@@ -2780,10 +2780,17 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         _uiState.update { it.copy(suggestedProposal = null) }
     }
 
-    fun applyProposedSetting(characters: List<CharacterProfile>, scenario: RoleplayScenario?) {
+    fun applyProposedSetting(
+        characters: List<CharacterProfile>,
+        scenario: RoleplayScenario?,
+        onSaved: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
         viewModelScope.launch {
+            try {
             val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
+            val currentSession = roleplayRepo.getSessionByConversationId(conversationId)
+                ?: error("当前故事已不存在，无法应用设定")
 
             // 1. 如果有新增/更新角色，存入局部角色列表
             var updatedSession = currentSession
@@ -2825,6 +2832,13 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     roleplayScenario = effectiveScenario,
                     suggestedProposal = null
                 )
+            }
+            onSaved()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "应用故事设定失败", e)
+                onError("保存失败，提取设定已保留，请重试")
             }
         }
     }

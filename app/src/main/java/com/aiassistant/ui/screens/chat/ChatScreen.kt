@@ -2503,8 +2503,9 @@ fun ChatScreen(
             proposal = uiState.suggestedProposal!!,
             onDismiss = { viewModel.dismissProposedSetting() },
             onApply = { chars, sc ->
-                viewModel.applyProposedSetting(chars, sc)
-                Toast.makeText(context, "已成功添加并融合到当前故事专属设定！", Toast.LENGTH_SHORT).show()
+                viewModel.applyProposedSetting(chars, sc,
+                    onSaved = { Toast.makeText(context, "已保存到当前故事专属设定", Toast.LENGTH_SHORT).show() },
+                    onError = { Toast.makeText(context, it, Toast.LENGTH_LONG).show() })
             }
         )
     }

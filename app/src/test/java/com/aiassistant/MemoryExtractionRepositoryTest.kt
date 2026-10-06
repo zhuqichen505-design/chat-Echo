@@ -347,6 +347,31 @@ class MemoryExtractionRepositoryTest {
         }
     }
 
+    @Test fun extractedLocalSettingsSurviveReloadAndEnterContextWithoutBoundCards() = runBlocking {
+        Endpoint { socket, _ -> memoryReply(socket, "NO_UPDATE") }.use { endpoint -> Fixture().use { f ->
+            val (_, id) = f.conversation(endpoint.url)
+            val characters = listOf(
+                com.aiassistant.domain.model.CharacterProfile(name = "合成守塔人", background = "只在黎明开启石门"),
+                com.aiassistant.domain.model.CharacterProfile(name = "合成旅人", background = "携带蓝色通行证"))
+            val scenario = com.aiassistant.domain.model.RoleplayScenario(name = "合成古塔", worldview = "塔内禁止火焰魔法")
+            val rpId = f.db.roleplaySessionDao().insertSession(com.aiassistant.domain.model.RoleplaySession(
+                conversationId = id, customCharacterData = Gson().toJson(characters),
+                customScenarioData = Gson().toJson(scenario)))
+            val repo = com.aiassistant.data.repository.RoleplayRepository(f.db.characterProfileDao(),
+                f.db.roleplayScenarioDao(), f.db.roleplaySessionDao(), f.db.roleplayMemoryDao(),
+                f.db.characterTagDao(), f.db.conversationDao(), f.db.messageDao(), f.db.worldBookDao(), f.db.memoryDao())
+            val reloaded = f.db.roleplaySessionDao().getSessionById(rpId)!!
+            assertTrue(reloaded.getEffectiveCharacterIds().isEmpty())
+            assertEquals(characters.map { it.name }, repo.getEffectiveCharactersForSession(reloaded).map { it.name })
+            val context = repo.assembleRoleplayContext(rpId, null, "继续故事", includeHistory = false)
+            for (character in characters) {
+                assertTrue(context.contains(character.name))
+                assertTrue(context.contains(character.background))
+            }
+            assertTrue(context.contains(scenario.worldview))
+        } }
+    }
+
     @Test fun incrementalAnthropicAnalysisKeepsProtocolAndSettings() = runBlocking {
         Endpoint { socket, _ -> reply(socket, Gson().toJson(mapOf("content" to listOf(mapOf("type" to "text",
             "text" to """{"newEvent":null,"atemporalSettings":[{"category":"世界规则","content":"古塔禁止一切火焰魔法"}]}"""))))) }.use { endpoint -> Fixture().use { f ->

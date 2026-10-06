@@ -325,16 +325,11 @@ class RoleplayRepository(
         }
 
         // 3. 角色卡 (支持多角色与故事编排，并支持本故事专属定制覆盖)
-        val characterIds = session.getEffectiveCharacterIds()
-        if (characterIds.isNotEmpty()) {
-            val baseChars = characterIds.mapNotNull { characterId ->
-                characterProfileDao.getCharacterById(characterId)
-            }
-            val effectiveChars = session.getCustomizedCharacters(baseChars)
-            val charPrompts = effectiveChars.map { buildCharacterCardPrompt(it) }
-            if (charPrompts.isNotEmpty()) {
-                parts.add("【登场角色设定 (${charPrompts.size}位)】\n\n" + charPrompts.joinToString("\n\n---\n\n"))
-            }
+        // Local extracted characters remain effective even when no global character card is bound.
+        val effectiveChars = getEffectiveCharactersForSession(session)
+        val charPrompts = effectiveChars.map { buildCharacterCardPrompt(it) }
+        if (charPrompts.isNotEmpty()) {
+            parts.add("【登场角色设定 (${charPrompts.size}位)】\n\n" + charPrompts.joinToString("\n\n---\n\n"))
         }
 
         // 3. 世界观/场景设定 (支持本故事专属定制覆盖)
