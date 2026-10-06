@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Echo UI Refresh V3.1</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-soft: #eef6ff;
+      --ink: #111827;
+      --muted: #64748b;
+      --soft: #94a3b8;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-2: #f1f5f9;
+      --line: #e2e8f0;
+      --rose: #e11d48;
+      --rose-soft: #ffe4e6;
+      --green: #0f766e;
+      --green-soft: #ecfdf5;
+      --shadow: 0 10px 26px rgba(15, 23, 42, .075);
+      --glass: rgba(255, 255, 255, .58);
+      --glass-strong: rgba(255, 255, 255, .68);
+      --glass-line: rgba(148, 163, 184, .4);
+      --glass-highlight: rgba(255, 255, 255, .92);
+      --glass-shadow: 0 16px 34px rgba(15, 23, 42, .09);
+      font-family: "Segoe UI", "Microsoft YaHei UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 100%);
+    }
+
+    .board {
+      width: 1500px;
+      min-height: 1880px;
+      padding: 42px 44px 64px;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
+    }
+
+    .board-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 26px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .board-sub {
+      margin-top: 8px;
+      font-size: 15px;
+      color: var(--muted);
+    }
+
+    .rule {
+      padding: 9px 12px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: var(--shadow);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 390px);
+      gap: 72px 78px;
+    }
+
+    .label {
+      margin: 0 0 10px 2px;
+      font-size: 17px;
+      font-weight: 800;
+    }
+
+    .phone {
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      border-radius: 28px;
+      background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 100%);
+      border: 1px solid rgba(203, 213, 225, .78);
+      box-shadow: 0 22px 52px rgba(15, 23, 42, .12);
+    }
+
+    .screen {
+      position: relative;
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      isolation: isolate;
+      background:
+        linear-gradient(180deg, #f8fafc 0%, #f4f8fc 100%),
+        #f8fafc;
+    }
+
+    .screen::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(116deg, rgba(37, 99, 235, .12) 0%, transparent 31%),
+        linear-gradient(24deg, transparent 0 44%, rgba(14, 165, 233, .105) 44% 56%, transparent 56%),
+        linear-gradient(155deg, transparent 0 62%, rgba(16, 185, 129, .08) 62% 76%, transparent 76%),
+        repeating-linear-gradient(135deg, rgba(148, 163, 184, .13) 0 1px, transparent 1px 19px);
+      opacity: .72;
+    }
+
+    .screen > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .home-screen-v3 {
+      background: #fff;
+    }
+
+    .home-screen-v3::before {
+      background:
+        linear-gradient(116deg, rgba(37, 99, 235, .08) 0%, transparent 30%),
+        linear-gradient(24deg, transparent 0 46%, rgba(14, 165, 233, .07) 46% 57%, transparent 57%),
+        repeating-linear-gradient(135deg, rgba(148, 163, 184, .09) 0 1px, transparent 1px 21px);
+      opacity: .44;
+    }
+
+    .home-screen-v3 .content,
+    .home-screen-v3 .top-plain {
+      background: transparent;
+    }
+
+    .top-plain {
+      padding: 18px 16px 10px;
+      background: #fff;
+    }
+
+    .home-word {
+      position: relative;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 40px;
+      font-weight: 700;
+      font-style: italic;
+      letter-spacing: 0;
+      color: #111827;
+      line-height: 56px;
+    }
+
+    .home-word::after {
+      content: "";
+      position: absolute;
+      left: 8px;
+      bottom: 5px;
+      width: 116px;
+      height: 12px;
+      border-bottom: 3px solid rgba(37, 99, 235, .32);
+      border-radius: 50%;
+      transform: rotate(-4deg);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+    }
+
+    .space { justify-content: space-between; }
+    .gap8 { gap: 8px; }
+    .gap10 { gap: 10px; }
+
+    .circle-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: var(--surface-2);
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 800;
+      border: 1px solid rgba(226, 232, 240, .7);
+    }
+
+    .stats-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: #e7edf5;
+      display: grid;
+      place-items: center;
+    }
+
+    .stats-icon .box {
+      width: 23px;
+      height: 23px;
+      border-radius: 5px;
+      background: #1f2937;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 3px;
+      padding-bottom: 5px;
+    }
+
+    .stats-icon i {
+      width: 3px;
+      border-radius: 2px;
+      background: #fff;
+      display: block;
+    }
+
+    .content {
+      padding: 0 16px 16px;
+    }
+
+    .search {
+      position: relative;
+      overflow: hidden;
+      height: 46px;
+      border-radius: 22px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(255, 255, 255, .54));
+      border: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 10px 22px rgba(15, 23, 42, .07);
+      -webkit-backdrop-filter: blur(26px) saturate(1.35);
+      backdrop-filter: blur(26px) saturate(1.35);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    .search::after,
+    .conv-card::after,
+    .card::after,
+    .setting-card::after {
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 0;
+      height: 1px;
+      background: rgba(255, 255, 255, .86);
+      pointer-events: none;
+    }
+
+    .folder-strip,
+    .period-strip {
+      display: flex;
+      gap: 8px;
+      padding: 12px 0 6px;
+      overflow: hidden;
+    }
+
+    .chip {
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 13px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: #475569;
+      font-size: 13px;
+      font-weight: 650;
+      white-space: nowrap;
+      border: 1px solid transparent;
+    }
+
+    .chip.active {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 7px 16px rgba(37, 99, 235, .18);
+    }
+
+    .section {
+      margin: 13px 0 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .conv-card {
+      min-height: 96px;
+      padding: 14px;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(255, 255, 255, .58));
+      border: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        var(--shadow);
+      -webkit-backdrop-filter: blur(22px) saturate(1.28);
+      backdrop-filter: blur(22px) saturate(1.28);
+      margin-bottom: 9px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .conv-card.pinned::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 14px;
+      bottom: 14px;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--primary);
+    }
+
+    .conv-title {
+      font-size: 15px;
+      font-weight: 780;
+      line-height: 22px;
+      margin-right: 36px;
+    }
+
+    .meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .tags {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .mini {
+      height: 23px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .mini.blue { background: var(--primary-soft); color: var(--primary); }
+    .mini.green { background: var(--green-soft); color: var(--green); }
+    .mini.rose { background: var(--rose-soft); color: var(--rose); }
+
+    .more {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      color: var(--soft);
+      font-weight: 900;
+    }
+
+    .fab {
+      position: absolute;
+      right: 18px;
+      bottom: 38px;
+      height: 56px;
+      padding: 0 22px;
+      border-radius: 18px;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 16px;
+      font-weight: 760;
+      box-shadow: 0 14px 24px rgba(37, 99, 235, .24);
+    }
+
+    .topbar {
+      position: relative;
+      overflow: hidden;
+      min-height: 64px;
+      padding: 10px 8px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .44));
+      border-bottom: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 12px 26px rgba(15, 23, 42, .075);
+      -webkit-backdrop-filter: blur(32px) saturate(1.38);
+      backdrop-filter: blur(32px) saturate(1.38);
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .topbar::before,
+    .stats-top::before,
+    .history-top::before,
+    .inputbar::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(105deg, rgba(255, 255, 255, .58) 0%, transparent 38%, rgba(37, 99, 235, .09) 68%, transparent 100%),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, .2) 0 1px, transparent 1px 34px);
+      opacity: .8;
+    }
+
+    .topbar > *,
+    .stats-top > *,
+    .history-top > *,
+    .inputbar > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .nav-btn,
+    .icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: #475569;
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    .chat-title {
+      min-width: 0;
+      font-size: 16px;
+      line-height: 22px;
+      font-weight: 760;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-subline {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+      min-height: 20px;
+    }
+
+    .header-chip {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, .1);
+      color: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .ctx-chip {
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 9px;
+      border-radius: 17px;
+      background: rgba(37, 99, 235, .11);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .messages {
+      padding: 16px 14px 100px;
+    }
+
+    .bubble {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      display: grid;
+      place-items: center;
+      color: var(--primary);
+      font-weight: 800;
+      flex: 0 0 auto;
+    }
+
+    .msg {
+      max-width: 292px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid rgba(226, 232, 240, .86);
+      box-shadow: 0 4px 12px rgba(15, 23, 42, .035);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .bubble.user {
+      justify-content: flex-end;
+    }
+
+    .bubble.user .msg {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      border-radius: 18px 6px 18px 18px;
+    }
+
+    .bubble.assistant .msg {
+      border-radius: 6px 18px 18px 18px;
+    }
+
+    .bubble.assistant .msg {
+      width: calc(100% - 40px);
+      max-width: none;
+      padding: 2px 4px 4px 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .time {
+      margin-top: 7px;
+      font-size: 11px;
+      color: var(--soft);
+    }
+
+    .bubble.user .time { color: rgba(255, 255, 255, .72); }
+
+    .inputbar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px 12px 26px;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .48), rgba(255, 255, 255, .72));
+      border-top: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 -16px 32px rgba(15, 23, 42, .075);
+      -webkit-backdrop-filter: blur(34px) saturate(1.42);
+      backdrop-filter: blur(34px) saturate(1.42);
+    }
+
+    .input-inner {
+      min-height: 52px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .54);
+      border: 1px solid rgba(255, 255, 255, .74);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .88),
+        0 8px 20px rgba(15, 23, 42, .06);
+      -webkit-backdrop-filter: blur(20px) saturate(1.22);
+      backdrop-filter: blur(20px) saturate(1.22);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 8px;
+    }
+
+    .tool {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: #64748b;
+      background: rgba(255, 255, 255, .7);
+      border: 1px solid rgba(255, 255, 255, .68);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .placeholder {
+      flex: 1;
+      color: var(--soft);
+      font-size: 14px;
+    }
+
+    .send {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .stats-top {
+      position: relative;
+      overflow: hidden;
+      height: 58px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, .44));
+      -webkit-backdrop-filter: blur(30px) saturate(1.34);
+      backdrop-filter: blur(30px) saturate(1.34);
+      display: grid;
+      grid-template-columns: 66px 1fr 58px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(226, 232, 240, .82);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 10px 24px rgba(15, 23, 42, .07);
+    }
+
+    .text-btn {
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 720;
+    }
+
+    .page-title {
+      font-size: 20px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      white-space: nowrap;
+    }
+
+    .tiny-note {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      margin-left: 2px;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      border-radius: 16px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(255, 255, 255, .58));
+      border: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        var(--glass-shadow);
+      -webkit-backdrop-filter: blur(24px) saturate(1.3);
+      backdrop-filter: blur(24px) saturate(1.3);
+      padding: 15px;
+      margin-bottom: 14px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .metric {
+      border-radius: 14px;
+      background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+      border: 1px solid rgba(226, 232, 240, .84);
+      padding: 12px;
+      min-height: 78px;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 22px;
+      margin-top: 12px;
+      line-height: 24px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .bars {
+      height: 130px;
+      display: flex;
+      align-items: flex-end;
+      gap: 13px;
+      padding: 12px 4px 0;
+    }
+
+    .bar {
+      width: 20px;
+      border-radius: 10px 10px 5px 5px;
+      background: #dbeafe;
+    }
+
+    .bar.hot { background: var(--primary); }
+
+    .rate-line {
+      height: 96px;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(37,99,235,.08), transparent),
+        repeating-linear-gradient(0deg, transparent 0 23px, #e2e8f0 24px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .rate-line::before {
+      content: "";
+      position: absolute;
+      left: 24px;
+      right: 22px;
+      top: 48px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--primary), var(--rose));
+      transform: rotate(-8deg);
+    }
+
+    .settings-menu {
+      padding: 16px;
+    }
+
+    .setting-card {
+      position: relative;
+      overflow: hidden;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .76), rgba(255, 255, 255, .6));
+      border: 1px solid var(--glass-line);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 10px 22px rgba(15,23,42,.055);
+      -webkit-backdrop-filter: blur(22px) saturate(1.28);
+      backdrop-filter: blur(22px) saturate(1.28);
+      padding: 13px;
+      display: grid;
+      grid-template-columns: 42px 1fr 20px;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 7px;
+    }
+
+    .setting-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      display: grid;
+      place-items: center;
+      font-weight: 850;
+      font-size: 13px;
+    }
+
+    .setting-icon svg {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .setting-name {
+      font-size: 15px;
+      font-weight: 780;
+    }
+
+    .setting-sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 3px;
+      line-height: 17px;
+    }
+
+    .chev {
+      color: var(--soft);
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .history-top {
+      position: relative;
+      overflow: hidden;
+      min-height: 64px;
+      padding: 8px 10px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, .44));
+      -webkit-backdrop-filter: blur(30px) saturate(1.34);
+      backdrop-filter: blur(30px) saturate(1.34);
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      align-items: center;
+      border-bottom: 1px solid rgba(226, 232, 240, .82);
+      box-shadow:
+        inset 0 1px 0 var(--glass-highlight),
+        0 10px 24px rgba(15, 23, 42, .07);
+    }
+
+    .bottom-handle {
+      position: absolute;
+      left: 158px;
+      bottom: 10px;
+      width: 74px;
+      height: 4px;
+      border-radius: 999px;
+      background: #cbd5e1;
+    }
+
+    body.single-mode {
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    body.single-mode .board {
+      width: 390px;
+      min-height: 844px;
+      padding: 0;
+      background: var(--bg);
+    }
+
+    body.single-mode .board-head,
+    body.single-mode .label { display: none; }
+    body.single-mode .grid { display: block; }
+    body.single-mode .tile { display: none; }
+    body.single-mode .tile.active-single { display: block; }
+    body.single-mode .phone {
+      border-radius: 0;
+      border: 0;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="board-head">
+      <div>
+        <h1>Echo UI Refresh V3.1</h1>
+        <div class="board-sub">原版增强 + 轻毛玻璃：入口和操作逻辑不变，只给顶栏、输入栏和卡片加半透明层次。</div>
+      </div>
+      <div class="rule">No IA / entry / workflow changes · light glass only</div>
+    </header>
+
+    <section class="grid">
+      <article class="tile" data-screen="home">
+        <div class="label">主页：入口不变</div>
+        <div class="phone"><div class="screen home-screen-v3">
+          <div class="top-plain">
+            <div class="row space">
+              <div class="home-word">Echo</div>
+              <div class="row gap8">
+                <div class="stats-icon"><div class="box"><i style="height:5px"></i><i style="height:9px"></i><i style="height:13px"></i></div></div>
+                <div class="circle-btn">⚙</div>
+              </div>
+            </div>
+          </div>
+          <div class="content">
+            <div class="search">⌕ <span>搜索对话</span></div>
+            <div class="folder-strip">
+              <div class="chip active">全部</div>
+              <div class="chip">置顶</div>
+              <div class="chip">课程</div>
+              <div class="chip">代码</div>
+              <div class="chip">管理</div>
+            </div>
+            <div class="section">置顶对话</div>
+            <div class="conv-card pinned">
+              <div class="more">···</div>
+              <div class="conv-title">UI 美化方向讨论</div>
+              <div class="meta">GPT-4o · 12 条消息 · 刚刚更新</div>
+              <div class="tags"><div class="mini blue">上下文 42%</div><div class="mini green">已同步</div></div>
+            </div>
+            <div class="section">其他</div>
+            <div class="conv-card">
+              <div class="more">···</div>
+              <div class="conv-title">课程设计功能整理</div>
+              <div class="meta">DeepSeek · 昨天 · 文件夹：课程</div>
+              <div class="tags"><div class="mini">可长按选择</div></div>
+            </div>
+            <div class="conv-card">
+              <div class="more">···</div>
+              <div class="conv-title">API 调用兼容性测试</div>
+              <div class="meta">Claude · 23 条消息 · 周二</div>
+              <div class="tags"><div class="mini green">长期记忆</div></div>
+            </div>
+          </div>
+          <div class="fab"><span>+</span><span>创建对话</span></div>
+          <div class="bottom-handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="chat">
+        <div class="label">对话页：顶栏动作不变</div>
+        <div class="phone"><div class="screen">
+          <div class="topbar">
+            <div class="nav-btn">‹</div>
+            <div>
+              <div class="chat-title">UI 美化方向讨论</div>
+              <div class="chat-subline">
+                <div class="header-chip">✓ 本对话配置</div>
+                <div class="header-chip">生成中</div>
+              </div>
+            </div>
+            <div class="row gap8">
+              <div class="ctx-chip"><span>◐</span>42%</div>
+              <div class="icon">≡</div>
+              <div class="icon">ψ</div>
+            </div>
+          </div>
+          <div class="messages">
+            <div class="bubble user">
+              <div class="msg">原版功能入口和操作逻辑不能改，只能美化。<div class="time">12:26</div></div>
+            </div>
+            <div class="bubble assistant">
+              <div class="avatar">E</div>
+              <div class="msg">收到。主页、对话、统计、设置的入口保持原位；只优化间距、层级、边线和状态样式。<div class="time">12:27</div></div>
+            </div>
+            <div class="bubble assistant">
+              <div class="avatar">E</div>
+              <div class="msg">上下文用量仍在顶栏，主动压缩仍在弹窗内；输入栏附件、图片、OCR、联网搜索入口保持原逻辑。<div class="tags"><span class="mini blue">上下文</span><span class="mini">不改流程</span></div></div>
+            </div>
+          </div>
+          <div class="inputbar">
+            <div class="input-inner">
+              <div class="tool">＋</div>
+              <div class="tool">图</div>
+              <div class="tool">OCR</div>
+              <div class="placeholder">输入消息...</div>
+              <div class="send">↑</div>
+            </div>
+          </div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="context">
+        <div class="label">上下文弹窗：入口和动作不变</div>
+        <div class="phone"><div class="screen">
+          <div class="topbar" style="grid-template-columns:44px 1fr 44px">
+            <div class="nav-btn">‹</div>
+            <div>
+              <div class="chat-title">上下文使用情况</div>
+              <div class="subtitle">当前对话的预算估算</div>
+            </div>
+            <div class="icon">↻</div>
+          </div>
+          <div class="content" style="padding-top:16px">
+            <div class="card">
+              <div class="row space">
+                <div>
+                  <div class="card-title" style="margin-bottom:4px">输入预算</div>
+                  <div class="meta">5.4k / 12.8k tokens</div>
+                </div>
+                <div style="font-size:28px;font-weight:850;color:var(--primary)">42%</div>
+              </div>
+              <div style="height:14px"></div>
+              <div style="height:8px;border-radius:99px;background:#e2e8f0;overflow:hidden"><div style="width:42%;height:100%;background:var(--primary);border-radius:99px"></div></div>
+            </div>
+            <div class="card">
+              <div class="row space"><span class="meta">近期原文</span><b>18 条 · 3.2k</b></div>
+              <div style="height:12px"></div>
+              <div class="row space"><span class="meta">较早消息</span><b>42 条</b></div>
+              <div style="height:12px"></div>
+              <div class="row space"><span class="meta">滚动摘要</span><b>1.1k tokens</b></div>
+              <div style="height:12px"></div>
+              <div class="row space"><span class="meta">长期记忆</span><b>7 条 · 420</b></div>
+              <div style="height:12px"></div>
+              <div class="row space"><span class="meta">已压缩至</span><b>#185</b></div>
+            </div>
+            <div class="card" style="background:#fff7ed;border-color:#fed7aa;color:#92400e">有较早消息尚未进入滚动摘要，可主动压缩。</div>
+            <div style="height:48px;border-radius:24px;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:800">主动压缩</div>
+          </div>
+          <div class="bottom-handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="stats">
+        <div class="label">使用统计：原入口原结构</div>
+        <div class="phone"><div class="screen">
+          <div class="stats-top">
+            <div class="text-btn">返回</div>
+            <div class="page-title">
+              <div class="stats-icon" style="width:36px;height:36px"><div class="box" style="width:21px;height:21px"><i style="height:4px"></i><i style="height:8px"></i><i style="height:12px"></i></div></div>
+              <span>使用统计</span><span class="tiny-note">（不准，仅供参考）</span>
+            </div>
+            <div class="text-btn">刷新</div>
+          </div>
+          <div class="content" style="padding-top:16px">
+            <div class="period-strip" style="padding-top:0"><div class="chip active">今天</div><div class="chip">7天</div><div class="chip">30天</div></div>
+            <div class="card">
+              <div class="metric-grid">
+                <div class="metric"><span>请求</span><b style="color:var(--primary)">128</b></div>
+                <div class="metric"><span>Tokens</span><b>86.4k</b></div>
+                <div class="metric"><span>命中</span><b style="color:var(--rose)">31%</b></div>
+              </div>
+            </div>
+            <div class="card"><div class="card-title">Token 消耗</div><div class="bars"><div class="bar" style="height:42px"></div><div class="bar" style="height:76px"></div><div class="bar" style="height:52px"></div><div class="bar" style="height:96px"></div><div class="bar" style="height:68px"></div><div class="bar hot" style="height:112px"></div><div class="bar" style="height:84px"></div></div></div>
+            <div class="card"><div class="card-title">命中率趋势</div><div class="rate-line"></div></div>
+            <div class="section">模型明细</div>
+            <div class="conv-card" style="min-height:70px"><div class="conv-title">gpt-4o</div><div class="meta">52 次 · 42.1k tokens</div></div>
+          </div>
+          <div class="bottom-handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="settings">
+        <div class="label">设置：8 个菜单入口不变</div>
+        <div class="phone"><div class="screen">
+          <div class="topbar" style="grid-template-columns:44px 1fr">
+            <div class="nav-btn">‹</div>
+            <div class="chat-title">设置</div>
+          </div>
+          <div class="settings-menu">
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="3.4"/><path d="M10.7 12.3 20 3"/><path d="M16 7h4v4"/><path d="M14.2 9.8 16.6 12.2"/></svg></div><div><div class="setting-name">API配置</div><div class="setting-sub">管理AI模型API密钥和配置</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.2"/><path d="M15.2 15.2 21 21"/></svg></div><div><div class="setting-name">联网搜索</div><div class="setting-sub">配置 Tavily，让对话中的智能搜索真正联网</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 2.5 14.2 9.8 21.5 12 14.2 14.2 12 21.5 9.8 14.2 2.5 12 9.8 9.8Z"/><path d="M19 3v4"/><path d="M21 5h-4"/></svg></div><div><div class="setting-name">个性化</div><div class="setting-sub">设置所有对话都会参考的自定义偏好</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M9 19c-2.8 0-5-2.2-5-5 0-2.1 1.3-3.9 3.1-4.6C7.4 6.9 9.5 5 12 5s4.6 1.9 4.9 4.4C18.7 10.1 20 11.9 20 14c0 2.8-2.2 5-5 5"/><path d="M9 9v10"/><path d="M15 9v10"/><path d="M9 13h6"/></svg></div><div><div class="setting-name">全局提示词</div><div class="setting-sub">设置适用于所有对话的系统提示词</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M8 8 4 12l4 4"/><path d="m16 8 4 4-4 4"/><path d="m14 4-4 16"/></svg></div><div><div class="setting-name">环境变量</div><div class="setting-sub">管理可在对话中引用的变量</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 10.6A2 2 0 0 0 13.4 13.4"/><path d="M9.9 5.2A9.4 9.4 0 0 1 12 5c5 0 8.5 4.5 9.5 7-0.4 1-1.2 2.2-2.2 3.3"/><path d="M6.4 6.8C4.5 8.2 3.2 10.3 2.5 12c1 2.5 4.5 7 9.5 7 1.6 0 3-.4 4.2-1.1"/></svg></div><div><div class="setting-name">其他对话</div><div class="setting-sub">输入 6 位数字密码查看隐藏对话</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M7 18.5h9.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.2-2A4.7 4.7 0 0 0 7 18.5Z"/><path d="M12 12v7"/><path d="m9 16 3 3 3-3"/></svg></div><div><div class="setting-name">数据备份</div><div class="setting-sub">备份和恢复应用数据</div></div><div class="chev">›</div></div>
+            <div class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 10v6"/><path d="M12 7h.01"/></svg></div><div><div class="setting-name">关于</div><div class="setting-sub">版本信息和功能介绍</div></div><div class="chev">›</div></div>
+          </div>
+          <div class="bottom-handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="history">
+        <div class="label">历史：搜索与卡片逻辑不变</div>
+        <div class="phone"><div class="screen">
+          <div class="history-top"><div class="nav-btn">‹</div><div class="chat-title">历史记录</div></div>
+          <div class="content" style="padding-top:16px">
+            <div class="search">⌕ <span>搜索所有对话</span></div>
+            <div class="folder-strip"><div class="chip active">全部</div><div class="chip">今天</div><div class="chip">本周</div><div class="chip">收藏</div></div>
+            <div class="section">搜索结果</div>
+            <div class="conv-card"><div class="conv-title">UI 美化方向讨论</div><div class="meta">今天 · 12 条消息 · GPT-4o</div><div class="tags"><span class="mini blue">上下文</span></div></div>
+            <div class="conv-card"><div class="conv-title">Android APK 构建记录</div><div class="meta">昨天 · 36 条消息 · DeepSeek</div><div class="tags"><span class="mini">构建</span></div></div>
+            <div class="conv-card"><div class="conv-title">GitHub 备份流程</div><div class="meta">周三 · 18 条消息 · Claude</div><div class="tags"><span class="mini green">备份</span></div></div>
+          </div>
+          <div class="bottom-handle"></div>
+        </div></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const screen = new URLSearchParams(location.search).get("screen") || location.hash.replace("#screen=", "");
+    if (screen) {
+      document.body.classList.add("single-mode");
+      document.querySelectorAll(".tile").forEach(tile => {
+        if (tile.dataset.screen === screen) tile.classList.add("active-single");
+      });
+    }
+  </script>
+</body>
+</html>

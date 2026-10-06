@@ -1,0 +1,117 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="148dp"
+    android:height="38dp"
+    android:viewportWidth="296"
+    android:viewportHeight="76">
+
+    <!-- Ambient luminous soft glow -->
+    <path
+        android:pathData="M18,38 Q148,16 278,38"
+        android:strokeWidth="14"
+        android:strokeAlpha="0.12"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="18"
+                android:startY="38"
+                android:endX="278"
+                android:endY="38"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#0EA5E9" />
+                <item android:offset="0.5" android:color="#3B82F6" />
+                <item android:offset="1.0" android:color="#8B5CF6" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Letter 'E' -->
+    <group android:name="letter_E">
+        <path
+            android:fillType="nonZero"
+            android:pathData="M24,18 L66,18 C69.3,18 72,20.7 72,24 C72,27.3 69.3,30 66,30 L36,30 L36,35 L60,35 C63.3,35 66,37.7 66,41 C66,44.3 63.3,47 60,47 L36,47 L36,52 L66,52 C69.3,52 72,54.7 72,58 C72,61.3 69.3,64 66,64 L24,64 C20.7,64 18,61.3 18,58 L18,24 C18,20.7 20.7,18 24,18 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="18"
+                    android:startY="18"
+                    android:endX="72"
+                    android:endY="64"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#0284C7" />
+                    <item android:offset="0.5" android:color="#2563EB" />
+                    <item android:offset="1.0" android:color="#4F46E5" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M22,22 L30,22 L30,58 L22,58 Z"
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.22" />
+    </group>
+
+    <!-- Letter 'C' -->
+    <group android:name="letter_C">
+        <path
+            android:pathData="M138,28 C135.2,25.2 130.8,25.5 128,28.5 C121.8,35.2 114.5,32 107,32 C94.2,32 84,42 84,54 C84,66 94.2,76 107,76 C114.5,76 121.8,72.8 128,79.5 C130.8,82.5 135.2,82.8 138,80 C140.8,77.2 140.8,72.8 138,69.8 C130.8,62.5 120,67.5 107,67.5 C99,67.5 92.5,61.2 92.5,54 C92.5,46.8 99,40.5 107,40.5 C120,40.5 130.8,45.5 138,38.2 C140.8,35.2 140.8,30.8 138,28 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="84"
+                    android:startY="24"
+                    android:endX="140"
+                    android:endY="80"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#0284C7" />
+                    <item android:offset="0.5" android:color="#3B82F6" />
+                    <item android:offset="1.0" android:color="#6366F1" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
+    <!-- Letter 'H' -->
+    <group android:name="letter_H">
+        <path
+            android:fillType="nonZero"
+            android:pathData="M154,18 L166,18 C169.3,18 172,20.7 172,24 L172,36 L196,36 L196,24 C196,20.7 198.7,18 202,18 L214,18 C217.3,18 220,20.7 220,24 L220,58 C220,61.3 217.3,64 214,64 L202,64 C198.7,64 196,61.3 196,58 L196,46 L172,46 L172,58 C172,61.3 169.3,64 166,64 L154,64 C150.7,64 148,61.3 148,58 L148,24 C148,20.7 150.7,18 154,18 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="148"
+                    android:startY="18"
+                    android:endX="220"
+                    android:endY="64"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#2563EB" />
+                    <item android:offset="0.5" android:color="#3B82F6" />
+                    <item android:offset="1.0" android:color="#6366F1" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
+    <!-- Letter 'O' -->
+    <group android:name="letter_O">
+        <path
+            android:fillType="evenOdd"
+            android:pathData="M256,18 C270.3,18 282,29.7 282,44 C282,58.3 270.3,70 256,70 C241.7,70 230,58.3 230,44 C230,29.7 241.7,18 256,18 Z M256,28 C247.2,28 240,35.2 240,44 C240,52.8 247.2,60 256,60 C264.8,60 272,52.8 272,44 C272,35.2 264.8,28 256,28 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="230"
+                    android:startY="18"
+                    android:endX="282"
+                    android:endY="70"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#3B82F6" />
+                    <item android:offset="0.5" android:color="#6366F1" />
+                    <item android:offset="1.0" android:color="#8B5CF6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M256,33 C262,33 267,38 267,44 C267,50 262,55 256,55"
+            android:strokeWidth="2.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.4"
+            android:strokeLineCap="round" />
+    </group>
+
+</vector>

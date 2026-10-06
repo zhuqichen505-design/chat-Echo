@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Echo UI Refresh V2</title>
+  <style>
+    :root {
+      --ink: #101828;
+      --muted: #667085;
+      --subtle: #98a2b3;
+      --line: #e4e7ec;
+      --paper: #ffffff;
+      --bg: #f5f7fb;
+      --blue: #2563eb;
+      --blue-soft: #edf4ff;
+      --teal: #0f766e;
+      --teal-soft: #e8f7f4;
+      --rose: #e11d48;
+      --rose-soft: #fff1f3;
+      --amber: #b7791f;
+      --amber-soft: #fff7e6;
+      --shadow: 0 18px 50px rgba(16, 24, 40, .10);
+      --soft-shadow: 0 8px 24px rgba(16, 24, 40, .07);
+      font-family: "Inter", "SF Pro Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, #eef3f9 0%, #f8fafc 42%, #f5f7fb 100%);
+    }
+
+    .board {
+      width: 1600px;
+      min-height: 1880px;
+      padding: 54px 58px 70px;
+    }
+
+    .board-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 34px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      letter-spacing: 0;
+      line-height: 1.1;
+    }
+
+    .board-subtitle {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .source-pill {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: #344054;
+      background: rgba(255,255,255,.72);
+      box-shadow: var(--soft-shadow);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 390px);
+      gap: 74px 86px;
+      align-items: start;
+    }
+
+    .tile-label {
+      font-size: 18px;
+      font-weight: 750;
+      margin: 0 0 14px 2px;
+      color: #182230;
+    }
+
+    .phone {
+      position: relative;
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      border-radius: 26px;
+      background: var(--bg);
+      border: 1px solid rgba(148, 163, 184, .25);
+      box-shadow: var(--shadow);
+    }
+
+    .single {
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .screen {
+      width: 390px;
+      height: 844px;
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, #f7f9fc 0%, #f3f6fa 100%);
+    }
+
+    .top {
+      height: 96px;
+      padding: 24px 18px 12px;
+      background: rgba(255,255,255,.82);
+      border-bottom: 1px solid rgba(228,231,236,.75);
+      backdrop-filter: blur(18px);
+    }
+
+    .top-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .title {
+      min-width: 0;
+      font-size: 22px;
+      line-height: 26px;
+      font-weight: 780;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subtitle {
+      margin-top: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .icon-row { display: flex; gap: 8px; align-items: center; }
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #344054;
+      font-size: 14px;
+      font-weight: 750;
+      box-shadow: 0 3px 10px rgba(16, 24, 40, .04);
+    }
+
+    .mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1e293b 0%, #2563eb 100%);
+      position: relative;
+      box-shadow: 0 8px 20px rgba(37,99,235,.18);
+    }
+
+    .mark::before,
+    .mark::after {
+      content: "";
+      position: absolute;
+      bottom: 9px;
+      width: 4px;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .mark::before { left: 11px; height: 10px; opacity: .78; }
+    .mark::after { left: 20px; height: 18px; }
+    .mark span {
+      position: absolute;
+      right: 8px;
+      bottom: 9px;
+      width: 4px;
+      height: 24px;
+      border-radius: 4px;
+      background: #9bd3ff;
+    }
+
+    .content {
+      padding: 16px 18px 20px;
+    }
+
+    .search {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--subtle);
+      font-size: 14px;
+      box-shadow: 0 7px 18px rgba(16, 24, 40, .04);
+    }
+
+    .seg {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      overflow: hidden;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 30px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #475467;
+      font-size: 12px;
+      font-weight: 680;
+      white-space: nowrap;
+    }
+
+    .chip.active {
+      border-color: transparent;
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, .20);
+    }
+
+    .section-label {
+      margin: 24px 0 10px;
+      font-size: 13px;
+      color: #344054;
+      font-weight: 760;
+    }
+
+    .row-card {
+      position: relative;
+      padding: 15px 15px 14px;
+      min-height: 92px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 22px rgba(16,24,40,.055);
+    }
+
+    .row-card + .row-card { margin-top: 10px; }
+    .accent-line {
+      position: absolute;
+      left: 0;
+      top: 12px;
+      bottom: 12px;
+      width: 3px;
+      border-radius: 3px;
+      background: var(--blue);
+    }
+
+    .row-title {
+      font-size: 15px;
+      line-height: 21px;
+      font-weight: 750;
+      color: #101828;
+      margin-right: 32px;
+    }
+
+    .row-meta {
+      margin-top: 5px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .row-tags {
+      display: flex;
+      gap: 7px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .mini-tag {
+      height: 24px;
+      padding: 0 8px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 7px;
+      background: #f2f4f7;
+      color: #475467;
+      font-size: 11px;
+      font-weight: 680;
+    }
+
+    .mini-tag.blue { color: #1d4ed8; background: var(--blue-soft); }
+    .mini-tag.teal { color: var(--teal); background: var(--teal-soft); }
+    .mini-tag.rose { color: var(--rose); background: var(--rose-soft); }
+    .mini-tag.amber { color: #92400e; background: var(--amber-soft); }
+
+    .more {
+      position: absolute;
+      right: 13px;
+      top: 14px;
+      color: #98a2b3;
+      font-weight: 800;
+    }
+
+    .fab {
+      position: absolute;
+      right: 22px;
+      bottom: 38px;
+      height: 46px;
+      padding: 0 18px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 760;
+      background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+      box-shadow: 0 18px 34px rgba(37,99,235,.24);
+    }
+
+    .bubble {
+      max-width: 302px;
+      padding: 13px 14px;
+      border-radius: 8px;
+      margin-bottom: 14px;
+      font-size: 14px;
+      line-height: 1.55;
+      box-shadow: 0 8px 20px rgba(16,24,40,.055);
+    }
+
+    .bubble.user {
+      margin-left: auto;
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+      color: #fff;
+    }
+
+    .bubble.assistant {
+      background: #fff;
+      border: 1px solid var(--line);
+      color: #182230;
+    }
+
+    .message-time {
+      margin-top: 8px;
+      font-size: 11px;
+      opacity: .68;
+    }
+
+    .composer {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 34px;
+      height: 60px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.92);
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 38px rgba(16,24,40,.13);
+      backdrop-filter: blur(14px);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+    }
+
+    .send {
+      margin-left: auto;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .usage-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: .7;
+    }
+
+    .panel {
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: var(--soft-shadow);
+    }
+
+    .progress {
+      height: 8px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #edf0f5;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #2563eb 0%, #0f766e 100%);
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .metric {
+      min-height: 92px;
+      padding: 14px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 18px rgba(16,24,40,.045);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      line-height: 28px;
+      letter-spacing: 0;
+      margin-top: 14px;
+    }
+
+    .metric label {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .bar-chart {
+      height: 138px;
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      padding: 18px 8px 2px;
+    }
+
+    .bar {
+      width: 20px;
+      border-radius: 6px 6px 3px 3px;
+      background: #dbeafe;
+    }
+
+    .bar.hot { background: linear-gradient(180deg, #2563eb 0%, #0f766e 100%); }
+    .settings-list .setting-row + .setting-row { border-top: 1px solid #eef1f5; }
+    .setting-row {
+      display: grid;
+      grid-template-columns: 40px 1fr 18px;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 0;
+    }
+
+    .glyph {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .setting-title {
+      font-size: 14px;
+      font-weight: 760;
+      color: #182230;
+    }
+
+    .setting-sub {
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .handle {
+      position: absolute;
+      width: 72px;
+      height: 4px;
+      border-radius: 99px;
+      left: 159px;
+      bottom: 11px;
+      background: #cbd5e1;
+    }
+
+    .home-screen .content { padding-top: 14px; }
+    .chat-screen .content { padding-top: 18px; padding-bottom: 112px; }
+    .context-screen .content { padding-top: 18px; }
+
+    .context-card {
+      padding: 18px;
+    }
+
+    .context-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .percent {
+      font-size: 30px;
+      font-weight: 820;
+      color: var(--blue);
+      line-height: 34px;
+    }
+
+    .usage-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #eef1f5;
+      font-size: 13px;
+    }
+
+    .usage-row:last-child { border-bottom: 0; }
+    .usage-row span:first-child { color: var(--muted); }
+    .usage-row span:last-child { color: #182230; font-weight: 720; }
+
+    .notice {
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      background: var(--amber-soft);
+      color: #92400e;
+      border: 1px solid #fedf89;
+    }
+
+    .primary-action {
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 780;
+      background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+      box-shadow: 0 14px 24px rgba(37,99,235,.20);
+    }
+
+    .timeline-card {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 14px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 7px 18px rgba(16,24,40,.045);
+    }
+
+    .timeline-card + .timeline-card { margin-top: 10px; }
+    .chevron { color: #98a2b3; font-weight: 900; font-size: 20px; }
+
+    body.single-mode {
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    body.single-mode .board {
+      padding: 0;
+      width: 390px;
+      min-height: 844px;
+    }
+
+    body.single-mode .board-title,
+    body.single-mode .tile-label { display: none; }
+
+    body.single-mode .grid {
+      display: block;
+    }
+
+    body.single-mode .tile { display: none; }
+    body.single-mode .tile.active-single { display: block; }
+    body.single-mode .phone {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="board-title">
+      <div>
+        <h1>Echo UI Refresh V2</h1>
+        <div class="board-subtitle">更精致的简约：轻边线、细腻状态、克制色彩、真实产品质感。</div>
+      </div>
+      <div class="source-pill"><span class="dot"></span> Preview only · not applied</div>
+    </header>
+
+    <section class="grid">
+      <article class="tile" data-screen="home">
+        <div class="tile-label">主页</div>
+        <div class="phone"><div class="screen home-screen">
+          <div class="top">
+            <div class="top-line">
+              <div>
+                <div class="title">Echo</div>
+                <div class="subtitle">专注对话，快速回到上下文</div>
+              </div>
+              <div class="icon-row">
+                <div class="mark"><span></span></div>
+                <div class="icon-btn">设</div>
+              </div>
+            </div>
+          </div>
+          <div class="content">
+            <div class="search"><span>⌕</span><span>搜索对话、模型或提示词</span></div>
+            <div class="seg">
+              <div class="chip active">全部</div>
+              <div class="chip">置顶</div>
+              <div class="chip">项目</div>
+              <div class="chip">隐藏</div>
+            </div>
+
+            <div class="section-label">今天</div>
+            <div class="row-card">
+              <div class="accent-line"></div>
+              <div class="more">···</div>
+              <div class="row-title">UI 美化方向讨论</div>
+              <div class="row-meta">GPT-4o · 12 条消息 · 刚刚更新</div>
+              <div class="row-tags">
+                <div class="mini-tag blue">上下文 42%</div>
+                <div class="mini-tag teal">已同步</div>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="row-title">课程设计功能整理</div>
+              <div class="row-meta">DeepSeek · 8 条消息 · 昨天</div>
+              <div class="row-tags"><div class="mini-tag">文件夹：课程</div></div>
+            </div>
+            <div class="row-card">
+              <div class="row-title">API 调用兼容性测试</div>
+              <div class="row-meta">Claude · 23 条消息 · 周二</div>
+              <div class="row-tags"><div class="mini-tag teal">长期记忆</div></div>
+            </div>
+          </div>
+          <div class="fab"><span>+</span><span>新建对话</span></div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="chat">
+        <div class="tile-label">对话</div>
+        <div class="phone"><div class="screen chat-screen">
+          <div class="top">
+            <div class="top-line">
+              <div style="min-width:0">
+                <div class="title">UI 美化方向讨论</div>
+                <div class="subtitle">GPT-4o · 本对话配置</div>
+              </div>
+              <div class="usage-pill"><span class="dot"></span>42%</div>
+            </div>
+          </div>
+          <div class="content">
+            <div class="mini-tag">生成中</div>
+            <div style="height:16px"></div>
+            <div class="bubble assistant">
+              我会先把界面语言定下来，再给出主页、对话、统计、设置等界面的高保真预览。
+              <div class="message-time">12:18</div>
+            </div>
+            <div class="bubble user">
+              要精致简约，不要只有空白和卡片。
+              <div class="message-time">12:19</div>
+            </div>
+            <div class="bubble assistant">
+              明白。第二版会加强视觉节奏、状态细节和组件质感，同时保持工具型应用的克制。
+              <div class="row-tags">
+                <div class="mini-tag blue">Material 3</div>
+                <div class="mini-tag teal">轻量层级</div>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="icon-btn" style="width:34px;height:34px">+</div>
+            <div style="font-size:14px;color:#98a2b3">继续输入...</div>
+            <div class="send">↑</div>
+          </div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="context">
+        <div class="tile-label">上下文</div>
+        <div class="phone"><div class="screen context-screen">
+          <div class="top">
+            <div class="title">上下文使用情况</div>
+            <div class="subtitle">当前对话预算估算</div>
+          </div>
+          <div class="content">
+            <div class="panel context-card">
+              <div class="context-head">
+                <div>
+                  <div class="row-title">输入预算</div>
+                  <div class="row-meta">5.4k / 12.8k tokens</div>
+                </div>
+                <div class="percent">42%</div>
+              </div>
+              <div style="height:18px"></div>
+              <div class="progress"><span style="width:42%"></span></div>
+              <div style="height:18px"></div>
+              <div class="usage-row"><span>近期原文</span><span>18 条 · 3.2k</span></div>
+              <div class="usage-row"><span>较早消息</span><span>42 条</span></div>
+              <div class="usage-row"><span>滚动摘要</span><span>1.1k tokens</span></div>
+              <div class="usage-row"><span>长期记忆</span><span>7 条 · 420</span></div>
+              <div class="usage-row"><span>已压缩至</span><span>#185</span></div>
+              <div class="usage-row"><span>摘要时间</span><span>07-04 12:45</span></div>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice">有较早消息可压缩，建议在长对话前主动刷新摘要。</div>
+            <div style="height:14px"></div>
+            <div class="primary-action">主动压缩</div>
+          </div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="stats">
+        <div class="tile-label">统计</div>
+        <div class="phone"><div class="screen">
+          <div class="top">
+            <div class="top-line">
+              <div>
+                <div class="title">使用统计</div>
+                <div class="subtitle">模型、token 与命中率</div>
+              </div>
+              <div class="mark"><span></span></div>
+            </div>
+          </div>
+          <div class="content">
+            <div class="seg">
+              <div class="chip active">今天</div>
+              <div class="chip">7 天</div>
+              <div class="chip">30 天</div>
+            </div>
+            <div style="height:16px"></div>
+            <div class="metric-grid">
+              <div class="metric"><label>请求</label><strong style="color:var(--blue)">128</strong></div>
+              <div class="metric"><label>Tokens</label><strong>86.4k</strong></div>
+              <div class="metric"><label>缓存</label><strong style="color:var(--rose)">31%</strong></div>
+            </div>
+            <div style="height:12px"></div>
+            <div class="panel" style="padding:16px">
+              <div class="row-title">Token 消耗趋势</div>
+              <div class="bar-chart">
+                <div class="bar" style="height:45px"></div>
+                <div class="bar" style="height:78px"></div>
+                <div class="bar" style="height:52px"></div>
+                <div class="bar" style="height:96px"></div>
+                <div class="bar" style="height:68px"></div>
+                <div class="bar hot" style="height:110px"></div>
+                <div class="bar" style="height:86px"></div>
+              </div>
+            </div>
+            <div style="height:12px"></div>
+            <div class="panel" style="padding:16px">
+              <div class="row-title">模型明细</div>
+              <div class="usage-row"><span><span class="dot" style="display:inline-block;color:var(--blue);margin-right:8px"></span>gpt-4o</span><span>52 次</span></div>
+              <div class="usage-row"><span><span class="dot" style="display:inline-block;color:var(--teal);margin-right:8px"></span>deepseek-chat</span><span>39 次</span></div>
+              <div class="usage-row"><span><span class="dot" style="display:inline-block;color:var(--rose);margin-right:8px"></span>claude-sonnet</span><span>22 次</span></div>
+            </div>
+          </div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="settings">
+        <div class="tile-label">设置</div>
+        <div class="phone"><div class="screen">
+          <div class="top">
+            <div class="title">设置</div>
+            <div class="subtitle">安静分组，低频功能收起</div>
+          </div>
+          <div class="content">
+            <div class="panel settings-list" style="padding:0 15px">
+              <div class="setting-row"><div class="glyph">API</div><div><div class="setting-title">API 配置</div><div class="setting-sub">模型服务、密钥与默认模型</div></div><div class="chevron">›</div></div>
+              <div class="setting-row"><div class="glyph" style="background:var(--teal-soft);color:var(--teal)">网</div><div><div class="setting-title">联网搜索</div><div class="setting-sub">Tavily 与搜索开关</div></div><div class="chevron">›</div></div>
+              <div class="setting-row"><div class="glyph" style="background:var(--rose-soft);color:var(--rose)">人</div><div><div class="setting-title">个性化</div><div class="setting-sub">头像、隐藏对话与外观</div></div><div class="chevron">›</div></div>
+              <div class="setting-row"><div class="glyph">词</div><div><div class="setting-title">全局提示词</div><div class="setting-sub">默认系统提示词</div></div><div class="chevron">›</div></div>
+              <div class="setting-row"><div class="glyph" style="background:#f2f4f7;color:#475467">ENV</div><div><div class="setting-title">环境变量</div><div class="setting-sub">加密保存可复用变量</div></div><div class="chevron">›</div></div>
+              <div class="setting-row"><div class="glyph" style="background:var(--amber-soft);color:#92400e">备</div><div><div class="setting-title">备份恢复</div><div class="setting-sub">导出、恢复与自动备份</div></div><div class="chevron">›</div></div>
+            </div>
+            <div style="height:14px"></div>
+            <div class="panel" style="padding:15px">
+              <div class="row-title">关于 Echo</div>
+              <div class="row-meta">版本 1.7.5 · 上下文用量、主动压缩、导航优化</div>
+            </div>
+          </div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+
+      <article class="tile" data-screen="history">
+        <div class="tile-label">历史/文件夹</div>
+        <div class="phone"><div class="screen">
+          <div class="top">
+            <div class="title">历史与文件夹</div>
+            <div class="subtitle">快速定位已有内容</div>
+          </div>
+          <div class="content">
+            <div class="search"><span>⌕</span><span>搜索历史记录</span></div>
+            <div class="seg">
+              <div class="chip active">全部</div>
+              <div class="chip">课程</div>
+              <div class="chip">代码</div>
+              <div class="chip">API</div>
+            </div>
+            <div class="section-label">最近打开</div>
+            <div class="timeline-card"><div><div class="row-title">UI 美化方向讨论</div><div class="row-meta">今天 · 12 条消息 · GPT-4o</div><div class="row-tags"><div class="mini-tag blue">上下文</div></div></div><div class="chevron">›</div></div>
+            <div class="timeline-card"><div><div class="row-title">Android APK 构建记录</div><div class="row-meta">昨天 · 36 条消息 · DeepSeek</div><div class="row-tags"><div class="mini-tag amber">构建</div></div></div><div class="chevron">›</div></div>
+            <div class="timeline-card"><div><div class="row-title">GitHub 备份流程</div><div class="row-meta">周三 · 18 条消息 · Claude</div><div class="row-tags"><div class="mini-tag teal">备份</div></div></div><div class="chevron">›</div></div>
+            <div class="timeline-card"><div><div class="row-title">联网搜索配置排查</div><div class="row-meta">周二 · 24 条消息 · GPT-4o</div><div class="row-tags"><div class="mini-tag">网络</div></div></div><div class="chevron">›</div></div>
+          </div>
+          <div class="handle"></div>
+        </div></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const screen = params.get("screen") || location.hash.replace("#screen=", "");
+    if (screen) {
+      document.body.classList.add("single-mode");
+      document.querySelectorAll(".tile").forEach(tile => {
+        if (tile.dataset.screen === screen) tile.classList.add("active-single");
+      });
+    }
+  </script>
+</body>
+</html>

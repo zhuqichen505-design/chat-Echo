@@ -1,0 +1,33 @@
+# Gradle / Android build outputs
+.gradle/
+.kotlin/
+build/
+app/build/
+
+# Local SDK and machine-specific files
+local.properties
+*.keystore
+*.jks
+
+# IDE files
+.idea/
+*.iml
+
+# Generated release artifacts and backups
+releases/
+*.apk
+*.aab
+*.apks
+*.zip
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Local secret/property overrides
+*.env
+*.env.*
+secrets.properties
