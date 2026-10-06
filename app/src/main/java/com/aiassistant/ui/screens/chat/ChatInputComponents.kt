@@ -202,36 +202,10 @@ fun ChatInputBar(
     // v2.7.4 需求 2：TextFieldValue 承载选区/焦点/布局以支持自绘光标；对外仍保持 String API，
     // 声明在 AnimatedContent 之外，输入栏隐藏/恢复切换不丢内部状态
     var inputFieldValue by remember { mutableStateOf(TextFieldValue(inputText)) }
-    LaunchedEffect(inputText) {
-        // 外部变更（发送清空、引用回填、编辑撤回）同步内部值并复位光标
-        if (inputText != inputFieldValue.text) {
-            inputFieldValue = TextFieldValue(inputText)
-        }
-    }
-    var inputFieldLayout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
-    var inputFieldFocused by remember { mutableStateOf(false) }
-    // v2.7.6 需求 4：记录最近一次点击在文本区内的横向位置（观察型 pointerInput，不消费事件、
-    // 不影响内置光标/选择手势）。软换行边界处"前一行行尾"与"下一行行首"为同一文本偏移，
-    // 按点击位置区分两种落点：点在文字上 → 行尾；点在文字右侧空白 → 下一行行首
-    var lastTapX by remember { mutableStateOf<Float?>(null) }
-    var lastTapAtMs by remember { mutableStateOf(0L) }
-    // v2.7.6 需求 4：行尾为显式换行时点击最右侧空白 → 光标越过换行符落到下一行起始位置
-    // （内置点击永远落在 \n 之前的行尾）。仅在点击后短时间内做一次性校正，
-    // 400ms 新鲜度窗口避免键盘输入期间残留的旧点击位置误触发光标跳转
-    LaunchedEffect(inputFieldValue.selection, inputFieldLayout) {
-        val tapX = lastTapX ?: return@LaunchedEffect
-        if (System.currentTimeMillis() - lastTapAtMs > 400) return@LaunchedEffect
-        val layout = inputFieldLayout ?: return@LaunchedEffect
-        if (!inputFieldValue.selection.collapsed) return@LaunchedEffect
-        val offset = inputFieldValue.selection.start
-        val text = layout.layoutInput.text
-        if (offset < 0 || offset >= text.length) return@LaunchedEffect
-        if (text[offset] != '\n') return@LaunchedEffect
-        val line = layout.getLineForOffset(offset)
-        if (tapX > layout.getLineRight(line)) {
-            lastTapX = null
-            inputFieldValue = inputFieldValue.copy(selection = TextRange(offset + 1))
-        }
+    // Reconcile before rendering, never from a delayed effect that can race an IME edit.
+    // Parent echoes preserve selection/composition; actual external replacements land at the end.
+    if (inputText != inputFieldValue.text) {
+        inputFieldValue = com.aiassistant.ui.components.reconcileEditorText(inputFieldValue, inputText)
     }
     // v2.7.8 需求 1：软键盘收起即回到最小高度（与失焦重置双保险）——
     // 部分机型按返回键收起键盘时焦点可能仍留在输入框，仅靠失焦重置无法覆盖
@@ -410,7 +384,6 @@ fun ChatInputBar(
                             )
                             .background(Color.Transparent)
                             .onFocusChanged {
-                                inputFieldFocused = it.isFocused
                                 // v2.7.8 需求 1：输入框高度只在聚焦编辑期间允许（拖拽手柄）改变——
                                 // 失焦（键盘收起/点击其他区域/发送）即回到最小高度，
                                 // 任何来源造成的非最小状态都不会跨编辑会话残留
@@ -423,11 +396,8 @@ fun ChatInputBar(
                             color = inputTextColor,
                             background = Color.Transparent
                         ),
-                        // v2.7.4 需求 2：隐藏内置光标改用自绘光标——软换行边界（前一行行尾与
-                        // 下一行行首为同一文本偏移）时绘制在**前一行行尾**，即右侧最后一个字后面，
-                        // 解决"光标只能放在下一行开头"的问题；其余位置与内置光标一致
-                        cursorBrush = SolidColor(Color.Transparent),
-                        onTextLayout = { inputFieldLayout = it },
+                        // Native cursor shares the field's scrolling, bidi and IME coordinates.
+                        cursorBrush = SolidColor(inputTextColor),
                         maxLines = if (isInputExpanded || (customInputHeightDp ?: 0f) > 60f) 15 else 5,
                         decorationBox = { innerTextField ->
                             Box(
@@ -449,33 +419,8 @@ fun ChatInputBar(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        // v2.7.6 需求 4：观察点击记录横向位置——本 Box 与 innerTextField
-                                        // 同原点，坐标即光标覆盖层/文本布局坐标系，无需换算
-                                        .pointerInput(Unit) {
-                                            awaitEachGesture {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
-                                                lastTapX = down.position.x
-                                                lastTapAtMs = System.currentTimeMillis()
-                                            }
-                                        }
                                 ) {
                                     innerTextField()
-                                    val cursorLayout = inputFieldLayout
-                                    if (inputFieldFocused && cursorLayout != null) {
-                                        InputCursorOverlay(
-                                            // v2.7.9 关键修复：matchParentSize 跟随文本区实际尺寸——
-                                            // 此前覆盖层 Canvas fillMaxSize 在无高度约束的包裹容器里
-                                            // 直接吃满父级允许的最大高度（heightIn 的 112dp），把整个
-                                            // 输入框顶到最大——表现为"一点输入框就变长一大截"
-                                            modifier = Modifier.matchParentSize(),
-                                            layout = cursorLayout,
-                                            text = inputFieldValue.text,
-                                            offset = inputFieldValue.selection.start,
-                                            collapsed = inputFieldValue.selection.collapsed,
-                                            tapX = lastTapX,
-                                            color = inputTextColor
-                                        )
-                                    }
                                 }
                             }
                         }

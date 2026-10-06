@@ -142,8 +142,13 @@ fun EchoScrollableTextEditor(
     //    且无法跟随光标，用 no-op 门禁（editorBringIntoViewGate）拦截其外传；
     // ② 选区/布局变化时，仅在光标行移出可视区时以最小距离滚动跟随——点击可视区内位置
     //    绝不滚动（修复「点击即强制滑到内容顶端」），输入时内容始终跟随光标。
-    LaunchedEffect(value.selection, textLayout, contentHeightPx) {
+    var followedValue by remember { mutableStateOf(value) }
+    LaunchedEffect(value, textLayout, focused) {
         val layout = textLayout ?: return@LaunchedEffect
+        if (layout.layoutInput.text.text != value.text) return@LaunchedEffect
+        val shouldFollow = shouldFollowEditorCursor(focused, followedValue, value, layout.layoutInput.text.text)
+        followedValue = value
+        if (!shouldFollow) return@LaunchedEffect
         val viewport = scrollState.viewportSize
         if (viewport <= 0) return@LaunchedEffect
         val offset = value.selection.end.coerceIn(0, layout.layoutInput.text.length)

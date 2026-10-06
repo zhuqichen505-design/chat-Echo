@@ -16,6 +16,28 @@ import org.junit.Test
  */
 class UiPolishRegressionTest {
 
+    @Test fun editorParentEchoPreservesSelectionAndComposition() {
+        val value = androidx.compose.ui.text.input.TextFieldValue("合成输入文本",
+            selection = androidx.compose.ui.text.TextRange(2), composition = androidx.compose.ui.text.TextRange(1, 3))
+        assertEquals(value, com.aiassistant.ui.components.reconcileEditorText(value, value.text))
+        val replacement = com.aiassistant.ui.components.reconcileEditorText(value, "外部引用")
+        assertEquals(androidx.compose.ui.text.TextRange(4), replacement.selection)
+        assertEquals(null, replacement.composition)
+        assertEquals(androidx.compose.ui.text.TextRange.Zero,
+            com.aiassistant.ui.components.reconcileEditorText(value, "").selection)
+    }
+
+    @Test fun editorLayoutAndFocusChangesDoNotFollowOldCursor() {
+        val old = androidx.compose.ui.text.input.TextFieldValue("合成长文本")
+        val clicked = old.copy(selection = androidx.compose.ui.text.TextRange(3))
+        assertTrue(!com.aiassistant.ui.components.shouldFollowEditorCursor(true, old, old, old.text))
+        assertTrue(!com.aiassistant.ui.components.shouldFollowEditorCursor(false, old, clicked, clicked.text))
+        assertTrue(!com.aiassistant.ui.components.shouldFollowEditorCursor(true, old, clicked, "过期布局"))
+        assertTrue(com.aiassistant.ui.components.shouldFollowEditorCursor(true, old, clicked, clicked.text))
+        val typed = clicked.copy(text = "合成新增长文本")
+        assertTrue(com.aiassistant.ui.components.shouldFollowEditorCursor(true, clicked, typed, typed.text))
+    }
+
     private val testClock = object : androidx.compose.runtime.MonotonicFrameClock {
         override suspend fun <R> withFrameNanos(onFrame: (frameTimeNanos: Long) -> R): R {
             return onFrame(System.nanoTime())
