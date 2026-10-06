@@ -525,6 +525,14 @@ object TimelineMemoryHelper {
      * 模型未按指令输出 NO_UPDATE 或 JSON 时的兜底。仅在未找到 JSON 时调用，
      * 因此不会误伤 JSON 正文中的措辞。
      */
+    /** Conservative identity check: unknown or differently labelled times must never overwrite a node. */
+    fun isSameTimelineEventTime(existing: String, incoming: String): Boolean {
+        fun normalize(value: String) = value.trim().replace(Regex("""[\s·・：:]"""), "")
+        val left = normalize(existing)
+        val right = normalize(incoming)
+        return left.isNotBlank() && left !in setOf("未确定", "未知") && left == right
+    }
+
     fun isNoChangeLikeResponse(text: String): Boolean {
         if (text.contains("NO_UPDATE", ignoreCase = true)) return true
         val phrases = listOf(

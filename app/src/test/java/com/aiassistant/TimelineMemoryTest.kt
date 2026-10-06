@@ -139,6 +139,16 @@ class TimelineMemoryTest {
     }
 
     @Test
+    fun eventTimeIdentityRejectsDifferentAndUnknownTimes() {
+        assertTrue(TimelineMemoryHelper.isSameTimelineEventTime("第1天 · 清晨", "第1天·清晨"))
+        assertFalse(TimelineMemoryHelper.isSameTimelineEventTime("第1天·清晨", "第1天·傍晚"))
+        assertFalse(TimelineMemoryHelper.isSameTimelineEventTime("第1天·清晨", "第2天·清晨"))
+        assertFalse(TimelineMemoryHelper.isSameTimelineEventTime("第1天", "第1天·清晨"))
+        assertFalse(TimelineMemoryHelper.isSameTimelineEventTime("未知", "未知"))
+        assertFalse(TimelineMemoryHelper.isSameTimelineEventTime("", ""))
+    }
+
+    @Test
     fun testIsNoChangeLikeResponse_coversMarkerAndChinesePhrasing() {
         assertTrue(TimelineMemoryHelper.isNoChangeLikeResponse("NO_UPDATE"))
         assertTrue(TimelineMemoryHelper.isNoChangeLikeResponse("no_update，本轮无变化"))

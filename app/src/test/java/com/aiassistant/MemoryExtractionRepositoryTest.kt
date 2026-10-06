@@ -294,6 +294,28 @@ class MemoryExtractionRepositoryTest {
         } }
     }
 
+    @Test fun differentTimeUpdateAndSimilarAppendNeverOverwriteEarlierEvent() = runBlocking {
+        for (action in listOf("UPDATE", "APPEND")) {
+            var nodeId = 0L
+            Endpoint { socket, _ -> memoryReply(socket, """{"action":"$action","targetNodeId":$nodeId,"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"林岚抵达古塔并与守门人缔结盟约"},"atemporalSettings":[]}""") }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第1天·清晨", event = "林岚抵达古塔", category = "PLOT_EVENT"))
+                val result = f.repository.evaluateAndAutoUpdateTimeline(id, "继续故事", "林岚抵达古塔并与守门人缔结盟约", config.id, config.modelName)!!
+                assertEquals("APPEND", result.action)
+                assertNull(result.targetNodeId)
+                // Even a stale/manually edited UPDATE proposal must be checked again at save time.
+                f.repository.applyAutoTimelineProposal(id, result.copy(action = "UPDATE", targetNodeId = nodeId))
+                val nodes = f.db.timelineNodeDao().getTimelineNodes(id)
+                assertEquals(2, nodes.size)
+                val earlier = nodes.single { it.id == nodeId }
+                assertEquals("第1天·清晨", earlier.timeTag)
+                assertEquals("林岚抵达古塔", earlier.event)
+                assertEquals("第2天·清晨", nodes.single { it.id != nodeId }.timeTag)
+            } }
+        }
+    }
+
     @Test fun confirmedIncrementalFactsSaveInBothStoryScopesWithoutReplacingTimelineOrLeakingGlobally() = runBlocking {
         Fixture().use { f ->
             val (_, id) = f.conversation("https://example.invalid/v1", tags = "story")

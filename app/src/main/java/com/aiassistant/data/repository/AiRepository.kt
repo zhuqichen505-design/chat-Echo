@@ -4338,7 +4338,7 @@ class AiRepository(
                 2.【多轮事件修改补充 vs 新增事件（拒绝流水账重复，核心铁律）】：
                    - 现实中一件事情往往由多轮对话连续进行（如同一场交谈、同一顿饭、同一场战斗、同一个场景的活动、同一个任务的前后进展）；
                    - 如果当前对话属于过往已记录事件（见上述【已记录的时间线最近事件列表】）的延续、细节补充、深入推进或同一事件的收尾，【严禁新增独立重复事件】！
-                     必须设置 "action": "UPDATE"，并在 "targetNodeId" 中填入该事件对应的数值 ID，在 "newEvent" 中给出【融合旧事件与新进展后的单条完整新描述】（12~28字完整单句），实现对过往事件的修改与充实！
+                     只有新事件与目标节点明确属于同一时间点才设置 "action": "UPDATE"，并在 "targetNodeId" 中填入该事件对应的数值 ID，在 "newEvent" 中给出【融合旧事件与新进展后的单条完整新描述】（12~28字完整单句）。时间点不同或不确定，即使人物、场景或内容相似也必须 APPEND，禁止用后续时段总结覆盖早期事件！
                    - 仅当真正发生了不同场景、不同时段、不同性质的全新独立重大事件时，才设置 "action": "APPEND"，此时 "targetNodeId" 设为 null。
                 3.【同一场景归并与防虚假跨天铁律】：
                    - 严禁将同一个连续场景或同一件事（如一顿饭、一次促膝长谈、一场战斗）错误拆分成多天多顿饭！
@@ -4492,7 +4492,10 @@ class AiRepository(
         // 匹配修改目标节点
         var resolvedTargetNode: TimelineNode? = null
         if (hasEvent) {
-            val existingNodes = timelineNodeDao?.getTimelineNodes(conversationId) ?: emptyList()
+            val eventTime = newEvent!!.timeTag.ifBlank { resolvedNewStoryTime ?: existingStoryTime.orEmpty() }
+            val existingNodes = (timelineNodeDao?.getTimelineNodes(conversationId) ?: emptyList()).filter {
+                TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime)
+            }
             if (parsedAction == "UPDATE") {
                 resolvedTargetNode = if (parsedTargetNodeId != null && parsedTargetNodeId > 0L) {
                     existingNodes.firstOrNull { it.id == parsedTargetNodeId }
@@ -4554,13 +4557,16 @@ class AiRepository(
             proposal.newEvent?.takeIf { it.content.isNotBlank() }?.let { event ->
                 val dao = timelineNodeDao ?: error("时间线存储不可用")
                 val nodes = dao.getTimelineNodes(conversationId)
-                val existing = if (proposal.action == "UPDATE") nodes.firstOrNull { it.id == proposal.targetNodeId } else null
+                val eventTime = event.timeTag.ifBlank { proposal.updatedStoryTime ?: conversation.currentStoryTime ?: "未确定" }
+                val existing = if (proposal.action == "UPDATE") nodes.firstOrNull {
+                    it.id == proposal.targetNodeId && TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime)
+                } else null
                 if (existing != null) {
                     dao.updateTimelineNode(existing.copy(timeTag = event.timeTag.ifBlank { existing.timeTag },
                         event = event.content.trim(), category = event.category.key, updatedAt = System.currentTimeMillis()))
-                } else if (nodes.none { it.event == event.content.trim() && it.timeTag == event.timeTag }) {
+                } else if (nodes.none { it.event == event.content.trim() && it.timeTag == eventTime }) {
                     dao.insertTimelineNode(TimelineNode(conversationId = conversationId,
-                        timeTag = event.timeTag.ifBlank { proposal.updatedStoryTime ?: conversation.currentStoryTime ?: "未确定" },
+                        timeTag = eventTime,
                         event = event.content.trim(), category = event.category.key,
                         orderIndex = (nodes.maxOfOrNull { it.orderIndex } ?: -1) + 1))
                 }
