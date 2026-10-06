@@ -4,10 +4,10 @@ Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上�
 
 ## 最新安装包
 
-- 版本：**2.8.2**（188），包名 `com.aiassistant`。
+- 版本：**2.8.3**（189），包名 `com.aiassistant`。
 - Android 8.0（API 26）及以上，当前安装包仅支持 `arm64-v8a`。
 - 最新版下载：[GitHub Releases](../../releases/latest)。发布完成前此链接可能尚不可用。
-- 唯一手动发布附件：`Echo-v2.8.2.apk`。不上传源码压缩包、历史 APK、日志或用户数据。
+- 唯一手动发布附件：`Echo-v2.8.3.apk`。不上传源码压缩包、历史 APK、日志或用户数据。
 - 最新版元数据与验收边界见 [release-notes/latest.md](release-notes/latest.md)；该目录仅保存公开脱敏说明。
 - GitHub 自动提供的 Source code zip/tar.gz 链接无法关闭；它们不是本项目手动上传的附件。
 - 当前安装包使用 Android Debug 证书，**非正式生产签名**。未完成真机安装、启动与真实接口验收；升级前请备份数据。

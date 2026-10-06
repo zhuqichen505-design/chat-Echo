@@ -1,5 +1,14 @@
 # 维护记录
 
+## 2026-10-06：v2.8.3/189 构建发布
+
+- 用户明确要求构建 APK；更新来源为本仓库已审核提交，不复制旧项目或旧 Git 历史。仅版本递增、发布文档更新；包含此前事件覆盖、专属设定和编辑光标修复。
+- compileDebugKotlin testDebugUnitTest lintDebug assembleRelease --no-daemon --console=plain 联合命令退出 0；83 套件/612 项全通过，Lint 0 Error/88 Warning。
+- apksigner verify --print-certs、aapt dump badging 退出 0；com.aiassistant、2.8.3/189、API 26/34、arm64-v8a；Room v34。既有 Android Debug 证书，非正式生产签名。
+- APK 16,782,609 字节，SHA256 C09A59BBA27DB1E767425DCB6EF793C3DD5F1ECFE99CF895FB24163B213C3EB0；445 个解压条目已知隐私/凭据模式扫描无匹配，复制以排他创建保护历史包，扫描与复制哈希校验退出 0。
+- 完整暂存及待推送历史/元数据核查后发布，原始未跟踪图片、签名及构建产物不提交；自动扫描不保证发现全部未知私人值。图片沿用之前核查素材，无新增图片。gh 不在 PATH，改用本机 Git 认证与 API，不打印凭据。
+- 发布结果以实际交付核验为准，成功前不清理旧 Release；本机历史包永久保留。无设备安装、启动、输入法或真实接口验收，已被覆盖或删除的数据无法恢复。
+
 ## 2026-10-06：输入光标与长文本点击跳顶回归修复（未发版）
 
 - 代码风险：聊天自绘光标不共享字段内部滚动坐标，点击后异步校正会改写选区；String 同步延迟重建 TextFieldValue 默认选区为开头。长文本跟随逻辑在布局变化时也滚动到旧选区。
