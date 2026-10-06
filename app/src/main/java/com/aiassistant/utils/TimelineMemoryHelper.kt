@@ -917,8 +917,19 @@ object TimelineMemoryHelper {
      */
     fun isExplicitTimelineEvent(content: String): Boolean {
         val trimmed = content.trim()
+        val eventPrefix = Regex("""^[\[【](?:主线剧情|剧情事件|转折关键|关键事件)[\]】]\s*""").find(trimmed)
+        if (eventPrefix != null) {
+            return isExplicitTimelineEvent(trimmed.substring(eventPrefix.range.last + 1))
+        }
         val matcher = TIME_TAG_PATTERN.matcher(trimmed)
-        if (matcher.find()) return true
+        if (matcher.find()) {
+            // The parser accepts arbitrary bracketed tags; classification must not treat
+            // setting categories such as 【角色特征】 as a story timestamp.
+            val tag = trimmed.substringBefore(']').substringBefore('】')
+                .trim().trimStart('[', '【').trim()
+            return Regex("""^(?:第\s*[\d一二三四五六七八九十百零]+\s*(?:天|日|周|月|年)|DAY\s*\d+|\d{4}[-年/]\d{1,2}|\d{1,2}[:：]\d{2}|暑假|寒假|新学期|两周|数日|几天|清晨|早晨|上午|中午|午后|下午|傍晚|黄昏|晚上|夜晚|深夜|凌晨|当天|次日|翌日|次晨|翌晨|今天|昨天|明天|次周|一周后|三天后|未确定|未知)""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(tag)
+        }
         return trimmed.startsWith("[第") || trimmed.startsWith("【第") ||
                trimmed.startsWith("[day", ignoreCase = true) ||
                trimmed.startsWith("[暑假") || trimmed.startsWith("[寒假") ||

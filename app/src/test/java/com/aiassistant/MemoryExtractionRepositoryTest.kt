@@ -347,6 +347,29 @@ class MemoryExtractionRepositoryTest {
         }
     }
 
+    @Test fun ordinaryChatConfirmedCharacterSettingsRemainVisibleAndEnterNextRequest() = runBlocking {
+        Endpoint { socket, _ -> streamReply(socket) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            val categories = listOf("角色特征", "习惯偏好", "生理禁忌", "世界规则", "人际羁绊", "固有设定")
+            val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(null, null, "待确认",
+                atemporalSettings = categories.map { com.aiassistant.utils.AtemporalSettingItem(
+                    category = it, content = "合成角色的${it}仅在本对话有效") })
+            f.repository.applyAutoTimelineProposal(id, proposal)
+            val saved = f.repository.getConversationMemoriesList(id)
+            assertEquals(categories.size, saved.size)
+            assertTrue(saved.all { it.isEnabled && it.scope == "conversation" && it.conversationId == id })
+            // The same timeline predicate is used by both the settings list and request assembly.
+            assertTrue(saved.none { com.aiassistant.utils.TimelineMemoryHelper.isExplicitTimelineEvent(it.content) })
+            chat(f, config, id)
+            val request = endpoint.payloads.last().getAsJsonArray("messages").toString()
+            for (setting in saved) assertTrue(request.contains(setting.content))
+            val (_, otherId) = f.conversation(endpoint.url)
+            chat(f, config, otherId)
+            val otherRequest = endpoint.payloads.last().getAsJsonArray("messages").toString()
+            for (setting in saved) assertFalse(otherRequest.contains(setting.content))
+        } }
+    }
+
     @Test fun extractedLocalSettingsSurviveReloadAndEnterContextWithoutBoundCards() = runBlocking {
         Endpoint { socket, _ -> memoryReply(socket, "NO_UPDATE") }.use { endpoint -> Fixture().use { f ->
             val (_, id) = f.conversation(endpoint.url)

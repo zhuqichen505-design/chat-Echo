@@ -174,5 +174,11 @@ class TimelineGeneralizationAndIsolationTest {
         assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("用户偏好：回答请保持严谨简洁"))
         assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("核心准则：严禁自称特助或老板"))
         assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("开发项目名称：Echo AI Assistant"))
+        assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("【角色特征】合成角色性格沉稳"))
+        assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("【习惯偏好】合成角色喜欢清晨散步"))
+        assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("【生理禁忌】合成角色对花粉过敏"))
+        assertFalse(TimelineMemoryHelper.isExplicitTimelineEvent("【世界规则】古塔禁止火焰魔法"))
+        assertTrue(TimelineMemoryHelper.isExplicitTimelineEvent("【清晨】抵达古塔"))
+        assertTrue(TimelineMemoryHelper.isExplicitTimelineEvent("【2026年10月6日】抵达古塔"))
     }
 }
