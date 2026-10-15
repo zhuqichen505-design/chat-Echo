@@ -208,6 +208,7 @@ fun ChatSettingsDialog(
     var enableSessionMemory by remember { mutableStateOf(tempSettings.enableSessionMemory) }
     var enableExternalMemory by remember { mutableStateOf(tempSettings.enableExternalMemory) }
     var enableWorldBook by remember { mutableStateOf(tempSettings.enableWorldBook) }
+    var activeWorldBookIds by remember { mutableStateOf(tempSettings.activeWorldBookIds) }
     var enableReplyDirections by remember { mutableStateOf(tempSettings.enableReplyDirections) }
     var replyDirectionCount by remember { mutableIntStateOf(tempSettings.replyDirectionCount.coerceIn(2, 4)) }
     var contextWindowTokens by remember { mutableStateOf(tempSettings.contextWindowTokens) }
@@ -252,6 +253,7 @@ fun ChatSettingsDialog(
         enableSessionMemory = tempSettings.enableSessionMemory
         enableExternalMemory = tempSettings.enableExternalMemory
         enableWorldBook = tempSettings.enableWorldBook
+        activeWorldBookIds = tempSettings.activeWorldBookIds
         enableReplyDirections = tempSettings.enableReplyDirections
         replyDirectionCount = tempSettings.replyDirectionCount.coerceIn(2, 4)
         contextWindowTokens = tempSettings.contextWindowTokens
@@ -270,7 +272,7 @@ fun ChatSettingsDialog(
             enableWorldBook = enableWorldBook,
             enableReplyDirections = enableReplyDirections,
             replyDirectionCount = replyDirectionCount,
-            activeWorldBookIds = tempSettings.activeWorldBookIds,
+            activeWorldBookIds = activeWorldBookIds,
             contextWindowTokens = contextWindowTokens
         )
         onTempSettingsChange?.invoke(updated)
@@ -923,6 +925,11 @@ fun ChatSettingsDialog(
                                 enableWorldBook = it
                                 notifyTempSettingsChange()
                             },
+                            activeWorldBookIds = activeWorldBookIds,
+                            onActiveWorldBookIdsChange = {
+                                activeWorldBookIds = it
+                                notifyTempSettingsChange()
+                            },
                             contentColor = dialogContentColor,
                             secondaryColor = dialogSecondaryColor,
                             hazeState = hazeState
@@ -978,7 +985,7 @@ fun ChatSettingsDialog(
                             enableWorldBook = enableWorldBook,
                             enableReplyDirections = enableReplyDirections,
                             replyDirectionCount = replyDirectionCount,
-                            activeWorldBookIds = tempSettings.activeWorldBookIds,
+                            activeWorldBookIds = activeWorldBookIds,
                             contextWindowTokens = contextWindowTokens
                         )
                         onSave(settings, promptTextFieldValue.text.ifBlank { null })

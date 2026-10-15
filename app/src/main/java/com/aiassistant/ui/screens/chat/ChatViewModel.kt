@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * v2.6.8 需求 4：上下文回退待确认提示的最长等待时间（5 分钟）。
@@ -228,6 +230,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private var apiConfig: ApiConfig? = null
     private var generationJob: Job? = null
     private var systemPromptSaveJob: Job? = null
+    private var storySettingsSaveJob: Job? = null
+    private val storySettingsSaveMutex = Mutex()
     private var isMessageSaved = false
     @Volatile private var isUserStopping = false
     private val currentKeyAttemptErrors = mutableListOf<String>()
@@ -975,7 +979,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 enableWorldBook = settings?.enableWorldBook ?: conv.enableWorldBook ?: false,
                 enableReplyDirections = settings?.enableReplyDirections ?: conv.enableReplyDirections,
                 replyDirectionCount = (settings?.replyDirectionCount ?: conv.replyDirectionCount).coerceIn(2, 4),
-                activeWorldBookIds = settings?.activeWorldBookIds ?: conv.activeWorldBookIds,
+                activeWorldBookIds = if (settings != null) settings.activeWorldBookIds else conv.activeWorldBookIds,
                 contextWindowTokens = settings?.contextWindowTokens,
                 systemPrompt = normalizeSystemPrompt(systemPrompt)
             )
@@ -1152,9 +1156,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         activeAssistantVariantGroupId = assistantVariantGroupId
         activeAssistantVariantIndex = assistantVariantIndex
 
-        // 获取当前选择的模型和设置
-        val settings = if (_useTempSettings.value) _tempSettings.value else null
-        val currentSystemPrompt = normalizeSystemPrompt(_uiState.value.systemPrompt)
+        // Capture the save that preceded this send; effective settings are read only after it completes.
+        val pendingStorySettingsSave = storySettingsSaveJob
 
         val session = ChatGenerationManager.startSession(
             conversationId = conversationId,
@@ -1162,7 +1165,6 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             variantGroupId = assistantVariantGroupId,
             variantIndex = assistantVariantIndex
         )
-        session.directionPhase = (settings?.enableReplyDirections ?: conversation?.enableReplyDirections ?: false) && retryReplyDirection == null
 
         // 生成锚点：重新生成（saveUserMessage=false）时由调用方传入触发本轮的用户消息 id，
         // 流式气泡钉在该消息之后，位置不随同一位置其他回复的删除而移动
@@ -1200,6 +1202,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             }
 
             var currentUserMsgId: Long? = null
+            var settingsForMemory: TempChatSettings? = null
             try {
                 if (saveUserMessage) {
                     val userMessage = Message(
@@ -1221,7 +1224,13 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
                 val selectedConfig = repository.getDecryptedConfig(selectedOption.apiConfigId)
                     ?: throw Exception("API配置不存在，请重新配置")
+                pendingStorySettingsSave?.join()
+                check(pendingStorySettingsSave?.isCancelled != true) { "故事设置保存未完成，请重新保存后发送" }
                 systemPromptSaveJob?.join()
+                val settings = if (_useTempSettings.value) _tempSettings.value else null
+                settingsForMemory = settings
+                val currentSystemPrompt = normalizeSystemPrompt(_uiState.value.systemPrompt)
+                session.directionPhase = (settings?.enableReplyDirections ?: conversation?.enableReplyDirections ?: false) && retryReplyDirection == null
                 val effectiveConfig = selectedConfig.copy(modelName = selectedOption.modelName)
 
                 val roleplayRepo = AiAssistantApp.instance.roleplayRepository
@@ -1233,7 +1242,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         globalSystemPrompt = currentSystemPrompt,
                         userMessage = null, // 设定与上下文纯净解耦，用户消息由 user 角色独立发送
                         globalRoleplayPrompt = globalRpPrompt,
-                        queryText = content // 用于动态匹配世界书设定与外置记忆库相关条目
+                        queryText = content,
+                        includeWorldBook = false // 世界书统一由实际请求链按本轮开关、范围和预算注入一次
                     )
                 } else {
                     currentSystemPrompt
@@ -1248,8 +1258,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     enableWebSearch = settings?.enableWebSearch,
                     enableSessionMemory = settings?.enableSessionMemory ?: conversation?.enableSessionMemory ?: true,
                     enableExternalMemory = settings?.enableExternalMemory ?: conversation?.enableExternalMemory ?: false,
-                    enableWorldBook = settings?.enableWorldBook ?: conversation?.enableWorldBook ?: false,
-                    activeWorldBookIds = settings?.activeWorldBookIds ?: conversation?.activeWorldBookIds,
+                    enableWorldBook = settings?.enableWorldBook ?: currentRoleplaySession?.enableWorldBook ?: conversation?.enableWorldBook ?: false,
+                    activeWorldBookIds = if (settings != null) settings.activeWorldBookIds
+                        else if (currentRoleplaySession != null) currentRoleplaySession.activeWorldBookIds else conversation?.activeWorldBookIds,
                     overrideSystemPrompt = true,
                     systemPromptOverride = effectiveSystemPrompt,
                     contextWindowOverrideTokens = settings?.contextWindowTokens ?: conversation?.contextWindowTokens
@@ -1533,7 +1544,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 // ordinary chat errors; stopped/cancelled rounds do not launch new requests.
                 if (!isUserStopping && !session.directionPhase && coroutineContext[Job]?.isActive == true) {
                     evaluateMemoryCandidate(currentUserMsgId, selectedOption,
-                        settings?.enableSessionMemory ?: conversation?.enableSessionMemory)
+                        settingsForMemory?.enableSessionMemory ?: conversation?.enableSessionMemory)
                 }
             }
         }
@@ -1788,13 +1799,33 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             } ?: messages.lastOrNull { it.role == "assistant" } ?: return@launch
 
             val isError = AiRepository.isErrorPlaceholderMessage(lastAssistantMessage.content)
-            if (isError) {
-                // 如果最后一条是错误占位消息，重新生成时直接删除该错误消息，避免污染会话记录与多分支
-                repository.deleteMessage(lastAssistantMessage)
-            }
             val lastUserMessage = messages.lastOrNull { it.role == "user" && it.createdAt < lastAssistantMessage.createdAt }
                 ?: messages.lastOrNull { it.role == "user" }
             if (lastUserMessage != null) {
+                // 附件内容与正文分开存储；重新生成必须恢复原附件，包含无文字的图片/文件消息。
+                // 在变更旧回复前解析，损坏的附件记录不得导致原回复丢失或静默降为纯文字请求。
+                val originalAttachments = try {
+                    lastUserMessage.attachments?.takeIf { it.isNotBlank() }?.let { raw ->
+                        val parsed = gson.fromJson(raw, Array<Attachment?>::class.java)
+                        requireNotNull(parsed).map { attachment ->
+                            requireNotNull(attachment).also {
+                                require(it.name.isNotBlank() && it.mimeType.isNotBlank())
+                                require(!it.base64Data.isNullOrBlank() || !it.textContent.isNullOrBlank())
+                            }
+                        }
+                    } ?: emptyList()
+                } catch (_: Exception) {
+                    _error.value = "原消息附件无法读取，请编辑该消息并重新添加附件后发送"
+                    return@launch
+                }
+                if (lastUserMessage.content.isBlank() && originalAttachments.isEmpty()) {
+                    _error.value = "原消息内容为空，请编辑后重新发送"
+                    return@launch
+                }
+                if (isError) {
+                    // 错误占位不保留为回复分支，但仅在原输入成功恢复后删除。
+                    repository.deleteMessage(lastAssistantMessage)
+                }
                 val groupId = if (isError) {
                     lastAssistantMessage.variantGroupId
                 } else {
@@ -1819,6 +1850,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
                 sendMessageInternal(
                     content = lastUserMessage.content,
+                    attachments = originalAttachments,
                     saveUserMessage = false,
                     assistantVariantGroupId = groupId,
                     assistantVariantIndex = nextIndex,
@@ -2626,30 +2658,60 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         plotSummary: String
     ) {
         viewModelScope.launch {
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
-            val charIdsJson = com.google.gson.Gson().toJson(characterIds)
-            val updated = currentSession.copy(
-                characterIds = charIdsJson,
-                characterId = characterIds.firstOrNull(),
-                scenarioId = scenarioId,
-                narrativeMode = narrativeMode.value,
-                currentPlotSummary = plotSummary,
-                updatedAt = System.currentTimeMillis()
-            )
-            roleplayRepo.updateSession(updated)
+            persistStorySessionContext(characterIds, scenarioId, narrativeMode, plotSummary)
+        }
+    }
 
-            val rpCharacters = roleplayRepo.getEffectiveCharactersForSession(updated)
-            val rpScenario = roleplayRepo.getEffectiveScenarioForSession(updated)
-            _uiState.update {
-                it.copy(
-                    roleplaySession = updated,
-                    roleplayCharacter = rpCharacters.firstOrNull(),
-                    roleplayCharacters = rpCharacters,
-                    roleplayScenario = rpScenario,
-                    narrativeMode = narrativeMode
-                )
+    fun saveStorySettings(
+        characterIds: List<Long>,
+        scenarioId: Long?,
+        narrativeMode: NarrativeMode,
+        plotSummary: String,
+        settings: TempChatSettings,
+        prompt: String?
+    ): Job {
+        val saveJob = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            storySettingsSaveMutex.withLock {
+                // The two saves both update the session row. Publish the completed story copy before
+                // chat settings read it, and finish this save before another dialog save can start.
+                systemPromptSaveJob?.join()
+                persistStorySessionContext(characterIds, scenarioId, narrativeMode, plotSummary)
+                updateChatSettings(settings, prompt)
+                systemPromptSaveJob?.join()
             }
+        }
+        storySettingsSaveJob = saveJob
+        saveJob.start()
+        return saveJob
+    }
+
+    private suspend fun persistStorySessionContext(
+        characterIds: List<Long>,
+        scenarioId: Long?,
+        narrativeMode: NarrativeMode,
+        plotSummary: String
+    ) {
+        val roleplayRepo = AiAssistantApp.instance.roleplayRepository
+        val currentSession = roleplayRepo.getSessionByConversationId(conversationId) ?: return
+        val updated = currentSession.copy(
+            characterIds = gson.toJson(characterIds),
+            characterId = characterIds.firstOrNull(),
+            scenarioId = scenarioId,
+            narrativeMode = narrativeMode.value,
+            currentPlotSummary = plotSummary,
+            updatedAt = System.currentTimeMillis()
+        )
+        roleplayRepo.updateSession(updated)
+        val rpCharacters = roleplayRepo.getEffectiveCharactersForSession(updated)
+        val rpScenario = roleplayRepo.getEffectiveScenarioForSession(updated)
+        _uiState.update {
+            it.copy(
+                roleplaySession = updated,
+                roleplayCharacter = rpCharacters.firstOrNull(),
+                roleplayCharacters = rpCharacters,
+                roleplayScenario = rpScenario,
+                narrativeMode = narrativeMode
+            )
         }
     }
 

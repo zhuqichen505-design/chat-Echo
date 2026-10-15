@@ -1,12 +1,171 @@
 package com.aiassistant
 
+import android.app.Application
+import androidx.room.Room
+import com.aiassistant.data.local.AppDatabase
+import com.aiassistant.domain.model.WorldBook
 import com.aiassistant.utils.RoleplaySmartParser
+import com.aiassistant.utils.WorldBookImport
+import com.aiassistant.utils.WorldBookImportFormat
+import com.google.gson.JsonParser
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.SQLiteMode
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class, manifest = Config.NONE)
+@SQLiteMode(SQLiteMode.Mode.NATIVE)
 class RoleplayParserAndStreamingTest {
+
+    @Test
+    fun worldBookImportRecognizesTavernObjectAndPreservesKeywordPhrases() {
+        val report = WorldBookImport.parse("""
+            {"name":"星港指南","description":"合成测试资料","entries":{
+              "70":{"uid":70,"comment":"北侧星港","key":["North Harbor","星港"],"content":"北侧星港设有维修站。","constant":false,"disable":false,"order":0}
+            }}
+        """.trimIndent())
+        assertEquals(WorldBookImportFormat.SILLY_TAVERN, report.format)
+        assertEquals("星港指南", report.name)
+        assertEquals("合成测试资料", report.description)
+        val entry = report.entries.single().draft
+        assertEquals("北侧星港", entry.name)
+        assertEquals(listOf("North Harbor", "星港"), JsonParser.parseString(entry.keys).asJsonArray.map { it.asString })
+        assertEquals(0, entry.priority)
+        assertTrue(entry.isEnabled)
+        assertFalse(entry.isConstant)
+        assertTrue(report.requiresCompatibilityConfirmation)
+        assertThrows(IllegalArgumentException::class.java) { WorldBookImport.prepare(report) }
+        val prepared = WorldBookImport.prepare(report, acceptCompatibilityLoss = true)
+        assertFalse(prepared.book.isEnabled)
+        assertEquals(0L, prepared.book.id)
+        assertEquals(0L, prepared.entries.single().id)
+    }
+
+    @Test
+    fun worldBookImportRecognizesStandaloneAndEmbeddedCharacterBooks() {
+        val standalone = WorldBookImport.parse("""
+            {"entries":[{"keys":["灯塔"],"content":"灯塔每晚亮起。","enabled":false,"constant":true}]}
+        """.trimIndent(), fallbackName = "航路设定")
+        assertEquals(WorldBookImportFormat.CHARACTER_BOOK, standalone.format)
+        assertEquals("航路设定", standalone.name)
+        assertFalse(standalone.requiresCompatibilityConfirmation)
+        assertFalse(standalone.entries.single().draft.isEnabled)
+        assertTrue(standalone.entries.single().draft.isConstant)
+
+        val embedded = WorldBookImport.parse("""
+            {"spec":"chara_card_v2","data":{"name":"测试角色","system_prompt":"不得导入的角色规则",
+              "character_book":{"name":"灯塔群岛","entries":[{"keys":["灯塔"],"content":"群岛有三座灯塔。","enabled":true}]}}}
+        """.trimIndent())
+        assertEquals(WorldBookImportFormat.EMBEDDED_CHARACTER_BOOK, embedded.format)
+        assertEquals("灯塔群岛", embedded.name)
+        assertEquals("群岛有三座灯塔。", embedded.entries.single().draft.content)
+        assertTrue(embedded.warnings.any { it.contains("仅提取角色卡") })
+    }
+
+    @Test
+    fun worldBookImportDisablesUnsupportedSemanticsUntilManualReview() {
+        val report = WorldBookImport.parse("""
+            {"entries":[
+              {"keys":["/harbor/i"],"content":"正则词条","enabled":true},
+              {"keys":["星港"],"secondary_keys":["夜晚"],"selective":true,"content":"条件词条"},
+              {"keys":["灯塔"],"content":"深度词条","extensions":{"position":4,"depth":2,"probability":50}},
+              {"keys":["船长"],"content":"未知扩展词条","extensions":{"future_rule":{"mode":"exclusive"}}}
+            ]}
+        """.trimIndent())
+        assertEquals(4, report.disabledEntryCount)
+        assertTrue(report.unsupportedFields.contains("正则关键词"))
+        assertTrue(report.unsupportedFields.contains("secondary_keys"))
+        assertTrue(report.unsupportedFields.contains("extensions.position"))
+        assertTrue(report.unsupportedFields.contains("extensions.future_rule"))
+        assertThrows(IllegalArgumentException::class.java) { WorldBookImport.prepare(report) }
+        val prepared = WorldBookImport.prepare(report, acceptCompatibilityLoss = true)
+        assertTrue(prepared.entries.all { !it.isEnabled })
+        assertEquals(4, prepared.entries.size)
+        assertEquals("未知扩展词条", prepared.entries.last().content)
+    }
+
+    @Test
+    fun worldBookImportFlagsBookSettingsMacrosAndMissingTriggers() {
+        val bookSettings = WorldBookImport.parse("""
+            {"scan_depth":8,"token_budget":200,"recursive_scanning":true,
+              "entries":[{"keys":["船长"],"content":"船长来自群岛。","enabled":true}]}
+        """.trimIndent())
+        assertTrue(bookSettings.unsupportedFields.containsAll(listOf("scan_depth", "token_budget", "recursive_scanning")))
+        assertFalse(bookSettings.entries.single().draft.isEnabled)
+
+        val macros = WorldBookImport.parse("""
+            {"entries":[{"keys":["{{char}}"],"content":"{{char}} 来自群岛。"},{"keys":[],"content":"无触发词"}]}
+        """.trimIndent())
+        assertEquals(2, macros.disabledEntryCount)
+        assertTrue(macros.warnings.any { it.contains("宏或脚本语法") })
+        assertTrue(macros.warnings.any { it.contains("缺少触发关键词") })
+    }
+
+    @Test
+    fun worldBookImportRejectsMalformedMixedAndOversizedInputs() {
+        val invalid = listOf(
+            "", "[]", "{entries:[]}", "{\"entries\":[]}",
+            "{\"entries\":[{\"keys\":[1],\"content\":\"测试\"}]}",
+            "{\"entries\":[{\"keys\":[\"灯塔\"],\"content\":\"测试\",\"enabled\":\"false\"}]}",
+            "{\"entries\":[{\"keys\":[\"灯塔\"],\"content\":\"测试\"},7]}",
+            "{\"entries\":{},\"entries\":{}}",
+            "{\"entries\":[{\"keys\":[\"灯塔\"],\"content\":\"测试\",\"order\":1.5}]}",
+            "{\"entries\":[{\"keys\":[\"灯塔\"],\"content\":\"  \"}]}",
+            "{\"entries\":[{\"keys\":[\"灯塔\"],\"content\":\"测试\"}]} trailing"
+        )
+        invalid.forEach { json -> assertThrows(IllegalArgumentException::class.java) { WorldBookImport.parse(json) } }
+        assertThrows(IllegalArgumentException::class.java) { WorldBookImport.parse(" ".repeat(WorldBookImport.MAX_JSON_BYTES) + "x") }
+        val manyEntries = "{\"entries\":[" + List(WorldBookImport.MAX_ENTRIES + 1) {
+            "{\"keys\":[\"星港\"],\"content\":\"合成条目\"}"
+        }.joinToString(",") + "]}"
+        assertThrows(IllegalArgumentException::class.java) { WorldBookImport.parse(manyEntries) }
+        val deep = "{\"unknown\":" + "[".repeat(40) + "0" + "]".repeat(40) + "}"
+        assertThrows(IllegalArgumentException::class.java) { WorldBookImport.parse(deep) }
+    }
+
+    @Test
+    fun worldBookImportCreatesDisabledCopyWithoutOverwritingAndRollsBackOnFailure() = runBlocking {
+        val database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val dao = database.worldBookDao()
+            val existingId = dao.insertBook(WorldBook(name = "星港指南", description = "原始资料", isEnabled = true))
+            val report = WorldBookImport.parse("""
+                {"name":"星港指南","entries":[{"id":1,"keys":["North Harbor"],"content":"新资料"}]}
+            """.trimIndent())
+            val newId = dao.insertImportedBook(WorldBookImport.prepare(report))
+            assertTrue(newId != existingId)
+            assertEquals("原始资料", dao.getBookById(existingId)?.description)
+            assertTrue(dao.getBookById(existingId)?.isEnabled == true)
+            assertFalse(dao.getBookById(newId)?.isEnabled ?: true)
+            assertEquals("新资料", dao.getEntriesForBookList(newId).single().content)
+            assertTrue(dao.getActiveEntriesFromEnabledBooks().isEmpty())
+            val countBefore = dao.getAllBooksList().size
+            database.openHelper.writableDatabase.execSQL(
+                "CREATE TRIGGER reject_import_test BEFORE INSERT ON world_book_entries WHEN NEW.name = '拒绝词条' BEGIN SELECT RAISE(ABORT, 'synthetic import failure'); END"
+            )
+            val failing = WorldBookImport.prepare(WorldBookImport.parse("""
+                {"name":"事务测试","entries":[{"name":"通过词条","keys":["通过"],"content":"第一条"},
+                {"name":"拒绝词条","keys":["拒绝"],"content":"第二条"}]}
+            """.trimIndent()))
+            var failed = false
+            try { dao.insertImportedBook(failing) } catch (_: android.database.sqlite.SQLiteException) { failed = true }
+            assertTrue("第二条插入应被测试触发器拒绝", failed)
+            assertEquals("书和先写入的词条必须一起回滚", countBefore, dao.getAllBooksList().size)
+            assertEquals(1, dao.getAllEnabledEntries().size)
+        } finally {
+            database.close()
+        }
+    }
 
     @Test
     fun testSmartParserCharacterExtraction() {

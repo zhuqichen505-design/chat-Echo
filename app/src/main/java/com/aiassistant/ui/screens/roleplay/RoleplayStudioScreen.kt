@@ -91,6 +91,7 @@ fun RoleplayStudioScreen(
                     }
                 },
                 actions = {
+                    WorldBookImportButton()
                     IconButton(onClick = { showSmartAnalyzeDialog = true }) {
                         Icon(
                             Icons.Default.AutoAwesome,
@@ -263,7 +264,7 @@ private fun StudioGuideCard(onDismiss: () -> Unit) {
         shape = EchoTokens.Radius.shapeLg,
         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -305,7 +306,25 @@ private fun StudioGuideCard(onDismiss: () -> Unit) {
             GuideStepRow(
                 step = "3",
                 title = "多轮沉浸式演绎与剧情推进",
-                desc = "支持第一人称角色交互、旁白叙事模式与剧情分支，AI 将严格遵循人设法则。"
+                desc = "角色模式保留你的行动决定；作者模式按你的指示推动人物；旁白模式侧重环境。模型仍可能偏离设定，可编辑或重新生成。"
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            GuideStepRow(
+                step = "4",
+                title = "导入、启用并绑定世界书",
+                desc = "顶部导入按钮可读取 SillyTavern JSON、Character Book 或角色卡内嵌世界书。检查兼容提示后新增副本；到设置的世界书列表检查并启用书目/词条，再在故事设置高级区打开世界书、选择书目。导入不等于绑定，不支持的规则不会自动执行。"
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            GuideStepRow(
+                step = "5",
+                title = "理解触发范围与预算",
+                desc = "按本轮输入与最近 4 条有效消息匹配关键词；常驻条目无需命中。总预算约 1500 token，常驻、高保留优先级先入选，超预算条目跳过。未指定书目沿用全部已启用书目；明确取消全部选择则不注入。"
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            GuideStepRow(
+                step = "6",
+                title = "设定冲突时从哪里调整",
+                desc = "本故事明确要求优先于全局默认文风；角色卡定义人物，世界观与世界书提供事实背景，已确认时间线记录事件，摘要仅作参考。条目数字表示预算保留顺序，不是模型权限；具体模型仍可能不遵循。全局规则在设置中调整，本故事要求在故事设置中调整。"
             )
         }
     }

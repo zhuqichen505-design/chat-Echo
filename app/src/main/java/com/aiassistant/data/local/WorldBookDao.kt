@@ -3,6 +3,7 @@ package com.aiassistant.data.local
 import androidx.room.*
 import com.aiassistant.domain.model.WorldBook
 import com.aiassistant.domain.model.WorldBookEntry
+import com.aiassistant.utils.PreparedWorldBookImport
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -24,6 +25,14 @@ interface WorldBookDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBook(book: WorldBook): Long
+
+    /** A fresh, disabled copy; source identifiers never replace existing books or entries. */
+    @Transaction
+    suspend fun insertImportedBook(imported: PreparedWorldBookImport): Long {
+        val bookId = insertBook(imported.book.copy(id = 0, isEnabled = false))
+        imported.entries.forEach { insertEntry(it.copy(id = 0, bookId = bookId)) }
+        return bookId
+    }
 
     @Update
     suspend fun updateBook(book: WorldBook)

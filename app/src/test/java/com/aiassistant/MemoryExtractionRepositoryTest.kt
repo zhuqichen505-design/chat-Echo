@@ -4,10 +4,12 @@ import android.app.Application
 import androidx.room.Room
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.AiRepository
+import com.aiassistant.data.repository.RoleplayRepository
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.CryptoManager
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.TavilySearchManager
+import com.aiassistant.utils.WorldBookImport
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -126,7 +128,8 @@ class MemoryExtractionRepositoryTest {
             settings.saveSettings(settings.getSettings().copy(autoMemoryEnabled = true, auxiliaryMemoryEnabled = false))
             repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), db.messageDao(), db.usageStatDao(),
                 db.environmentVariableDao(), db.promptTemplateDao(), db.memoryDao(), db.conversationBranchDao(), db.selectedModelDao(),
-                crypto, settings, TavilySearchManager(context, crypto), timelineNodeDao = db.timelineNodeDao())
+                crypto, settings, TavilySearchManager(context, crypto), worldBookDao = db.worldBookDao(),
+                timelineNodeDao = db.timelineNodeDao())
         }
         suspend fun conversation(url: String, model: String = "vendor/gpt-5.2:Exact-ID", protocol: String = "openai", enabled: Boolean = true, tags: String? = null): Pair<ApiConfig, Long> {
             val config = ApiConfig(name = "Synthetic", provider = "proxy", baseUrl = url, apiKey = "test-only", modelName = model, apiType = protocol, enableThinking = false)
@@ -145,6 +148,186 @@ class MemoryExtractionRepositoryTest {
         f.repository.sendChatMessageWithConfig(config, id, "reply OK", onToken = { tokens.append(it) },
             onComplete = { text, _, _ -> assertEquals("OK", text) }, onError = { fail(it) })
         assertEquals("OK", tokens.toString())
+    }
+
+    private fun roleplayRepository(f: Fixture) = RoleplayRepository(
+        f.db.characterProfileDao(), f.db.roleplayScenarioDao(), f.db.roleplaySessionDao(),
+        f.db.roleplayMemoryDao(), f.db.characterTagDao(), f.db.conversationDao(),
+        f.db.messageDao(), f.db.worldBookDao(), f.db.memoryDao()
+    )
+
+    @Test fun storyContextKeepsUserRulesAndCharacterFactsWithoutRepeatedStyleMandates() = runBlocking {
+        Fixture().use { f ->
+            val (_, conversationId) = f.conversation("https://model.invalid", tags = "story")
+            val conversation = f.db.conversationDao().getConversationById(conversationId)!!
+            f.db.conversationDao().updateConversation(conversation.copy(currentStoryTime = "第九日·傍晚"))
+            val characters = listOf(
+                CharacterProfile(name = "合成领航员", background = "在雾海学习辨认星图", speakingStyle = "说话简短", constraints = "不透露航线密码"),
+                CharacterProfile(name = "合成修船师", background = "只修理木制船只", speakingStyle = "喜欢用航海比喻")
+            )
+            val sessionId = f.db.roleplaySessionDao().insertSession(RoleplaySession(
+                conversationId = conversationId, customCharacterData = Gson().toJson(characters),
+                currentPlotSummary = "众人正在筹备修船"
+            ))
+            val globalRule = "全局自定义规则：允许直接描述情绪，采用朴素的剧本对白。"
+            val storyRule = "本故事规则：以修船师视角展开本幕。"
+            val context = roleplayRepository(f).assembleRoleplayContext(
+                sessionId, storyRule, "继续", globalRoleplayPrompt = globalRule, includeHistory = false
+            )
+            assertEquals(1, Regex(Regex.escape(globalRule)).findAll(context).count())
+            assertEquals(1, Regex(Regex.escape(storyRule)).findAll(context).count())
+            for (character in characters) {
+                assertTrue(context.contains(character.name))
+                assertTrue(context.contains(character.background))
+                assertTrue(context.contains(character.speakingStyle))
+            }
+            assertTrue(context.contains(characters.first().constraints))
+            assertFalse(context.contains("文学创作与角色演绎铁律"))
+            assertFalse(context.contains("严禁在动作描写中直接使用生硬性格副词"))
+            assertFalse(context.contains("动作描写与台词对话分段交替"))
+            assertTrue(f.db.roleplayMemoryDao().getPinnedFacts(sessionId).isEmpty())
+            assertTrue(f.db.memoryDao().getConversationMemories(conversationId).isEmpty())
+            assertTrue("没有记忆记录时也必须携带会话当前时间", context.contains("第九日·傍晚"))
+            assertFalse(context.contains("【故事当前时间节点】\n众人正在筹备修船"))
+        }
+    }
+
+    @Test fun storyWorldBookUsesRecentMessagesAndExplicitScopeWithoutTeachingPromptTriggers() = runBlocking {
+        Fixture().use { f ->
+            val (_, conversationId) = f.conversation("https://model.invalid", tags = "story")
+            val bookId = f.db.worldBookDao().insertBook(WorldBook(name = "合成群岛资料"))
+            val harborLore = "北港通行证必须盖三枚蓝印。"
+            val teachingOnlyLore = "琥珀王国的王冠藏在枯井。"
+            f.db.worldBookDao().insertEntry(WorldBookEntry(
+                bookId = bookId, name = "北港规则", keys = "[\"North Harbor\"]", content = harborLore
+            ))
+            f.db.worldBookDao().insertEntry(WorldBookEntry(
+                bookId = bookId, name = "教学误触发哨兵", keys = "琥珀王国", content = teachingOnlyLore
+            ))
+            f.db.messageDao().insertMessage(Message(
+                conversationId = conversationId, role = "assistant", content = "他们刚刚驶入 North Harbor。"
+            ))
+            f.db.messageDao().insertMessage(Message(
+                conversationId = conversationId, role = "assistant", content = "琥珀王国的废弃分支。",
+                variantGroupId = "synthetic-branch", variantIndex = 0
+            ))
+            f.db.messageDao().insertMessage(Message(
+                conversationId = conversationId, role = "assistant", content = "船员在码头等候。",
+                variantGroupId = "synthetic-branch", variantIndex = 1
+            ))
+            f.db.messageDao().insertMessage(Message(
+                conversationId = conversationId, role = "user", content = "琥珀王国的已排除备注。",
+                isExcluded = true
+            ))
+            val sessionId = f.db.roleplaySessionDao().insertSession(RoleplaySession(
+                conversationId = conversationId, enableWorldBook = true, activeWorldBookIds = bookId.toString()
+            ))
+            val repo = roleplayRepository(f)
+            val teaching = "用琥珀王国作修辞示例，保持叙事简洁。"
+            val context = repo.assembleRoleplayContext(sessionId, null, "继续向前", globalRoleplayPrompt = teaching)
+            assertTrue("最近消息应触发当前书目", context.contains(harborLore))
+            assertTrue(context.contains(teaching))
+            assertFalse("全局教学指引、旧回复变体和排除消息不应触发背景设定", context.contains(teachingOnlyLore))
+            val withoutWorldBook = repo.assembleRoleplayContext(
+                sessionId, null, "North Harbor", globalRoleplayPrompt = teaching, includeWorldBook = false
+            )
+            assertFalse(withoutWorldBook.contains(harborLore))
+            assertFalse(withoutWorldBook.contains(teachingOnlyLore))
+            val withoutHistory = repo.assembleRoleplayContext(
+                sessionId, null, "继续向前", globalRoleplayPrompt = teaching, includeHistory = false
+            )
+            assertFalse(withoutHistory.contains(harborLore))
+
+            val session = f.db.roleplaySessionDao().getSessionById(sessionId)!!
+            f.db.roleplaySessionDao().updateSession(session.copy(activeWorldBookIds = ""))
+            val emptySelection = repo.assembleRoleplayContext(sessionId, null, "North Harbor")
+            assertFalse("显式取消全部书目不应回退到所有全局书", emptySelection.contains(harborLore))
+            f.db.roleplaySessionDao().updateSession(session.copy(activeWorldBookIds = null))
+            val legacyGlobalSelection = repo.assembleRoleplayContext(sessionId, null, "North Harbor")
+            assertTrue("未指定书目保留既有全局启用书语义", legacyGlobalSelection.contains(harborLore))
+        }
+    }
+
+    @Test fun worldBookRecentWindowUsesOriginalHistoryBeforeCompressionForBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                if (protocol == "openai") streamReply(socket) else reply(socket,
+                    "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                        "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                val model = if (protocol == "openai") "deepseek-chat" else "claude-sonnet-4-6"
+                val (config, id) = f.conversation(endpoint.url, model, protocol, enabled = false)
+                val conversation = f.db.conversationDao().getConversationById(id)!!
+                f.db.conversationDao().updateConversation(conversation.copy(
+                    compressionTier = CompressionTier.LC.level, compressionCustomPercent = 10,
+                    contextWindowTokens = 128000, rollingSummary = "合成历史摘要。"
+                ))
+                for (index in 0 until 20) {
+                    f.db.messageDao().insertMessage(Message(
+                        conversationId = id, role = if (index % 2 == 0) "user" else "assistant",
+                        content = when (index) {
+                            0 -> "旧日航程经过远古石堡。"
+                            16 -> "现在已抵达青色港湾。"
+                            else -> "合成航海记录 $index。"
+                        }, isPinned = index == 0, createdAt = index.toLong()
+                    ))
+                }
+                val bookId = f.db.worldBookDao().insertBook(WorldBook(name = "合成压缩回归资料"))
+                val oldLore = "旧城守卫只接受铜制凭证。"
+                val recentLore = "港口的灯塔每夜鸣笛三次。"
+                f.db.worldBookDao().insertEntry(WorldBookEntry(
+                    bookId = bookId, name = "旧背景", keys = "远古石堡", content = oldLore
+                ))
+                f.db.worldBookDao().insertEntry(WorldBookEntry(
+                    bookId = bookId, name = "近期背景", keys = "青色港湾", content = recentLore
+                ))
+                val options = ChatRequestOptions(enableWorldBook = true,
+                    activeWorldBookIds = bookId.toString(), enableSessionMemory = false,
+                    enableExternalMemory = false, enableWebSearch = false)
+                val prepared = f.repository.prepareReplyDirectionContext(config, id, "继续", options)
+                assertTrue("压缩应保留旧置顶消息", prepared.recentMessages.any { it.content.contains("远古石堡") })
+                assertFalse("回归前提：近期触发词已被压缩移出原文", prepared.recentMessages.any { it.content.contains("青色港湾") })
+                assertTrue("方向准备应扫描真实最近四条消息", prepared.systemPrompt.orEmpty().contains(recentLore))
+                assertFalse("旧置顶消息不能冒充近期消息", prepared.systemPrompt.orEmpty().contains(oldLore))
+
+                val tokens = StringBuilder()
+                f.repository.sendChatMessageWithConfig(config, id, "继续", options = options,
+                    onToken = { tokens.append(it) }, onComplete = { text, _, _ -> assertEquals("OK", text) },
+                    onError = { fail(it) })
+                assertEquals("OK", tokens.toString())
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+                val payload = endpoint.payloads.single()
+                val system = if (protocol == "anthropic") payload.get("system").toString() else
+                    payload.getAsJsonArray("messages").filter { it.asJsonObject.get("role").asString == "system" }
+                        .joinToString("\n") { it.asJsonObject.get("content").toString() }
+                assertTrue("$protocol 请求应包含压缩前近期消息触发的设定", system.contains(recentLore))
+                assertFalse("$protocol 请求不得由旧置顶消息触发设定", system.contains(oldLore))
+            } }
+        }
+    }
+
+    @Test fun repositoryWorldBookBudgetSkipsOversizedEntriesAndMatchesImportedPhrases() = runBlocking {
+        Fixture().use { f ->
+            val report = WorldBookImport.parse("""
+                {"name":"合成短语书","entries":[{"name":"北港","keys":["North Harbor"],"content":"港口有钟塔。","priority":10}]}
+            """.trimIndent())
+            val bookId = f.db.worldBookDao().insertImportedBook(WorldBookImport.prepare(report))
+            f.db.worldBookDao().setBookEnabled(bookId, true)
+            val shortEntry = f.db.worldBookDao().getEntriesForBookList(bookId).single()
+            assertTrue("旧手填方括号关键词仍按字面匹配", shortEntry.copy(keys = "[港口]，钟塔").matchesText("前往[港口]"))
+            assertFalse("方括号不应被宽松 JSON 解析器吞掉", shortEntry.copy(keys = "[港口]").matchesText("前往港口"))
+            f.db.worldBookDao().insertEntry(WorldBookEntry(
+                bookId = bookId, name = "超预算常驻条目", keys = "", content = "冗长的合成背景资料。".repeat(1000),
+                isConstant = true, priority = 1000
+            ))
+            val selected = f.repository.matchWorldBookEntries("抵达 NORTH HARBOR", listOf(bookId), maxTokenBudget = 64)
+            assertEquals("大条目跳过后仍需尝试后续小条目", listOf(shortEntry.id), selected.map { it.id })
+            assertTrue(f.repository.matchWorldBookEntries("只有 North 一词", listOf(bookId), maxTokenBudget = 64).isEmpty())
+            assertTrue(f.repository.matchWorldBookEntries("North Harbor", emptyList(), maxTokenBudget = 64).isEmpty())
+            assertTrue(f.repository.matchWorldBookEntries("North Harbor", listOf(bookId), maxTokenBudget = 0).isEmpty())
+            f.db.worldBookDao().setBookEnabled(bookId, false)
+            assertTrue(f.repository.matchWorldBookEntries("North Harbor", listOf(bookId), maxTokenBudget = 64).isEmpty())
+        }
     }
 
     @Test fun incrementalTimelineRequestsUseOnlyCompatibleTokenLimitAndKeepTailSettings() = runBlocking {

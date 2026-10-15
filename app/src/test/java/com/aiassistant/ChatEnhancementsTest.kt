@@ -8,6 +8,71 @@ import org.junit.Test
 import java.util.Locale
 
 class ChatEnhancementsTest {
+    @Test fun reopeningRegeneratingConversationRecoversVariantHostInsteadOfHidingBehindOldReply() {
+        val conversationId = 908090L
+        val manager = com.aiassistant.data.repository.ChatGenerationManager
+        val session = manager.startSession(conversationId, "synthetic-model", "reply_11", 2)
+        try {
+            session.anchorUserMessageId = 10
+            session.appendResponse("new reply still streaming")
+            val user = com.aiassistant.domain.model.Message(id = 10, conversationId = conversationId, role = "user", content = "question")
+            val oldReply = com.aiassistant.domain.model.Message(id = 11, conversationId = conversationId, role = "assistant",
+                content = "old reply", variantGroupId = "reply_11")
+            val display = com.aiassistant.ui.screens.chat.buildDisplayMessages(listOf(user, oldReply), emptyMap())
+            assertTrue(com.aiassistant.ui.screens.chat.chatReplyRowKeys(display, user.id).hasPersistedReply)
+            val restoredGroup = com.aiassistant.ui.screens.chat.activeStreamingBranchGroupId(conversationId)
+            assertEquals("reply_11", restoredGroup)
+            assertTrue(display.any { it.groupId == restoredGroup })
+            assertEquals("new reply still streaming", manager.getSession(conversationId)!!.currentResponse.value)
+            session.markFinished()
+            assertEquals(null, com.aiassistant.ui.screens.chat.activeStreamingBranchGroupId(conversationId))
+        } finally { manager.removeSession(conversationId, session) }
+        assertEquals(null, com.aiassistant.ui.screens.chat.activeStreamingBranchGroupId(conversationId))
+    }
+
+    @Test fun streamingReplyKeepsItsRowKeyWhenSavedAndAcrossVariantSelection() {
+        val user = com.aiassistant.domain.model.Message(id = 10, conversationId = 1, role = "user", content = "question")
+        val reply = com.aiassistant.domain.model.Message(id = 11, conversationId = 1, role = "assistant", content = "long reply")
+        fun rows(messages: List<com.aiassistant.domain.model.Message>, selections: Map<String, Int> = emptyMap()) =
+            com.aiassistant.ui.screens.chat.chatReplyRowKeys(com.aiassistant.ui.screens.chat.buildDisplayMessages(messages, selections), user.id)
+        val streaming = rows(listOf(user))
+        val saved = rows(listOf(user, reply))
+        assertFalse(streaming.hasPersistedReply)
+        assertTrue(saved.hasPersistedReply)
+        assertEquals(streaming.streamingKey, saved.messageKeys.last())
+        val first = reply.copy(variantGroupId = "reply_11", variantIndex = 1)
+        val second = first.copy(id = 12, variantIndex = 2, content = "another long reply")
+        assertEquals(saved.messageKeys, rows(listOf(user, first, second), mapOf("reply_11" to 1)).messageKeys)
+        assertEquals(saved.messageKeys, rows(listOf(user, first, second), mapOf("reply_11" to 2)).messageKeys)
+    }
+
+    @Test fun replyRowsRemainUniqueForExtraRepliesAndEditedUserBranches() {
+        val user = com.aiassistant.domain.model.Message(id = 20, conversationId = 1, role = "user", content = "first", variantGroupId = "turn_20_user")
+        val edited = user.copy(id = 23, content = "edited", variantIndex = 2)
+        val reply = com.aiassistant.domain.model.Message(id = 21, conversationId = 1, role = "assistant", content = "reply", variantGroupId = "turn_20_assistant")
+        val extra = reply.copy(id = 22, content = "extra", variantGroupId = null)
+        val messages = listOf(user, reply, extra, edited)
+        val first = com.aiassistant.ui.screens.chat.chatReplyRowKeys(
+            com.aiassistant.ui.screens.chat.buildDisplayMessages(messages, mapOf("turn_20_user" to 1)), edited.id, "turn_20_user")
+        val second = com.aiassistant.ui.screens.chat.chatReplyRowKeys(
+            com.aiassistant.ui.screens.chat.buildDisplayMessages(messages, mapOf("turn_20_user" to 2)), edited.id, "turn_20_user")
+        assertEquals(first.messageKeys.size, first.messageKeys.toSet().size)
+        assertEquals(first.messageKeys, second.messageKeys)
+        assertEquals(first.streamingKey, first.messageKeys[1])
+        val missingAnchor = com.aiassistant.ui.screens.chat.chatReplyRowKeys(
+            com.aiassistant.ui.screens.chat.buildDisplayMessages(messages, emptyMap()), 999L)
+        assertFalse(missingAnchor.hasPersistedReply)
+        assertFalse(missingAnchor.streamingKey in missingAnchor.messageKeys)
+    }
+
+    @Test fun assistantPersistenceDoesNotRequestScrollButNewUserInputDoes() {
+        val user = com.aiassistant.domain.model.Message(id = 30, conversationId = 1, role = "user", content = "question")
+        val reply = com.aiassistant.domain.model.Message(id = 31, conversationId = 1, role = "assistant", content = "reply")
+        assertFalse(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id), listOf(user, reply)))
+        assertFalse(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id, reply.id), listOf(user, reply.copy(content = "updated"))))
+        assertTrue(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id, reply.id), listOf(user, reply, user.copy(id = 32))))
+    }
+
     @Test fun directionChoicesHaveDistinctOneRoundSemantics() {
         assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.ChoosingDirection,
             com.aiassistant.ui.screens.chat.GenerationUiStateRules.derive(true, "", false, "等待选择回复方向"))

@@ -2,13 +2,19 @@ package com.aiassistant
 
 import android.app.Application
 import androidx.room.Room
+import androidx.lifecycle.viewModelScope
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.AiRepository
+import com.aiassistant.data.repository.ChatGenerationManager
+import com.aiassistant.data.repository.RoleplayRepository
 import com.aiassistant.domain.model.*
+import com.aiassistant.ui.screens.chat.ChatViewModel
 import com.aiassistant.utils.CryptoManager
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.TavilySearchManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -125,13 +131,13 @@ class ChatRetryRepositoryTest {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
         val settings = PersonalizationManager(context)
         val repository: AiRepository
+        val app = AiAssistantApp()
         private val instance = AiAssistantApp::class.java.getDeclaredField("instance").apply { isAccessible = true }
         private val previous = instance.get(null)
         init {
             context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
             settings.setBackupKeyFallbackEnabled(false)
             settings.saveSettings(settings.getSettings().copy(autoNameEnabled = false, autoMemoryEnabled = false, auxiliaryMemoryEnabled = false))
-            val app = AiAssistantApp()
             instance.set(null, app)
             AiAssistantApp::class.java.getDeclaredField("database").apply { isAccessible = true }.set(app, db)
             val unsafeClass = Class.forName("sun.misc.Unsafe")
@@ -139,7 +145,17 @@ class ChatRetryRepositoryTest {
             val crypto = unsafeClass.getMethod("allocateInstance", Class::class.java).invoke(unsafe, CryptoManager::class.java) as CryptoManager
             repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), db.messageDao(), db.usageStatDao(),
                 db.environmentVariableDao(), db.promptTemplateDao(), db.memoryDao(), db.conversationBranchDao(), db.selectedModelDao(),
-                crypto, settings, TavilySearchManager(context, crypto), firstTokenTimeoutMillis = timeout)
+                crypto, settings, TavilySearchManager(context, crypto), worldBookDao = db.worldBookDao(),
+                timelineNodeDao = db.timelineNodeDao(), firstTokenTimeoutMillis = timeout)
+        }
+        fun enableViewModel() {
+            android.content.ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", android.content.Context::class.java)
+                .apply { isAccessible = true }.invoke(app, context)
+            AiAssistantApp::class.java.getDeclaredField("repository").apply { isAccessible = true }.set(app, repository)
+            AiAssistantApp::class.java.getDeclaredField("personalizationManager").apply { isAccessible = true }.set(app, settings)
+            val roleplay = RoleplayRepository(db.characterProfileDao(), db.roleplayScenarioDao(), db.roleplaySessionDao(),
+                db.roleplayMemoryDao(), db.characterTagDao())
+            AiAssistantApp::class.java.getDeclaredField("roleplayRepository").apply { isAccessible = true }.set(app, roleplay)
         }
         suspend fun config(url: String, protocol: String = "openai", keys: String = "test-only"): Pair<ApiConfig, Long> {
             val config = ApiConfig(name = "synthetic", provider = "proxy", apiType = protocol, baseUrl = url,
@@ -148,7 +164,255 @@ class ChatRetryRepositoryTest {
             val id = db.conversationDao().insertConversation(Conversation(title = "retry regression", apiConfigId = configId, modelName = config.modelName))
             return config.copy(id = configId) to id
         }
-        override fun close() { db.close(); instance.set(null, previous) }
+        override fun close() {
+            runBlocking { app.applicationScope.coroutineContext[Job]?.cancelAndJoin() }
+            db.close()
+            instance.set(null, previous)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun combinedStorySavePreservesCharactersScenarioAndEveryWorldBookScope() = runBlocking {
+        newSingleThreadContext("story-settings-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config("https://example.invalid/v1")
+                    val firstCharacter = f.db.characterProfileDao().insertCharacter(CharacterProfile(name = "Synthetic First"))
+                    val secondCharacter = f.db.characterProfileDao().insertCharacter(CharacterProfile(name = "Synthetic Second"))
+                    val firstScenario = f.db.roleplayScenarioDao().insertScenario(RoleplayScenario(name = "Synthetic Old Setting"))
+                    val secondScenario = f.db.roleplayScenarioDao().insertScenario(RoleplayScenario(name = "Synthetic New Setting"))
+                    f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id, characterId = firstCharacter,
+                        scenarioId = firstScenario, activeWorldBookIds = "99", currentPlotSummary = "old plot"))
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.uiState.value.roleplaySession == null || vm.currentModelOption.value == null) delay(10) }
+                        for (bookIds in listOf(null, "", "71,72")) {
+                            val settings = vm.tempSettings.value.copy(enableWorldBook = true, activeWorldBookIds = bookIds,
+                                enableExternalMemory = true, temperature = 0.45f)
+                            val save = withContext(Dispatchers.Main) {
+                                vm.saveStorySettings(listOf(secondCharacter, firstCharacter), secondScenario,
+                                    NarrativeMode.NARRATOR, "new plot $bookIds", settings, "synthetic story prompt")
+                            }
+                            withTimeout(5000) { save.join() }
+                            val session = f.db.roleplaySessionDao().getSessionByConversationId(id)!!
+                            val conversation = f.db.conversationDao().getConversationById(id)!!
+                            assertEquals(listOf(secondCharacter, firstCharacter), session.getEffectiveCharacterIds())
+                            assertEquals(secondScenario, session.scenarioId)
+                            assertEquals(NarrativeMode.NARRATOR.value, session.narrativeMode)
+                            assertEquals("new plot $bookIds", session.currentPlotSummary)
+                            assertTrue(session.enableWorldBook)
+                            assertTrue(session.enableExternalMemory)
+                            assertEquals(bookIds, session.activeWorldBookIds)
+                            assertEquals(bookIds, conversation.activeWorldBookIds)
+                            assertEquals("synthetic story prompt", conversation.systemPrompt)
+                            assertEquals(0.45f, conversation.temperature!!, 0f)
+                            assertEquals(session, vm.uiState.value.roleplaySession)
+                            assertEquals(secondScenario, vm.uiState.value.roleplayScenario?.id)
+                            assertEquals(bookIds, vm.tempSettings.value.activeWorldBookIds)
+                        }
+                        val saves = withContext(Dispatchers.Main) {
+                            val first = vm.saveStorySettings(listOf(firstCharacter), firstScenario, NarrativeMode.CHARACTER,
+                                "first queued save", vm.tempSettings.value.copy(activeWorldBookIds = "71"), "first prompt")
+                            val second = vm.saveStorySettings(listOf(secondCharacter), secondScenario, NarrativeMode.AUTHOR,
+                                "last queued save", vm.tempSettings.value.copy(activeWorldBookIds = null), "last prompt")
+                            listOf(first, second)
+                        }
+                        withTimeout(5000) { saves.joinAll() }
+                        val finalSession = f.db.roleplaySessionDao().getSessionByConversationId(id)!!
+                        assertEquals(listOf(secondCharacter), finalSession.getEffectiveCharacterIds())
+                        assertEquals(secondScenario, finalSession.scenarioId)
+                        assertEquals(NarrativeMode.AUTHOR.value, finalSession.narrativeMode)
+                        assertEquals("last queued save", finalSession.currentPlotSummary)
+                        assertNull(finalSession.activeWorldBookIds)
+                        val finalConversation = f.db.conversationDao().getConversationById(id)!!
+                        assertNull(finalConversation.activeWorldBookIds)
+                        assertEquals("last prompt", finalConversation.systemPrompt)
+                        assertEquals(finalSession, vm.uiState.value.roleplaySession)
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun sendingImmediatelyAfterStorySaveUsesNewCharactersPromptAndSelectedWorldBookInBothProtocols() = runBlocking {
+        newSingleThreadContext("story-save-send-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (protocol in listOf("openai", "anthropic")) {
+                    Endpoint { socket, _ ->
+                        val body = if (protocol == "openai") "data: {\"choices\":[{\"delta\":{\"content\":\"saved settings reply\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                            else "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"saved settings reply\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+                        socket.response("200 OK", body, "text/event-stream")
+                    }.use { endpoint -> Fixture().use { f ->
+                        f.enableViewModel()
+                        val (_, id) = f.config(endpoint.url, protocol)
+                        val oldConversation = f.db.conversationDao().getConversationById(id)!!
+                        f.db.conversationDao().updateConversation(oldConversation.copy(systemPrompt = "SYNTHETIC_OLD_PROMPT", enableReplyDirections = true))
+                        val oldCharacter = f.db.characterProfileDao().insertCharacter(CharacterProfile(name = "SYNTHETIC_OLD_ROLE"))
+                        val newCharacter = f.db.characterProfileDao().insertCharacter(CharacterProfile(name = "SYNTHETIC_NEW_ROLE"))
+                        val newScenario = f.db.roleplayScenarioDao().insertScenario(RoleplayScenario(name = "SYNTHETIC_NEW_SCENARIO", worldview = "SYNTHETIC_NEW_WORLDVIEW"))
+                        f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id, characterId = oldCharacter))
+                        val selectedBook = f.db.worldBookDao().insertBook(WorldBook(name = "Synthetic selected book"))
+                        val excludedBook = f.db.worldBookDao().insertBook(WorldBook(name = "Synthetic excluded book"))
+                        f.db.worldBookDao().insertEntry(WorldBookEntry(bookId = selectedBook, name = "selected rule", keys = "", isConstant = true, content = "SYNTHETIC_SELECTED_LORE"))
+                        f.db.worldBookDao().insertEntry(WorldBookEntry(bookId = excludedBook, name = "excluded rule", keys = "", isConstant = true, content = "SYNTHETIC_EXCLUDED_LORE"))
+                        val vm = ChatViewModel(id)
+                        try {
+                            withTimeout(5000) { while (vm.uiState.value.roleplaySession == null || vm.currentModelOption.value == null) delay(10) }
+                            val save = withContext(Dispatchers.Main) {
+                                val pending = vm.saveStorySettings(listOf(newCharacter), newScenario, NarrativeMode.NARRATOR,
+                                    "SYNTHETIC_NEW_PLOT", vm.tempSettings.value.copy(enableWorldBook = true,
+                                        activeWorldBookIds = selectedBook.toString(), enableReplyDirections = false, enableSessionMemory = false),
+                                    "SYNTHETIC_NEW_PROMPT")
+                                // Deliberately do not join: this is the user's save-then-send interaction.
+                                vm.sendMessage("Continue the synthetic story")
+                                pending
+                            }
+                            withTimeout(5000) {
+                                save.join()
+                                while (f.db.messageDao().getMessagesList(id).none { it.content == "saved settings reply" } || vm.isGenerating.value) delay(10)
+                            }
+                            assertEquals(1, endpoint.payloads.size)
+                            val body = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+                            val system = if (protocol == "openai") body.getAsJsonArray("messages").first { it.asJsonObject["role"].asString == "system" }.asJsonObject["content"].asString
+                                else body["system"].asString
+                            for (expected in listOf("SYNTHETIC_NEW_ROLE", "SYNTHETIC_NEW_WORLDVIEW", "SYNTHETIC_NEW_PLOT", "SYNTHETIC_NEW_PROMPT", "SYNTHETIC_SELECTED_LORE")) {
+                                assertTrue("Missing $expected in $protocol request", system.contains(expected))
+                            }
+                            for (excluded in listOf("SYNTHETIC_OLD_ROLE", "SYNTHETIC_OLD_PROMPT", "SYNTHETIC_EXCLUDED_LORE")) {
+                                assertFalse("Stale $excluded in $protocol request", system.contains(excluded))
+                            }
+                        } finally {
+                            vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            ChatGenerationManager.cancelSession(id)
+                        }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun regenerationRestoresOriginalAttachmentsForEmptyAndTextInputsInEitherProtocol() = runBlocking {
+        newSingleThreadContext("regeneration-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                val gson = com.google.gson.Gson()
+                val image = Attachment("content://synthetic/image", "diagram.png", "image/png", base64Data = "c3ludGhldGlj", payloadMimeType = "image/png")
+                val textFile = Attachment("content://synthetic/text", "notes.txt", "text/plain", textContent = "Synthetic attachment facts")
+                val attachments = gson.toJson(listOf(image, textFile))
+                for (protocol in listOf("openai", "anthropic")) {
+                    for (input in listOf("", "请结合附件说明")) {
+                        for (failedReply in listOf(false, true)) {
+                            Endpoint { socket, _ ->
+                                val body = if (protocol == "openai") "data: {\"choices\":[{\"delta\":{\"content\":\"regenerated\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                                    else "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"regenerated\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+                                socket.response("200 OK", body, "text/event-stream")
+                            }.use { endpoint -> Fixture().use { f ->
+                                f.enableViewModel()
+                                val (_, id) = f.config(endpoint.url, protocol)
+                                val userId = f.db.messageDao().insertMessage(Message(conversationId = id, role = "user", content = input,
+                                    attachments = attachments, createdAt = 1L))
+                                val reply = Message(conversationId = id, role = "assistant",
+                                    content = if (failedReply) "请求失败\n\nsynthetic failure" else "previous reply", createdAt = 2L)
+                                val replyId = f.db.messageDao().insertMessage(reply)
+                                val vm = ChatViewModel(id)
+                                try {
+                                    withTimeout(5000) { while (vm.currentModelOption.value == null) delay(10) }
+                                    withContext(Dispatchers.Main) { vm.regenerateLastMessage(reply.copy(id = replyId)) }
+                                    withTimeout(5000) {
+                                        while (f.db.messageDao().getMessagesList(id).none { it.content == "regenerated" } || vm.isGenerating.value) delay(10)
+                                    }
+                                    assertEquals(1, endpoint.payloads.size)
+                                    val body = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+                                    val userContent = body.getAsJsonArray("messages").last().asJsonObject.getAsJsonArray("content")
+                                    val text = userContent.first { it.asJsonObject["type"].asString == "text" }.asJsonObject["text"].asString
+                                    assertTrue(text.contains("Synthetic attachment facts"))
+                                    if (input.isNotBlank()) assertTrue(text.contains(input))
+                                    val imagePart = userContent.first { it.asJsonObject["type"].asString == if (protocol == "openai") "image_url" else "image" }.asJsonObject
+                                    if (protocol == "openai") {
+                                        assertEquals("data:image/png;base64,c3ludGhldGlj", imagePart.getAsJsonObject("image_url")["url"].asString)
+                                    } else {
+                                        assertEquals("image/png", imagePart.getAsJsonObject("source")["media_type"].asString)
+                                        assertEquals("c3ludGhldGlj", imagePart.getAsJsonObject("source")["data"].asString)
+                                    }
+                                    val saved = f.db.messageDao().getMessagesList(id)
+                                    assertEquals(1, saved.count { it.role == "user" })
+                                    assertEquals(attachments, saved.single { it.id == userId }.attachments)
+                                    assertEquals(!failedReply, saved.any { it.id == replyId })
+                                    assertEquals(if (failedReply) 2 else 3, saved.size)
+                                } finally {
+                                    vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                                    ChatGenerationManager.cancelSession(id)
+                                }
+                            } }
+                        }
+                    }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun unreadableRegenerationAttachmentsKeepOriginalErrorAndMakeNoRequest() = runBlocking {
+        newSingleThreadContext("regeneration-invalid-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (raw in listOf("[broken", "[null]", "null", "[{}]")) {
+                    Endpoint { socket, _ -> socket.response("500 Internal Server Error", "unexpected request") }.use { endpoint -> Fixture().use { f ->
+                        f.enableViewModel()
+                        val (_, id) = f.config(endpoint.url)
+                        f.db.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "", attachments = raw, createdAt = 1L))
+                        val reply = Message(conversationId = id, role = "assistant", content = "请求失败\n\nsynthetic failure", createdAt = 2L)
+                        val replyId = f.db.messageDao().insertMessage(reply)
+                        val vm = ChatViewModel(id)
+                        try {
+                            withTimeout(5000) { while (vm.currentModelOption.value == null) delay(10) }
+                            withContext(Dispatchers.Main) { vm.regenerateLastMessage(reply.copy(id = replyId)) }
+                            withTimeout(5000) { while (vm.error.value == null) delay(10) }
+                            assertTrue(vm.error.value!!.contains("原消息附件无法读取"))
+                            assertFalse(vm.isGenerating.value)
+                            assertTrue(endpoint.payloads.isEmpty())
+                            assertEquals(2, f.db.messageDao().getMessagesList(id).size)
+                            assertEquals(reply.content, f.db.messageDao().getMessageById(replyId)?.content)
+                        } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @Test fun standaloneTimelineAndStoryTimeEnterBothProtocolsWithoutMemoryItems() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            for ((hasNode, hasTime) in listOf(true to true, true to false, false to true, false to false)) {
+                Endpoint { socket, _ ->
+                    val body = if (protocol == "openai") "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                        else "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+                    socket.response("200 OK", body, "text/event-stream")
+                }.use { endpoint -> Fixture().use { f ->
+                    val (config, id) = f.config(endpoint.url, protocol)
+                    if (hasNode) f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "第 2 天·清晨", event = "合成角色抵达测试城门"))
+                    if (hasTime) {
+                        val conversation = f.db.conversationDao().getConversationById(id)!!
+                        f.db.conversationDao().updateConversation(conversation.copy(currentStoryTime = "第 3 天·上午"))
+                    }
+                    assertTrue(f.db.memoryDao().getCandidateMemories(id).isEmpty())
+                    f.repository.sendChatMessageWithConfig(config, id, "继续", options = ChatRequestOptions(enableSessionMemory = false),
+                        onToken = {}, onComplete = { text, _, _ -> assertEquals("OK", text) }, onError = { fail(it) })
+                    val body = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+                    val system = if (protocol == "openai") body.getAsJsonArray("messages")
+                        .firstOrNull { it.asJsonObject["role"].asString == "system" }?.asJsonObject?.get("content")?.asString.orEmpty()
+                        else body["system"]?.takeUnless { it.isJsonNull }?.asString.orEmpty()
+                    assertEquals(hasNode, system.contains("合成角色抵达测试城门"))
+                    assertEquals(hasTime, system.contains("第 3 天·上午"))
+                    assertEquals(hasNode || hasTime, system.contains("<session_timeline>"))
+                    assertTrue(f.db.memoryDao().getCandidateMemories(id).isEmpty())
+                } }
+            }
+        }
     }
 
     @Test fun directionPlanningAndFinalReplyShareContextWithoutSavingUnchosenOptionsInEitherProtocol() = runBlocking {

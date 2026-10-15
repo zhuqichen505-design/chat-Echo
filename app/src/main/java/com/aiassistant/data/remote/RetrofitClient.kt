@@ -14,7 +14,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
-    const val DEFAULT_USER_AGENT = "Echo-Assistant/2.2.5 (Android; Mobile)"
+    val DEFAULT_USER_AGENT = "Echo-Assistant/${com.aiassistant.BuildConfig.VERSION_NAME} (Android; Mobile)"
     const val RESPONSE_HEADER_TIMEOUT_SECONDS = 120L
     const val STREAM_IDLE_TIMEOUT_SECONDS = 600L
 

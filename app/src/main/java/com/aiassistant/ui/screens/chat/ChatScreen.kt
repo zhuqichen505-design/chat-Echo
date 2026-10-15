@@ -182,7 +182,8 @@ fun ChatScreen(
     var currentResponse by remember(viewModel) { mutableStateOf("") }
     LaunchedEffect(viewModel) {
         viewModel.currentResponse.collect { full ->
-            currentResponse = full
+            // Keep the final frame until Room publishes the saved reply, so its row never disappears.
+            if (full.isNotEmpty() || viewModel.isGenerating.value) currentResponse = full
             kotlinx.coroutines.delay(com.aiassistant.ui.theme.EchoMotion.Typewriter.frameBudgetMs)
         }
     }
@@ -190,7 +191,7 @@ fun ChatScreen(
     var currentThinking by remember(viewModel) { mutableStateOf("") }
     LaunchedEffect(viewModel) {
         viewModel.currentThinking.collect { full ->
-            currentThinking = full
+            if (full.isNotEmpty() || viewModel.isGenerating.value) currentThinking = full
             kotlinx.coroutines.delay(com.aiassistant.ui.theme.EchoMotion.Typewriter.frameBudgetMs)
         }
     }
@@ -250,7 +251,7 @@ fun ChatScreen(
     var modelAvatarRevision by remember { mutableIntStateOf(0) }
     var pendingEditSource by remember { mutableStateOf<Message?>(null) }
     var preserveScrollForBranchGeneration by remember { mutableStateOf(false) }
-    var streamingBranchGroupId by remember { mutableStateOf<String?>(null) }
+    var streamingBranchGroupId by remember(viewModel) { mutableStateOf(activeStreamingBranchGroupId(conversationId)) }
     var autoFollowOutput by remember { mutableStateOf(true) }
     var isBarsHidden by remember { mutableStateOf(false) }
     var branchSuccessDialog by remember { mutableStateOf<BranchSuccessDialogState?>(null) }
@@ -269,6 +270,22 @@ fun ChatScreen(
     val variantSelectionSnapshot = variantSelections.toMap()
     val displayMessages = remember(messages, variantSelectionSnapshot) {
         buildDisplayMessages(messages, variantSelectionSnapshot)
+    }
+    val replyRowKeys = remember(displayMessages, generatingAnchor) {
+        chatReplyRowKeys(displayMessages, generatingAnchor?.userMessageId, generatingAnchor?.userGroupId)
+    }
+    LaunchedEffect(isGenerating, generatingAnchor, replyRowKeys.hasPersistedReply) {
+        if (isGenerating) {
+            // A new round can start while the source flows are already empty (no new empty emission).
+            currentResponse = viewModel.currentResponse.value
+            currentThinking = viewModel.currentThinking.value
+        } else {
+            // Normal persistence replaces this row immediately. Bound the handoff if saving failed
+            // or the source was deleted, so an ended round cannot leave a permanent live bubble.
+            if (!replyRowKeys.hasPersistedReply) kotlinx.coroutines.delay(1500)
+            currentResponse = ""
+            currentThinking = ""
+        }
     }
     val chatNavItems = remember(displayMessages) {
         buildChatAnchorItems(displayMessages)
@@ -362,7 +379,7 @@ fun ChatScreen(
         addAttachments(uris, forceOcr = true)
     }
 
-    var prevMessagesCount by remember { mutableIntStateOf(messages.size) }
+    var previousMessageIds by remember(conversationId) { mutableStateOf(messages.map { it.id }.toSet()) }
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -396,12 +413,10 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
-        val prev = prevMessagesCount
-        prevMessagesCount = messages.size
-        if (messages.size <= prev) {
-            return@LaunchedEffect
-        }
+    LaunchedEffect(messages) {
+        val hasNewInput = hasNewUserMessage(previousMessageIds, messages)
+        previousMessageIds = messages.map { it.id }.toSet()
+        if (!hasNewInput) return@LaunchedEffect
         if (autoFollowOutput && !preserveScrollForBranchGeneration && !listState.isScrollInProgress) {
             androidx.compose.runtime.withFrameNanos { }
             val totalCount = listState.layoutInfo.totalItemsCount
@@ -420,6 +435,7 @@ fun ChatScreen(
     // 改为 LaunchedEffect(isGenerating) + snapshotFlow 在协程内读取长度：组合期零读取，
     // 70ms 节流与钉底条件保持原样，滚动跟随行为不变
     LaunchedEffect(isGenerating) {
+        if (!isGenerating) return@LaunchedEffect
         snapshotFlow { currentResponse.length to currentThinking.length }.collect {
             if (preserveScrollForBranchGeneration || !autoFollowOutput || listState.isScrollInProgress) {
                 return@collect
@@ -445,15 +461,8 @@ fun ChatScreen(
     LaunchedEffect(isGenerating) {
         if (!isGenerating) {
             streamingBranchGroupId = null
-            if (autoFollowOutput && !preserveScrollForBranchGeneration && !listState.isScrollInProgress) {
-                kotlinx.coroutines.delay(40)
-                val totalCount = listState.layoutInfo.totalItemsCount
-                if (totalCount > 0) {
-                    try {
-                        listState.followMeasuredBottom()
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                }
-            }
+        } else {
+            streamingBranchGroupId = activeStreamingBranchGroupId(conversationId) ?: streamingBranchGroupId
         }
     }
 
@@ -486,7 +495,7 @@ fun ChatScreen(
     }
 
     LaunchedEffect(conversationId) {
-        streamingBranchGroupId = null
+        streamingBranchGroupId = activeStreamingBranchGroupId(conversationId)
         pendingEditSource = null
     }
 
@@ -1248,7 +1257,7 @@ fun ChatScreen(
                     val currentAssistantModelName = currentModelOption?.modelName ?: currentModel ?: uiState.modelName ?: "AI"
                     itemsIndexed(
                         items = displayMessages,
-                        key = { _, item -> item.groupId ?: "${item.message.id}_${item.message.createdAt}_${item.message.role}" }
+                        key = { index, _ -> replyRowKeys.messageKeys[index] }
                     ) { index, displayItem ->
                         val message = displayItem.message
                         val isUser = message.role == "user"
@@ -1505,8 +1514,10 @@ fun ChatScreen(
                     }) || isAnchorHostMounted
 
                     // 当前正在生成的内容（若为常规生成，或分支宿主/生成锚点不存在/被删除时，在底部稳妥兜底渲染，绝不丢失流式气泡）
-                    if (!isBranchStreamingMounted && (currentThinking.isNotEmpty() || currentResponse.isNotEmpty() || isGenerating)) {
-                        item(key = "streaming_assistant_message") {
+                    val isTailReplyPersisted = streamingBranchGroupId == null && replyRowKeys.hasPersistedReply
+                    if (!isBranchStreamingMounted && !isTailReplyPersisted &&
+                        (currentThinking.isNotEmpty() || currentResponse.isNotEmpty() || isGenerating)) {
+                        item(key = streamingBranchGroupId?.let { "chat_streaming_branch:$it" } ?: replyRowKeys.streamingKey) {
                             MessageBubble(
                                 message = Message(
                                     conversationId = conversationId,
@@ -2396,8 +2407,7 @@ fun ChatScreen(
             templates = promptTemplates,
             onDismiss = { showStoryManagerDialog = false },
             onSaveAll = { charIds, scenarioId, mode, plotSummary, settings, prompt ->
-                viewModel.updateStorySessionContext(charIds, scenarioId, mode, plotSummary)
-                viewModel.updateChatSettings(settings, prompt)
+                viewModel.saveStorySettings(charIds, scenarioId, mode, plotSummary, settings, prompt)
                 showStoryManagerDialog = false
             },
             onPlotAction = { action, custom ->

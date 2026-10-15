@@ -6,8 +6,8 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 **当前版本**: v2.8.3（versionCode 189）
 **数据库版本**: 34（20 个实体）
-**当前源码**: 增量事件跨时间保护、故事局部角色上下文、普通对话自动设定清单过滤修复；聊天恢复原生光标并保留同文本选区，长文本编辑避免布局变化跟随旧光标跳顶。83 套件/612 项通过，Lint 0 Error/88 Warning；设备交互待验收。
-**本轮发布**: 用户要求构建 APK，当前仓库 Release 构建、签名和复制哈希校验通过；未覆盖本机历史包。APK 元数据见 release-notes/latest.md，远端及 Release 状态以交付核验为准；非正式生产签名，设备安装/视觉未验收。
+**当前源码（2026-10-15，未发版）**: 角色创作规则精简、世界书基础 JSON 导入与范围选择、统一触发与严格估算预算、空记忆下当前故事时间注入、流式回复落库衔接及 User-Agent 版本同步。最终验证：`compileDebugKotlin` 退出 0；`testDebugUnitTest` 退出 0，83 套件 / 631 项通过、无失败或跳过；`lintDebug --rerun-tasks` 退出 0，0 Error / 88 Warning；`git diff --check` 退出 0。Gradle 命令均使用 `-g D:/Agent/APP-Echo/app/.gradle-home --no-daemon`。
+**已发布安装包**: 仍为 v2.8.3/189，**不包含本轮源码改动**；本轮未构建 APK。2026-10-06 构建与签名、哈希记录见 release-notes/latest.md；非正式生产签名，设备安装/视觉未验收。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 
@@ -17,7 +17,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 ## 维护规则（摘要，细则见 AGENTS.md）
 
-当前开发/发布仓库为 chat-Echo，旧项目仅作本机历史或待审核来源。“构建 APK”命令包含 Agent 执行的隐私审核、逐项同步、验证构建、新仓库推送与最新版 APK 发布；不是后台自动同步。冲突或疑点未确认停止相关操作，严禁带入旧 Git 历史。完整规则见工作区 AGENTS.md §2.1，仓库执行清单见 WORKFLOW_GUIDELINES.md。
+当前开发/发布仓库为 chat-Echo，旧项目仅作本机历史或待审核来源。`APP改进/` 含大量错误或过时内容，默认不作为项目事实或实施依据；事实以当前源码、配置和可复核结果为准，完整约束指向工作区 AGENTS.md。“构建 APK”命令包含 Agent 执行的隐私审核、逐项同步、验证构建、新仓库推送与最新版 APK 发布；不是后台自动同步。冲突或疑点未确认停止相关操作，严禁带入旧 Git 历史。完整规则见工作区 AGENTS.md §2.1，仓库执行清单见 WORKFLOW_GUIDELINES.md。
 
 1. 每次代码变动后都必须提交到 Git。
 2. 每次版本更新后都必须创建对应版本标签，例如 `v1.7.2`。
@@ -36,7 +36,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
    - 绝对严禁删除、覆盖或清理 `D:\Agent\APP-Echo\app\releases` 目录下的任何历史版本安装包；
    - 每次发布新版本时只在 `D:\Agent\APP-Echo\app\releases` 目录下增量输出对应版本的唯一定名安装包（`Echo-v<version>.apk`），所有历史安装包必须永久保留。
 6. 不允许提交本机敏感文件或构建产物，包括 `local.properties`、keystore、`.env`、`app/build/`、`.gradle/` 等。
-7. **每次上传前必须进行隐私核查**：完整暂存文件、待推送提交/标签/元数据及所有附件均须检查；不包含用户任何个人信息或隐私，疑点未确认即禁止上传。自动扫描结合人工复核，报告只写脱敏结果；详见工作区 AGENTS.md §6 与 WORKFLOW_GUIDELINES.md §F。
+7. **每次上传前必须进行隐私核查**：完整暂存文件、待推送提交/标签/元数据及所有附件均须检查；不包含用户任何个人信息或隐私，疑点未确认即禁止上传。自动扫描结合人工复核，报告只写脱敏结果；详见工作区 AGENTS.md §6 与 [WORKFLOW_GUIDELINES.md 的强制隐私核查](WORKFLOW_GUIDELINES.md#强制隐私核查)。
 
 ---
 
@@ -79,6 +79,15 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 7. **提示词系统** - 预设模板、全局提示词
 8. **环境变量** - 加密存储、变量引用
 
+### 角色与创作的本轮源码变化（未发版）
+
+- **世界书导入**：角色与创作页、设置中的世界书入口可读取 SillyTavern `entries` 对象、Character Book `entries` 数组或角色卡内嵌 `character_book`；2 MiB / 2000 条上限，严格检查结构。预检后事务新增同名独立副本，整书默认关闭，导入不会自动绑定。
+- **兼容边界**：这是基础内容导入。正则、宏、次关键词逻辑、位置/深度、概率等高级语义及未知字段会提示；受影响条目默认停用，原始扩展不保存，必须显式接受兼容损失。外部 `order` 只转为预算保留优先级，不保证原插入顺序，不提供无损往返承诺。
+- **范围与触发**：世界书总开关外，书目选择有三种状态：未指定（`null`）使用全部已启用书、显式空选择不使用任何书、指定 ID 仅使用选中的已启用书。普通对话、角色创作及方向准备共用选择策略；最近 4 条有效消息与本轮输入参与匹配，折叠旧回复变体，不用全局教学文案触发词条。
+- **预算与优先级**：统一默认预算为 1500 个估算 token，包含条目与标题包装成本；常驻、同类高优先级先入选，过大条目跳过后继续尝试较小条目。数字仅影响预算内保留顺序，不改变 API 指令权限。后台返回匹配/未命中/禁用/超预算等原因；完整可视诊断页仍待后续设计。
+- **提示词与时间**：保留用户全局创作规则和故事要求，移除每张角色卡重复注入的固定文学铁律；人物卡描述人物、世界书提供背景、已确认时间线记录事件，摘要作为参考。空记忆时仍携带已明确的当前故事时间。
+- **页面边界**：现有页面只增加必要导入、书目选择和使用说明。整体角色创作页面的布局重构仅提供三套预览供选择，尚未正式应用。公开研究与后续范围见 [research.md](design/roleplay-rework/research.md)。
+
 ---
 
 ## 版本历史
@@ -95,20 +104,22 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 | **v2.0.4** | **v23** | **分支功能完整重构与事务原子落库、分支生成弹窗确认与跳转、隐藏对话解锁会话维持** |
 | **v2.0.5** | **v23** | **非破坏性增量备份导入、复制整个对话（普通与隐藏同步）、备份单对话（普通与隐藏同步）** |
 
-> 完整版本历史见 `CHANGELOG.md` 与 `UPDATE_LOG.md`（v2.0.5 之后含角色扮演全链路、时间线、世界书、阶梯式上下文压缩等）。
+> 上表为保留的历史摘要；`CHANGELOG.md` 仅说明当前发布版本，`UPDATE_LOG.md` 记录新仓库维护事项，两者不包含完整旧版本历史。
 
 ---
 
-## 构建命令（Git Bash，已核验）
+## 验证命令（PowerShell 7）
 
-```bash
-cd /d/Agent/APP-Echo/app/AiApiAssistant
+```powershell
+Set-Location D:/Agent/APP-Echo/app/chat-Echo
 ./gradlew.bat compileDebugKotlin --no-daemon   # 编译
 ./gradlew.bat testDebugUnitTest --no-daemon    # 单元测试
 ./gradlew.bat lintDebug --no-daemon            # Lint
-./gradlew.bat assembleRelease --no-daemon      # 发布 APK
+git diff --check
 ```
 
+- 仅在用户明确要求构建 APK 时运行 `./gradlew.bat assembleRelease --no-daemon`，并执行 AGENTS.md 的审核与发布流程。
 - JDK 17 由 `gradle.properties` 的 `org.gradle.java.home=D:/Java/jdk-17.0.2` 固定，无需手动 export。
 - Android SDK 由 `local.properties` 的 `sdk.dir` 指定（本机 `D:\Agent\app\.android-sdk`，该文件不入库）。
+- 本轮已在本机补齐 SDK 与签名配置；不纳入 Git。此环境默认 Gradle 缓存锁不可写，实际验证需追加 `-g D:/Agent/APP-Echo/app/.gradle-home`；其他开发者使用自己的有效缓存目录。
 - 发布产物须复制为 `D:\Agent\APP-Echo\app\releases\Echo-v<version>.apk`（详见 AGENTS.md §4 铁律）。

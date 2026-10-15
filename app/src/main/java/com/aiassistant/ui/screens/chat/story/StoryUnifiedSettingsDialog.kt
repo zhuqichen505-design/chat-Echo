@@ -220,6 +220,7 @@ fun StoryUnifiedSettingsDialog(
     var enableWebSearch by remember { mutableStateOf(tempSettings.enableWebSearch) }
     var enableExternalMemory by remember { mutableStateOf(session.enableExternalMemory) }
     var enableWorldBook by remember { mutableStateOf(session.enableWorldBook) }
+    var activeWorldBookIds by remember { mutableStateOf(tempSettings.activeWorldBookIds) }
     var contextWindowTokens by remember { mutableStateOf(tempSettings.contextWindowTokens) }
     var promptTextFieldValue by rememberSaveable(currentPrompt, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(
@@ -987,6 +988,8 @@ fun StoryUnifiedSettingsDialog(
                                         onEnableExternalMemoryChange = { enableExternalMemory = it },
                                         enableWorldBook = enableWorldBook,
                                         onEnableWorldBookChange = { enableWorldBook = it },
+                                        activeWorldBookIds = activeWorldBookIds,
+                                        onActiveWorldBookIdsChange = { activeWorldBookIds = it },
                                         contentColor = dialogContentColor,
                                         secondaryColor = dialogSecondaryColor,
                                         hazeState = hazeState
@@ -1143,7 +1146,7 @@ fun StoryUnifiedSettingsDialog(
                             enableSessionMemory = tempSettings.enableSessionMemory,
                             enableExternalMemory = enableExternalMemory,
                             enableWorldBook = enableWorldBook,
-                            activeWorldBookIds = tempSettings.activeWorldBookIds,
+                            activeWorldBookIds = activeWorldBookIds,
                             contextWindowTokens = contextWindowTokens
                         )
                         val charListToDisplay = (allCharacters + characters).distinctBy { it.id }

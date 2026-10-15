@@ -994,7 +994,10 @@ object TimelineMemoryHelper {
      * 构建注入给大模型的完整时间线参照上下文（强化泛化时空参照系、全域关键里程碑看板与时空连贯性三大铁律）
      */
     fun buildTimelinePromptContext(currentStoryTime: String?, memoryContents: List<String>): String {
-        if (memoryContents.isEmpty()) return ""
+        if (memoryContents.isEmpty()) {
+            val time = currentStoryTime?.trim()?.takeIf { it.isNotBlank() && it != "未确定" } ?: return ""
+            return "【故事当前时间节点】：$time\n以此为当前时间参照；尚无已确认事件，不凭空补写历史。"
+        }
 
         val effectiveCurrent = currentStoryTime?.trim()?.takeIf { it.isNotBlank() } ?: "未指定"
         val events = memoryContents.map { parseContentToEvent(it) }

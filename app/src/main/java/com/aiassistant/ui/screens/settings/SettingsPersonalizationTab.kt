@@ -553,7 +553,7 @@ fun WorldBookEntryEditDialog(
     onConfirm: (name: String, keys: String, content: String, isConstant: Boolean, priority: Int) -> Unit
 ) {
     var name by remember { mutableStateOf(entry?.name.orEmpty()) }
-    var keys by remember { mutableStateOf(entry?.keys.orEmpty()) }
+    var keys by remember { mutableStateOf(entry?.getKeyList()?.joinToString("\n").orEmpty()) }
     var content by remember { mutableStateOf(entry?.content.orEmpty()) }
     var isConstant by remember { mutableStateOf(entry?.isConstant ?: false) }
     var priorityText by remember { mutableStateOf((entry?.priority ?: 10).toString()) }
@@ -580,8 +580,9 @@ fun WorldBookEntryEditDialog(
                 OutlinedTextField(
                     value = keys,
                     onValueChange = { keys = it },
-                    placeholder = { Text("多个关键词用逗号分隔，例如：以太, 灵素, 魔法") },
-                    singleLine = true,
+                    placeholder = { Text("每行一个关键词；英文短语保留空格，例如 Quantum Core") },
+                    minLines = 2,
+                    maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                     shape = SettingsInnerShape
                 )
@@ -614,7 +615,7 @@ fun WorldBookEntryEditDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("优先级权重 (数值越大越优先注入)", style = MaterialTheme.typography.bodyMedium)
+                    Text("预算保留优先级（同类词条数值越大越先入选，不改变指令权限）", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(
                         value = priorityText,
                         onValueChange = { priorityText = it.filter { ch -> ch.isDigit() }.take(3) },
@@ -630,7 +631,7 @@ fun WorldBookEntryEditDialog(
             Button(
                 onClick = {
                     val prio = priorityText.toIntOrNull() ?: 10
-                    onConfirm(name, keys, content, isConstant, prio)
+                    onConfirm(name, com.google.gson.Gson().toJson(keys.lines().map { it.trim() }.filter { it.isNotBlank() }.distinct()), content, isConstant, prio)
                 },
                 enabled = name.isNotBlank() && content.isNotBlank()
             ) {

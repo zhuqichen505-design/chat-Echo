@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -55,6 +56,7 @@ import com.aiassistant.utils.AtemporalSettingItem
 import com.aiassistant.utils.TimelineReconcileCheckpoint
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -681,10 +683,18 @@ internal fun ChatSettingsWorldBookAndExternalMemorySection(
     onEnableExternalMemoryChange: (Boolean) -> Unit,
     enableWorldBook: Boolean,
     onEnableWorldBookChange: (Boolean) -> Unit,
+    activeWorldBookIds: String?,
+    onActiveWorldBookIdsChange: (String?) -> Unit,
     contentColor: Color,
     secondaryColor: Color,
     hazeState: dev.chrisbanes.haze.HazeState? = null
 ) {
+    val booksFlow = remember { AiAssistantApp.instance.repository.getAllWorldBooks() }
+    val worldBooks by booksFlow.collectAsState(initial = emptyList())
+    val useAllEnabledBooks = activeWorldBookIds == null
+    val selectedBookIds = remember(activeWorldBookIds) {
+        activeWorldBookIds.orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
@@ -766,6 +776,69 @@ internal fun ChatSettingsWorldBookAndExternalMemorySection(
                     onCheckedChange = onEnableWorldBookChange
                 )
             }
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = useAllEnabledBooks,
+                    onClick = { onActiveWorldBookIdsChange(null) },
+                    enabled = enableWorldBook,
+                    label = { Text("全部已启用") },
+                    colors = echoFilterChipColors(),
+                    border = echoFilterChipBorder(useAllEnabledBooks),
+                    elevation = echoFilterChipElevation()
+                )
+                FilterChip(
+                    selected = !useAllEnabledBooks,
+                    onClick = { if (useAllEnabledBooks) onActiveWorldBookIdsChange("") },
+                    enabled = enableWorldBook,
+                    label = { Text("仅选中") },
+                    colors = echoFilterChipColors(),
+                    border = echoFilterChipBorder(!useAllEnabledBooks),
+                    elevation = echoFilterChipElevation()
+                )
+            }
+            Text(
+                text = when {
+                    !enableWorldBook -> "世界书已关闭，保留书目选择。"
+                    useAllEnabledBooks -> "使用所有已启用书目；之后导入并启用的书目也会参与。"
+                    selectedBookIds.isEmpty() -> "尚未选择书目，此会话不会注入世界书。"
+                    else -> "仅使用选中的已启用书目；停用书不会参与。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = secondaryColor
+            )
+            if (worldBooks.isEmpty()) {
+                Text("暂无世界书，可先在系统设置中创建或导入。", style = MaterialTheme.typography.bodySmall, color = secondaryColor)
+            } else {
+                worldBooks.forEach { book ->
+                    val checked = if (useAllEnabledBooks) book.isEnabled else book.id in selectedBookIds
+                    val canChange = enableWorldBook && !useAllEnabledBooks && (book.isEnabled || checked)
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .toggleable(value = checked, enabled = canChange, role = Role.Checkbox) { selected ->
+                                val updated = if (selected) selectedBookIds + book.id else selectedBookIds - book.id
+                                onActiveWorldBookIdsChange(updated.sorted().joinToString(","))
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = checked, onCheckedChange = null, enabled = canChange)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(book.name, style = MaterialTheme.typography.bodyMedium,
+                                color = if (book.isEnabled && enableWorldBook) contentColor else secondaryColor)
+                            if (!book.isEnabled) {
+                                Text("已停用，绑定不会生效", style = MaterialTheme.typography.labelSmall, color = secondaryColor)
+                            }
+                        }
+                    }
+                }
+            }
+            Text(
+                "选中书目不代表整本发送：常驻词条直接参与，其他词条按关键词与触发条件匹配，并受预算限制。",
+                style = MaterialTheme.typography.bodySmall,
+                color = secondaryColor
+            )
         }
     }
 }

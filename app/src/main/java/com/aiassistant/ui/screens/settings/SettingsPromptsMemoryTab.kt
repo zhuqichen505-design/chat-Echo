@@ -723,6 +723,7 @@ fun PromptsMemoryTab(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("示例载入", style = MaterialTheme.typography.labelSmall)
                             }
+                            com.aiassistant.ui.screens.roleplay.WorldBookImportButton(onImported = { isWorldBooksExpanded = true })
                             IconButton(onClick = { isAddingWorldBook = true }, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Add, contentDescription = "新建世界书", tint = MaterialTheme.colorScheme.primary)
                             }

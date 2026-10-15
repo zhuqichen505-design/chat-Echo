@@ -389,7 +389,7 @@ class NetworkAndKeyStabilityTest {
         assertTrue(restClient.retryOnConnectionFailure)
         assertNotNull("restClient 应配置专用连接池", restClient.connectionPool)
 
-        assertEquals("默认 User-Agent 必须为合规标识而非默认 okhttp", "Echo-Assistant/2.2.5 (Android; Mobile)", RetrofitClient.DEFAULT_USER_AGENT)
+        assertEquals("默认 User-Agent 必须使用当前应用版本", "Echo-Assistant/${BuildConfig.VERSION_NAME} (Android; Mobile)", RetrofitClient.DEFAULT_USER_AGENT)
     }
 
     // 2. 异常判定测试：验证协议抖动与超时异常均被正确识别为网络波动以触发退避重试

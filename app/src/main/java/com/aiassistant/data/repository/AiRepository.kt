@@ -967,28 +967,12 @@ class AiRepository(
         maxTokenBudget: Int = 1500
     ): List<WorldBookEntry> {
         val dao = worldBookDao ?: return emptyList()
-        val candidateEntries = if (!activeBookIds.isNullOrEmpty()) {
+        val candidateEntries = if (activeBookIds != null) {
             dao.getActiveEntriesForBooks(activeBookIds)
         } else {
             dao.getActiveEntriesFromEnabledBooks()
         }
-        if (candidateEntries.isEmpty()) return emptyList()
-
-        val matched = candidateEntries.filter { it.matchesText(text) }
-        val sorted = matched.sortedWith(
-            compareByDescending<WorldBookEntry> { it.priority }
-                .thenByDescending { it.updatedAt }
-        )
-
-        val results = mutableListOf<WorldBookEntry>()
-        var estimatedTokens = 0
-        for (entry in sorted) {
-            val cost = (entry.name.length + entry.content.length) / 2 + 10
-            if (results.isNotEmpty() && estimatedTokens + cost > maxTokenBudget) break
-            results.add(entry)
-            estimatedTokens += cost
-        }
-        return results
+        return WorldBookActivation.select(candidateEntries, text, maxTokenBudget).entries
     }
 
     // ============ 消息相关 ============
@@ -1318,9 +1302,9 @@ class AiRepository(
             effective.maxTokens, effective.contextWindowOverrideTokens, userMessage, effective)
         val roleplay = isRoleplayConversation(conversation)
         val prompt = resolveSystemPromptWithPriority(conversation, effective, roleplay)
-        val lore = if (effective.enableWorldBook == true && userMessage.isNotBlank()) {
+        val lore = if (effective.enableWorldBook == true) {
             val ids = effective.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            matchWorldBookEntries(userMessage, ids).takeIf { it.isNotEmpty() }?.let {
+            matchWorldBookEntries(WorldBookActivation.scanText(userMessage, history), ids).takeIf { it.isNotEmpty() }?.let {
                 "<world_book_lore>\n${formatWorldBookPrompt(it)}\n</world_book_lore>"
             }
         } else null
@@ -1708,9 +1692,9 @@ class AiRepository(
         val isRoleplayConv = isRoleplayConversation(conversation)
         val promptResolution = resolveSystemPromptWithPriority(conversation, effectiveOptions, isRoleplayConv)
 
-        val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true && userMessage.isNotBlank()) {
+        val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true) {
             val bookIds = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            val matchedEntries = matchWorldBookEntries(userMessage, bookIds)
+            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(userMessage, contextMessages), bookIds)
             if (matchedEntries.isNotEmpty()) {
                 "<world_book_lore>\n${formatWorldBookPrompt(matchedEntries)}\n</world_book_lore>"
             } else null
@@ -2142,9 +2126,9 @@ class AiRepository(
         val isRoleplayConv = isRoleplayConversation(conversation)
         val promptResolution = resolveSystemPromptWithPriority(conversation, effectiveOptions, isRoleplayConv)
 
-        val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true && userMessage.isNotBlank()) {
+        val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true) {
             val bookIds = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            val matchedEntries = matchWorldBookEntries(userMessage, bookIds)
+            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(userMessage, contextMessages), bookIds)
             if (matchedEntries.isNotEmpty()) {
                 "<world_book_lore>\n${formatWorldBookPrompt(matchedEntries)}\n</world_book_lore>"
             } else null
@@ -4868,7 +4852,7 @@ class AiRepository(
         val extMemoryEnabled = if (isRoleplay) false else (options?.enableExternalMemory ?: conversation.enableExternalMemory ?: false)
 
         val candidates = memoryDao.getCandidateMemories(conversation.id).filter { it.isEnabled }
-        if (candidates.isEmpty()) return null
+        // 独立时间线与当前故事时间不依赖 memory_items；空记忆库仍需继续组装时间线上下文。
 
         // 会话专属记忆在所有对话（包括普通对话、私密对话、角色扮演）中只要开启均生效
         val sessionMemories = if (options?.enableSessionMemory == false) {
