@@ -595,7 +595,8 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToChat: (Long) -> Unit,
     themeMode: AppThemeMode,
-    onThemeModeChange: (AppThemeMode) -> Unit
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    onAppearancePresetChange: (String) -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val glass = echoGlassPalette()
@@ -677,6 +678,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxSize(),
                         themeMode = themeMode,
                         onThemeModeChange = onThemeModeChange,
+                        onAppearancePresetChange = onAppearancePresetChange,
                         contentPadding = tabContentPadding
                     )
                     "model_features" -> ModelFeaturesTab(

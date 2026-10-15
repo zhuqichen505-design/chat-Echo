@@ -73,6 +73,7 @@ import com.aiassistant.domain.model.ModelCapabilityEngine
 import com.aiassistant.domain.model.ModelCustomSettings
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
+import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.readableTextColorFor
@@ -97,6 +98,13 @@ import com.aiassistant.utils.BackupManager
 import com.aiassistant.utils.HiddenConversationLock
 import com.aiassistant.utils.TavilySearchSettings
 import com.aiassistant.utils.AppThemeMode
+import com.aiassistant.utils.EchoAppearancePreset
+import com.aiassistant.utils.EchoStoryReadingStyle
+import com.aiassistant.utils.EchoStreamingAnimationStyle
+import com.aiassistant.utils.PersonalizationSettings
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import com.aiassistant.tools.search.SearchEngineType
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -114,6 +122,7 @@ fun AppearanceTab(
     modifier: Modifier = Modifier,
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
+    onAppearancePresetChange: (String) -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(16.dp)
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -140,14 +149,25 @@ fun AppearanceTab(
     val snackbarHostState = remember { SnackbarHostState() }
 
     fun performSave() {
-        manager.saveSettings(
-            settings.copy(
+        val saved = manager.saveSettings(
+            manager.getSettings().copy(
                 chatFontSize = chatFontSize,
                 fontSizeScale = fontSizeScale
             )
         )
         settings = manager.getSettings()
-        savedMessage = "已保存界面与外观设定"
+        savedMessage = if (saved) "已保存界面与外观设定" else "外观设定保存失败，请重试"
+    }
+
+    fun saveVisualPreference(message: String, update: (PersonalizationSettings) -> PersonalizationSettings) {
+        val updated = update(manager.getSettings())
+        if (manager.saveSettings(updated)) {
+            settings = manager.getSettings()
+            onAppearancePresetChange(settings.appearancePreset)
+            savedMessage = message
+        } else {
+            savedMessage = "外观设定保存失败，请重试"
+        }
     }
 
     LaunchedEffect(savedMessage) {
@@ -293,6 +313,84 @@ fun AppearanceTab(
             )
         }
 
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
+                Text("主题预设", style = MaterialTheme.typography.titleMedium)
+                Text("选择应用配色，明暗模式沿用上方设置。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.fillMaxWidth().selectableGroup()) {
+                    val presets = listOf(
+                        AppearancePresetOption(EchoAppearancePreset.EXISTING, "经典", "保留当前 Echo 配色", listOf(0xFF3B82F6, 0xFF38BDF8, 0xFFFB7185)),
+                        AppearancePresetOption(EchoAppearancePreset.CLEAR_SKY, "晴空", "蓝白层次，清晰舒展", listOf(0xFF2C73B7, 0xFF83D3F0, 0xFFEDF4FC)),
+                        AppearancePresetOption(EchoAppearancePreset.NIGHT_VOYAGE, "夜航", "墨绿与暖金，安静阅读", listOf(0xFF172B29, 0xFFD6BB83, 0xFFA5C9AD)),
+                        AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "纸色与赭红，温和分明", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354))
+                    )
+                    presets.forEach { preset ->
+                        val selected = settings.appearancePreset == preset.id
+                        Row(
+                            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .selectable(selected = selected, role = Role.RadioButton, onClick = {
+                                    saveVisualPreference("已应用「${preset.label}」主题") { it.copy(appearancePreset = preset.id) }
+                                }).padding(horizontal = 4.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected, onClick = null)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(preset.label, style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                Text(preset.description, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                preset.colors.forEach { color ->
+                                    Box(Modifier.size(16.dp).clip(CircleShape).background(Color(color))
+                                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
+                Text("创作阅读页", style = MaterialTheme.typography.titleMedium)
+                Text("独立选择故事正文排版。分栏上下文在宽屏并排显示，窄屏折叠为资料面板。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(EchoStoryReadingStyle.IMMERSIVE to "沉浸叙事", EchoStoryReadingStyle.PLAIN to "简洁正文",
+                        EchoStoryReadingStyle.SPLIT to "分栏上下文").forEach { (value, label) ->
+                        FilterChip(selected = settings.storyReadingStyle == value,
+                            onClick = { saveVisualPreference("创作阅读页已切换为$label") { it.copy(storyReadingStyle = value) } },
+                            label = { Text(label) }, colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(settings.storyReadingStyle == value))
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
+                Text("流式动画", style = MaterialTheme.typography.titleMedium)
+                Text("回复生成时的轻量提示，遵循系统减弱动画设置。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(EchoStreamingAnimationStyle.THIN_CURSOR to "细光标", EchoStreamingAnimationStyle.SOUND_WAVE to "微声波",
+                        EchoStreamingAnimationStyle.INK_RING to "墨环").forEach { (value, label) ->
+                        FilterChip(selected = settings.streamingAnimationStyle == value,
+                            onClick = { saveVisualPreference("流式动画已切换为$label") { it.copy(streamingAnimationStyle = value) } },
+                            label = { Text(label) },
+                            leadingIcon = { EchoStreamingIndicator(color = MaterialTheme.colorScheme.primary, style = value, compact = true) },
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(settings.streamingAnimationStyle == value))
+                    }
+                }
+            }
+        }
+
         // 2. 界面与对话字体大小设置
         item {
             SettingsGlassCard(hazeState = hazeState) {
@@ -350,9 +448,9 @@ fun AppearanceTab(
                                 selected = selected,
                                 onClick = {
                                     fontSizeScale = scale
-                                    manager.saveSettings(settings.copy(chatFontSize = chatFontSize, fontSizeScale = scale))
+                                    val saved = manager.saveSettings(manager.getSettings().copy(chatFontSize = chatFontSize, fontSizeScale = scale))
                                     settings = manager.getSettings()
-                                    savedMessage = "已保存界面字体缩放"
+                                    savedMessage = if (saved) "已保存界面字体缩放" else "字体缩放保存失败，请重试"
                                 },
                                 shape = SegmentedButtonDefaults.itemShape(index = index, count = scales.size),
                                 colors = echoSegmentedButtonColors(),
@@ -625,3 +723,10 @@ fun AppearanceTab(
         )
     }
 }
+
+private data class AppearancePresetOption(
+    val id: String,
+    val label: String,
+    val description: String,
+    val colors: List<Long>
+)

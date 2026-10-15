@@ -46,6 +46,7 @@ import com.aiassistant.ui.screens.settings.SettingsScreen
 import com.aiassistant.ui.screens.stats.StatsScreen
 import com.aiassistant.ui.theme.AiApiAssistantTheme
 import com.aiassistant.utils.AppThemeMode
+import com.aiassistant.utils.EchoAppearancePreset
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.collectAsState
@@ -61,7 +62,9 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val themeManager = remember { AiAssistantApp.instance.themePreferenceManager }
+            val personalizationManager = remember { AiAssistantApp.instance.personalizationManager }
             var themeMode by remember { mutableStateOf(themeManager.getThemeMode()) }
+            var appearancePreset by remember { mutableStateOf(personalizationManager.getSettings().appearancePreset) }
             val systemDark = isSystemInDarkTheme()
             val useDarkTheme = when (themeMode) {
                 AppThemeMode.System -> systemDark
@@ -69,7 +72,7 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.Dark -> true
             }
 
-            AiApiAssistantTheme(darkTheme = useDarkTheme) {
+            AiApiAssistantTheme(darkTheme = useDarkTheme, appearancePreset = appearancePreset) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -83,6 +86,9 @@ class MainActivity : ComponentActivity() {
                                 if (themeManager.saveThemeMode(mode)) {
                                     themeMode = mode
                                 }
+                            },
+                            onAppearancePresetChange = { preset ->
+                                appearancePreset = EchoAppearancePreset.sanitize(preset)
                             }
                         )
                     }
@@ -95,7 +101,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AiAssistantNavigation(
     themeMode: AppThemeMode,
-    onThemeModeChange: (AppThemeMode) -> Unit
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    onAppearancePresetChange: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -352,7 +359,8 @@ fun AiAssistantNavigation(
                     }
                 },
                 themeMode = themeMode,
-                onThemeModeChange = onThemeModeChange
+                onThemeModeChange = onThemeModeChange,
+                onAppearancePresetChange = onAppearancePresetChange
             )
         }
 

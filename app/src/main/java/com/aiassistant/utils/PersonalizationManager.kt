@@ -3,6 +3,40 @@ package com.aiassistant.utils
 import android.content.Context
 import androidx.core.content.edit
 
+/** 用户可选的应用视觉预设。值写入 SharedPreferences，未知值始终回退到 existing。 */
+object EchoAppearancePreset {
+    const val EXISTING = "existing"
+    const val CLEAR_SKY = "clear_sky"
+    const val NIGHT_VOYAGE = "night_voyage"
+    const val INDEX = "index"
+
+    val values = listOf(EXISTING, CLEAR_SKY, NIGHT_VOYAGE, INDEX)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: EXISTING
+}
+
+/** 创作阅读页的独立正文排版预设；不改变普通聊天页排版。 */
+object EchoStoryReadingStyle {
+    const val IMMERSIVE = "immersive"
+    const val PLAIN = "plain"
+    const val SPLIT = "split"
+
+    val values = listOf(IMMERSIVE, PLAIN, SPLIT)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: IMMERSIVE
+}
+
+/** 流式回复指示动画预设；动画实现由聊天渲染层消费。 */
+object EchoStreamingAnimationStyle {
+    const val THIN_CURSOR = "thin_cursor"
+    const val SOUND_WAVE = "sound_wave"
+    const val INK_RING = "ink_ring"
+
+    val values = listOf(THIN_CURSOR, SOUND_WAVE, INK_RING)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: THIN_CURSOR
+}
+
 data class PersonalizationSettings(
     val globalSystemPrompt: String = "",
     val globalRoleplayPrompt: String = "",
@@ -16,6 +50,9 @@ data class PersonalizationSettings(
     val fontSizeScale: Float = 1.0f,
     val chatFontSize: Int = 16,
     val appTheme: String = "system",
+    val appearancePreset: String = EchoAppearancePreset.EXISTING,
+    val storyReadingStyle: String = EchoStoryReadingStyle.IMMERSIVE,
+    val streamingAnimationStyle: String = EchoStreamingAnimationStyle.THIN_CURSOR,
     val autoNameEnabled: Boolean = true,
     val autoNameApiConfigId: Long = 0L,
     val autoNameModel: String = "",
@@ -94,6 +131,9 @@ class PersonalizationManager(private val context: Context) {
             fontSizeScale = prefs.getFloat(KEY_FONT_SIZE_SCALE, 1.0f),
             chatFontSize = prefs.getInt(KEY_CHAT_FONT_SIZE, 16),
             appTheme = prefs.getString(KEY_APP_THEME, "system").orEmpty().ifBlank { "system" },
+            appearancePreset = EchoAppearancePreset.sanitize(prefs.getString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.EXISTING)),
+            storyReadingStyle = EchoStoryReadingStyle.sanitize(prefs.getString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.IMMERSIVE)),
+            streamingAnimationStyle = EchoStreamingAnimationStyle.sanitize(prefs.getString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.THIN_CURSOR)),
             autoNameEnabled = prefs.getBoolean(KEY_AUTO_NAME_ENABLED, true),
             autoNameApiConfigId = prefs.getLong(KEY_AUTO_NAME_API_CONFIG_ID, 0L),
             autoNameModel = prefs.getString(KEY_AUTO_NAME_MODEL, "").orEmpty(),
@@ -131,6 +171,9 @@ class PersonalizationManager(private val context: Context) {
             .putFloat(KEY_FONT_SIZE_SCALE, settings.fontSizeScale)
             .putInt(KEY_CHAT_FONT_SIZE, settings.chatFontSize)
             .putString(KEY_APP_THEME, settings.appTheme)
+            .putString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.sanitize(settings.appearancePreset))
+            .putString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.sanitize(settings.storyReadingStyle))
+            .putString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.sanitize(settings.streamingAnimationStyle))
             .putBoolean(KEY_AUTO_NAME_ENABLED, settings.autoNameEnabled)
             .putLong(KEY_AUTO_NAME_API_CONFIG_ID, settings.autoNameApiConfigId)
             .putString(KEY_AUTO_NAME_MODEL, settings.autoNameModel)
@@ -213,6 +256,9 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_FONT_SIZE_SCALE = "font_size_scale"
         private const val KEY_CHAT_FONT_SIZE = "chat_font_size"
         private const val KEY_APP_THEME = "app_theme"
+        private const val KEY_APPEARANCE_PRESET = "appearance_preset"
+        private const val KEY_STORY_READING_STYLE = "story_reading_style"
+        private const val KEY_STREAMING_ANIMATION_STYLE = "streaming_animation_style"
         private const val KEY_AUTO_NAME_ENABLED = "auto_name_enabled"
         private const val KEY_AUTO_NAME_API_CONFIG_ID = "auto_name_api_config_id"
         private const val KEY_AUTO_NAME_MODEL = "auto_name_model"

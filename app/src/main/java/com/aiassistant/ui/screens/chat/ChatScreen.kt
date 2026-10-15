@@ -169,6 +169,9 @@ fun ChatScreen(
         factory = ChatViewModel.factory(conversationId)
     )
     val uiState by viewModel.uiState.collectAsState()
+    val appearanceSettings = rememberChatPersonalizationSettings()
+    val showStoryContext = uiState.isRoleplay &&
+        appearanceSettings.storyReadingStyle == com.aiassistant.utils.EchoStoryReadingStyle.SPLIT
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
     // 实时 Key 尝试报错明细：生成过程中无需手动暂停即可直接看到各次连接失败的具体原因
@@ -1212,9 +1215,11 @@ fun ChatScreen(
             }
         }
 ) { paddingValues ->
-        Box(
+        BoxWithConstraints(
             modifier = Modifier.fillMaxSize()
         ) {
+            val showContextBesideText = showStoryContext && maxWidth >= 720.dp
+            val storyContextInset = if (showContextBesideText) 264.dp else 0.dp
             // N-2：悬浮跳转按钮保持原有底部偏移；v2.7.7 需求 6：消息列表底部间距单独收窄——
             // 滑到最底部时最后一条回复与输入栏顶部的距离由 16dp 收窄为 4dp
             val bottomBarOverlay = paddingValues.calculateBottomPadding() + EchoTokens.Spacing.lg
@@ -1223,19 +1228,22 @@ fun ChatScreen(
             val topFloatingBarHeight = 68.dp + (if (error != null) 60.dp else 0.dp)
 
             // 1. 底层：全屏贯通的消息列表，向上滚动时平滑穿透悬浮顶栏与错误提示
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier.fillMaxSize()
             ) {
+                var compactContextHeight by remember { mutableIntStateOf(0) }
+                val compactContextPadding = with(LocalDensity.current) { compactContextHeight.toDp() } + 16.dp
                 // 消息列表 (全屏延伸，向上滚动时平滑穿透悬浮工具栏和报错弹窗，被毛玻璃实时模糊)
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(end = storyContextInset),
                     state = listState,
                     // v2.7.4 需求 1：水平 contentPadding 与底部输入栏/顶部工具栏统一为 12dp——
                     // 状态胶囊右缘与输入气泡右缘精确对齐（原先列表 14dp 与界面骨架 12dp 不一致）
                     contentPadding = PaddingValues(
                         start = 12.dp,
                         end = 12.dp,
-                        top = statusBarTopPadding + topFloatingBarHeight,
+                        top = statusBarTopPadding + topFloatingBarHeight +
+                            if (showStoryContext && !showContextBesideText) compactContextPadding else 0.dp,
                         bottom = listBottomPadding
                     ),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -1295,6 +1303,7 @@ fun ChatScreen(
                             if (showStreamingBubbleHere) {
                                 // 在原位以正在生成的最新版本渲染
                                 MessageBubble(
+                                    isStory = uiState.isRoleplay,
                                     message = Message(
                                         conversationId = conversationId,
                                         role = "assistant",
@@ -1356,6 +1365,7 @@ fun ChatScreen(
                                 val isLastAssistantTurn = !isGenerating && message.role == "assistant" &&
                                     displayItem == displayMessages.lastOrNull { it.message.role == "assistant" }
                                 MessageBubble(
+                                    isStory = uiState.isRoleplay,
                                     message = message,
                                     hazeState = hazeState,
                                     readableBackdrop = readableBackdrops.content,
@@ -1467,6 +1477,7 @@ fun ChatScreen(
                             ) {
                                 Spacer(modifier = Modifier.height(14.dp))
                                 MessageBubble(
+                                    isStory = uiState.isRoleplay,
                                     message = Message(
                                         conversationId = conversationId,
                                         role = "assistant",
@@ -1519,6 +1530,7 @@ fun ChatScreen(
                         (currentThinking.isNotEmpty() || currentResponse.isNotEmpty() || isGenerating)) {
                         item(key = streamingBranchGroupId?.let { "chat_streaming_branch:$it" } ?: replyRowKeys.streamingKey) {
                             MessageBubble(
+                                    isStory = uiState.isRoleplay,
                                 message = Message(
                                     conversationId = conversationId,
                                     role = "assistant",
@@ -1548,6 +1560,27 @@ fun ChatScreen(
                     item(key = "chat_bottom_anchor") {
                         Spacer(modifier = Modifier.height(1.dp))
                     }
+                }
+                if (showContextBesideText) {
+                    StoryContextPanel(
+                        uiState = uiState,
+                        settings = tempSettings,
+                        expandedByDefault = true,
+                        onOpenSettings = { showStoryManagerDialog = true },
+                        modifier = Modifier.align(Alignment.TopEnd).width(252.dp).fillMaxHeight()
+                            .padding(top = statusBarTopPadding + topFloatingBarHeight, bottom = listBottomPadding, end = 12.dp)
+                    )
+                } else if (showStoryContext) {
+                    StoryContextPanel(
+                        uiState = uiState,
+                        settings = tempSettings,
+                        expandedByDefault = false,
+                        onOpenSettings = { showStoryManagerDialog = true },
+                        modifier = Modifier.align(Alignment.TopCenter)
+                            .padding(top = statusBarTopPadding + topFloatingBarHeight + 8.dp, start = 12.dp, end = 12.dp)
+                            .fillMaxWidth().heightIn(max = maxHeight * 0.35f)
+                            .onSizeChanged { compactContextHeight = it.height }
+                    )
                 }
             }
 
@@ -1908,7 +1941,7 @@ fun ChatScreen(
                 visible = showScrollControls,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = 4.dp)
+                    .padding(end = 4.dp + storyContextInset)
             )
 
             SideAnchorNavigator(
@@ -1918,7 +1951,7 @@ fun ChatScreen(
                 hazeState = hazeState,
                 modifier = Modifier
                     .matchParentSize()
-                    .padding(end = 4.dp)
+                    .padding(end = 4.dp + storyContextInset)
             )
 
             // v2.7.3 流畅度：组合期直读 listState.layoutInfo 会随列表每次测量/滚动更新而失效本作用域，
@@ -1976,7 +2009,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
-                        end = 18.dp,
+                        end = 18.dp + storyContextInset,
                         bottom = bottomBarOverlay
                     )
             )

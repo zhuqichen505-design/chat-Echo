@@ -117,7 +117,7 @@ fun echoGlassPalette(): EchoGlassPalette {
         userBubble = if (isDark) {
             colors.primaryContainer.copy(alpha = 0.90f)
         } else {
-            Color(0xFFE0F2FE).copy(alpha = 0.94f)
+            colors.primaryContainer.copy(alpha = 0.94f)
         },
         assistantBubble = Color.Transparent, // 模型回复不使用气泡背景
         outline = if (isDark) Color.White.copy(alpha = 0.12f) else colors.outlineVariant.copy(alpha = 0.18f),

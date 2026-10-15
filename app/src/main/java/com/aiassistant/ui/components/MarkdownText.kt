@@ -40,15 +40,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.CornerRadius
-import com.aiassistant.ui.theme.EchoMotion
-import com.aiassistant.ui.theme.rememberReducedMotion
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.key
+
+/** Style selected in Settings; kept local so nested Markdown blocks share one value. */
+internal val LocalStreamingAnimationStyle = compositionLocalOf { StreamingAnimationStyle.CURSOR }
 
 @Composable
 fun MarkdownText(
@@ -58,16 +54,22 @@ fun MarkdownText(
     onCitationClick: ((Int) -> Unit)? = null,
     streaming: Boolean = false,
     cursor: Color? = null,
-    cursorFading: Boolean = false
+    cursorFading: Boolean = false,
+    streamingAnimationStyle: String = StreamingAnimationStyle.CURSOR
 ) {
-    if (!streaming) {
-        MarkdownContent(
-            content = content,
-            modifier = modifier,
-            color = color,
-            onCitationClick = onCitationClick
-        )
-    } else {
+    val resolvedStyle = StreamingAnimationStyle.normalize(streamingAnimationStyle)
+    val inlineCursor = cursor.takeIf { resolvedStyle == StreamingAnimationStyle.THIN_CURSOR }
+    CompositionLocalProvider(
+        LocalStreamingAnimationStyle provides resolvedStyle
+    ) {
+        if (!streaming) {
+            MarkdownContent(
+                content = content,
+                modifier = modifier,
+                color = color,
+                onCitationClick = onCitationClick
+            )
+        } else {
         // P0-2② 增量渲染（A1 修正）：稳定内容切分为不可变分段，每段 key(段文本) 独立组合；
         // 段字符串一旦完成永不变化 → remember(content=段) 不重算，历史段零重解析（R-2 字面达成）；
         // 新段仅在完成时解析一次；未稳定尾部每帧重解析（O(尾部长)）；流式结束走上方全文路径定稿
@@ -89,8 +91,8 @@ fun MarkdownText(
             val split = MarkdownSegmentation(emptyList(), segmentation.tail, segmentation.tailInFence)
             if (split.tail.isEmpty()) {
                 // v2.7.2 需求 6：段落边界瞬间尾段为空，光标以独立行形式保持在场，动画不中断
-                if (cursor != null) {
-                    StreamingTailCursor(color = cursor, fading = cursorFading)
+                if (inlineCursor != null) {
+                    StreamingTailCursor(color = inlineCursor, fading = cursorFading)
                 }
             } else if (split.tailInFence) {
                 // 方案 P0-2④：未闭合 ``` 围栏——围栏开启行之前的文本照常渲染，
@@ -110,8 +112,7 @@ fun MarkdownText(
                     )
                 }
                 if (fenceBody.isNotEmpty()) {
-                    // 检查报告 P3-4：代码围栏流式期间补静态光标（恒亮不呼吸），
-                    // 与正文光标同定位方案（onTextLayout 覆盖层，零测量干扰）
+                    // The cursor follows the last code line without affecting text measurement.
                     val fenceLayoutState = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                     Box {
                         Text(
@@ -121,32 +122,36 @@ fun MarkdownText(
                             onTextLayout = { fenceLayoutState.value = it },
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
-                        if (cursor != null) {
+                        if (inlineCursor != null) {
                             EchoStreamingCursor(
-                                color = cursor,
-                                breathing = false,
+                                color = inlineCursor,
+                                fading = cursorFading,
                                 modifier = Modifier.echoCursorLineTransform(fenceLayoutState)
                             )
                         }
                     }
-                } else if (cursor != null) {
+                } else if (inlineCursor != null) {
                     // 围栏刚开启、尚无围栏内文本：光标以独立行保持在场
-                    StreamingTailCursor(color = cursor, fading = cursorFading)
+                    StreamingTailCursor(color = inlineCursor, fading = cursorFading)
                 }
             } else {
                 MarkdownContent(
                     content = split.tail,
                     color = color,
                     onCitationClick = onCitationClick,
-                    endCursorColor = cursor,
+                    endCursorColor = inlineCursor,
                     endCursorFading = cursorFading
                 )
                 // v2.7.2 需求 6：表格/数学块/闭合代码块/分割线/空尾等无法内联承载光标的尾部，
                 // 追加独立行光标，保证流式动画一直持续到回复完毕
-                if (cursor != null && tailNeedsStandaloneCursor(split.tail)) {
-                    StreamingTailCursor(color = cursor, fading = cursorFading)
+                if (inlineCursor != null && tailNeedsStandaloneCursor(split.tail)) {
+                    StreamingTailCursor(color = inlineCursor, fading = cursorFading)
                 }
             }
+            if (cursor != null && resolvedStyle != StreamingAnimationStyle.THIN_CURSOR) {
+                StreamingTailCursor(color = cursor, fading = cursorFading)
+            }
+        }
         }
     }
 }
@@ -162,7 +167,11 @@ private fun StreamingTailCursor(
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.padding(top = 2.dp)) {
-        EchoStreamingCursor(color = color, fading = fading)
+        EchoStreamingIndicator(
+            color = color,
+            style = LocalStreamingAnimationStyle.current,
+            fading = fading
+        )
     }
 }
 
@@ -869,6 +878,36 @@ internal fun InlineMarkdownText(
                     style = style.copy(color = color),
                     onTextLayout = { layoutState.value = it }
                 )
+                EchoStreamingIndicator(
+                    color = endCursorColor,
+                    style = LocalStreamingAnimationStyle.current,
+                    fading = endCursorFading,
+                    modifier = Modifier.echoCursorLineTransform(layoutState)
+                )
+            }
+        }
+    } else {
+        val layoutState = remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+        Box(modifier) {
+            ClickableText(
+                text = text,
+                style = style.copy(color = color),
+                onTextLayout = { layoutState.value = it },
+                onClick = { offset ->
+                    text.getStringAnnotations(tag = "CITATION", start = offset, end = offset)
+                        .firstOrNull()
+                        ?.let { annotation ->
+                            val id = annotation.item.toIntOrNull() ?: 1
+                            onCitationClick?.invoke(id)
+                        }
+                    text.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()
+                        ?.let { annotation ->
+                            runCatching { uriHandler.openUri(annotation.item) }
+                        }
+                }
+            )
+            if (endCursorColor != null) {
                 EchoStreamingCursor(
                     color = endCursorColor,
                     fading = endCursorFading,
@@ -876,25 +915,6 @@ internal fun InlineMarkdownText(
                 )
             }
         }
-    } else {
-        ClickableText(
-            text = text,
-            style = style.copy(color = color),
-            modifier = modifier,
-            onClick = { offset ->
-                text.getStringAnnotations(tag = "CITATION", start = offset, end = offset)
-                    .firstOrNull()
-                    ?.let { annotation ->
-                        val id = annotation.item.toIntOrNull() ?: 1
-                        onCitationClick?.invoke(id)
-                    }
-                text.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                    .firstOrNull()
-                    ?.let { annotation ->
-                        runCatching { uriHandler.openUri(annotation.item) }
-                    }
-            }
-        )
     }
 }
 
@@ -927,8 +947,8 @@ fun CodeBlock(code: String, language: String = "", modifier: Modifier = Modifier
 
 /**
  * Echo 流式打字光标（P0-2②/P0-3①）
- * 2dp 宽、字高约 70% 的竖线，530ms 周期透明度呼吸；落定时以 300ms 淡出（fading=true）。
- * reduced motion：光标保持静态可见（保留状态指示），淡出路径不变。
+ * 2dp 宽的竖线，随末行文字定位；动画绘制复用 EchoStreamingIndicator。
+ * reduced motion：光标保持静态可见，结束时立即移除。
  *
  * v2.7.2 需求 8：几何常量提升为顶层值，定位逻辑（echoCursorLineTransform）与其共用，
  * 保证绘制尺寸与定位计算一致。
@@ -963,42 +983,12 @@ private fun Modifier.echoCursorLineTransform(
 internal fun EchoStreamingCursor(
     color: Color,
     modifier: Modifier = Modifier,
-    fading: Boolean = false,
-    breathing: Boolean = true
+    fading: Boolean = false
 ) {
-    val reduced = rememberReducedMotion()
-    // 检查报告 P3-2：reduced motion / 静态光标（breathing=false）下条件创建 InfiniteTransition，
-    // 避免帧回调空转（微功耗）
-    val breathe: Float = if (reduced || !breathing) {
-        1f
-    } else {
-        val transition = rememberInfiniteTransition(label = "echoCursor")
-        val v by transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 0.25f,
-            animationSpec = EchoMotion.reverseCycleSpec<Float>(EchoMotion.Typewriter.cursorBlinkMs),
-            label = "cursorBreathe"
-        )
-        v
-    }
-    val fade by animateFloatAsState(
-        targetValue = if (fading) 0f else 1f,
-        animationSpec = EchoMotion.tweenSpec<Float>(EchoMotion.Typewriter.cursorFadeMs),
-        label = "cursorFade"
+    EchoStreamingIndicator(
+        color = color,
+        style = LocalStreamingAnimationStyle.current,
+        modifier = modifier,
+        fading = fading
     )
-    Canvas(modifier.size(width = EchoStreamingCursorWidth, height = EchoStreamingCursorHeight)) {
-        // fading（落定）：停止呼吸、只做静态淡出；正常流式：呼吸；breathing=false：恒亮静态；reduced：静态
-        val alpha = when {
-            reduced -> fade
-            fading -> fade
-            !breathing -> 1f * fade
-            else -> breathe * fade
-        }
-        if (alpha > 0.01f) {
-            drawRoundRect(
-                color = color.copy(alpha = alpha),
-                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
-            )
-        }
-    }
 }

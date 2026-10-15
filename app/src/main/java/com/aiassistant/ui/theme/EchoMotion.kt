@@ -1,6 +1,9 @@
 package com.aiassistant.ui.theme
 
 import android.provider.Settings
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -11,7 +14,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -89,13 +96,26 @@ object EchoMotion {
  */
 @Composable
 fun rememberReducedMotion(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE, 1f
-            ) == 0f
-        }.getOrDefault(false)
+    val resolver = LocalContext.current.contentResolver
+    fun readSetting(): Boolean = runCatching {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }.getOrDefault(false)
+    var reducedMotion by remember(resolver) { mutableStateOf(readSetting()) }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                reducedMotion = readSetting()
+            }
+        }
+        val registered = runCatching {
+            resolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer
+            )
+        }.isSuccess
+        reducedMotion = readSetting()
+        onDispose {
+            if (registered) resolver.unregisterContentObserver(observer)
+        }
     }
+    return reducedMotion
 }

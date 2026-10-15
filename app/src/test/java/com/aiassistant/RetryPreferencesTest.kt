@@ -3,6 +3,9 @@ package com.aiassistant
 import android.app.Application
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.PersonalizationManager
+import com.aiassistant.utils.EchoAppearancePreset
+import com.aiassistant.utils.EchoStoryReadingStyle
+import com.aiassistant.utils.EchoStreamingAnimationStyle
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,6 +16,67 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun visualPreferencesPersistIndependentlyWithoutChangingOtherPersonalization() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        val initial = manager.getSettings()
+        assertEquals(EchoAppearancePreset.EXISTING, initial.appearancePreset)
+        assertEquals(EchoStoryReadingStyle.IMMERSIVE, initial.storyReadingStyle)
+        assertEquals(EchoStreamingAnimationStyle.THIN_CURSOR, initial.streamingAnimationStyle)
+        assertTrue(manager.saveSettings(initial.copy(
+            appTheme = "dark", chatFontSize = 20, fontSizeScale = 1.15f,
+            globalSystemPrompt = "合成测试指引", aboutUser = "合成偏好", autoNameEnabled = false,
+            appearancePreset = EchoAppearancePreset.NIGHT_VOYAGE,
+            storyReadingStyle = EchoStoryReadingStyle.PLAIN,
+            streamingAnimationStyle = EchoStreamingAnimationStyle.INK_RING
+        )))
+        val recreated = PersonalizationManager(context)
+        assertTrue(recreated.saveSettings(recreated.getSettings().copy(appearancePreset = EchoAppearancePreset.INDEX)))
+        val restored = PersonalizationManager(context).getSettings()
+        assertEquals(EchoAppearancePreset.INDEX, restored.appearancePreset)
+        assertEquals(EchoStoryReadingStyle.PLAIN, restored.storyReadingStyle)
+        assertEquals(EchoStreamingAnimationStyle.INK_RING, restored.streamingAnimationStyle)
+        assertEquals("dark", restored.appTheme)
+        assertEquals(20, restored.chatFontSize)
+        assertEquals(1.15f, restored.fontSizeScale, 0f)
+        assertEquals("合成测试指引", restored.globalSystemPrompt)
+        assertEquals("合成偏好", restored.aboutUser)
+        assertFalse(restored.autoNameEnabled)
+    }
+
+    @Test fun unsupportedVisualPreferencesRestoreSafeDefaultsAndValidChoicesRemainIndependent() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        prefs.edit().clear()
+            .putString("appearance_preset", "future_theme")
+            .putString("story_reading_style", "future_reader")
+            .putString("streaming_animation_style", "future_animation")
+            .commit()
+        val manager = PersonalizationManager(context)
+        val restored = manager.getSettings()
+        assertEquals(EchoAppearancePreset.EXISTING, restored.appearancePreset)
+        assertEquals(EchoStoryReadingStyle.IMMERSIVE, restored.storyReadingStyle)
+        assertEquals(EchoStreamingAnimationStyle.THIN_CURSOR, restored.streamingAnimationStyle)
+        for (preset in EchoAppearancePreset.values) {
+            for (reader in EchoStoryReadingStyle.values) {
+                for (animation in EchoStreamingAnimationStyle.values) {
+                    assertTrue(manager.saveSettings(restored.copy(appearancePreset = preset,
+                        storyReadingStyle = reader, streamingAnimationStyle = animation)))
+                    val actual = PersonalizationManager(context).getSettings()
+                    assertEquals(preset, actual.appearancePreset)
+                    assertEquals(reader, actual.storyReadingStyle)
+                    assertEquals(animation, actual.streamingAnimationStyle)
+                }
+            }
+        }
+        assertTrue(manager.saveSettings(restored.copy(appearancePreset = "invalid",
+            storyReadingStyle = "invalid", streamingAnimationStyle = "invalid")))
+        assertEquals(EchoAppearancePreset.EXISTING, prefs.getString("appearance_preset", null))
+        assertEquals(EchoStoryReadingStyle.IMMERSIVE, prefs.getString("story_reading_style", null))
+        assertEquals(EchoStreamingAnimationStyle.THIN_CURSOR, prefs.getString("streaming_animation_style", null))
+    }
+
     @Test fun httpPermissionsDefaultClosedPersistAndRemainDeviceLocal() {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("http_access_permissions", 0)

@@ -79,7 +79,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import com.aiassistant.ui.components.EchoDoubleArcRing
 import com.aiassistant.ui.components.EchoPulseRing
 import com.aiassistant.ui.components.EchoTextToolbar
-import com.aiassistant.ui.components.EchoThinkingDots
+import com.aiassistant.ui.components.EchoStreamingIndicator
+import com.aiassistant.ui.components.StreamingAnimationStyle
 import com.aiassistant.ui.components.EchoTextToolbarHost
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
@@ -394,6 +395,7 @@ private val chatCustomAvatarCache = object : android.util.LruCache<String, andro
 @Composable
 internal fun MessageBubble(
     message: Message,
+    isStory: Boolean = false,
     hazeState: dev.chrisbanes.haze.HazeState? = null,
     readableBackdrop: Color = Color.Unspecified,
     isGenerating: Boolean = false,
@@ -424,6 +426,8 @@ internal fun MessageBubble(
     settleSignal: Boolean = false
 ) {
     val isUser = message.role == "user"
+    val personalizationSettings = rememberChatPersonalizationSettings()
+    val readingStyle = personalizationSettings.storyReadingStyle.takeIf { isStory }
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }
@@ -645,6 +649,7 @@ internal fun MessageBubble(
                             )
                         }
                     } else {
+                        StoryReadingTypography(readingStyle) {
                         MarkdownText(
                             content = message.content,
                             color = contentColor,
@@ -654,8 +659,10 @@ internal fun MessageBubble(
                             },
                             streaming = isGenerating || cursorAlive,
                             cursor = if (cursorAlive) generationAccentColor else null,
-                            cursorFading = !isGenerating
+                            cursorFading = !isGenerating,
+                            streamingAnimationStyle = personalizationSettings.streamingAnimationStyle
                         )
+                        }
                         if (citations.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
                             CitationsCardsRow(
@@ -672,16 +679,7 @@ internal fun MessageBubble(
                     )
                 }
 
-                // v2.7.4 需求 1/2：流式输出动画（呼吸光环点）持续**整个生成过程**、直到模型回复
-                // 结束才消失——正文流式期间跟随内容末尾：配合列表钉底跟随，动画与屏幕底部
-                // （输入栏上方）的距离在流式期间保持稳定。
-                // v2.7.6 需求 2：正文空白阶段（连接/思考）动画已上移到胶囊下方与连接提醒同行，
-                // 此处仅在正文开始后渲染，避免同屏两份动画。
-                // v2.7.7 需求 3：与内容末尾的间距 6dp→2dp，动画更贴近正文与底部时间戳。
-                if (isGenerating && message.content.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    TypingIndicator(accentColor = generationAccentColor)
-                }
+                // Markdown owns the single output marker; do not add a second waiting animation.
             }
         }
     }
@@ -781,9 +779,6 @@ internal fun MessageBubble(
                         .fillMaxWidth()
                         .padding(bottom = 6.dp)
                 ) {
-                    val personalizationSettings = remember {
-                        AiAssistantApp.instance.personalizationManager.getSettings()
-                    }
                     val isMessageContentError = contentIsErrorMessage
                     val isConnecting = isGenerating && message.content.isBlank() && !hasThinking
                     val isThinkingActive = isGenerating && hasThinking && message.content.isBlank()
@@ -1123,7 +1118,10 @@ internal fun MessageBubble(
                                 .fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TypingIndicator(accentColor = generationAccentColor)
+                            TypingIndicator(
+                                accentColor = generationAccentColor,
+                                style = personalizationSettings.streamingAnimationStyle
+                            )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = if (generationState == GenerationUiState.Reconnecting && !reconnectStatus.isNullOrBlank()) {
@@ -1927,16 +1925,30 @@ internal fun ChatAvatar(
 
 @Composable
 fun TypingIndicator(
-    accentColor: androidx.compose.ui.graphics.Color
+    accentColor: androidx.compose.ui.graphics.Color,
+    style: String = StreamingAnimationStyle.THIN_CURSOR
 ) {
-    // 重新设计：呼吸光环点（Canvas 绘制，一次组合、零重组、零每帧分配），
-    // 配色消费 generationAccentColor，与流式光标/脉冲环同源；
-    // v2.7.6 需求 2：主体点放大（2.8dp→4dp 半径，含光环扩散余量），画布随之加大
-    EchoThinkingDots(
-        color = accentColor,
-        modifier = Modifier.width(44.dp).height(20.dp),
-        dotRadius = 4.dp
-    )
+    Box(Modifier.width(28.dp).height(20.dp), contentAlignment = Alignment.CenterStart) {
+        EchoStreamingIndicator(color = accentColor, style = style, compact = true)
+    }
+}
+
+/** Update existing bubbles when the user changes an appearance setting. */
+@Composable
+internal fun rememberChatPersonalizationSettings(): com.aiassistant.utils.PersonalizationSettings {
+    val context = LocalContext.current.applicationContext
+    val manager = AiAssistantApp.instance.personalizationManager
+    var settings by remember(manager) { mutableStateOf(manager.getSettings()) }
+    DisposableEffect(context, manager) {
+        val prefs = context.getSharedPreferences("personalization_settings", android.content.Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            settings = manager.getSettings()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        settings = manager.getSettings()
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    return settings
 }
 
 // 格式化时间
