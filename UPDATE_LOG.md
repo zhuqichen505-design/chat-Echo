@@ -16,6 +16,8 @@
 
 - 最终验证：`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合退出 0；85 套件 / 695 项全部通过，失败、错误、跳过均为 0；Lint 0 Error / 95 Warning；`git diff --check` 退出 0。 Release 构建、aapt/apksigner、APK扫描和排他复制/哈希复核均退出 0。APK 25,292,273 字节、446 个条目，SHA256 `833A9233C7422296D6078BB7D9EE80F65893C29156A7B66FDCAB677A46028E15`；版本 2.8.6/192、API 26–34、arm64-v8a、applicationId `com.aiassistant`。 非正式生产签名；安装启动未验收。
 
+- 远端发布：提交 `5a3eece`、标签 `v2.8.6` 与 main 已核验；GitHub Release 已公开，唯一附件为 `Echo-v2.8.6.apk`，公开下载 SHA256 与本机一致。旧 v2.8.5 Release/标签以及误跟随推送的 v2.8.3/v2.8.4 远端标签已撤下；本机历史 APK 与标签保留。
+
 ## 2026-10-16：v2.8.5 信息架构、创作工作台与外观历史
 
 - 降低底部导航为紧凑 56dp 内容区并保留系统导航栏安全区；侧栏与底栏复用同一目的地定义，仍为会话、创作、统计、设置四项。首页移除重复大标题和重复设置按钮，新对话与配置收拢为一行，故事卡和会话列表使用真实数据。

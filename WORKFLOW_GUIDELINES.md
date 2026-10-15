@@ -29,6 +29,7 @@
 - 2026-10-16（v2.8.6/192）：完成历史删除/背景/主题/普通阅读作用域、多方向入口、作品与工作区重写、完整压缩/提取和实际请求统计。全部来自本仓库，未读 `APP改进/`；Room v35（20 实体），新增保留旧数据的 34→35 迁移。
 - 最终验证：`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合退出 0；85 套件 / 695 项全部通过，失败、错误、跳过均为 0；Lint 0 Error / 95 Warning；`git diff --check` 退出 0。 `assembleRelease --no-daemon` 退出 0；签名/版本/架构/已知隐私模式扫描与排他复制/副本哈希校验均退出 0。APK 25,292,273 字节、446 个条目，SHA256 `833A9233C7422296D6078BB7D9EE80F65893C29156A7B66FDCAB677A46028E15`；版本 2.8.6/192、API 26–34、arm64-v8a、applicationId `com.aiassistant`。
 - 收敛过程中联合验证曾退出 1：补齐调用参数和协程 import；修正旧颜色/展示断言、分段压力样本、Windows Robolectric 原生图形/POSIX文件替换适配；4处 produceState 改为显式状态＋LaunchedEffect 后通过。没有删除失败测试、忽略规则或扩张 Lint 隔离。最终命令包含本机专用 Gradle 缓存参数，未写入公共配置。
+- 远端：提交 `5a3eece`、main 与 `v2.8.6` 已通过 `git ls-remote` 核验；GitHub Release 唯一附件与公开下载哈希核验通过。旧 v2.8.5 Release/标签及误跟随推送的 v2.8.3/v2.8.4 远端标签已撤下，本机历史包和标签保留。
 - 无真机/模拟器或真实第三方模型验收。原有未跟踪图片与浏览器目录保留且排除上传，本机签名/配置/缓存与构建输出不提交；本机历史 APK 永久保留。远端推送与 Release 实际结果在完成后另记。
 
 
