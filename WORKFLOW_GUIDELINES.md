@@ -26,6 +26,12 @@
 
 ## 本次记录
 
+- 2026-10-16（v2.8.5/191）：完成紧凑底栏、高密度首页与设置分区、创作工作台真实会话索引、头像/背景历史、主题语义色、创作衬线字体及回复结束不滚动。参考 SillyTavern、Character Card V2、RisuAI/KoboldCpp 公开资料；未使用 `APP改进/`。Room v34 不变。
+- 验证退出码：`compileDebugKotlin` 0，`testDebugUnitTest` 0（84 套件/643 项，无失败/错误/跳过），`lintDebug` 0（0 Error/88 Warning），`git diff --check` 0；`assembleRelease` 0。APK 25,275,889 字节、446 条目，aapt/apksigner/副本 SHA256 校验均 0。
+- 隐私核查：32 个完整暂存文件（源码、文档、字体和 OFL 许可证）自动扫描及人工复核退出 0；未包含本机配置、密钥、用户数据或未跟踪图片/浏览器目录。APK 原始字节与可读 UTF-16 字符串扫描退出 0；仅使用公共维护者占位身份。
+- 发布：远端 main 与 `v2.8.5` 已核验；GitHub Release 仅含 `Echo-v2.8.5.apk`，公开下载 SHA256 与本机一致；旧 v2.8.4 Release/远端标签已撤下，本机历史安装包保留。无真机/模拟器，安装启动与视觉人工验收待执行。
+
+
 - 2026-10-16（v2.8.4/190）：两种首页可切换、统一四入口导航、独立密度/继续故事偏好；前两次世界书、聊天及外观改动一并出包。全部来源为本仓库，无旧目录复制，Room v34 不变。
 - 首轮编译/全量单测/Lint 联合退出 0，643 项通过，Lint 0/89；修正新增滚动状态警告及收尾后，最终 `compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合退出 0，84 套件/643 项通过、失败/错误/跳过 0，Lint 0 Error/88 Warning。`git diff --check` 退出 0。本机专用 Gradle 缓存不纳入公共配置。
 - 新增 10 项领域测试，覆盖真实导航控制器与偏好持久化、首页故事隐私过滤和索引；没有设备/模拟器，实际安装、启动、系统返回派发、大字体、横屏和真实模型调用待验收。验收清单见 walkthrough.md。
