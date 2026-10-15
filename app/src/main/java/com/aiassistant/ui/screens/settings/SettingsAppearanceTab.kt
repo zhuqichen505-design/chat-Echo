@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -74,6 +75,7 @@ import com.aiassistant.domain.model.ModelCustomSettings
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoStreamingIndicator
+import com.aiassistant.ui.components.echoSwitchColors
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.readableTextColorFor
@@ -99,11 +101,17 @@ import com.aiassistant.utils.HiddenConversationLock
 import com.aiassistant.utils.TavilySearchSettings
 import com.aiassistant.utils.AppThemeMode
 import com.aiassistant.utils.EchoAppearancePreset
+import com.aiassistant.utils.EchoHomeLayoutStyle
 import com.aiassistant.utils.EchoStoryReadingStyle
 import com.aiassistant.utils.EchoStreamingAnimationStyle
 import com.aiassistant.utils.PersonalizationSettings
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import com.aiassistant.tools.search.SearchEngineType
 import com.google.gson.Gson
@@ -311,6 +319,48 @@ fun AppearanceTab(
                 selected = themeMode,
                 onSelected = onThemeModeChange
             )
+        }
+
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
+                Text("首页布局", style = MaterialTheme.typography.titleMedium)
+                Text("两种布局均提供会话、创作、统计和设置入口。配色、创作阅读与流式动画可分别选择。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HomeLayoutChoice(
+                        style = EchoHomeLayoutStyle.FOCUS,
+                        label = "聚焦对话（底栏）",
+                        selected = settings.homeLayoutStyle == EchoHomeLayoutStyle.FOCUS,
+                        compact = settings.homeCompactList,
+                        showRecentStory = settings.homeShowRecentStory,
+                        onSelected = { saveVisualPreference("首页已切换为聚焦对话") { it.copy(homeLayoutStyle = EchoHomeLayoutStyle.FOCUS) } },
+                        modifier = Modifier.weight(1f)
+                    )
+                    HomeLayoutChoice(
+                        style = EchoHomeLayoutStyle.WORKBENCH,
+                        label = "侧栏工作台（左栏）",
+                        selected = settings.homeLayoutStyle == EchoHomeLayoutStyle.WORKBENCH,
+                        compact = settings.homeCompactList,
+                        showRecentStory = settings.homeShowRecentStory,
+                        onSelected = { saveVisualPreference("首页已切换为侧栏工作台") { it.copy(homeLayoutStyle = EchoHomeLayoutStyle.WORKBENCH) } },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                HomeLayoutSwitch(
+                    title = "列表紧凑模式", description = "减少两种布局中会话列表的留白。",
+                    checked = settings.homeCompactList,
+                    onCheckedChange = { value -> saveVisualPreference(if (value) "已开启列表紧凑模式" else "已恢复标准列表间距") {
+                        it.copy(homeCompactList = value)
+                    } }
+                )
+                HomeLayoutSwitch(
+                    title = "显示继续故事", description = "在两种布局中显示最近故事的继续入口。",
+                    checked = settings.homeShowRecentStory,
+                    onCheckedChange = { value -> saveVisualPreference(if (value) "首页将显示继续故事" else "已隐藏首页继续故事") {
+                        it.copy(homeShowRecentStory = value)
+                    } }
+                )
+            }
         }
 
         item {
@@ -730,3 +780,82 @@ private data class AppearancePresetOption(
     val description: String,
     val colors: List<Long>
 )
+
+@Composable
+private fun HomeLayoutChoice(
+    style: String,
+    label: String,
+    selected: Boolean,
+    compact: Boolean,
+    showRecentStory: Boolean,
+    onSelected: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(modifier.clip(RoundedCornerShape(12.dp))
+        .selectable(selected = selected, role = Role.RadioButton, onClick = onSelected)
+        .padding(4.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(106.dp).clip(RoundedCornerShape(8.dp))
+            .background(colors.surface).border(if (selected) 2.dp else 1.dp,
+                if (selected) colors.primary else colors.outlineVariant, RoundedCornerShape(8.dp))
+            .clearAndSetSemantics { }) {
+            val gap = 9.dp.toPx()
+            val isWorkbench = style == EchoHomeLayoutStyle.WORKBENCH
+            val navWidth = if (isWorkbench) size.width * 0.22f else 0f
+            val navHeight = if (isWorkbench) 0f else 23.dp.toPx()
+            val contentLeft = navWidth + gap
+            val contentWidth = size.width - contentLeft - gap
+            val navColor = colors.primaryContainer
+            if (isWorkbench) {
+                drawRect(navColor, size = Size(navWidth, size.height))
+            } else {
+                drawRect(navColor, topLeft = Offset(0f, size.height - navHeight), size = Size(size.width, navHeight))
+            }
+            repeat(4) { index ->
+                val center = if (isWorkbench) Offset(navWidth / 2f, (index + 0.5f) * size.height / 4f)
+                    else Offset((index + 0.5f) * size.width / 4f, size.height - navHeight / 2f)
+                drawCircle(if (index == 0) colors.primary else colors.onPrimaryContainer.copy(alpha = 0.55f),
+                    radius = if (index == 0) 4.dp.toPx() else 2.5.dp.toPx(), center = center)
+            }
+            val radius = CornerRadius(2.dp.toPx())
+            drawRoundRect(colors.onSurface, topLeft = Offset(contentLeft, gap),
+                size = Size(contentWidth * 0.58f, 4.dp.toPx()), cornerRadius = radius)
+            var rowTop = gap + 12.dp.toPx()
+            if (showRecentStory) {
+                drawRoundRect(colors.secondaryContainer, topLeft = Offset(contentLeft, rowTop),
+                    size = Size(contentWidth, 17.dp.toPx()), cornerRadius = radius)
+                drawRoundRect(colors.onSecondaryContainer, topLeft = Offset(contentLeft + 5.dp.toPx(), rowTop + 7.dp.toPx()),
+                    size = Size(contentWidth * 0.45f, 3.dp.toPx()), cornerRadius = radius)
+                rowTop += 24.dp.toPx()
+            }
+            val rowGap = if (compact) 9.dp.toPx() else 15.dp.toPx()
+            val rowCount = ((size.height - navHeight - gap - rowTop) / rowGap).toInt().coerceAtLeast(1)
+            repeat(rowCount) { index ->
+                drawRoundRect(colors.onSurfaceVariant.copy(alpha = 0.48f), topLeft = Offset(contentLeft, rowTop + index * rowGap),
+                    size = Size(contentWidth * (if (index % 2 == 0) 0.9f else 0.68f), 3.dp.toPx()), cornerRadius = radius)
+            }
+        }
+        Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selected, onClick = null)
+            Spacer(Modifier.width(4.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = colors.onSurface, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun HomeLayoutSwitch(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp)
+        .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+        .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = null, colors = echoSwitchColors(),
+            modifier = Modifier.clearAndSetSemantics { })
+    }
+}

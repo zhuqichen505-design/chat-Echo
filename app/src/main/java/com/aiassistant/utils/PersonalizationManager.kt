@@ -15,6 +15,16 @@ object EchoAppearancePreset {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: EXISTING
 }
 
+/** 首页布局仅改变导航与会话列表的排布，独立于配色、阅读和动画选择。 */
+object EchoHomeLayoutStyle {
+    const val FOCUS = "focus"
+    const val WORKBENCH = "workbench"
+
+    val values = listOf(FOCUS, WORKBENCH)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: FOCUS
+}
+
 /** 创作阅读页的独立正文排版预设；不改变普通聊天页排版。 */
 object EchoStoryReadingStyle {
     const val IMMERSIVE = "immersive"
@@ -53,6 +63,9 @@ data class PersonalizationSettings(
     val appearancePreset: String = EchoAppearancePreset.EXISTING,
     val storyReadingStyle: String = EchoStoryReadingStyle.IMMERSIVE,
     val streamingAnimationStyle: String = EchoStreamingAnimationStyle.THIN_CURSOR,
+    val homeLayoutStyle: String = EchoHomeLayoutStyle.FOCUS,
+    val homeCompactList: Boolean = false,
+    val homeShowRecentStory: Boolean = true,
     val autoNameEnabled: Boolean = true,
     val autoNameApiConfigId: Long = 0L,
     val autoNameModel: String = "",
@@ -134,6 +147,9 @@ class PersonalizationManager(private val context: Context) {
             appearancePreset = EchoAppearancePreset.sanitize(prefs.getString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.EXISTING)),
             storyReadingStyle = EchoStoryReadingStyle.sanitize(prefs.getString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.IMMERSIVE)),
             streamingAnimationStyle = EchoStreamingAnimationStyle.sanitize(prefs.getString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.THIN_CURSOR)),
+            homeLayoutStyle = EchoHomeLayoutStyle.sanitize(prefs.getString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.FOCUS)),
+            homeCompactList = prefs.getBoolean(KEY_HOME_COMPACT_LIST, false),
+            homeShowRecentStory = prefs.getBoolean(KEY_HOME_SHOW_RECENT_STORY, true),
             autoNameEnabled = prefs.getBoolean(KEY_AUTO_NAME_ENABLED, true),
             autoNameApiConfigId = prefs.getLong(KEY_AUTO_NAME_API_CONFIG_ID, 0L),
             autoNameModel = prefs.getString(KEY_AUTO_NAME_MODEL, "").orEmpty(),
@@ -174,6 +190,9 @@ class PersonalizationManager(private val context: Context) {
             .putString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.sanitize(settings.appearancePreset))
             .putString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.sanitize(settings.storyReadingStyle))
             .putString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.sanitize(settings.streamingAnimationStyle))
+            .putString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.sanitize(settings.homeLayoutStyle))
+            .putBoolean(KEY_HOME_COMPACT_LIST, settings.homeCompactList)
+            .putBoolean(KEY_HOME_SHOW_RECENT_STORY, settings.homeShowRecentStory)
             .putBoolean(KEY_AUTO_NAME_ENABLED, settings.autoNameEnabled)
             .putLong(KEY_AUTO_NAME_API_CONFIG_ID, settings.autoNameApiConfigId)
             .putString(KEY_AUTO_NAME_MODEL, settings.autoNameModel)
@@ -259,6 +278,9 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_APPEARANCE_PRESET = "appearance_preset"
         private const val KEY_STORY_READING_STYLE = "story_reading_style"
         private const val KEY_STREAMING_ANIMATION_STYLE = "streaming_animation_style"
+        private const val KEY_HOME_LAYOUT_STYLE = "home_layout_style"
+        private const val KEY_HOME_COMPACT_LIST = "home_compact_list"
+        private const val KEY_HOME_SHOW_RECENT_STORY = "home_show_recent_story"
         private const val KEY_AUTO_NAME_ENABLED = "auto_name_enabled"
         private const val KEY_AUTO_NAME_API_CONFIG_ID = "auto_name_api_config_id"
         private const val KEY_AUTO_NAME_MODEL = "auto_name_model"

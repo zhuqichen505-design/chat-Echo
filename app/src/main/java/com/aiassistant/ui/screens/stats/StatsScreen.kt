@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,7 +83,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    showBackButton: Boolean = true
 ) {
     val localContext = LocalContext.current
     val context = localContext.applicationContext
@@ -91,10 +93,10 @@ fun StatsScreen(
     }
     val hazeState = rememberEchoHazeState()
     val readableBackdrop = rememberReadableBackdropColor(statsBackgroundBitmap)
-    var selectedPeriod by remember { mutableStateOf(StatsPeriod.Day) }
+    var selectedPeriod by rememberSaveable { mutableStateOf(StatsPeriod.Day) }
     // 模型多选（v2.6.7 需求 5d）：记录被取消选择的模型集合，空集合 = 全部模型选中（默认）；
     // 点击「全部模型」在全选/全不选间切换，点击单个模型行切换其选中态
-    var deselectedModels by remember { mutableStateOf(setOf<String>()) }
+    var deselectedModels by rememberSaveable { mutableStateOf(setOf<String>()) }
     var refreshKey by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var stats by remember { mutableStateOf<List<UsageRow>>(emptyList()) }
     var previousStats by remember { mutableStateOf<List<UsageRow>>(emptyList()) }
@@ -362,8 +364,12 @@ fun StatsScreen(
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        if (showBackButton) {
+                            IconButton(onClick = onNavigateBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                        } else {
+                            Spacer(Modifier.width(12.dp))
                         }
                         StatsHeaderIcon()
                         Spacer(modifier = Modifier.width(6.dp))

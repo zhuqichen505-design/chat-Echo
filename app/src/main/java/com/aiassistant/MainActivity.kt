@@ -5,6 +5,7 @@ package com.aiassistant
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -29,6 +30,12 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.aiassistant.ui.components.EchoAppShell
+import com.aiassistant.ui.components.EchoDestination
+import com.aiassistant.ui.components.openEchoDestination
+import com.aiassistant.utils.PersonalizationSettings
+import com.aiassistant.utils.rememberPersonalizationSettings
 import androidx.navigation.navArgument
 import com.aiassistant.domain.model.CharacterProfile
 import com.aiassistant.domain.model.RoleplayScenario
@@ -46,7 +53,6 @@ import com.aiassistant.ui.screens.settings.SettingsScreen
 import com.aiassistant.ui.screens.stats.StatsScreen
 import com.aiassistant.ui.theme.AiApiAssistantTheme
 import com.aiassistant.utils.AppThemeMode
-import com.aiassistant.utils.EchoAppearancePreset
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.collectAsState
@@ -62,9 +68,8 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val themeManager = remember { AiAssistantApp.instance.themePreferenceManager }
-            val personalizationManager = remember { AiAssistantApp.instance.personalizationManager }
+            val appearance = rememberPersonalizationSettings()
             var themeMode by remember { mutableStateOf(themeManager.getThemeMode()) }
-            var appearancePreset by remember { mutableStateOf(personalizationManager.getSettings().appearancePreset) }
             val systemDark = isSystemInDarkTheme()
             val useDarkTheme = when (themeMode) {
                 AppThemeMode.System -> systemDark
@@ -72,7 +77,7 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.Dark -> true
             }
 
-            AiApiAssistantTheme(darkTheme = useDarkTheme, appearancePreset = appearancePreset) {
+            AiApiAssistantTheme(darkTheme = useDarkTheme, appearancePreset = appearance.appearancePreset) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -87,9 +92,7 @@ class MainActivity : ComponentActivity() {
                                     themeMode = mode
                                 }
                             },
-                            onAppearancePresetChange = { preset ->
-                                appearancePreset = EchoAppearancePreset.sanitize(preset)
-                            }
+                            appearance = appearance
                         )
                     }
                 }
@@ -102,303 +105,323 @@ class MainActivity : ComponentActivity() {
 fun AiAssistantNavigation(
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
-    onAppearancePresetChange: (String) -> Unit = {}
+    appearance: PersonalizationSettings = PersonalizationSettings()
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
     val roleplayViewModel: RoleplayViewModel = viewModel()
 
-    NavHost(
-        navController = navController,
-        startDestination = "home",
-        enterTransition = {
-            slideInHorizontally(
-                initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(300))
-        },
-        exitTransition = {
-            slideOutHorizontally(
-                targetOffsetX = { fullWidth -> -fullWidth / 4 },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
-            ) + fadeOut(animationSpec = tween(250))
-        },
-        popEnterTransition = {
-            slideInHorizontally(
-                initialOffsetX = { fullWidth -> -fullWidth / 4 },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(300))
-        },
-        popExitTransition = {
-            slideOutHorizontally(
-                targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
-            ) + fadeOut(animationSpec = tween(250))
-        }
+    val entry by navController.currentBackStackEntryAsState()
+    val selectedDestination = EchoDestination.fromRoute(entry?.destination?.route ?: "home")
+    fun openDestination(destination: EchoDestination) {
+        navController.openEchoDestination(destination)
+    }
+    BackHandler(enabled = selectedDestination != null && selectedDestination != EchoDestination.CONVERSATIONS) {
+        openDestination(EchoDestination.CONVERSATIONS)
+    }
+
+    EchoAppShell(
+        layoutStyle = appearance.homeLayoutStyle,
+        selected = selectedDestination,
+        onSelect = ::openDestination
     ) {
-        // 主页
-        composable("home") {
-            HomeScreen(
-                onNavigateToChat = { conversationId ->
-                    navController.navigate("chat/$conversationId") {
-                        // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
-                        // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
-                        launchSingleTop = true
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            enterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { fullWidth -> fullWidth },
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) + fadeIn(animationSpec = tween(300))
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { fullWidth -> -fullWidth / 4 },
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(250))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { fullWidth -> -fullWidth / 4 },
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) + fadeIn(animationSpec = tween(300))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { fullWidth -> fullWidth },
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(250))
+            }
+        ) {
+            // 主页
+            composable("home") {
+                HomeScreen(
+                    homeLayoutStyle = appearance.homeLayoutStyle,
+                    compactCards = appearance.homeCompactList,
+                    showRecentStory = appearance.homeShowRecentStory,
+                    onNavigateToChat = { conversationId ->
+                        navController.navigate("chat/$conversationId") {
+                            // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
+                            // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
+                            launchSingleTop = true
+                        }
+                    },
+                    onNavigateToSettings = {
+                        openDestination(EchoDestination.SETTINGS)
+                    },
+                    onNavigateToHistory = {
+                        navController.navigate("history")
+                    },
+                    onNavigateToStats = {
+                        openDestination(EchoDestination.STATISTICS)
+                    },
+                    onNavigateToFolders = {
+                        navController.navigate("folders")
+                    },
+                    onNavigateToRoleplayStudio = {
+                        openDestination(EchoDestination.CREATION)
                     }
-                },
-                onNavigateToSettings = {
-                    navController.navigate("settings")
-                },
-                onNavigateToHistory = {
-                    navController.navigate("history")
-                },
-                onNavigateToStats = {
-                    navController.navigate("stats")
-                },
-                onNavigateToFolders = {
-                    navController.navigate("folders")
-                },
-                onNavigateToRoleplayStudio = {
-                    navController.navigate("roleplay_studio")
-                }
-            )
-        }
+                )
+            }
 
-        // 对话页面
-        composable(
-            route = "chat/{conversationId}",
-            arguments = listOf(
-                navArgument("conversationId") { type = NavType.LongType }
-            )
-        ) { backStackEntry ->
-            val conversationId = backStackEntry.arguments?.getLong("conversationId") ?: return@composable
-            ChatScreen(
-                conversationId = conversationId,
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onNavigateToChat = { newConversationId ->
-                    navController.navigate("chat/$newConversationId") {
-                        // v2.6.8 需求 4：同上，避免重复压栈生成多个对话页实例
-                        launchSingleTop = true
+            // 对话页面
+            composable(
+                route = "chat/{conversationId}",
+                arguments = listOf(
+                    navArgument("conversationId") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val conversationId = backStackEntry.arguments?.getLong("conversationId") ?: return@composable
+                ChatScreen(
+                    conversationId = conversationId,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToChat = { newConversationId ->
+                        navController.navigate("chat/$newConversationId") {
+                            // v2.6.8 需求 4：同上，避免重复压栈生成多个对话页实例
+                            launchSingleTop = true
+                        }
+                    },
+                    onNavigateToRoleplayMemory = { sessionId ->
+                        navController.navigate("roleplay_memory/$sessionId")
                     }
-                },
-                onNavigateToRoleplayMemory = { sessionId ->
-                    navController.navigate("roleplay_memory/$sessionId")
-                }
-            )
-        }
+                )
+            }
 
-        // 角色扮演工作室
-        composable("roleplay_studio") {
-            RoleplayStudioScreen(
-                viewModel = roleplayViewModel,
-                onNavigateToCharacters = {},
-                onNavigateToScenarios = {},
-                onNavigateToCharacterEditor = { character ->
-                    if (character != null) {
-                        navController.navigate("roleplay_character_editor?characterId=${character.id}")
-                    } else {
-                        navController.navigate("roleplay_character_editor")
+            // 角色扮演工作室
+            composable("roleplay_studio") {
+                RoleplayStudioScreen(
+                    showBackButton = false,
+                    viewModel = roleplayViewModel,
+                    onNavigateToCharacters = {},
+                    onNavigateToScenarios = {},
+                    onNavigateToCharacterEditor = { character ->
+                        if (character != null) {
+                            navController.navigate("roleplay_character_editor?characterId=${character.id}")
+                        } else {
+                            navController.navigate("roleplay_character_editor")
+                        }
+                    },
+                    onNavigateToScenarioEditor = { scenario ->
+                        if (scenario != null) {
+                            navController.navigate("roleplay_scenario_editor?scenarioId=${scenario.id}")
+                        } else {
+                            navController.navigate("roleplay_scenario_editor")
+                        }
+                    },
+                    onNavigateToSession = { conversationId ->
+                        navController.navigate("chat/$conversationId") {
+                            // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
+                            // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
+                            launchSingleTop = true
+                        }
+                    },
+                    onCreateNewSession = {
+                        navController.navigate("roleplay_new_session")
+                    },
+                    onBack = {
+                        navController.popBackStack()
                     }
-                },
-                onNavigateToScenarioEditor = { scenario ->
-                    if (scenario != null) {
-                        navController.navigate("roleplay_scenario_editor?scenarioId=${scenario.id}")
-                    } else {
-                        navController.navigate("roleplay_scenario_editor")
-                    }
-                },
-                onNavigateToSession = { conversationId ->
-                    navController.navigate("chat/$conversationId") {
-                        // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
-                        // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
-                        launchSingleTop = true
-                    }
-                },
-                onCreateNewSession = {
-                    navController.navigate("roleplay_new_session")
-                },
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
+                )
+            }
 
-        // 新建角色扮演会话
-        composable("roleplay_new_session") {
-            val apiConfigs by AiAssistantApp.instance.database.apiConfigDao().getAllConfigs().collectAsState(initial = emptyList())
-            NewRoleplaySessionScreen(
-                viewModel = roleplayViewModel,
-                apiConfigs = apiConfigs,
-                onStartSession = { characterIds, scenarioId, apiConfigId, modelName, narrativeMode ->
-                    roleplayViewModel.createStorySessionAndStart(
-                        characterIds = characterIds,
-                        scenarioId = scenarioId,
-                        apiConfigId = apiConfigId,
-                        modelName = modelName,
-                        narrativeMode = narrativeMode,
-                        onSuccess = { conversationId ->
-                            navController.navigate("chat/$conversationId") {
-                                popUpTo("roleplay_studio")
-                                // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片
-                                // 产生两个 ChatViewModel 互相取消/清理生成会话，导致正在连接或回复的请求被中断
-                                launchSingleTop = true
+            // 新建角色扮演会话
+            composable("roleplay_new_session") {
+                val apiConfigs by AiAssistantApp.instance.database.apiConfigDao().getAllConfigs().collectAsState(initial = emptyList())
+                NewRoleplaySessionScreen(
+                    viewModel = roleplayViewModel,
+                    apiConfigs = apiConfigs,
+                    onStartSession = { characterIds, scenarioId, apiConfigId, modelName, narrativeMode ->
+                        roleplayViewModel.createStorySessionAndStart(
+                            characterIds = characterIds,
+                            scenarioId = scenarioId,
+                            apiConfigId = apiConfigId,
+                            modelName = modelName,
+                            narrativeMode = narrativeMode,
+                            onSuccess = { conversationId ->
+                                navController.navigate("chat/$conversationId") {
+                                    popUpTo("roleplay_studio")
+                                    // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片
+                                    // 产生两个 ChatViewModel 互相取消/清理生成会话，导致正在连接或回复的请求被中断
+                                    launchSingleTop = true
+                                }
+                            }
+                        )
+                    },
+                    onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            // 角色卡编辑/创建
+            composable(
+                route = "roleplay_character_editor?characterId={characterId}",
+                arguments = listOf(
+                    navArgument("characterId") {
+                        type = NavType.LongType
+                        defaultValue = 0L
+                    }
+                )
+            ) { backStackEntry ->
+                val characterId = backStackEntry.arguments?.getLong("characterId") ?: 0L
+                val characters by roleplayViewModel.characters.collectAsState()
+                val character = if (characterId > 0) characters.find { it.id == characterId } else null
+
+                CharacterEditorScreen(
+                    character = character,
+                    onSave = { savedCharacter ->
+                        roleplayViewModel.saveCharacter(savedCharacter) { success, errorMsg ->
+                            if (success) {
+                                navController.popBackStack()
+                            } else {
+                                android.widget.Toast.makeText(context, "保存失败: ${errorMsg ?: "未知错误"}", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
-                    )
-                },
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
-
-        // 角色卡编辑/创建
-        composable(
-            route = "roleplay_character_editor?characterId={characterId}",
-            arguments = listOf(
-                navArgument("characterId") {
-                    type = NavType.LongType
-                    defaultValue = 0L
-                }
-            )
-        ) { backStackEntry ->
-            val characterId = backStackEntry.arguments?.getLong("characterId") ?: 0L
-            val characters by roleplayViewModel.characters.collectAsState()
-            val character = if (characterId > 0) characters.find { it.id == characterId } else null
-
-            CharacterEditorScreen(
-                character = character,
-                onSave = { savedCharacter ->
-                    roleplayViewModel.saveCharacter(savedCharacter) { success, errorMsg ->
-                        if (success) {
+                    },
+                    onDelete = character?.let {
+                        {
+                            roleplayViewModel.deleteCharacter(it)
                             navController.popBackStack()
-                        } else {
-                            android.widget.Toast.makeText(context, "保存失败: ${errorMsg ?: "未知错误"}", android.widget.Toast.LENGTH_SHORT).show()
                         }
-                    }
-                },
-                onDelete = character?.let {
-                    {
-                        roleplayViewModel.deleteCharacter(it)
+                    },
+                    onBack = {
                         navController.popBackStack()
                     }
-                },
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
+                )
+            }
 
-        // 场景卡编辑/创建
-        composable(
-            route = "roleplay_scenario_editor?scenarioId={scenarioId}",
-            arguments = listOf(
-                navArgument("scenarioId") {
-                    type = NavType.LongType
-                    defaultValue = 0L
-                }
-            )
-        ) { backStackEntry ->
-            val scenarioId = backStackEntry.arguments?.getLong("scenarioId") ?: 0L
-            val scenarios by roleplayViewModel.scenarios.collectAsState()
-            val scenario = if (scenarioId > 0) scenarios.find { it.id == scenarioId } else null
-
-            ScenarioEditorScreen(
-                scenario = scenario,
-                onSave = { savedScenario ->
-                    roleplayViewModel.saveScenario(savedScenario) { success, errorMsg ->
-                        if (success) {
-                            navController.popBackStack()
-                        } else {
-                            android.widget.Toast.makeText(context, "保存失败: ${errorMsg ?: "未知错误"}", android.widget.Toast.LENGTH_SHORT).show()
-                        }
+            // 场景卡编辑/创建
+            composable(
+                route = "roleplay_scenario_editor?scenarioId={scenarioId}",
+                arguments = listOf(
+                    navArgument("scenarioId") {
+                        type = NavType.LongType
+                        defaultValue = 0L
                     }
-                },
-                onDelete = scenario?.let {
-                    {
-                        roleplayViewModel.deleteScenario(it)
+                )
+            ) { backStackEntry ->
+                val scenarioId = backStackEntry.arguments?.getLong("scenarioId") ?: 0L
+                val scenarios by roleplayViewModel.scenarios.collectAsState()
+                val scenario = if (scenarioId > 0) scenarios.find { it.id == scenarioId } else null
+
+                ScenarioEditorScreen(
+                    scenario = scenario,
+                    onSave = { savedScenario ->
+                        roleplayViewModel.saveScenario(savedScenario) { success, errorMsg ->
+                            if (success) {
+                                navController.popBackStack()
+                            } else {
+                                android.widget.Toast.makeText(context, "保存失败: ${errorMsg ?: "未知错误"}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onDelete = scenario?.let {
+                        {
+                            roleplayViewModel.deleteScenario(it)
+                            navController.popBackStack()
+                        }
+                    },
+                    onBack = {
                         navController.popBackStack()
                     }
-                },
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
+                )
+            }
 
-        // 记忆管理页面
-        composable(
-            route = "roleplay_memory/{sessionId}",
-            arguments = listOf(
-                navArgument("sessionId") { type = NavType.LongType }
-            )
-        ) { backStackEntry ->
-            val sessionId = backStackEntry.arguments?.getLong("sessionId") ?: return@composable
-            RoleplayMemoryScreen(
-                viewModel = roleplayViewModel,
-                sessionId = sessionId,
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
-
-        // 设置页面
-        composable("settings") {
-            SettingsScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onNavigateToChat = { conversationId ->
-                    navController.navigate("chat/$conversationId") {
-                        // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
-                        // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
-                        launchSingleTop = true
+            // 记忆管理页面
+            composable(
+                route = "roleplay_memory/{sessionId}",
+                arguments = listOf(
+                    navArgument("sessionId") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getLong("sessionId") ?: return@composable
+                RoleplayMemoryScreen(
+                    viewModel = roleplayViewModel,
+                    sessionId = sessionId,
+                    onBack = {
+                        navController.popBackStack()
                     }
-                },
-                themeMode = themeMode,
-                onThemeModeChange = onThemeModeChange,
-                onAppearancePresetChange = onAppearancePresetChange
-            )
-        }
+                )
+            }
 
-        // 历史记录页面
-        composable("history") {
-            HistoryScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onNavigateToChat = { conversationId ->
-                    navController.navigate("chat/$conversationId") {
-                        // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
-                        // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
-                        launchSingleTop = true
+            // 设置页面
+            composable("settings") {
+                SettingsScreen(
+                    showBackButton = false,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToChat = { conversationId ->
+                        navController.navigate("chat/$conversationId") {
+                            // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
+                            // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
+                            launchSingleTop = true
+                        }
+                    },
+                    themeMode = themeMode,
+                    onThemeModeChange = onThemeModeChange
+                )
+            }
+
+            // 历史记录页面
+            composable("history") {
+                HistoryScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToChat = { conversationId ->
+                        navController.navigate("chat/$conversationId") {
+                            // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
+                            // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
+                            launchSingleTop = true
+                        }
                     }
-                }
-            )
-        }
+                )
+            }
 
-        // 统计页面
-        composable("stats") {
-            StatsScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                }
-            )
-        }
+            // 统计页面
+            composable("stats") {
+                StatsScreen(
+                    showBackButton = false,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
 
-        // 文件夹管理页面
-        composable("folders") {
-            FolderManagerScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onFolderSelected = {
-                    navController.popBackStack()
-                }
-            )
+            // 文件夹管理页面
+            composable("folders") {
+                FolderManagerScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onFolderSelected = {
+                        navController.popBackStack()
+                    }
+                )
+            }
         }
     }
 }

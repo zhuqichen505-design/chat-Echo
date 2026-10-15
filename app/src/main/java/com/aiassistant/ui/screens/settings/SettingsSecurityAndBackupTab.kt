@@ -617,7 +617,7 @@ fun BackupTab(
                 isBackingUp = true
                 val result = withContext(Dispatchers.IO) { BackupManager.restoreBackupFromUri(context, it) }
                 isBackingUp = false
-                showMessage = if (result) "导入成功，已安全合并备份数据" else "导入失败，请确认文件格式有效"
+                showMessage = if (result) "导入成功，已合并备份数据；请重启应用以加载恢复的设置" else "导入失败，请确认文件格式有效"
                 backups = BackupManager.getBackupList(context)
             }
         }

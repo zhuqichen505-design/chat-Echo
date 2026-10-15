@@ -241,7 +241,14 @@ internal val V254UserUpdates = listOf(
     "角色扮演记忆与世界书协同注入：角色扮演模式下完整保留会话专属记忆、故事时间线与世界书背景，保障长篇剧情创作的设定连贯与深度代入"
 )
 
-internal val CurrentVersionUserUpdates = V255UserUpdates
+internal val CurrentVersionUserUpdates = listOf(
+    "两种首页布局：可在「聚焦对话」与「侧栏工作台」之间切换，支持紧凑列表和最近故事入口，保留搜索、文件夹、多选及会话管理操作",
+    "一致的全局导航：两种布局均提供会话、创作、统计和设置四个入口，底栏与左侧栏沿用相同的功能分组",
+    "独立外观偏好：首页布局、主题配色、创作阅读排版和流式动画分别保存；流式动画可选择细光标、微声波或墨环，并响应系统移除动画设置",
+    "世界书导入与会话范围：支持导入世界书，并按会话选择全部已启用书、指定书目或不绑定；关键词扫描使用压缩前对话，减少上下文压缩造成的漏触发",
+    "故事设置保存更连贯：角色、世界观、剧情摘要与对话设置按顺序保存；保存后立即发送会等待设置完成，再使用新的提示词与世界书范围",
+    "回复衔接与重新生成：流式回复落库时保留列表锚点，结束后不强制滚动；重新生成恢复原消息附件，附件无法读取时保留原回复并提示原因"
+)
 
 internal val V253UserUpdates = listOf(
     "彻底根除第4次回复精准报错 (empty response detected 500)：全面废除在用户消息头部注水注入 [System Override Directive / 核心指令强化声明] 的旧机制，消除 Google Gemini 等模型将用户提问误判为越狱/指令攻击的安全拦截，多轮对话持久顺畅",
@@ -596,7 +603,8 @@ fun SettingsScreen(
     onNavigateToChat: (Long) -> Unit,
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
-    onAppearancePresetChange: (String) -> Unit = {}
+    onAppearancePresetChange: (String) -> Unit = {},
+    showBackButton: Boolean = true
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val glass = echoGlassPalette()
@@ -748,8 +756,12 @@ fun SettingsScreen(
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { executeBack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        if (showBackButton || selectedSection != null) {
+                            IconButton(onClick = { executeBack() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                        } else {
+                            Spacer(Modifier.width(12.dp))
                         }
                         Text(
                             text = when (selectedSection) {

@@ -4,6 +4,7 @@ import android.app.Application
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.EchoAppearancePreset
+import com.aiassistant.utils.EchoHomeLayoutStyle
 import com.aiassistant.utils.EchoStoryReadingStyle
 import com.aiassistant.utils.EchoStreamingAnimationStyle
 import org.junit.Assert.*
@@ -16,6 +17,95 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun homeLayoutPreferencesSurviveRecreationAndStayIndependentOfVisualAndRetryChoices() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        manager.saveRetryRule(RetryErrorType.SERVER, RetryRule(true, 7))
+        manager.saveRetryRule(RetryErrorType.TIMEOUT, RetryRule(false, 2))
+        manager.setBackupKeyFallbackEnabled(false)
+        manager.setModelRetryEnabled(false)
+        assertTrue(manager.saveSettings(manager.getSettings().copy(
+            appTheme = "dark", chatFontSize = 19, fontSizeScale = 1.15f,
+            appearancePreset = EchoAppearancePreset.NIGHT_VOYAGE,
+            storyReadingStyle = EchoStoryReadingStyle.SPLIT,
+            streamingAnimationStyle = EchoStreamingAnimationStyle.SOUND_WAVE,
+            globalSystemPrompt = "合成首页测试规则"
+        )))
+        for (layout in EchoHomeLayoutStyle.values) {
+            for (compact in listOf(false, true)) {
+                for (showStory in listOf(false, true)) {
+                    assertTrue(manager.saveSettings(manager.getSettings().copy(
+                        homeLayoutStyle = layout, homeCompactList = compact, homeShowRecentStory = showStory
+                    )))
+                    val recreated = PersonalizationManager(context)
+                    val actual = recreated.getSettings()
+                    assertEquals(layout, actual.homeLayoutStyle)
+                    assertEquals(compact, actual.homeCompactList)
+                    assertEquals(showStory, actual.homeShowRecentStory)
+                    assertEquals(EchoAppearancePreset.NIGHT_VOYAGE, actual.appearancePreset)
+                    assertEquals(EchoStoryReadingStyle.SPLIT, actual.storyReadingStyle)
+                    assertEquals(EchoStreamingAnimationStyle.SOUND_WAVE, actual.streamingAnimationStyle)
+                    assertEquals("dark", actual.appTheme)
+                    assertEquals(19, actual.chatFontSize)
+                    assertEquals(1.15f, actual.fontSizeScale, 0f)
+                    assertEquals("合成首页测试规则", actual.globalSystemPrompt)
+                    assertFalse(recreated.isModelRetryEnabled())
+                    assertEquals(RetryRule(true, 7), recreated.getRetryPolicy().rule(RetryErrorType.SERVER))
+                    assertEquals(RetryRule(false, 2), recreated.getRetryPolicy().rule(RetryErrorType.TIMEOUT))
+                }
+            }
+        }
+        assertTrue(manager.saveSettings(manager.getSettings().copy(
+            homeLayoutStyle = EchoHomeLayoutStyle.WORKBENCH, homeCompactList = true, homeShowRecentStory = false
+        )))
+        assertTrue(manager.saveSettings(manager.getSettings().copy(
+            appearancePreset = EchoAppearancePreset.CLEAR_SKY, storyReadingStyle = EchoStoryReadingStyle.PLAIN,
+            streamingAnimationStyle = EchoStreamingAnimationStyle.INK_RING
+        )))
+        val recreated = PersonalizationManager(context)
+        assertEquals(EchoHomeLayoutStyle.WORKBENCH, recreated.getSettings().homeLayoutStyle)
+        assertTrue(recreated.getSettings().homeCompactList)
+        assertFalse(recreated.getSettings().homeShowRecentStory)
+        recreated.setModelRetryEnabled(true)
+        assertFalse("重新开启重试后仍保留备份 Key 回退选择", recreated.isBackupKeyFallbackEnabled())
+    }
+
+    @Test fun existingPreferencesWithoutHomeKeysAndUnknownLayoutsUseFocusDefaults() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        prefs.edit().clear().putString("appearance_preset", EchoAppearancePreset.INDEX)
+            .putString("story_reading_style", EchoStoryReadingStyle.PLAIN)
+            .putString("streaming_animation_style", EchoStreamingAnimationStyle.INK_RING)
+            .putInt("chat_font_size", 21).putBoolean("auto_name_enabled", false).commit()
+        val manager = PersonalizationManager(context)
+        val oldPreferences = manager.getSettings()
+        assertEquals(EchoHomeLayoutStyle.FOCUS, oldPreferences.homeLayoutStyle)
+        assertFalse(oldPreferences.homeCompactList)
+        assertTrue(oldPreferences.homeShowRecentStory)
+        assertEquals(EchoAppearancePreset.INDEX, oldPreferences.appearancePreset)
+        assertEquals(21, oldPreferences.chatFontSize)
+        assertFalse(oldPreferences.autoNameEnabled)
+        for (unknown in listOf("future_layout", "", "WORKBENCH")) {
+            prefs.edit().putString("home_layout_style", unknown)
+                .putBoolean("home_compact_list", true).putBoolean("home_show_recent_story", false).commit()
+            val restored = PersonalizationManager(context).getSettings()
+            assertEquals(EchoHomeLayoutStyle.FOCUS, restored.homeLayoutStyle)
+            assertTrue(restored.homeCompactList)
+            assertFalse(restored.homeShowRecentStory)
+            assertEquals(EchoAppearancePreset.INDEX, restored.appearancePreset)
+            assertEquals(EchoStoryReadingStyle.PLAIN, restored.storyReadingStyle)
+            assertEquals(EchoStreamingAnimationStyle.INK_RING, restored.streamingAnimationStyle)
+        }
+        assertTrue(manager.saveSettings(manager.getSettings().copy(homeLayoutStyle = "unsupported_layout")))
+        assertEquals(EchoHomeLayoutStyle.FOCUS, prefs.getString("home_layout_style", null))
+        val recreated = PersonalizationManager(context).getSettings()
+        assertTrue(recreated.homeCompactList)
+        assertFalse(recreated.homeShowRecentStory)
+        assertEquals(21, recreated.chatFontSize)
+        assertFalse(recreated.autoNameEnabled)
+    }
+
     @Test fun visualPreferencesPersistIndependentlyWithoutChangingOtherPersonalization() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()

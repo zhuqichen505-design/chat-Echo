@@ -33,6 +33,8 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aiassistant.R
+import com.aiassistant.AiAssistantApp
 import com.aiassistant.domain.model.ApiConfig
 import com.aiassistant.domain.model.Conversation
 import com.aiassistant.domain.model.Folder
@@ -115,7 +118,10 @@ fun HomeScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToStats: () -> Unit,
     onNavigateToFolders: () -> Unit,
-    onNavigateToRoleplayStudio: () -> Unit = {}
+    onNavigateToRoleplayStudio: () -> Unit = {},
+    homeLayoutStyle: String = "focus",
+    compactCards: Boolean = false,
+    showRecentStory: Boolean = true
 ) {
     val context = LocalContext.current
     // v2.7.3 流畅度：对话备份涉及 DB 全量查询+序列化+写盘，统一经 IO 协程执行，点击回调不再冻结主线程
@@ -131,11 +137,19 @@ fun HomeScreen(
     val showNewChatDialog by viewModel.showNewChatDialog.collectAsState()
     val folders by viewModel.folders.collectAsState()
     val selectedFolderId by viewModel.selectedFolderId.collectAsState()
+    val workbench = homeLayoutStyle == "workbench"
+    val recentStory by remember(showRecentStory) {
+        if (showRecentStory) combine(
+            AiAssistantApp.instance.repository.getAllConversations(),
+            AiAssistantApp.instance.roleplayRepository.getAllSessions(),
+            ::recentHomeStory
+        ) else flowOf(null)
+    }.collectAsState(initial = null)
     val hazeState = rememberEchoHazeState()
     val readableBackdrop = rememberReadableBackdropColor(homeBackgroundBitmap)
     val conversationListState = rememberLazyListState()
     val showScrollControls by rememberLazyListControlsVisible(conversationListState)
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var pinnedExpanded by rememberSaveable { mutableStateOf(true) }
     var selectedConversationIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
@@ -158,10 +172,12 @@ fun HomeScreen(
     val selectedConversations = remember(filteredConversations, selectedConversationIds) {
         filteredConversations.filter { it.id in selectedConversationIds }
     }
-    val homeNavItems = remember(filteredConversations, pinnedExpanded) {
-        buildHomeAnchorItems(filteredConversations, pinnedExpanded)
-    }
     val isSelectionMode = selectedConversationIds.isNotEmpty()
+    val showPresentation = !isSelectionMode && searchQuery.isBlank() && selectedFolderId == null
+    val leadingItemCount = if (showPresentation) 1 else 0
+    val homeNavItems = remember(filteredConversations, pinnedExpanded, leadingItemCount) {
+        buildHomeAnchorItems(filteredConversations, pinnedExpanded, leadingItemCount)
+    }
     val selectedAreAllInFolders = selectedConversations.isNotEmpty() &&
         selectedConversations.all { it.folderId != null }
 
@@ -173,6 +189,15 @@ fun HomeScreen(
         }
     }
 
+    fun startNewConversation() {
+        if (apiConfigs.isEmpty()) {
+            Toast.makeText(context, "请先配置 API 和模型", Toast.LENGTH_SHORT).show()
+            onNavigateToSettings()
+        } else {
+            viewModel.createDefaultConversation(onNavigateToChat)
+        }
+    }
+
     LaunchedEffect(visibleConversationIds) {
         val visibleSelection = selectedConversationIds.intersect(visibleConversationIds)
         if (visibleSelection.size != selectedConversationIds.size) {
@@ -180,18 +205,18 @@ fun HomeScreen(
         }
     }
 
+    val presentationScrolledAway by remember(conversationListState) {
+        derivedStateOf { conversationListState.firstVisibleItemIndex > 0 }
+    }
+
     Scaffold(
         containerColor = Color.Transparent,
         floatingActionButton = {
-            if (conversations.isNotEmpty() && !isSelectionMode) {
+            if (!isSelectionMode && (!showPresentation || presentationScrolledAway)) {
                 NewConversationFab(
                     hazeState = hazeState,
                     readableBackdrop = readableBackdrop,
-                    onClick = {
-                        viewModel.createDefaultConversation { conversationId ->
-                            onNavigateToChat(conversationId)
-                        }
-                    },
+                    onClick = ::startNewConversation,
                     onLongClick = { viewModel.showNewChatDialog() }
                 )
             }
@@ -227,7 +252,11 @@ fun HomeScreen(
                     hazeState = hazeState,
                     onNavigateToSettings = onNavigateToSettings,
                     onNavigateToStats = onNavigateToStats,
-                    onNavigateToRoleplayStudio = onNavigateToRoleplayStudio
+                    onNavigateToRoleplayStudio = onNavigateToRoleplayStudio,
+                    onNavigateToHistory = onNavigateToHistory,
+                    onNavigateToFolders = onNavigateToFolders,
+                    onConfigureChat = { viewModel.showNewChatDialog() },
+                    workbench = workbench
                 )
 
                 HomeSearchRow(
@@ -279,19 +308,6 @@ fun HomeScreen(
                 )
             }
 
-            if (filteredConversations.isEmpty()) {
-                EmptyHomeContent(
-                    modifier = Modifier.weight(1f),
-                    hazeState = hazeState,
-                    readableBackdrop = readableBackdrop,
-                    onStartChat = {
-                        viewModel.createDefaultConversation { conversationId ->
-                            onNavigateToChat(conversationId)
-                        }
-                    },
-                    isSearching = searchQuery.isNotBlank()
-                )
-            } else {
                 Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(
                         modifier = Modifier
@@ -301,8 +317,41 @@ fun HomeScreen(
                         // 右缘字母锚点条（24dp+4dp 边距，仅滚动时短暂显示）预留的恒定空距；
                         // 收窄后锚点条显示时恰好只覆盖卡片右侧留白条，不遮挡任何交互元素
                         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(if (workbench || compactCards) 6.dp else 10.dp)
                     ) {
+                        if (showPresentation) {
+                            item(key = "home_presentation") {
+                                HomePresentationSection(
+                                    workbench = workbench,
+                                    compact = compactCards,
+                                    recentStory = recentStory,
+                                    showRecentStory = showRecentStory,
+                                    onNewChat = ::startNewConversation,
+                                    onConfigureChat = { viewModel.showNewChatDialog() },
+                                    onContinueStory = onNavigateToChat,
+                                    onOpenStudio = onNavigateToRoleplayStudio
+                                )
+                            }
+                        }
+                        if (filteredConversations.isEmpty()) {
+                            item(key = "home_empty") {
+                                Column(Modifier.fillMaxWidth().padding(vertical = 26.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        if (searchQuery.isNotBlank()) "没有找到匹配的会话"
+                                        else if (selectedFolderId != null) "这里还没有会话" else "还没有会话",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        if (searchQuery.isNotBlank()) "试试其他关键词，或从历史记录中查找。"
+                                        else if (selectedFolderId != null) "可以切回全部会话，或在这里新建对话。"
+                                        else "点击上方按钮开始，之后可以在这里继续。",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                         // 置顶对话
                         val pinnedConversations = filteredConversations.filter { it.isPinned }
                         if (pinnedConversations.isNotEmpty()) {
@@ -319,6 +368,7 @@ fun HomeScreen(
                                     key = { "pinned_${it.id}" }
                                 ) { conversation ->
                                     ConversationCard(
+                                        compact = compactCards,
                                         hazeState = hazeState,
                                         conversation = conversation,
                                         selected = conversation.id in selectedConversationIds,
@@ -388,6 +438,7 @@ fun HomeScreen(
                             key = { it.id }
                         ) { conversation ->
                             ConversationCard(
+                                compact = compactCards,
                                 hazeState = hazeState,
                                 conversation = conversation,
                                 selected = conversation.id in selectedConversationIds,
@@ -449,7 +500,6 @@ fun HomeScreen(
                             .padding(end = 4.dp)
                     )
                 }
-            }
         }
             SideAnchorNavigator(
                 items = homeNavItems,
@@ -526,14 +576,15 @@ fun HomeScreen(
     }
 }
 
-private fun buildHomeAnchorItems(
+internal fun buildHomeAnchorItems(
     conversations: List<Conversation>,
-    pinnedExpanded: Boolean
+    pinnedExpanded: Boolean,
+    leadingItemCount: Int = 0
 ): List<SideAnchorItem> {
     val pinned = conversations.filter { it.isPinned }
     val normal = conversations.filter { !it.isPinned }
     val anchors = mutableListOf<SideAnchorItem>()
-    var index = 0
+    var index = leadingItemCount
 
     if (pinned.isNotEmpty()) {
         index += 1 // pinned section header
@@ -577,8 +628,13 @@ fun HomeDashboardHeader(
     hazeState: dev.chrisbanes.haze.HazeState,
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
-    onNavigateToRoleplayStudio: () -> Unit
+    onNavigateToRoleplayStudio: () -> Unit,
+    onNavigateToHistory: () -> Unit,
+    onNavigateToFolders: () -> Unit,
+    onConfigureChat: () -> Unit,
+    workbench: Boolean
 ) {
+    var showMoreMenu by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -588,28 +644,32 @@ fun HomeDashboardHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            EchoWordmark(modifier = Modifier.weight(1f))
-            GlassHomeIconButton(
-                hazeState = hazeState,
-                icon = Icons.Default.AutoStories,
-                contentDescription = "角色与创作",
-                onClick = onNavigateToRoleplayStudio,
-                modifier = Modifier.size(42.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            StatsIconButton(
-                hazeState = hazeState,
-                onClick = onNavigateToStats,
-                modifier = Modifier.size(42.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            GlassHomeIconButton(
-                hazeState = hazeState,
-                icon = Icons.Default.Settings,
-                contentDescription = "设置",
-                onClick = onNavigateToSettings,
-                modifier = Modifier.size(42.dp)
-            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                EchoWordmark()
+                Text(if (workbench) "会话工作台" else "会话",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Box {
+                IconButton(onClick = { showMoreMenu = true }) {
+                    Icon(Icons.Default.MoreHoriz, contentDescription = "更多会话工具")
+                }
+                EchoGlassDropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                    DropdownMenuItem(text = { Text("配置新对话") }, leadingIcon = { Icon(Icons.Default.Tune, null) },
+                        onClick = { showMoreMenu = false; onConfigureChat() })
+                    DropdownMenuItem(text = { Text("历史与隐藏会话") }, leadingIcon = { Icon(Icons.Default.History, null) },
+                        onClick = { showMoreMenu = false; onNavigateToHistory() })
+                    DropdownMenuItem(text = { Text("管理文件夹") }, leadingIcon = { Icon(Icons.Default.Folder, null) },
+                        onClick = { showMoreMenu = false; onNavigateToFolders() })
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("创作与资料") }, leadingIcon = { Icon(Icons.Default.AutoStories, null) },
+                        onClick = { showMoreMenu = false; onNavigateToRoleplayStudio() })
+                    DropdownMenuItem(text = { Text("使用统计") }, leadingIcon = { Icon(Icons.Default.BarChart, null) },
+                        onClick = { showMoreMenu = false; onNavigateToStats() })
+                    DropdownMenuItem(text = { Text("设置") }, leadingIcon = { Icon(Icons.Default.Settings, null) },
+                        onClick = { showMoreMenu = false; onNavigateToSettings() })
+                }
+            }
         }
     }
 }
@@ -1466,7 +1526,8 @@ fun ConversationCard(
     onHide: () -> Unit,
     onCreateFolder: (String, String, Int) -> Unit,
     onUpdateFolder: (Folder, String, String, Int) -> Unit,
-    folders: List<Folder>
+    folders: List<Folder>,
+    compact: Boolean = false
 ) {
     val dateFormat = remember { SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -1494,7 +1555,8 @@ fun ConversationCard(
     ) {
         Row(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 12.dp)
+                .heightIn(min = 48.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1514,7 +1576,7 @@ fun ConversationCard(
 
             HomeModelAvatar(
                 apiConfigId = conversation.apiConfigId,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(if (compact) 32.dp else 40.dp)
             )
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -1544,7 +1606,15 @@ fun ConversationCard(
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(
+                if (compact) {
+                    Text(
+                        text = "${com.aiassistant.domain.model.ModelDisplayName.format(conversation.modelName)} · ${conversation.messageCount} 条消息",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically

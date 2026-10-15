@@ -18,7 +18,14 @@ class V255FeaturesTest {
         assertTrue("必须包含角色与世界观表单交互防呆说明", V255UserUpdates.any { it.contains("角色与世界观表单交互防呆与输入保护") })
         assertTrue("必须包含 API 配置弹窗异常捕获说明", V255UserUpdates.any { it.contains("API 配置弹窗异常捕获与防卡死") })
         assertTrue("必须包含角色扮演工坊实时检索说明", V255UserUpdates.any { it.contains("角色扮演工坊实时检索与防误触优化") })
-        assertSame("当前版本更新日志应指向 V255UserUpdates", V255UserUpdates, CurrentVersionUserUpdates)
+        assertNotSame("当前版本更新日志不得继续引用 V2.5.5 历史列表", V255UserUpdates, CurrentVersionUserUpdates)
+        assertFalse("当前版本更新内容应与 V2.5.5 历史内容分离", CurrentVersionUserUpdates == V255UserUpdates)
+        assertTrue("当前版本应介绍两种可选首页布局", CurrentVersionUserUpdates.any {
+            it.contains("聚焦对话") && it.contains("侧栏工作台")
+        })
+        assertTrue("当前版本应介绍统一的四入口导航", CurrentVersionUserUpdates.any {
+            it.contains("会话、创作、统计和设置")
+        })
     }
 
     @Test

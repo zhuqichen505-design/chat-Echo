@@ -61,7 +61,8 @@ fun RoleplayStudioScreen(
     onNavigateToScenarioEditor: (RoleplayScenario?) -> Unit,
     onNavigateToSession: (Long) -> Unit,
     onCreateNewSession: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    showBackButton: Boolean = true
 ) {
     val context = LocalContext.current
     val repository = remember { AiAssistantApp.instance.repository }
@@ -73,6 +74,7 @@ fun RoleplayStudioScreen(
 
     val currentTab = viewModel.studioTab
     var showGuide by remember { mutableStateOf(false) }
+    var showStudioMenu by remember { mutableStateOf(false) }
     var showSmartAnalyzeDialog by remember { mutableStateOf(false) }
     var analyzedBundle by remember { mutableStateOf<AnalyzedRoleplayBundle?>(null) }
 
@@ -81,32 +83,36 @@ fun RoleplayStudioScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("角色与创作", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("故事创作 · 多角色演绎 · 沉浸互动", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (showBackButton) "角色与创作" else "创作", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {
                     WorldBookImportButton()
-                    IconButton(onClick = { showSmartAnalyzeDialog = true }) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = "AI智能识别与拆解",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    IconButton(onClick = { showGuide = !showGuide }) {
-                        Icon(
-                            if (showGuide) Icons.Default.Info else Icons.AutoMirrored.Filled.HelpOutline,
-                            contentDescription = "玩法说明"
-                        )
-                    }
                     IconButton(onClick = onCreateNewSession) {
                         Icon(Icons.Default.Add, contentDescription = "新建故事")
+                    }
+                    Box {
+                        IconButton(onClick = { showStudioMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "创作工具")
+                        }
+                        DropdownMenu(expanded = showStudioMenu, onDismissRequest = { showStudioMenu = false }) {
+                            DropdownMenuItem(text = { Text("智能识别与拆解") }, onClick = {
+                                showStudioMenu = false
+                                showSmartAnalyzeDialog = true
+                            })
+                            DropdownMenuItem(text = { Text(if (showGuide) "收起使用说明" else "使用说明") }, onClick = {
+                                showStudioMenu = false
+                                showGuide = !showGuide
+                            })
+                        }
                     }
                 }
             )
@@ -127,8 +133,9 @@ fun RoleplayStudioScreen(
             }
 
             // 标签页导航
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = currentTab,
+                edgePadding = 0.dp,
                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
             ) {
                 Tab(

@@ -16,6 +16,51 @@ import org.junit.Test
  */
 class UiPolishRegressionTest {
 
+    @Test fun recentHomeStoryUsesLatestVisibleStoryRatherThanPinnedOrOrdinaryConversation() {
+        fun conversation(id: Long, updated: Long, pinned: Boolean = false, tags: String? = null) =
+            com.aiassistant.domain.model.Conversation(id = id, title = "Synthetic $id", apiConfigId = 1,
+                modelName = "synthetic-model", updatedAt = updated, isPinned = pinned, tags = tags)
+        val pinnedStory = conversation(1, 10, pinned = true)
+        val newestStory = conversation(2, 20)
+        val ordinary = conversation(3, 100)
+        val hiddenStory = conversation(4, 200, tags = "hidden")
+        val privateStory = conversation(5, 300, tags = "private")
+        val sessions = listOf(1L, 2L, 4L, 5L, 99L).map {
+            com.aiassistant.domain.model.RoleplaySession(id = it, conversationId = it)
+        }
+        val result = com.aiassistant.ui.screens.home.recentHomeStory(
+            listOf(pinnedStory, hiddenStory, ordinary, newestStory, privateStory), sessions)
+        assertEquals(newestStory, result?.conversation)
+        assertEquals(2L, result?.session?.conversationId)
+        assertEquals(null, com.aiassistant.ui.screens.home.recentHomeStory(
+            listOf(ordinary, hiddenStory, privateStory), sessions))
+        assertEquals(null, com.aiassistant.ui.screens.home.recentHomeStory(emptyList(), sessions))
+        assertEquals(null, com.aiassistant.ui.screens.home.recentHomeStory(listOf(newestStory), emptyList()))
+    }
+
+    @Test fun homeAnchorIndicesIncludePresentationAndPinnedSectionWithoutShiftingCollapsedEntries() {
+        fun conversation(id: Long, pinned: Boolean) = com.aiassistant.domain.model.Conversation(
+            id = id, title = "Synthetic $id", apiConfigId = 1, modelName = "synthetic-model", isPinned = pinned)
+        val pinned = listOf(conversation(1, true), conversation(2, true))
+        val ordinary = listOf(conversation(3, false), conversation(4, false))
+        // Presentation at 0, pinned header at 1, pinned rows 2/3, other header 4, normal rows 5/6.
+        val expanded = com.aiassistant.ui.screens.home.buildHomeAnchorItems(pinned + ordinary, true, 1)
+        assertEquals(listOf("Synthetic 1", "Synthetic 2", "Synthetic 3", "Synthetic 4"), expanded.map { it.title })
+        assertEquals(listOf(2, 3, 5, 6), expanded.map { it.itemIndex })
+        val collapsed = com.aiassistant.ui.screens.home.buildHomeAnchorItems(pinned + ordinary, false, 1)
+        assertEquals(listOf("Synthetic 3", "Synthetic 4"), collapsed.map { it.title })
+        assertEquals(listOf(3, 4), collapsed.map { it.itemIndex })
+        // Search and folder filters remove the presentation, with no phantom offset.
+        assertEquals(listOf(1, 2, 4, 5),
+            com.aiassistant.ui.screens.home.buildHomeAnchorItems(pinned + ordinary, true, 0).map { it.itemIndex })
+        assertEquals(listOf(0, 1),
+            com.aiassistant.ui.screens.home.buildHomeAnchorItems(ordinary, true, 0).map { it.itemIndex })
+        assertEquals(listOf(1, 2),
+            com.aiassistant.ui.screens.home.buildHomeAnchorItems(ordinary, true, 1).map { it.itemIndex })
+        assertTrue(com.aiassistant.ui.screens.home.buildHomeAnchorItems(pinned, false, 1).isEmpty())
+        assertTrue(com.aiassistant.ui.screens.home.buildHomeAnchorItems(emptyList(), true, 1).isEmpty())
+    }
+
     @Test fun editorParentEchoPreservesSelectionAndComposition() {
         val value = androidx.compose.ui.text.input.TextFieldValue("合成输入文本",
             selection = androidx.compose.ui.text.TextRange(2), composition = androidx.compose.ui.text.TextRange(1, 3))
