@@ -67,7 +67,7 @@ object AvatarManager {
                 bitmap
             }
             atomicWrite(file) { output -> check(resized.compress(Bitmap.CompressFormat.PNG, 90, output)) }
-            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP), explicitlySelected = true)
             if (resized != bitmap) resized.recycle()
             Uri.fromFile(file).toString()
         } catch (e: Exception) {
@@ -86,7 +86,7 @@ object AvatarManager {
                 bitmap
             }
             atomicWrite(file) { output -> check(resized.compress(Bitmap.CompressFormat.PNG, 90, output)) }
-            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP), explicitlySelected = true)
             if (resized != bitmap) resized.recycle()
             Uri.fromFile(file).toString()
         } catch (e: Exception) {
@@ -130,7 +130,7 @@ object AvatarManager {
     private fun saveAvatar(context: Context, fileName: String, base64Data: String) {
         val file = File(context.filesDir, fileName)
         if (file.isFile) recordUserAvatarHistory(context, file.readText())
-        recordUserAvatarHistory(context, base64Data)
+        recordUserAvatarHistory(context, base64Data, explicitlySelected = true)
         atomicWrite(file) { it.write(base64Data.toByteArray(Charsets.UTF_8)) }
         avatarBitmapCache.evictAll()
     }
@@ -180,7 +180,22 @@ object AvatarManager {
         }.getOrDefault(false)
     }
 
-    private fun recordUserAvatarHistory(context: Context, base64Data: String) {
+    /** Deletes the library copy only. Active avatars remain intact and lazy migration must not restore it. */
+    fun deleteAvatarHistory(context: Context, entry: AvatarHistoryEntry): Boolean {
+        if (!entry.id.matches(Regex("user_avatar_history_[a-f0-9]{64}\\.dat"))) return false
+        return runCatching {
+            val file = File(context.filesDir, entry.id)
+            val prefs = context.getSharedPreferences("avatar_history", Context.MODE_PRIVATE)
+            if (!prefs.edit().putBoolean(entry.id, true).commit()) return@runCatching false
+            AtomicFile(file).delete()
+            if (file.exists()) {
+                prefs.edit().remove(entry.id).commit()
+                false
+            } else true
+        }.getOrDefault(false)
+    }
+
+    private fun recordUserAvatarHistory(context: Context, base64Data: String, explicitlySelected: Boolean = false) {
         if (base64Data.isBlank()) return
         val bytes = runCatching { Base64.decode(base64Data, Base64.DEFAULT) }.getOrNull() ?: return
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -189,11 +204,17 @@ object AvatarManager {
         val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
         val file = File(context.filesDir, "$USER_AVATAR_HISTORY_PREFIX$hash$USER_AVATAR_HISTORY_SUFFIX")
+        val prefs = context.getSharedPreferences("avatar_history", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(file.name, false)) {
+            if (!explicitlySelected) return
+            check(prefs.edit().remove(file.name).commit())
+        }
         if (!file.isFile) atomicWrite(file) { it.write(Base64.encodeToString(bytes, Base64.NO_WRAP).toByteArray(Charsets.UTF_8)) }
     }
 
     private fun historyFiles(context: Context): List<File> = context.filesDir.listFiles()
-        ?.filter { it.isFile && it.name.startsWith(USER_AVATAR_HISTORY_PREFIX) && it.name.endsWith(USER_AVATAR_HISTORY_SUFFIX) }
+        ?.filter { it.isFile && it.name.matches(Regex("user_avatar_history_[a-f0-9]{64}\\.dat")) &&
+            !context.getSharedPreferences("avatar_history", Context.MODE_PRIVATE).getBoolean(it.name, false) }
         ?.sortedByDescending { it.lastModified() }
         ?: emptyList()
 

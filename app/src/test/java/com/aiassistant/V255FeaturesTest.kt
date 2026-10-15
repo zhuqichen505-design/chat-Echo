@@ -1,6 +1,7 @@
 package com.aiassistant
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.aiassistant.ui.screens.settings.CurrentVersionUserUpdates
 import com.aiassistant.ui.screens.settings.V255UserUpdates
 import com.aiassistant.ui.theme.EchoSemanticColors
@@ -30,8 +31,13 @@ class V255FeaturesTest {
 
     @Test
     fun testLightPrimaryColorContrastAndTheme() {
-        // 验证浅色主题 Primary 主色调提升至 #3B82F6 以保障充足的色彩对比度 (>= 4.5:1)
-        assertEquals("浅色主色 Primary 需为 Color(0xFF3B82F6)", Color(0xFF3B82F6), Primary)
+        // The previous #3B82F6 token did not meet its advertised 4.5:1 white-text contrast.
+        val colors = com.aiassistant.ui.theme.echoColorScheme(com.aiassistant.utils.EchoAppearancePreset.EXISTING, false)
+        assertEquals("经典浅色主题使用统一主色", Primary, colors.primary)
+        assertEquals("经典主题保留蓝色品牌", Color(0xFF2563EB), Primary)
+        val contrast = (maxOf(colors.primary.luminance(), colors.onPrimary.luminance()) + 0.05f) /
+            (minOf(colors.primary.luminance(), colors.onPrimary.luminance()) + 0.05f)
+        assertTrue("主操作按钮文字对比度须达到 4.5:1，实际 $contrast", contrast >= 4.5f)
     }
 
     @Test

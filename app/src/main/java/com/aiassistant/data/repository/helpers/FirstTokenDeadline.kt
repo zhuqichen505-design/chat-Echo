@@ -11,8 +11,14 @@ internal class FirstTokenDeadline(private val timeoutMillis: Long) : AutoCloseab
     private var timer: ScheduledFuture<*>? = null
     private var finished = false
     private var expired = false
+    private var startedNanos = 0L
+    private var firstNanos = 0L
+    val hasStarted: Boolean get() = startedNanos != 0L
+    val elapsedMillis: Long get() = if (!hasStarted) 0 else ((System.nanoTime() - startedNanos) / 1_000_000).coerceAtLeast(1)
+    val firstTokenTimeMs: Long get() = if (firstNanos == 0L || !hasStarted) 0 else ((firstNanos - startedNanos) / 1_000_000).coerceAtLeast(1)
     @Synchronized fun start(call: Call) {
         if (finished || timer != null) return
+        startedNanos = System.nanoTime()
         timer = scheduler.schedule({ synchronized(this) {
             if (!finished && !call.isCanceled()) {
                 expired = true
@@ -23,7 +29,10 @@ internal class FirstTokenDeadline(private val timeoutMillis: Long) : AutoCloseab
     }
     @Synchronized fun received(delta: String) {
         if (expired) throw failure(SocketTimeoutException())
-        if (delta.isNotEmpty()) close()
+        if (delta.isNotEmpty()) {
+            if (firstNanos == 0L) firstNanos = System.nanoTime()
+            close()
+        }
     }
     @Synchronized fun failure(error: Exception): Exception {
         close()

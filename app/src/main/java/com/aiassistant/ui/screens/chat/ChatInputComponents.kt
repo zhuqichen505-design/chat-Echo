@@ -308,7 +308,7 @@ fun ChatInputBar(
                             onClick = { onBarsHiddenChange(false) },
                             shape = CircleShape,
                             color = if (isGenerating) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                            contentColor = Color.White,
+                            contentColor = if (isGenerating) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
                             border = BorderStroke(1.2.dp, bottomSurfaceBorderColor),
                             modifier = Modifier.size(40.dp)
                         ) {
@@ -970,7 +970,7 @@ internal fun ReasoningEffortPopupCard(
 ) {
     var showParamsExplanationDialog by remember { mutableStateOf(false) }
 
-    val levels = remember(modelName, apiType, reasoningCapability) {
+    val levels = run {
         listOf(
             ThinkingEffortLevel(
                 step = 0,
@@ -1082,7 +1082,7 @@ internal fun ReasoningEffortPopupCard(
                         Icon(
                             imageVector = Icons.Default.Psychology,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = readableTextColorFor(currentLevel.primaryColor),
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -1142,7 +1142,7 @@ internal fun ReasoningEffortPopupCard(
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSelected) lvl.primaryColor else glass.control,
-                            contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            contentColor = if (isSelected) readableTextColorFor(lvl.primaryColor) else MaterialTheme.colorScheme.onSurfaceVariant,
                             border = BorderStroke(
                                 1.dp,
                                 if (isSelected) lvl.primaryColor else glass.outline

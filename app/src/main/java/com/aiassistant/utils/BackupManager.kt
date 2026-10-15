@@ -42,9 +42,11 @@ object BackupManager {
                     BackupGraphStore.writeFullSnapshot(AppDatabase.getDatabase(context), zip.writer(Charsets.UTF_8).buffered())
                     zip.closeEntry()
                     context.filesDir.listFiles()?.filter {
-                        it.isFile && (it.name in setOf("user_avatar.dat", "model_avatar.dat") ||
-                            (it.name.startsWith("model_avatar_api_") && it.name.endsWith(".dat")))
+                        it.isFile && MediaHistoryBackup.isMediaFile(it.name)
                     }?.forEach { addFileToZip(zip, it, "files/${it.name}") }
+                    zip.putNextEntry(ZipEntry("media_history.json"))
+                    zip.write(MediaHistoryBackup.exportDeleted(context).toString().toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
                     val prefs = File(context.applicationInfo.dataDir, "shared_prefs/personalization_settings.xml")
                     if (prefs.exists()) addFileToZip(zip, prefs, "shared_prefs/personalization_settings.xml")
                     zip.putNextEntry(ZipEntry("backup_info.json"))
@@ -127,8 +129,11 @@ object BackupManager {
                         ?.let { restoreSingleConversationFromJson(context, it.readText(Charsets.UTF_8)) } ?: false
                 }
                 if (success) {
-                    File(temp, "files").listFiles()?.filter { it.isFile }?.forEach { source ->
+                    File(temp, "files").listFiles()?.filter { it.isFile && MediaHistoryBackup.isMediaFile(it.name) }?.forEach { source ->
                         source.copyTo(File(context.filesDir, source.name), overwrite = true)
+                    }
+                    File(temp, "media_history.json").takeIf { it.isFile }?.let { metadata ->
+                        MediaHistoryBackup.importDeleted(context, JsonParser.parseString(metadata.readText(Charsets.UTF_8)).asJsonObject)
                     }
                     val prefs = File(temp, "shared_prefs/personalization_settings.xml")
                     if (prefs.exists()) {

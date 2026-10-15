@@ -10,17 +10,17 @@ import androidx.compose.ui.graphics.luminance
 
 // ============ 浅色主题 ============
 
-val Primary = Color(0xFF3B82F6) // 纯正明朗蔚蓝，使白色文字与高光对比度达到 4.5:1+ 符合 WCAG AA
+val Primary = Color(0xFF2563EB) // 纯正明朗蔚蓝，使白色文字与高光对比度达到 4.5:1+ 符合 WCAG AA
 val OnPrimary = Color(0xFFFFFFFF)
 val PrimaryContainer = Color(0xFFEFF6FF)
 val OnPrimaryContainer = Color(0xFF1E40AF)
 
-val Secondary = Color(0xFF38BDF8) // 淡青蓝
+val Secondary = Color(0xFF0369A1) // 淡青蓝
 val OnSecondary = Color(0xFFFFFFFF)
 val SecondaryContainer = Color(0xFFF0F9FF)
 val OnSecondaryContainer = Color(0xFF0369A1)
 
-val Tertiary = Color(0xFFFB7185) // 淡珊瑚粉红
+val Tertiary = Color(0xFFBE123C) // 淡珊瑚粉红
 val OnTertiary = Color(0xFFFFFFFF)
 val TertiaryContainer = Color(0xFFFFF1F2)
 val OnTertiaryContainer = Color(0xFF9F1239)
@@ -30,11 +30,11 @@ val OnBackground = Color(0xFF1E293B)
 val Surface = Color(0xFFFFFFFF)
 val OnSurface = Color(0xFF1E293B)
 val SurfaceVariant = Color(0xFFF1F5F9)
-val OnSurfaceVariant = Color(0xFF64748B)
+val OnSurfaceVariant = Color(0xFF526176)
 
 // 错误色 - 修正：原 #F87171 白字对比度 ≈2.5:1 不达标
 // 容器场景用 #EF4444，文字场景用 #DC2626
-val Error = Color(0xFFEF4444)
+val Error = Color(0xFFDC2626)
 val OnError = Color(0xFFFFFFFF)
 val ErrorContainer = Color(0xFFFEF2F2)
 val OnErrorContainer = Color(0xFF991B1B)
@@ -146,22 +146,8 @@ data class EchoChartPalette(
  */
 @Composable
 fun rememberEchoChartColors(): EchoChartPalette {
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    return if (isDark) {
-        EchoChartPalette(
-            primary = EchoChartColors.primaryDark,
-            secondary = EchoChartColors.secondaryDark,
-            tertiary = EchoChartColors.tertiaryDark,
-            quaternary = EchoChartColors.quaternaryDark
-        )
-    } else {
-        EchoChartPalette(
-            primary = EchoChartColors.primary,
-            secondary = EchoChartColors.secondary,
-            tertiary = EchoChartColors.tertiary,
-            quaternary = EchoChartColors.quaternary
-        )
-    }
+    val colors = MaterialTheme.colorScheme
+    return EchoChartPalette(colors.primary, colors.secondary, colors.tertiary, colors.onSurfaceVariant)
 }
 
 // ============ 文件夹调色板 (EchoFolderColors) ============
@@ -205,33 +191,23 @@ object EchoFolderColors {
 // ============ 思考等级颜色 (EchoThinkingColors) ============
 // 聊天页思考等级专用，替代 ChatInputComponents 硬编码色
 
+/** Thinking strength shares the selected theme; no fixed blue survives a preset switch. */
 object EchoThinkingColors {
-    // 关闭状态
-    val none = Color(0xFF64748B)
-    val noneGradient = listOf(Color(0xFF64748B), Color(0xFF94A3B8))
+    val none: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+    val low: Color @Composable get() = MaterialTheme.colorScheme.secondary
+    val medium: Color @Composable get() = MaterialTheme.colorScheme.primary
+    val high: Color @Composable get() = MaterialTheme.colorScheme.tertiary
+    val max: Color @Composable get() = MaterialTheme.colorScheme.primary
+    val maxAccent: Color @Composable get() = MaterialTheme.colorScheme.primary
+    val noneGradient: List<Color> @Composable get() = listOf(none, none)
+    val lowGradient: List<Color> @Composable get() = listOf(low, low)
+    val mediumGradient: List<Color> @Composable get() = listOf(medium, medium)
+    val highGradient: List<Color> @Composable get() = listOf(high, high)
+    val maxGradient: List<Color> @Composable get() = listOf(max, max)
 
-    // 低等级 (low/fast)
-    val low = Color(0xFF60A5FA)
-    val lowGradient = listOf(Color(0xFF93C5FD), Color(0xFF60A5FA))
-
-    // 中等级 (medium/balanced)
-    val medium = Color(0xFF2563EB)
-    val mediumGradient = listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8))
-
-    // 高等级 (high/deep)
-    val high = Color(0xFF1D4ED8)
-    val highGradient = listOf(Color(0xFF1D4ED8), Color(0xFF1E3A8A))
-
-    // 最高等级 (ultra/max)
-    val max = Color(0xFF4F46E5)
-    val maxGradient = listOf(Color(0xFF6366F1), Color(0xFF4338CA))
-
-    // 最高等级的强调色（档位胶囊选中态前景，取 maxGradient 深端）
-    val maxAccent = Color(0xFF4338CA)
-
-    /** 思考档位字符串 → 档位色（动效轮：光标/脉冲环同源配色，方案 P0-1②/P0-2②） */
+    @Composable
     fun forEffort(effort: String?): Color = when {
-        effort == null -> medium
+        effort.equals("none", true) -> none
         effort.equals("low", true) || effort.equals("fast", true) -> low
         effort.equals("high", true) || effort.equals("deep", true) -> high
         effort.equals("ultra", true) || effort.equals("max", true) -> maxAccent

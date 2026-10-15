@@ -33,13 +33,21 @@ object BackgroundImageManager {
         val displayHex: String
     )
 
+    // A preset is the selected color, not a bitmap whose hue silently changes with dark mode.
+    // Dark options have their own visible swatches and remain available in either mode.
     val PRESET_SOLID_COLORS = listOf(
-        SolidColorPreset("pale_green", "浅艾绿", 0xFFF1F8F4.toInt(), 0xFF0C140F.toInt(), "#F1F8F4"),
-        SolidColorPreset("pale_blue", "浅湖蓝", 0xFFF0F5FA.toInt(), 0xFF0C121A.toInt(), "#F0F5FA"),
-        SolidColorPreset("pale_purple", "浅薰紫", 0xFFF6F3F9.toInt(), 0xFF130E18.toInt(), "#F6F3F9"),
-        SolidColorPreset("pale_pink", "浅樱粉", 0xFFFAF2F4.toInt(), 0xFF160E11.toInt(), "#FAF2F4"),
-        SolidColorPreset("pale_yellow", "浅暖杏", 0xFFFAF8F0.toInt(), 0xFF15140D.toInt(), "#FAF8F0"),
-        SolidColorPreset("pale_cyan", "浅山岚", 0xFFF0F7F7.toInt(), 0xFF0C1414.toInt(), "#F0F7F7")
+        SolidColorPreset("pale_green", "浅艾绿", 0xFFF1F8F4.toInt(), 0xFFF1F8F4.toInt(), "#F1F8F4"),
+        SolidColorPreset("pale_blue", "浅湖蓝", 0xFFF0F5FA.toInt(), 0xFFF0F5FA.toInt(), "#F0F5FA"),
+        SolidColorPreset("pale_purple", "浅薰紫", 0xFFF6F3F9.toInt(), 0xFFF6F3F9.toInt(), "#F6F3F9"),
+        SolidColorPreset("pale_pink", "浅樱粉", 0xFFFAF2F4.toInt(), 0xFFFAF2F4.toInt(), "#FAF2F4"),
+        SolidColorPreset("pale_yellow", "浅暖杏", 0xFFFAF8F0.toInt(), 0xFFFAF8F0.toInt(), "#FAF8F0"),
+        SolidColorPreset("pale_cyan", "浅山岚", 0xFFF0F7F7.toInt(), 0xFFF0F7F7.toInt(), "#F0F7F7"),
+        SolidColorPreset("night_blue", "深海蓝", 0xFF24374D.toInt(), 0xFF24374D.toInt(), "#24374D"),
+        SolidColorPreset("forest", "夜森林", 0xFF263E35.toInt(), 0xFF263E35.toInt(), "#263E35"),
+        SolidColorPreset("plum", "暮烟紫", 0xFF40334A.toInt(), 0xFF40334A.toInt(), "#40334A"),
+        SolidColorPreset("cocoa", "暖可可", 0xFF44372F.toInt(), 0xFF44372F.toInt(), "#44372F"),
+        SolidColorPreset("graphite", "石墨灰", 0xFF343B42.toInt(), 0xFF343B42.toInt(), "#343B42"),
+        SolidColorPreset("deep_teal", "深青绿", 0xFF214148.toInt(), 0xFF214148.toInt(), "#214148")
     )
 
     /** The active theme paints its own solid backdrop; custom images stay available in history. */
@@ -79,7 +87,7 @@ object BackgroundImageManager {
             val target = backgroundFile(context, fileName)
             check(recordBackgroundHistory(context, target))
             atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)) }
-            check(recordBackgroundHistory(context, target))
+            check(recordBackgroundHistory(context, target, explicitlySelected = true))
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
             revision++
             true
@@ -140,7 +148,7 @@ object BackgroundImageManager {
             val target = backgroundFile(context, fileName)
             check(recordBackgroundHistory(context, target))
             atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) }
-            if (recordHistory) check(recordBackgroundHistory(context, target))
+            if (recordHistory) check(recordBackgroundHistory(context, target, explicitlySelected = true))
             bitmap.recycle()
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
             revision++
@@ -157,7 +165,7 @@ object BackgroundImageManager {
             val target = backgroundFile(context, fileName)
             check(recordBackgroundHistory(context, target))
             atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) }
-            check(recordBackgroundHistory(context, target))
+            check(recordBackgroundHistory(context, target, explicitlySelected = true))
             bitmap.recycle()
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
             revision++
@@ -202,7 +210,21 @@ object BackgroundImageManager {
         }.getOrDefault(false)
     }
 
-    private fun recordBackgroundHistory(context: Context, source: File): Boolean {
+    /** Removes the history copy, leaving any active home/chat image untouched. */
+    fun deleteBackgroundHistory(context: Context, entry: BackgroundHistoryEntry): Boolean {
+        val file = historyFile(context, entry.id) ?: return false
+        return runCatching {
+            val prefs = context.getSharedPreferences("background_history", Context.MODE_PRIVATE)
+            if (!prefs.edit().putBoolean(entry.id, true).commit()) return@runCatching false
+            AtomicFile(file).delete()
+            if (file.exists()) {
+                prefs.edit().remove(entry.id).commit()
+                false
+            } else true
+        }.getOrDefault(false)
+    }
+
+    private fun recordBackgroundHistory(context: Context, source: File, explicitlySelected: Boolean = false): Boolean {
         if (!source.isFile || source.length() <= 0L) return true
         return runCatching {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -216,6 +238,11 @@ object BackgroundImageManager {
             }
             val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
             val history = File(context.filesDir, "$HISTORY_PREFIX$hash$HISTORY_SUFFIX")
+            val prefs = context.getSharedPreferences("background_history", Context.MODE_PRIVATE)
+            if (prefs.getBoolean(history.name, false)) {
+                if (!explicitlySelected) return@runCatching true
+                check(prefs.edit().remove(history.name).commit())
+            }
             if (history.isFile && history.length() == source.length()) return@runCatching true
             atomicWrite(history) { output -> source.inputStream().use { it.copyTo(output) } }
             true
@@ -240,7 +267,8 @@ object BackgroundImageManager {
     }
 
     private fun historyFiles(context: Context): List<File> = context.filesDir.listFiles()
-        ?.filter { it.isFile && it.name.startsWith(HISTORY_PREFIX) && it.name.endsWith(HISTORY_SUFFIX) }
+        ?.filter { it.isFile && it.name.matches(Regex("background_history_[a-f0-9]{64}\\.img")) &&
+            !context.getSharedPreferences("background_history", Context.MODE_PRIVATE).getBoolean(it.name, false) }
         ?.sortedByDescending { it.lastModified() }
         ?: emptyList()
 

@@ -137,11 +137,13 @@ fun AppearanceTab(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = AiAssistantApp.instance.personalizationManager
+    val appearanceScope = rememberCoroutineScope()
 
     var avatarBase64 by remember { mutableStateOf(AvatarManager.getAvatar(context)) }
     var avatarHistoryRevision by remember { mutableIntStateOf(0) }
-    val avatarHistory = remember(avatarHistoryRevision, avatarBase64) {
-        AvatarManager.listAvatarHistory(context)
+    var avatarHistory by remember(context) { mutableStateOf(emptyList<AvatarManager.AvatarHistoryEntry>()) }
+    LaunchedEffect(context, avatarHistoryRevision, avatarBase64) {
+        avatarHistory = withContext(Dispatchers.IO) { AvatarManager.listAvatarHistory(context) }
     }
 
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
@@ -162,6 +164,8 @@ fun AppearanceTab(
     var savedMessage by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     var backgroundRevision by remember { mutableIntStateOf(0) }
+    var avatarPendingDelete by remember { mutableStateOf<AvatarManager.AvatarHistoryEntry?>(null) }
+    var backgroundPendingDelete by remember { mutableStateOf<BackgroundImageManager.BackgroundHistoryEntry?>(null) }
 
     fun performSave() {
         val saved = manager.saveSettings(
@@ -201,8 +205,9 @@ fun AppearanceTab(
         }
     }
 
-    val backgroundHistory = remember(backgroundRevision) {
-        BackgroundImageManager.listBackgroundHistory(context)
+    var backgroundHistory by remember(context) { mutableStateOf(emptyList<BackgroundImageManager.BackgroundHistoryEntry>()) }
+    LaunchedEffect(context, backgroundRevision) {
+        backgroundHistory = withContext(Dispatchers.IO) { BackgroundImageManager.listBackgroundHistory(context) }
     }
     val hasHomeBackground = remember(backgroundRevision) {
         BackgroundImageManager.hasHomeBackground(context)
@@ -350,8 +355,12 @@ fun AppearanceTab(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(avatarHistory, key = { it.id }) { entry ->
-                            val bitmap = remember(entry.id) { AvatarManager.getAvatarHistoryBitmap(context, entry) }
-                            if (bitmap != null) {
+                            var bitmap by remember(context, entry.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                            LaunchedEffect(context, entry.id) {
+                                bitmap = withContext(Dispatchers.IO) { AvatarManager.getAvatarHistoryBitmap(context, entry) }
+                            }
+                            val loadedBitmap = bitmap
+                            if (loadedBitmap != null) {
                                 var showActions by remember { mutableStateOf(false) }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp)) {
                                     Box(
@@ -362,7 +371,7 @@ fun AppearanceTab(
                                             .clickable { showActions = true }
                                     ) {
                                         Image(
-                                            bitmap = bitmap.asImageBitmap(),
+                                            bitmap = loadedBitmap.asImageBitmap(),
                                             contentDescription = "历史头像",
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop
@@ -377,25 +386,41 @@ fun AppearanceTab(
                                         title = { Text("历史头像") },
                                         text = {
                                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Image(bitmap.asImageBitmap(), "历史头像预览", modifier = Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
+                                                Image(loadedBitmap.asImageBitmap(), "历史头像预览", modifier = Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
                                                 TextButton(onClick = {
-                                                    val saved = AvatarManager.restoreAvatarHistory(context, entry)
-                                                    if (saved) { avatarBase64 = AvatarManager.getAvatar(context); avatarHistoryRevision++ }
-                                                    savedMessage = if (saved) "已恢复历史头像" else "头像恢复失败，请重试"
                                                     showActions = false
+                                                    appearanceScope.launch {
+                                                        val restored = withContext(Dispatchers.IO) {
+                                                            if (AvatarManager.restoreAvatarHistory(context, entry)) AvatarManager.getAvatar(context) else null
+                                                        }
+                                                        if (restored != null) { avatarBase64 = restored; avatarHistoryRevision++ }
+                                                        savedMessage = if (restored != null) "已恢复历史头像" else "头像恢复失败，请重试"
+                                                    }
                                                 }) { Text("设为用户头像") }
                                                 TextButton(onClick = {
-                                                    val saved = BackgroundImageManager.saveHomeBackgroundBitmap(context, bitmap)
-                                                    backgroundRevision++
-                                                    savedMessage = if (saved) "已设置首页壁纸" else "壁纸保存失败，请重试"
                                                     showActions = false
+                                                    appearanceScope.launch {
+                                                        val saved = withContext(Dispatchers.IO) { BackgroundImageManager.saveHomeBackgroundBitmap(context, loadedBitmap) }
+                                                        backgroundRevision++
+                                                        savedMessage = if (saved) "已设置首页壁纸" else "壁纸保存失败，请重试"
+                                                    }
                                                 }) { Text("设为首页壁纸") }
                                                 TextButton(onClick = {
-                                                    val saved = BackgroundImageManager.saveChatBackgroundBitmap(context, bitmap)
-                                                    backgroundRevision++
-                                                    savedMessage = if (saved) "已设置对话壁纸" else "壁纸保存失败，请重试"
                                                     showActions = false
+                                                    appearanceScope.launch {
+                                                        val saved = withContext(Dispatchers.IO) { BackgroundImageManager.saveChatBackgroundBitmap(context, loadedBitmap) }
+                                                        backgroundRevision++
+                                                        savedMessage = if (saved) "已设置对话壁纸" else "壁纸保存失败，请重试"
+                                                    }
                                                 }) { Text("设为对话壁纸") }
+                                                TextButton(onClick = {
+                                                    showActions = false
+                                                    avatarPendingDelete = entry
+                                                }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                                                    Icon(Icons.Default.DeleteOutline, null, Modifier.size(18.dp))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("删除此历史头像")
+                                                }
                                             }
                                         }, confirmButton = { TextButton(onClick = { showActions = false }) { Text("关闭") } })
                                 }
@@ -520,9 +545,12 @@ fun AppearanceTab(
                             border = echoFilterChipBorder(settings.storyReadingStyle == value))
                     }
                 }
+                HomeLayoutSwitch("阅读排版也用于普通对话", "普通对话可使用沉浸、简洁或分栏布局。", settings.applyReadingStyleToChats) { enabled ->
+                    saveVisualPreference("普通对话阅读排版已更新") { it.copy(applyReadingStyleToChats = enabled) }
+                }
                 Spacer(Modifier.height(10.dp))
                 Text("创作正文字体", style = MaterialTheme.typography.titleSmall)
-                Text("只改变故事正文，不影响普通对话和设置文字。", style = MaterialTheme.typography.bodySmall,
+                Text("可单独选择是否应用于普通对话；设置与操作按钮保持界面字体。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
@@ -539,6 +567,9 @@ fun AppearanceTab(
                             modifier = Modifier.weight(1f)
                         )
                     }
+                }
+                HomeLayoutSwitch("正文字体也用于普通对话", "同时用于消息正文与展开的思考内容。", settings.applyReadingFontToChats) { enabled ->
+                    saveVisualPreference("普通对话字体已更新") { it.copy(applyReadingFontToChats = enabled) }
                 }
             }
         }
@@ -651,7 +682,7 @@ fun AppearanceTab(
                             "你好！我是 Echo 智能助手，这是一段用于预览对话与排版字体大小的示例文本。",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = chatFontSize.sp,
-                                fontFamily = FontFamily.SansSerif
+                                fontFamily = if (settings.applyReadingFontToChats) com.aiassistant.ui.screens.chat.readingFontFamily(settings.storyFont) else FontFamily.SansSerif
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -691,17 +722,18 @@ fun AppearanceTab(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "选择颜色后设置到首页、对话页或两处。",
+                        "浅色与深色各 6 种。色卡所见即所得，不随深浅模式变黑；切换主题可恢复主题背景。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     var selectedColorPreset by remember { mutableStateOf<BackgroundImageManager.SolidColorPreset?>(null) }
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        maxItemsInEachRow = 6,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         BackgroundImageManager.PRESET_SOLID_COLORS.forEach { preset ->
                             val isDark = themeMode == AppThemeMode.Dark || (themeMode == AppThemeMode.System && androidx.compose.foundation.isSystemInDarkTheme())
@@ -735,7 +767,7 @@ fun AppearanceTab(
                                         Icon(
                                             Icons.Default.Check,
                                             contentDescription = null,
-                                            tint = if (isDark) Color.White else MaterialTheme.colorScheme.primary,
+                                            tint = readableTextColorFor(Color(displayColorInt)),
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -777,9 +809,9 @@ fun AppearanceTab(
 
                                     FilledTonalButton(
                                         onClick = {
-                                            BackgroundImageManager.saveHomeBackgroundSolidColor(context, targetColorInt)
+                                            val saved = BackgroundImageManager.saveHomeBackgroundSolidColor(context, targetColorInt)
                                             backgroundRevision++
-                                            savedMessage = "已将「${preset.name}」应用为首页背景"
+                                            savedMessage = if (saved) "已将「${preset.name}」应用为首页背景" else "背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
                                         modifier = Modifier.weight(1f),
@@ -790,9 +822,9 @@ fun AppearanceTab(
 
                                     FilledTonalButton(
                                         onClick = {
-                                            BackgroundImageManager.saveChatBackgroundSolidColor(context, targetColorInt)
+                                            val saved = BackgroundImageManager.saveChatBackgroundSolidColor(context, targetColorInt)
                                             backgroundRevision++
-                                            savedMessage = "已将「${preset.name}」应用为对话页背景"
+                                            savedMessage = if (saved) "已将「${preset.name}」应用为对话页背景" else "背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
                                         modifier = Modifier.weight(1f),
@@ -803,10 +835,10 @@ fun AppearanceTab(
 
                                     Button(
                                         onClick = {
-                                            BackgroundImageManager.saveHomeBackgroundSolidColor(context, targetColorInt)
-                                            BackgroundImageManager.saveChatBackgroundSolidColor(context, targetColorInt)
+                                            val homeSaved = BackgroundImageManager.saveHomeBackgroundSolidColor(context, targetColorInt)
+                                            val chatSaved = BackgroundImageManager.saveChatBackgroundSolidColor(context, targetColorInt)
                                             backgroundRevision++
-                                            savedMessage = "已将「${preset.name}」应用为全局背景"
+                                            savedMessage = if (homeSaved && chatSaved) "已将「${preset.name}」应用为全局背景" else "部分背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
                                         modifier = Modifier.weight(1f),
@@ -855,26 +887,41 @@ fun AppearanceTab(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(backgroundHistory, key = { it.id }) { entry ->
-                            val bitmap = remember(entry.id) { BackgroundImageManager.getBackgroundHistoryBitmap(context, entry) }
-                            if (bitmap != null) {
+                            var bitmap by remember(context, entry.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                            LaunchedEffect(context, entry.id) {
+                                bitmap = withContext(Dispatchers.IO) { BackgroundImageManager.getBackgroundHistoryBitmap(context, entry) }
+                            }
+                            val loadedBitmap = bitmap
+                            if (loadedBitmap != null) {
                                 Column(modifier = Modifier.width(110.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Image(bitmap = bitmap.asImageBitmap(), contentDescription = "历史背景",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxWidth().height(74.dp).clip(RoundedCornerShape(10.dp))
-                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)))
+                                    Box {
+                                        Image(bitmap = loadedBitmap.asImageBitmap(), contentDescription = "历史背景",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxWidth().height(74.dp).clip(RoundedCornerShape(10.dp))
+                                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)))
+                                        FilledIconButton(onClick = { backgroundPendingDelete = entry },
+                                            modifier = Modifier.align(Alignment.TopEnd).size(40.dp),
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.surface,
+                                                contentColor = MaterialTheme.colorScheme.error)) {
+                                            Icon(Icons.Default.DeleteOutline, "删除历史背景", Modifier.size(18.dp))
+                                        }
+                                    }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         TextButton(onClick = {
-                                            if (BackgroundImageManager.restoreHomeBackground(context, entry)) {
+                                            appearanceScope.launch {
+                                                val saved = withContext(Dispatchers.IO) { BackgroundImageManager.restoreHomeBackground(context, entry) }
                                                 backgroundRevision++
-                                                savedMessage = "已恢复首页背景"
+                                                savedMessage = if (saved) "已恢复首页背景" else "背景恢复失败，请重试"
                                             }
                                         }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f)) {
                                             Text("首页", style = MaterialTheme.typography.labelSmall)
                                         }
                                         TextButton(onClick = {
-                                            if (BackgroundImageManager.restoreChatBackground(context, entry)) {
+                                            appearanceScope.launch {
+                                                val saved = withContext(Dispatchers.IO) { BackgroundImageManager.restoreChatBackground(context, entry) }
                                                 backgroundRevision++
-                                                savedMessage = "已恢复对话页背景"
+                                                savedMessage = if (saved) "已恢复对话页背景" else "背景恢复失败，请重试"
                                             }
                                         }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f)) {
                                             Text("对话", style = MaterialTheme.typography.labelSmall)
@@ -894,6 +941,35 @@ fun AppearanceTab(
         modifier = Modifier.align(Alignment.BottomCenter)
     )
 }
+
+    avatarPendingDelete?.let { entry ->
+        AlertDialog(onDismissRequest = { avatarPendingDelete = null },
+            title = { Text("删除历史头像？") },
+            text = { Text("删除后不会自动重新收录。正在使用的用户、模型或角色头像保持不变；以后重新上传该图片仍可保存。") },
+            confirmButton = { TextButton(onClick = {
+                avatarPendingDelete = null
+                appearanceScope.launch {
+                    val deleted = withContext(Dispatchers.IO) { AvatarManager.deleteAvatarHistory(context, entry) }
+                    avatarHistoryRevision++
+                    savedMessage = if (deleted) "已删除历史头像" else "删除失败，请重试"
+                }
+            }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { avatarPendingDelete = null }) { Text("取消") } })
+    }
+    backgroundPendingDelete?.let { entry ->
+        AlertDialog(onDismissRequest = { backgroundPendingDelete = null },
+            title = { Text("删除历史背景？") },
+            text = { Text("删除后不会自动重新收录。当前首页和对话页背景保持不变；以后重新上传该图片仍可保存。") },
+            confirmButton = { TextButton(onClick = {
+                backgroundPendingDelete = null
+                appearanceScope.launch {
+                    val deleted = withContext(Dispatchers.IO) { BackgroundImageManager.deleteBackgroundHistory(context, entry) }
+                    backgroundRevision++
+                    savedMessage = if (deleted) "已删除历史背景" else "删除失败，请重试"
+                }
+            }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { backgroundPendingDelete = null }) { Text("取消") } })
+    }
 
     pendingCropUri?.let { cropUri ->
         val currentTarget = pendingCropTarget

@@ -23,6 +23,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import com.aiassistant.ui.screens.stats.quality
+import com.aiassistant.ui.screens.stats.usageRow
 import org.junit.Test
 import java.util.Calendar
 
@@ -31,6 +33,69 @@ import java.util.Calendar
  * （概览聚合、时段分布、供应商占比、失败归纳、环比、环形图角度与格式化）
  */
 class StatsDashboardTest {
+    @Test fun reportedUsageSplitsReasoningOutOfCompletionAndCacheRemainsInputSubset() {
+        val counts = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            100, 60, 20, 160, 30, 999, 999, 999)
+        assertEquals(100, counts.input)
+        assertEquals(40, counts.output)
+        assertEquals(20, counts.reasoning)
+        assertEquals(160, counts.total)
+        assertEquals(30, counts.cached)
+        assertEquals("reported", counts.source)
+    }
+
+    @Test fun missingUsageUsesSeparateInputOutputAndThinkingEstimates() {
+        val counts = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            null, null, null, null, null, 90, 40, 10)
+        assertEquals(90, counts.input)
+        assertEquals(40, counts.output)
+        assertEquals(10, counts.reasoning)
+        assertEquals(140, counts.total)
+        assertEquals(0, counts.cached)
+        assertEquals("estimated", counts.source)
+    }
+
+    @Test fun completionWithUnreportedThinkingIsMarkedMixedAndNeverDoubleCountsThinking() {
+        val counts = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            120, 50, null, 170, 300, 800, 900, 12)
+        assertEquals(38, counts.output)
+        assertEquals(12, counts.reasoning)
+        assertEquals(170, counts.total)
+        assertEquals(120, counts.cached)
+        assertEquals("mixed", counts.source)
+    }
+
+    @Test fun partialInputReportKeepsReportedInputAndUsesEstimatedGeneration() {
+        val counts = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            80, null, 9, 2, null, 200, 30, 500)
+        assertEquals(80, counts.input)
+        assertEquals(30, counts.output)
+        assertEquals(9, counts.reasoning)
+        assertEquals(119, counts.total)
+        assertEquals("mixed", counts.source)
+    }
+
+    @Test fun malformedProviderCountsAreClampedWithoutNegativeBodyTokens() {
+        val counts = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            -5, 20, 100, -10, -20, 300, 400, 500)
+        assertEquals(0, counts.input)
+        assertEquals(0, counts.output)
+        assertEquals(20, counts.reasoning)
+        assertEquals(20, counts.total)
+        assertEquals(0, counts.cached)
+    }
+
+    @Test fun reportedTotalsPreserveUnclassifiedTokensAndEstimatedSumCannotOverflow() {
+        val reported = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            100, 40, 10, 180, 20, 0, 0, 0)
+        assertEquals(180, reported.total)
+        assertEquals(40, reported.total - reported.input - reported.output - reported.reasoning)
+        val overflow = com.aiassistant.data.repository.helpers.UsageTokenAccounting.normalize(
+            null, null, null, null, null, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
+        assertEquals(Int.MAX_VALUE, overflow.total)
+        assertEquals("estimated", overflow.source)
+    }
+
 
     private fun row(
         timestamp: Long,
@@ -73,10 +138,10 @@ class StatsDashboardTest {
         assertEquals("总请求数应为 3", 3, summary.requestCount)
         assertEquals("失败次数应为 1", 1, summary.failedCount)
         assertEquals("成功率应为 2/3", 2f / 3f, summary.successRate, 0.0001f)
-        assertEquals("总 Token 应为 900", 900, summary.totalTokens)
+        assertEquals("总 Token 应为 900", 900L, summary.totalTokens)
         assertEquals("缓存命中应为 100/300", 100f / 300f, summary.cacheHitRate, 0.0001f)
-        assertEquals("平均响应应为 600ms", 600L, summary.avgResponseTime)
-        assertEquals("TPS 应为 600 输出 / 1.8s", 600f / 1.8f, summary.avgTps, 0.01f)
+        assertEquals("仅成功且有计时请求参与平均响应", 500L, summary.avgResponseTime)
+        assertEquals("TPS 仅成功样本 400 输出 / 1s", 400f, summary.avgTps, 0.01f)
     }
 
     @Test
@@ -168,7 +233,7 @@ class StatsDashboardTest {
 
         assertEquals("必须固定返回 24 个切片", 24, slices.size)
         assertEquals("8 时应聚合 2 次调用", 2, slices[8].requestCount)
-        assertEquals("8 时应聚合 33 Token", 33, slices[8].totalTokens)
+        assertEquals("8 时应聚合 33 Token", 33L, slices[8].totalTokens)
         assertEquals("23 时应聚合 1 次调用", 1, slices[23].requestCount)
         assertEquals("0 时应无调用", 0, slices[0].requestCount)
         assertEquals("总调用次数应守恒", 3, slices.sumOf { it.requestCount })
@@ -273,8 +338,8 @@ class StatsDashboardTest {
             successRate = 1f
         )
         val slices = buildDonutSlices(summary)
-        assertEquals("其他 Token 应为残差 100", 100, slices[3].value)
-        assertEquals("四个切片总和应等于总量", 1000, slices.sumOf { it.value })
+        assertEquals("其他 Token 应为残差 100", 100L, slices[3].value)
+        assertEquals("四个切片总和应等于总量", 1000L, slices.sumOf { it.value })
     }
 
     // ==================== Token 构成 · 模型占比视图（v2.7.0 需求 4b） ====================
@@ -290,10 +355,10 @@ class StatsDashboardTest {
         )
         val slices = rows.toModelDonutSlices(topN = 4)
         assertEquals("Top4 + 其他", 5, slices.size)
-        assertEquals("切片应按消耗降序", "glm-a", slices[0].label)
+        assertEquals("切片应按消耗降序，展示层格式化模型名并保留供应商", "GLM-A · openai", slices[0].label)
         assertEquals("尾部应合并为其他", "其他", slices[4].label)
-        assertEquals("其他应聚合未进 Top4 的 glm-e（20 Token）", 20, slices[4].value)
-        assertEquals("切片总和应守恒", 1000, slices.sumOf { it.value })
+        assertEquals("其他应聚合未进 Top4 的 glm-e（20 Token）", 20L, slices[4].value)
+        assertEquals("切片总和应守恒", 1000L, slices.sumOf { it.value })
     }
 
     @Test
@@ -326,14 +391,14 @@ class StatsDashboardTest {
 
         val series = buildModelTokenSeries(rows, period, endTime, topN = 2)
         assertEquals("Top2 + 其他", 3, series.size)
-        assertEquals("按消耗降序：glm-a 第一", "glm-a", series[0].modelName)
-        assertEquals("glm-a 总量 150", 150, series[0].totalTokens)
-        assertEquals("glm-a 第 0 桶 100", 100, series[0].values[0])
-        assertEquals("glm-a 第 3 桶 50", 50, series[0].values[3])
-        assertEquals("glm-b 第 1 桶 80", 80, series[1].values[1])
+        assertEquals("按消耗降序：glm-a 第一，展示层统一模型名", "GLM-A · openai", series[0].modelName)
+        assertEquals("glm-a 总量 150", 150L, series[0].totalTokens)
+        assertEquals("glm-a 第 0 桶 100", 100L, series[0].values[0])
+        assertEquals("glm-a 第 3 桶 50", 50L, series[0].values[3])
+        assertEquals("glm-b 第 1 桶 80", 80L, series[1].values[1])
         assertEquals("其他合并为一条序列", "其他", series[2].modelName)
-        assertEquals("其他第 2 桶聚合 c/d/e 共 30", 30, series[2].values[2])
-        assertEquals("序列总量守恒", 260, series.sumOf { it.totalTokens })
+        assertEquals("其他第 2 桶聚合 c/d/e 共 30", 30L, series[2].values[2])
+        assertEquals("序列总量守恒", 260L, series.sumOf { it.totalTokens })
         assertEquals("每条序列必须与分桶等长", period.bucketCount, series[0].values.size)
     }
 
@@ -356,11 +421,11 @@ class StatsDashboardTest {
         assertEquals("必须返回固定数量的格子", period.heatmapCells, cells.size)
         assertEquals("第 0 格应聚合 2 次请求", 2, cells[0].requestCount)
         assertEquals("第 0 格应含 1 次失败", 1, cells[0].failedCount)
-        assertEquals("第 0 格 Token 应为 160", 160, cells[0].totalTokens)
+        assertEquals("第 0 格 Token 应为 160", 160L, cells[0].totalTokens)
         assertEquals("第 1 格应聚合 1 次请求", 1, cells[1].requestCount)
         assertEquals("第 2 格应无请求", 0, cells[2].requestCount)
         assertEquals("总请求数应守恒", 3, cells.sumOf { it.requestCount })
-        assertEquals("总 Token 应守恒", 170, cells.sumOf { it.totalTokens })
+        assertEquals("总 Token 应守恒", 170L, cells.sumOf { it.totalTokens })
     }
 
     @Test
@@ -403,4 +468,51 @@ class StatsDashboardTest {
         assertEquals("1.5K", formatNumber(1_500))
         assertEquals("2.0M", formatNumber(2_000_000))
     }
+    @Test fun largeUsageTotalsDoNotOverflowAndProviderSharesRemainComplete() {
+        val rows = (1..8).map { row(it.toLong(), provider = "provider-$it", inputTokens = 1_000_000_000, outputTokens = 0) }
+        assertEquals(8_000_000_000L, rows.toSummary().totalTokens)
+        assertEquals(8_000_000_000L, rows.quality().exactTokens)
+        assertEquals(8_000_000_000L, rows.toProviderShares().sumOf { it.totalTokens })
+        assertEquals(1f, rows.toProviderShares().sumOf { it.share.toDouble() }.toFloat(), 0.0001f)
+    }
+
+    @Test fun exactWindowEndIsIncludedAndOutsideRowsAreExcluded() {
+        val end = 10_000_000L
+        val start = end - StatsPeriod.Hour.durationMillis
+        val rows = listOf(row(start - 1), row(start), row(end), row(end + 1))
+        assertEquals(2, buildBuckets(rows, StatsPeriod.Hour, end).sumOf { it.requestCount })
+        assertEquals(600L, buildModelTokenSeries(rows, StatsPeriod.Hour, end).sumOf { it.totalTokens })
+        assertEquals(2, buildHealthCells(rows, StatsPeriod.Hour, end).sumOf { it.requestCount })
+    }
+
+    @Test fun sameModelFromDifferentProvidersRemainsDistinct() {
+        val rows = listOf(row(1, provider = "a"), row(2, provider = "b"))
+        assertEquals(2, rows.map { it.modelKey }.distinct().size)
+        assertEquals(2, rows.toModelDonutSlices().size)
+    }
+
+    @Test fun qualitySeparatesMissingAndMeasuredLatencyAndTokenSources() {
+        val rows = listOf(row(1, responseTime = 100).copy(tokenSource = "reported", firstTokenTimeMs = 20),
+            row(2, responseTime = 300).copy(tokenSource = "estimated", firstTokenTimeMs = 60),
+            row(3, responseTime = 9000, success = false).copy(completionStatus = "interrupted"),
+            row(4, responseTime = 0))
+        val quality = rows.quality()
+        assertEquals(100L, quality.medianMs)
+        assertEquals(300L, quality.p95Ms)
+        assertEquals(40L, quality.firstTokenMs)
+        assertEquals(2, quality.firstTokenSamples)
+        assertEquals(1, quality.interrupted)
+        assertEquals(2, quality.legacy)
+        assertEquals(200L, rows.toModelRows().single().avgResponseTime)
+    }
+
+    @Test fun cacheSubsetIsNotAddedTwiceAndMalformedNegativeCountsAreSanitized() {
+        val stat = com.aiassistant.domain.model.ApiUsageStat(apiConfigId = 1, provider = "synthetic", modelName = "test",
+            inputTokens = 100, outputTokens = 20, thinkingTokens = 5, totalTokens = 125, cachedTokens = 900)
+        val normalized = usageRow(stat)
+        assertEquals(125, normalized.totalTokens)
+        assertEquals(100, normalized.cachedTokens)
+        assertEquals(0, usageRow(stat.copy(inputTokens = -1, outputTokens = -1, thinkingTokens = -1, totalTokens = -1)).totalTokens)
+    }
+
 }

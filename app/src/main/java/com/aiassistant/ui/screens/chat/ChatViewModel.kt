@@ -703,7 +703,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun compressContextNow(isAuto: Boolean = false) {
-        if (_contextUsage.value.isCompressing) return
+        if (_contextUsage.value.isCompressing || _contextUsage.value.isGeneratingSummary || _isGenerating.value) return
         viewModelScope.launch {
             val shouldCompress = _contextUsage.value.usage?.canCompress == true
             val initialPercent = (_contextUsage.value.usage?.usagePercent ?: 0f) * 100
@@ -730,11 +730,11 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     val newPercent = usage.usagePercent * 100
                     val freed = (initialPercent - newPercent).coerceAtLeast(0f)
                     val finishMsg = if (freed > 1f) {
-                        "✅ 较早历史已成功沉淀为时间线与会话记忆，释放约 ${freed.toInt()}% 空间，最近十几次对话完整保留"
+                        "较早原文已总结并保存，预计释放 ${freed.toInt()}% 输入预算；原始聊天记录完整保留"
                     } else if (shouldCompress || usage.compressedThroughMessageId != null) {
-                        "✅ 较早历史已梳理沉淀为时间线与会话记忆，最近十几次对话完整无损保留"
+                        "摘要与覆盖范围已更新，可审阅摘要确认关键事实"
                     } else {
-                        "当前最近十几次对话已处于无损保留状态，无需额外压缩"
+                        "暂无新的可压缩历史"
                     }
                     _contextUsage.update {
                         it.copy(
@@ -761,9 +761,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun generateRollingSummaryNow() {
-        if (_contextUsage.value.isGeneratingSummary) return
+        if (_contextUsage.value.isGeneratingSummary || _contextUsage.value.isCompressing || _isGenerating.value) return
         viewModelScope.launch {
-            _contextUsage.update { it.copy(isGeneratingSummary = true, statusMessage = "🔄 正在梳理较早历史时间线并沉淀会话记忆...") }
+            _contextUsage.update { it.copy(isGeneratingSummary = true, statusMessage = "正在连续整理历史摘要，完成前保持原有上下文…") }
             val modelName = _currentModel.value ?: conversation?.modelName ?: _uiState.value.modelName
             val maxTokens = (_useTempSettings.value)
                 .takeIf { it }
@@ -782,7 +782,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             ).fold(
                 onSuccess = { usage ->
                     conversation = repository.getConversationById(conversationId) ?: conversation
-                    val msg = "✅ 较早历史已成功沉淀为时间线与会话记忆，最近十几次对话完整无损保留"
+                    val msg = "历史摘要已保存，请审阅其中的事实与时间"
                     _contextUsage.update {
                         it.copy(
                             usage = usage,
@@ -795,7 +795,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     _contextUsage.update {
                         it.copy(
                             isGeneratingSummary = false,
-                            statusMessage = error.message ?: "提炼时间线与记忆失败"
+                            statusMessage = error.message ?: "摘要生成失败，原文与上次摘要已保留"
                         )
                     }
                 }
@@ -986,6 +986,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             conversation = updated
             systemPromptSaveJob?.cancel()
             systemPromptSaveJob = viewModelScope.launch {
+                try {
                 AiAssistantApp.instance.database.conversationDao().updateConversation(updated)
                 // 若当前会话为角色扮演会话，同步保存至角色扮演会话实体
                 val rpRepo = AiAssistantApp.instance.roleplayRepository
@@ -999,6 +1000,11 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     )
                     rpRepo.updateSession(updatedRp)
                     _uiState.update { it.copy(roleplaySession = updatedRp) }
+                }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    _error.value = "对话设置未能保存，请重试。"
+                    throw CancellationException("对话设置保存失败").apply { initCause(failure) }
                 }
             }
         }
@@ -2185,7 +2191,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "应用时间线提案失败: ${e.message}", e)
-                _timelineUpdateNotice.value = "保存失败，待确认内容已保留，请重试"
+                _timelineUpdateNotice.value = e.message?.takeIf { it.contains("请重新提取或审阅") }
+                    ?: "保存失败，待确认内容已保留，请重试"
             }
         }
     }
@@ -2576,78 +2583,42 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         newCharacters: List<CharacterProfile>,
         newScenario: RoleplayScenario?,
         resolutionMap: Map<String, com.aiassistant.ui.screens.roleplay.ConflictAction>,
-        onComplete: (String) -> Unit
+        onComplete: (String) -> Unit = {}
     ) {
-        val session = _uiState.value.roleplaySession ?: return
         viewModelScope.launch {
             try {
-                val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-                val existingAllChars = roleplayRepo.getAllCharacters().first()
-                val currentIds = session.getEffectiveCharacterIds().toMutableList()
-
-                newCharacters.forEach { incoming ->
-                    val existing = existingAllChars.firstOrNull { it.name.trim() == incoming.name.trim() }
-                    val action = resolutionMap[incoming.name.trim()] ?: com.aiassistant.ui.screens.roleplay.ConflictAction.MERGE
-
-                    if (existing != null) {
-                        when (action) {
-                            com.aiassistant.ui.screens.roleplay.ConflictAction.CREATE_COPY -> {
-                                val copyChar = incoming.copy(name = "${incoming.name} (副本)")
-                                val newId = roleplayRepo.insertCharacter(copyChar)
-                                if (newId !in currentIds) currentIds.add(newId)
-                            }
-                            com.aiassistant.ui.screens.roleplay.ConflictAction.OVERWRITE -> {
-                                val updated = incoming.copy(id = existing.id, isFavorite = existing.isFavorite)
-                                roleplayRepo.updateCharacter(updated)
-                                if (existing.id !in currentIds) currentIds.add(existing.id)
-                            }
-                            com.aiassistant.ui.screens.roleplay.ConflictAction.MERGE -> {
-                                val merged = com.aiassistant.utils.RoleplaySmartAnalyzer.mergeCharacters(existing, incoming)
-                                roleplayRepo.updateCharacter(merged)
-                                if (existing.id !in currentIds) currentIds.add(existing.id)
-                            }
+                storySettingsSaveMutex.withLock {
+                    val roleplayRepo = AiAssistantApp.instance.roleplayRepository
+                    var updated = roleplayRepo.getSessionByConversationId(conversationId)
+                        ?: error("当前作品不存在")
+                    var effective = roleplayRepo.getEffectiveCharactersForSession(updated)
+                    newCharacters.forEach { incoming ->
+                        val existing = effective.firstOrNull { it.name.trim() == incoming.name.trim() }
+                        val action = resolutionMap[incoming.name.trim()]
+                            ?: com.aiassistant.ui.screens.roleplay.ConflictAction.MERGE
+                        val edited = when {
+                            existing == null -> incoming.copy(id = 0)
+                            action == com.aiassistant.ui.screens.roleplay.ConflictAction.CREATE_COPY -> incoming.copy(id = 0, name = "${incoming.name} (副本)")
+                            action == com.aiassistant.ui.screens.roleplay.ConflictAction.OVERWRITE -> incoming.copy(id = existing.id)
+                            else -> com.aiassistant.utils.RoleplaySmartAnalyzer.mergeCharacters(existing, incoming).copy(id = existing.id)
                         }
-                    } else {
-                        val newId = roleplayRepo.insertCharacter(incoming)
-                        if (newId !in currentIds) currentIds.add(newId)
+                        updated = StorySessionBindings.upsertCharacter(updated, updated.getCustomizedCharacters(effective), edited)
+                        effective = updated.getParticipatingCharacters(emptyList())
                     }
-                }
-
-                var finalScenarioId = session.scenarioId
-                if (newScenario != null) {
-                    val currentSc = session.scenarioId?.let { roleplayRepo.getScenarioById(it) }
-                    if (currentSc != null) {
-                        val mergedSc = com.aiassistant.utils.RoleplaySmartAnalyzer.mergeScenarios(currentSc, newScenario)
-                        roleplayRepo.updateScenario(mergedSc)
-                    } else {
-                        finalScenarioId = roleplayRepo.insertScenario(newScenario)
+                    if (newScenario != null) {
+                        val existing = roleplayRepo.getEffectiveScenarioForSession(updated)
+                        val world = if (existing == null) newScenario.copy(id = -1L)
+                            else com.aiassistant.utils.RoleplaySmartAnalyzer.mergeScenarios(existing, newScenario).copy(id = existing.id)
+                        updated = updated.copy(scenarioId = world.id.takeIf { it > 0 }, customScenarioData = gson.toJson(world))
                     }
+                    roleplayRepo.updateSession(updated)
+                    val world = roleplayRepo.getEffectiveScenarioForSession(updated)
+                    _uiState.update { it.copy(roleplaySession = updated, roleplayCharacter = effective.firstOrNull(),
+                        roleplayCharacters = effective, roleplayScenario = world) }
                 }
-
-                val updatedCharIdsJson = com.google.gson.Gson().toJson(currentIds)
-                val updatedSession = session.copy(
-                    characterId = currentIds.firstOrNull(),
-                    characterIds = updatedCharIdsJson,
-                    scenarioId = finalScenarioId
-                )
-                roleplayRepo.updateSession(updatedSession)
-
-                val updatedChars = roleplayRepo.getCharactersByIds(currentIds)
-                val updatedSc = finalScenarioId?.let { roleplayRepo.getScenarioById(it) }
-
-                _uiState.update {
-                    it.copy(
-                        roleplaySession = updatedSession,
-                        roleplayCharacter = updatedChars.firstOrNull(),
-                        roleplayCharacters = updatedChars,
-                        roleplayScenario = updatedSc
-                    )
-                }
-
-                onComplete("已成功追加/融合 ${newCharacters.size} 位角色" + (if (newScenario != null) "与世界观设定" else ""))
-            } catch (e: Exception) {
-                onComplete("追加融合失败: ${e.message}")
-            }
+                onComplete("已将 ${newCharacters.size} 位人物${if (newScenario != null) "与世界观" else ""}保存到本作品；资料库保持原样")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { onComplete("追加融合失败：${failure.message}") }
         }
     }
 
@@ -2671,13 +2642,18 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         prompt: String?
     ): Job {
         val saveJob = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-            storySettingsSaveMutex.withLock {
-                // The two saves both update the session row. Publish the completed story copy before
-                // chat settings read it, and finish this save before another dialog save can start.
-                systemPromptSaveJob?.join()
-                persistStorySessionContext(characterIds, scenarioId, narrativeMode, plotSummary)
-                updateChatSettings(settings, prompt)
-                systemPromptSaveJob?.join()
+            try {
+                storySettingsSaveMutex.withLock {
+                    systemPromptSaveJob?.join()
+                    persistStorySessionContext(characterIds, scenarioId, narrativeMode, plotSummary)
+                    updateChatSettings(settings, prompt)
+                    systemPromptSaveJob?.join()
+                    check(systemPromptSaveJob?.isCancelled != true) { "对话设置保存被取消" }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                _error.value = "故事设置未能保存，请保留当前编辑并重试。"
+                throw CancellationException("故事设置保存失败").apply { initCause(failure) }
             }
         }
         storySettingsSaveJob = saveJob
@@ -2692,15 +2668,16 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         plotSummary: String
     ) {
         val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-        val currentSession = roleplayRepo.getSessionByConversationId(conversationId) ?: return
-        val updated = currentSession.copy(
-            characterIds = gson.toJson(characterIds),
-            characterId = characterIds.firstOrNull(),
-            scenarioId = scenarioId,
-            narrativeMode = narrativeMode.value,
-            currentPlotSummary = plotSummary,
-            updatedAt = System.currentTimeMillis()
-        )
+        val currentSession = roleplayRepo.getSessionByConversationId(conversationId) ?: error("当前作品已不存在")
+        val effectiveCharacters = roleplayRepo.getEffectiveCharactersForSession(currentSession)
+        val libraryCharacters = roleplayRepo.getCharactersByIds(characterIds.filter { it > 0 })
+        val selected = StorySessionBindings.select(currentSession,
+            (currentSession.getCustomizedCharacters(effectiveCharacters) + libraryCharacters).distinctBy { it.id },
+            characterIds, scenarioId, narrativeMode, plotSummary)
+        val updated = if (selected.customScenarioData == null && selected.scenarioId != null) {
+            val world = roleplayRepo.getScenarioById(selected.scenarioId)
+            selected.copy(customScenarioData = world?.let { gson.toJson(it) })
+        } else selected
         roleplayRepo.updateSession(updated)
         val rpCharacters = roleplayRepo.getEffectiveCharactersForSession(updated)
         val rpScenario = roleplayRepo.getEffectiveScenarioForSession(updated)
@@ -2715,81 +2692,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
     }
 
-    fun saveLocalCharacterOverride(editedCharacter: CharacterProfile) {
-        viewModelScope.launch {
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
+    fun saveLocalCharacterOverride(editedCharacter: CharacterProfile) = addNewLocalCharacter(editedCharacter)
 
-            // 如果是全新创建的角色 (id <= 0)，先同步持久化进全局 Room 数据库以分配真实主键 ID
-            val finalCharacter = if (editedCharacter.id <= 0L) {
-                val newId = roleplayRepo.insertCharacter(editedCharacter)
-                editedCharacter.copy(id = newId)
-            } else {
-                editedCharacter
-            }
-
-            val baseCharacters = _uiState.value.roleplayCharacters
-            val currentCustomized = currentSession.getCustomizedCharacters(baseCharacters).toMutableList()
-            val existingIndex = currentCustomized.indexOfFirst { (it.id == finalCharacter.id && it.id > 0) || it.name == finalCharacter.name }
-            if (existingIndex >= 0) {
-                currentCustomized[existingIndex] = finalCharacter
-            } else {
-                currentCustomized.add(finalCharacter)
-            }
-
-            // 确保角色 ID 加入到本故事会话的登场角色列表中
-            val sessionCharIds = currentSession.getEffectiveCharacterIds().toMutableList()
-            if (!sessionCharIds.contains(finalCharacter.id)) {
-                sessionCharIds.add(finalCharacter.id)
-            }
-
-            val jsonStr = com.google.gson.Gson().toJson(currentCustomized)
-            val updatedSession = currentSession.copy(
-                characterIds = com.google.gson.Gson().toJson(sessionCharIds),
-                customCharacterData = jsonStr,
-                updatedAt = System.currentTimeMillis()
-            )
-            roleplayRepo.updateSession(updatedSession)
-            val effectiveChars = roleplayRepo.getEffectiveCharactersForSession(updatedSession)
-            _uiState.update {
-                it.copy(
-                    roleplaySession = updatedSession,
-                    roleplayCharacter = effectiveChars.firstOrNull(),
-                    roleplayCharacters = effectiveChars
-                )
-            }
-        }
-    }
-
-    fun saveLocalScenarioOverride(editedScenario: RoleplayScenario) {
-        viewModelScope.launch {
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
-
-            // 如果是全新创建的世界观 (id <= 0)，先同步持久化进全局 Room 数据库以分配真实主键 ID
-            val finalScenario = if (editedScenario.id <= 0L) {
-                val newId = roleplayRepo.insertScenario(editedScenario)
-                editedScenario.copy(id = newId)
-            } else {
-                editedScenario
-            }
-
-            val jsonStr = com.google.gson.Gson().toJson(finalScenario)
-            val updatedSession = currentSession.copy(
-                scenarioId = finalScenario.id,
-                customScenarioData = jsonStr,
-                updatedAt = System.currentTimeMillis()
-            )
-            roleplayRepo.updateSession(updatedSession)
-            val effectiveScenario = roleplayRepo.getEffectiveScenarioForSession(updatedSession)
-            _uiState.update {
-                it.copy(
-                    roleplaySession = updatedSession,
-                    roleplayScenario = effectiveScenario
-                )
-            }
-        }
-    }
+    fun saveLocalScenarioOverride(editedScenario: RoleplayScenario) = saveLocalScenario(editedScenario)
 
     fun analyzeAndProposeSettingFromInput(
         text: String,
@@ -2907,30 +2812,15 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     fun addNewLocalCharacter(newChar: CharacterProfile) {
         viewModelScope.launch {
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
-
-            val baseChars = _uiState.value.roleplayCharacters
-            val currentCustomized = currentSession.getCustomizedCharacters(baseChars).toMutableList()
-            val idx = currentCustomized.indexOfFirst { (it.id > 0 && it.id == newChar.id) || it.name == newChar.name }
-            if (idx >= 0) {
-                currentCustomized[idx] = newChar
-            } else {
-                currentCustomized.add(newChar)
-            }
-            val jsonStr = com.google.gson.Gson().toJson(currentCustomized)
-            val updatedSession = currentSession.copy(
-                customCharacterData = jsonStr,
-                updatedAt = System.currentTimeMillis()
-            )
-            roleplayRepo.updateSession(updatedSession)
-            val effectiveChars = roleplayRepo.getEffectiveCharactersForSession(updatedSession)
-            _uiState.update {
-                it.copy(
-                    roleplaySession = updatedSession,
-                    roleplayCharacter = effectiveChars.firstOrNull(),
-                    roleplayCharacters = effectiveChars
-                )
+            storySettingsSaveMutex.withLock {
+                val roleplayRepo = AiAssistantApp.instance.roleplayRepository
+                val currentSession = roleplayRepo.getSessionByConversationId(conversationId) ?: return@withLock
+                val currentCharacters = currentSession.getCustomizedCharacters(roleplayRepo.getEffectiveCharactersForSession(currentSession))
+                val updatedSession = StorySessionBindings.upsertCharacter(currentSession, currentCharacters, newChar)
+                roleplayRepo.updateSession(updatedSession)
+                val effectiveChars = roleplayRepo.getEffectiveCharactersForSession(updatedSession)
+                _uiState.update { it.copy(roleplaySession = updatedSession,
+                    roleplayCharacter = effectiveChars.firstOrNull(), roleplayCharacters = effectiveChars) }
             }
         }
     }
@@ -2949,7 +2839,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
             val baseChars = _uiState.value.roleplayCharacters
             val currentCustomized = currentSession.getCustomizedCharacters(baseChars).filterNot {
-                (it.id > 0 && it.id == character.id) || it.name == character.name
+                (it.id != 0L && it.id == character.id) || (character.id == 0L && it.name == character.name)
             }
             val customJson = if (currentCustomized.isNotEmpty()) {
                 com.google.gson.Gson().toJson(currentCustomized)
@@ -2957,6 +2847,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
             val updatedSession = currentSession.copy(
                 characterIds = charIdsJson,
+                characterId = charIds.firstOrNull { it > 0 },
                 customCharacterData = customJson,
                 updatedAt = System.currentTimeMillis()
             )
@@ -2977,9 +2868,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             val roleplayRepo = AiAssistantApp.instance.roleplayRepository
             val currentSession = _uiState.value.roleplaySession ?: roleplayRepo.getSessionByConversationId(conversationId) ?: return@launch
 
-            val jsonStr = com.google.gson.Gson().toJson(scenario)
+            val localScenario = if (scenario.id == 0L) scenario.copy(id = -1L) else scenario
+            val jsonStr = com.google.gson.Gson().toJson(localScenario)
             val updatedSession = currentSession.copy(
-                scenarioId = if (scenario.id > 0) scenario.id else currentSession.scenarioId,
+                scenarioId = localScenario.id.takeIf { it > 0 },
                 customScenarioData = jsonStr,
                 updatedAt = System.currentTimeMillis()
             )

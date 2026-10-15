@@ -26,6 +26,12 @@
 
 ## 本次记录
 
+- 2026-10-16（v2.8.6/192）：完成历史删除/背景/主题/普通阅读作用域、多方向入口、作品与工作区重写、完整压缩/提取和实际请求统计。全部来自本仓库，未读 `APP改进/`；Room v35（20 实体），新增保留旧数据的 34→35 迁移。
+- 最终验证：`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合退出 0；85 套件 / 695 项全部通过，失败、错误、跳过均为 0；Lint 0 Error / 95 Warning；`git diff --check` 退出 0。 `assembleRelease --no-daemon` 退出 0；签名/版本/架构/已知隐私模式扫描与排他复制/副本哈希校验均退出 0。APK 25,292,273 字节、446 个条目，SHA256 `833A9233C7422296D6078BB7D9EE80F65893C29156A7B66FDCAB677A46028E15`；版本 2.8.6/192、API 26–34、arm64-v8a、applicationId `com.aiassistant`。
+- 收敛过程中联合验证曾退出 1：补齐调用参数和协程 import；修正旧颜色/展示断言、分段压力样本、Windows Robolectric 原生图形/POSIX文件替换适配；4处 produceState 改为显式状态＋LaunchedEffect 后通过。没有删除失败测试、忽略规则或扩张 Lint 隔离。最终命令包含本机专用 Gradle 缓存参数，未写入公共配置。
+- 无真机/模拟器或真实第三方模型验收。原有未跟踪图片与浏览器目录保留且排除上传，本机签名/配置/缓存与构建输出不提交；本机历史 APK 永久保留。远端推送与 Release 实际结果在完成后另记。
+
+
 - 2026-10-16（v2.8.5/191）：完成紧凑底栏、高密度首页与设置分区、创作工作台真实会话索引、头像/背景历史、主题语义色、创作衬线字体及回复结束不滚动。参考 SillyTavern、Character Card V2、RisuAI/KoboldCpp 公开资料；未使用 `APP改进/`。Room v34 不变。
 - 验证退出码：`compileDebugKotlin` 0，`testDebugUnitTest` 0（84 套件/643 项，无失败/错误/跳过），`lintDebug` 0（0 Error/88 Warning），`git diff --check` 0；`assembleRelease` 0。APK 25,275,889 字节、446 条目，aapt/apksigner/副本 SHA256 校验均 0。
 - 隐私核查：32 个完整暂存文件（源码、文档、字体和 OFL 许可证）自动扫描及人工复核退出 0；未包含本机配置、密钥、用户数据或未跟踪图片/浏览器目录。APK 原始字节与可读 UTF-16 字符串扫描退出 0；仅使用公共维护者占位身份。

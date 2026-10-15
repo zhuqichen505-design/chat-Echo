@@ -427,7 +427,8 @@ internal fun MessageBubble(
 ) {
     val isUser = message.role == "user"
     val personalizationSettings = rememberChatPersonalizationSettings()
-    val readingStyle = personalizationSettings.storyReadingStyle.takeIf { isStory }
+    val readingStyle = personalizationSettings.storyReadingStyle.takeIf { isStory || personalizationSettings.applyReadingStyleToChats }
+    val readingFont = personalizationSettings.storyFont.takeIf { isStory || personalizationSettings.applyReadingFontToChats }
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }
@@ -436,7 +437,7 @@ internal fun MessageBubble(
     val bubbleColor = if (isUser) glass.userBubble else glass.assistantBubble
     val textBackground = if (isUser) bubbleColor else resolvedReadableBackdrop
     val textColor = readableTextColorFor(
-        background = if (isUser) textBackground else glass.panelStrong,
+        background = textBackground,
         fallbackSurface = resolvedReadableBackdrop
     )
     val bubbleShape = if (isUser) {
@@ -559,6 +560,7 @@ internal fun MessageBubble(
         if (!isUser && isGenerating && message.content.isBlank()) {
             return
         }
+        StoryReadingTypography(readingStyle, readingFont) {
         SelectionContainer {
             Column(
                 modifier = if (isUser) {
@@ -649,7 +651,6 @@ internal fun MessageBubble(
                             )
                         }
                     } else {
-                        StoryReadingTypography(readingStyle, personalizationSettings.storyFont) {
                         MarkdownText(
                             content = message.content,
                             color = contentColor,
@@ -662,7 +663,6 @@ internal fun MessageBubble(
                             cursorFading = !isGenerating,
                             streamingAnimationStyle = personalizationSettings.streamingAnimationStyle
                         )
-                        }
                         if (citations.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
                             CitationsCardsRow(
@@ -681,6 +681,7 @@ internal fun MessageBubble(
 
                 // Markdown owns the single output marker; do not add a second waiting animation.
             }
+        }
         }
     }
 
@@ -732,6 +733,7 @@ internal fun MessageBubble(
                     MessageFooter(
                         isUser = true,
                         message = message,
+                        backdropContentColor = readableTextColorFor(resolvedReadableBackdrop),
                         variantInfo = variantInfo,
                         onVariantSelected = onVariantSelected,
                         onCopy = onCopy,
@@ -1333,10 +1335,9 @@ internal fun MessageBubble(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 val displayThinking = if (hasTranslation && showTranslated) message.translatedThinking ?: "" else (message.thinkingContent ?: "")
-                                MarkdownText(
-                                    content = displayThinking,
-                                    color = thinkingContentColor
-                                )
+                                StoryReadingTypography(style = null, font = readingFont) {
+                                    MarkdownText(content = displayThinking, color = thinkingContentColor)
+                                }
                             }
                         }
                     }
@@ -1363,10 +1364,9 @@ internal fun MessageBubble(
 
                         // 如果前面已有部分输出内容，先以正常气泡展示正文
                         if (beforeInterrupt.isNotBlank()) {
-                            MarkdownText(
-                                content = beforeInterrupt,
-                                color = textColor
-                            )
+                            StoryReadingTypography(readingStyle, readingFont) {
+                                MarkdownText(content = beforeInterrupt, color = textColor)
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
                         }
 
@@ -1463,6 +1463,7 @@ internal fun MessageBubble(
                     MessageFooter(
                         isUser = false,
                         message = message,
+                        backdropContentColor = readableTextColorFor(resolvedReadableBackdrop),
                         variantInfo = variantInfo,
                         onVariantSelected = onVariantSelected,
                         onCopy = onCopy,
@@ -1502,6 +1503,7 @@ internal fun MessageBubble(
 internal fun MessageFooter(
     isUser: Boolean,
     message: Message,
+    backdropContentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     variantInfo: VariantInfo? = null,
     onVariantSelected: ((String, Int) -> Unit)? = null,
     onCopy: () -> Unit,
@@ -1549,20 +1551,20 @@ internal fun MessageFooter(
 
             MessageMetaText(
                 text = formatMessageClock(message.createdAt),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                color = backdropContentColor.copy(alpha = 0.84f)
             )
 
             if (message.responseTime > 0 && !responseTimeInThinkingBubble) {
                 MessageMetaText(
                     text = formatTime(message.responseTime),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                    color = backdropContentColor.copy(alpha = 0.84f)
                 )
             }
 
             if (message.tokenCount > 0) {
                 MessageMetaText(
                     text = "${message.tokenCount} tokens",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                    color = backdropContentColor.copy(alpha = 0.84f)
                 )
 
                 if (message.responseTime > 0) {
@@ -1575,7 +1577,7 @@ internal fun MessageFooter(
                         val speed = outputTokens / seconds
                         MessageMetaText(
                             text = String.format(Locale.US, "%.1f tokens/s", speed),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                            color = backdropContentColor.copy(alpha = 0.84f)
                         )
                     }
                 }
@@ -1597,6 +1599,7 @@ internal fun MessageFooter(
             if (variantInfo != null && variantInfo.total > 1 && onVariantSelected != null) {
                 VariantSwitcher(
                     info = variantInfo,
+                    contentColor = backdropContentColor,
                     onSelect = { index -> onVariantSelected(variantInfo.groupId, index) }
                 )
                 Spacer(modifier = Modifier.width(2.dp))
@@ -1605,7 +1608,7 @@ internal fun MessageFooter(
             FooterIconButton(
                 icon = Icons.Default.ContentCopy,
                 contentDescription = "复制",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = backdropContentColor,
                 onClick = onCopy
             )
 
@@ -1613,14 +1616,14 @@ internal fun MessageFooter(
                 FooterIconButton(
                     icon = Icons.AutoMirrored.Filled.AltRoute,
                     contentDescription = "分支对话",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = backdropContentColor,
                     onClick = onBranch
                 )
             } else if (onQuote != null) {
                 FooterIconButton(
                     icon = Icons.Default.FormatQuote,
                     contentDescription = "引用",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = backdropContentColor,
                     onClick = onQuote
                 )
             }
@@ -1629,7 +1632,7 @@ internal fun MessageFooter(
                 FooterIconButton(
                     icon = Icons.Default.Refresh,
                     contentDescription = "重新生成",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = backdropContentColor,
                     onClick = onRegenerate
                 )
             }
@@ -1643,7 +1646,7 @@ internal fun MessageFooter(
                     FooterIconButton(
                         icon = Icons.Default.MoreVert,
                         contentDescription = "更多操作",
-                        tint = if (message.isPinned || message.isExcluded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = backdropContentColor,
                         onClick = { showMoreMenu = true }
                     )
 
@@ -1791,7 +1794,8 @@ internal fun FooterIconButton(
 internal fun VariantSwitcher(
     info: VariantInfo,
     onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
     val currentPosition = info.availableIndices.indexOf(info.currentIndex).coerceAtLeast(0)
     val canGoPrevious = currentPosition > 0
@@ -1813,13 +1817,13 @@ internal fun VariantSwitcher(
                 Icons.Default.ChevronLeft,
                 contentDescription = "上一版",
                 modifier = Modifier.size(20.dp),
-                tint = if (canGoPrevious) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                tint = if (canGoPrevious) contentColor else contentColor.copy(alpha = 0.38f)
             )
         }
         Text(
             text = "${currentPosition + 1}/${info.total}",
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = contentColor
         )
         IconButton(
             onClick = {
@@ -1832,7 +1836,7 @@ internal fun VariantSwitcher(
                 Icons.Default.ChevronRight,
                 contentDescription = "下一版",
                 modifier = Modifier.size(20.dp),
-                tint = if (canGoNext) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                tint = if (canGoNext) contentColor else contentColor.copy(alpha = 0.38f)
             )
         }
     }

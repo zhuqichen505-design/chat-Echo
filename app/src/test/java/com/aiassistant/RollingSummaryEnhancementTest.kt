@@ -119,12 +119,12 @@ class RollingSummaryEnhancementTest {
         assertTrue("提示词必须强调时间线系统紧密协同互补", prompt.contains("时间线系统紧密协同互补"))
         assertTrue("提示词必须强调避免机械复读冗长的时间节点列表", prompt.contains("避免机械复读冗长的时间节点列表"))
         assertTrue("提示词必须强调当前未决议题与待办事项", prompt.contains("当前未决议题与待办事项"))
-        assertTrue("提示词必须强调整体的时间线通过记忆读取", prompt.contains("整体的时间线通过记忆读取"))
-        assertTrue("提示词必须强调摘要只负责总结最近发生了什么", prompt.contains("摘要只负责总结最近发生了什么"))
-        assertTrue("提示词必须强调摘要总结的内容只能和时间线最新的时间节点关联上", prompt.contains("摘要总结的内容只能和时间线最新的时间节点关联上"))
-        assertTrue("提示词必须强调严禁跨越中段剧情去错误连接开场相见与最新事件等断层情节", prompt.contains("严禁跨越中段剧情去错误连接开场相见与最新事件等断层情节"))
-        assertTrue("提示词必须强调必须完整输出全部4个板块", prompt.contains("必须完整输出全部 4 个板块"))
-        assertTrue("提示词必须严禁只输出板块标题而不写实质内容", prompt.contains("绝对严禁只输出板块标题而不写实质内容"))
+        assertTrue("摘要不能依赖可能未注入的记忆", prompt.contains("不能假设省略的事实一定由其他记忆完整承载"))
+        assertFalse("摘要不得丢弃已确认早期事实", prompt.contains("摘要只负责总结最近发生了什么"))
+        assertTrue("各事件保留原始时间", prompt.contains("每个事件保留原始时间"))
+        assertTrue("摘要不得编造未发生事实", prompt.contains("不把假设、计划、导演要求或未选择的回复当作已发生事实"))
+        assertTrue("无事实的板块不应诱导幻觉", prompt.contains("不要补造内容"))
+        assertTrue("合并时必须保留未解决矛盾", prompt.contains("矛盾未解决时标注双方说法"))
     }
 
     @Test
@@ -138,7 +138,7 @@ class RollingSummaryEnhancementTest {
 
         assertTrue("提示词必须注入时间线最新节点", prompt.contains("【时间线最新时间节点（时序基准）】："))
         assertTrue("提示词必须包含具体时间节点内容", prompt.contains("[第 3 天·傍晚] 调查告一段落，两人相约商业街"))
-        assertTrue("提示词必须包含时空锚定铁律", prompt.contains("整体时间线通过记忆读取，摘要只负责总结最近发生了什么，摘要总结的内容只能和时间线最新的时间节点关联上！"))
+        assertTrue("最新时间不能改写旧事件日期", prompt.contains("最新时间锚点不能覆盖早期事件日期"))
         assertTrue("提示词必须严禁将更早开场情节与近期事件跨段因果连接", prompt.contains("严禁将更早开场情节（如初次相见）与近期事件跨段因果连接"))
     }
 
@@ -156,7 +156,7 @@ class RollingSummaryEnhancementTest {
     @Test
     fun testRecentMessagesUncompressed_fullContextPreservation() {
         assertEquals("未压缩最近消息保护门限应为 16 条", 16, com.aiassistant.data.repository.AiRepository.UNCOMPRESSED_RECENT_MESSAGE_COUNT)
-        assertEquals("滚动摘要预算比例应彻底废除置零", 0.0f, com.aiassistant.data.repository.AiRepository.SUMMARY_BUDGET_RATIO, 0.001f)
+        assertEquals("滚动摘要必须分配明确预算", 0.12f, com.aiassistant.data.repository.AiRepository.SUMMARY_BUDGET_RATIO, 0.001f)
         assertTrue("记忆与时间线预算比例应充裕", com.aiassistant.data.repository.AiRepository.MEMORY_BUDGET_RATIO >= 0.10f)
     }
 
@@ -313,12 +313,12 @@ class RollingSummaryEnhancementTest {
         )
 
         // 验证提示词注入了去重指令
-        assertTrue("提示词必须明确声明不要总结记忆中已经存在的内容", prompt.contains("不要总结记忆中已经存在的内容"))
-        assertTrue("提示词必须严禁总结用户偏好习惯", prompt.contains("严禁总结用户偏好习惯"))
-        assertTrue("提示词必须包含已有记忆约束板块", prompt.contains("【已有记忆与偏好约束（严禁在此重复提炼）】："))
+        assertTrue("应保留仍有效的早期事实", prompt.contains("保留既有摘要中仍有效的早期事实"))
+        assertTrue("关键约束必须在去重后仍被保留", prompt.contains("仍须保留后续回复必需的约束"))
+        assertTrue("提示词必须包含已有记忆约束板块", prompt.contains("【已有记忆与偏好约束（去重参考）】："))
         assertTrue("必须列出已知约束1", prompt.contains("用户偏好简洁中文回复，禁止使用英文术语"))
         assertTrue("必须列出已知约束2", prompt.contains("必须始终保持冷静理性的语气"))
-        assertTrue("必须声明记忆去重铁律", prompt.contains("以上用户偏好习惯、行为禁令与固定约束已由系统记忆全量保存，本摘要严禁总结或记录上述任何内容！"))
+        assertFalse("不得再要求丢弃用户约束", prompt.contains("严禁总结或记录上述任何内容"))
     }
 
     @Test

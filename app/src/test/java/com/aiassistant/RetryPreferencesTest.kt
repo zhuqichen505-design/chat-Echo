@@ -17,6 +17,25 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun readingScopeSwitchesPersistIndependentlyAndDefaultToStoriesOnly() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        assertFalse(manager.getSettings().applyReadingStyleToChats)
+        assertFalse(manager.getSettings().applyReadingFontToChats)
+        assertTrue(manager.saveSettings(manager.getSettings().copy(applyReadingFontToChats = true,
+            storyFont = com.aiassistant.utils.EchoStoryFont.TYPEWRITER)))
+        val restored = PersonalizationManager(context)
+        assertTrue(restored.getSettings().applyReadingFontToChats)
+        assertFalse(restored.getSettings().applyReadingStyleToChats)
+        assertTrue(restored.saveSettings(restored.getSettings().copy(applyReadingStyleToChats = true,
+            applyReadingFontToChats = false)))
+        val actual = PersonalizationManager(context).getSettings()
+        assertTrue(actual.applyReadingStyleToChats)
+        assertFalse(actual.applyReadingFontToChats)
+        assertEquals(com.aiassistant.utils.EchoStoryFont.TYPEWRITER, actual.storyFont)
+    }
+
     @Test fun homeLayoutPreferencesSurviveRecreationAndStayIndependentOfVisualAndRetryChoices() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()

@@ -133,3 +133,24 @@ SillyTavern 文档关于历史后指令影响的描述是其产品用法，并�
 `option-a.png`、`option-b.png`、`option-c.png` 为早期主题样稿，不能当作当前 Android 截图。流式动效保留细光标、微声波、墨环三种，呼吸光带不列入实现选项；创作阅读另设沉浸叙事、简洁正文、分栏上下文。全部样稿内容为合成数据，未连接真实会话或模型。
 
 既有浏览器检查覆盖桌面 1440 px、手机 390 px、主题、阅读样式控件、三种动画、减弱动态及键盘焦点，检查时窄屏无横向溢出。此记录仅覆盖当时 HTML；本次边界文字更新不冒充新增浏览器检查，HTML 检查也不代表 Android 视觉验收。
+
+## 9. v2.8.6：作品工作区、可靠压缩与计量（2026-10-16）
+
+本轮直接对照 Echo 当前源码与以下公开材料，未读取或采用 `APP改进/`。没有复制外部项目代码，未运行第三方客户端，也未发送真实会话或凭据。
+
+| 已读取来源 | 观察与本地取舍 |
+| --- | --- |
+| [SillyTavern World Info](https://docs.sillytavern.app/usage/core-concepts/worldinfo/) | 资料库与聊天绑定分开，词条需要触发和预算；Echo 新作品工作区直接管理世界书，基础导入与高级扩展兼容边界保持明确。 |
+| [SillyTavern Author’s Note](https://docs.sillytavern.app/usage/core-concepts/authors-note/) | 当前聊天写作要求独立于人物资料。Echo 将写作要求、人物与世界、会话设定、时间线、世界书分成直接可达的工作区；编辑作品副本不污染全局资料库。 |
+| [SillyTavern Summarize](https://docs.sillytavern.app/extensions/summarize/) | 摘要可丢失细节，应允许人工审阅；覆盖位置应关联真实消息，既有摘要与新增原文连续合并。Echo 恢复可审阅滚动摘要、真实消息水线及编辑失效机制，保留所有原文。 |
+| [SillyTavern issue #2968](https://github.com/SillyTavern/SillyTavern/issues/2968) | 社区报告未变化消息被反复摘要、长会话成本增加；这是用户痛点线索，并非经本轮复现的官方缺陷结论。Echo 对小批量新增历史缓冲，仅在策略或预算需要时更新。 |
+| [OpenTelemetry GenAI metrics](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md) | 首段等待、端到端完成耗时、解码速度是不同指标。Echo 分开显示首段等待、P50/P95完成耗时及端到端吞吐，不将等待在内的吞吐称为解码速度。 |
+| [OpenTelemetry GenAI token metrics](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-token-metrics.md) | 缓存与推理属于相应输入/输出子集，服务端上报与缺失数据应区分。Echo 用统一归一化器避免重复相加，保留本地估算并明确标记；不宣称实现完整 OTel 遥测或账单核算。 |
+
+实现重点是实际数据路径，而非仅改变标签：创作首页、新作品流程与故事工作区重写；会话设定/时间线使用普通聊天的同一数据和操作；本地角色使用稳定 ID，活跃选择和资料副本分离；世界观更换清除旧覆盖；保存完成才打开后续设置。
+
+压缩改为连续历史分块、逐步合并摘要、完整验证成功后事务更新覆盖位置。超长单条保留中间内容与 Unicode 字符边界；失败、截断、编辑竞争不覆盖旧摘要或推进水线。置顶保护完整轮次；系统、世界书、记忆、附件、本轮输入与输出预留共同计入估算预算，不能静默放大用户配置窗口。时间线按有效回复变体连续提取；同时间也仅精确去重，保留不同角色、否定、数量与条件。更新提案绑定请求前原节点，审阅期间人工修改会阻止旧提案覆盖。实际双协议提取不接受截断或思考替代正文；超窗口增量明确转全历史分块梳理，不发送静默截断内容。
+
+统计通过实际 API 尝试采集，覆盖正式回复、方向选择、压缩、设定/时间线、命名及其他辅助调用。Room 34→35 保留旧行并将旧来源标记为未分类，不编造历史首段等待。模型与供应商组成筛选键，汇总使用 Long，桶边界与筛选窗口一致。
+
+验证使用本地合成 HTTP、真实 Room 迁移/读写及领域单测；自动验证结果见最新发布说明。没有设备和第三方模型端到端验收，不以源码重写、单测或 HTML 预览宣称触控、视觉与生成质量已经验证。

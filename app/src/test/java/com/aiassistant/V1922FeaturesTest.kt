@@ -12,8 +12,10 @@ class V1922FeaturesTest {
 
     @Test
     fun testBuiltInSolidColorPresets() {
-        val presets = BackgroundImageManager.PRESET_SOLID_COLORS
-        // 必须包含 6 款精选低饱和护眼纯色
+        val allPresets = BackgroundImageManager.PRESET_SOLID_COLORS
+        assertEquals(12, allPresets.size)
+        val presets = allPresets.take(6)
+        // 保留原有 6 款精选低饱和护眼纯色
         assertEquals(6, presets.size)
 
         val expectedIds = listOf("pale_green", "pale_blue", "pale_purple", "pale_pink", "pale_yellow", "pale_cyan")

@@ -217,4 +217,74 @@ class ContextCompressionAndBudgetTest {
         assertEquals(20L, result.activeMessages.last().id)
         assertTrue("总 Token 允许突破紧凑预算以确保最近16条无损", result.recentTokens > tinyBudget)
     }
+    @Test fun compressionPlanProtectsWholePinnedTurnsAndMarksUncoveredSources() {
+        val messages = (1L..24L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "synthetic-$id", isPinned = id == 2L) }
+        val plan = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.plan(messages,
+            com.aiassistant.domain.model.CompressionTier.L2, 100000, null, 1700000000000L, recentRounds = 4)
+        assertTrue(plan.needsSummary)
+        assertEquals((1L..16L).toList(), plan.summarySource.map { it.id })
+        assertEquals(16L, plan.summaryThroughId)
+        assertEquals(listOf(1L, 2L) + (17L..24L), plan.retainedMessages.map { it.id })
+        val covered = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.plan(messages,
+            com.aiassistant.domain.model.CompressionTier.L2, 100000, "checked summary", 16L, recentRounds = 4)
+        assertFalse(covered.needsSummary)
+        assertEquals(plan.retainedMessages, covered.retainedMessages)
+    }
+
+    @Test fun compressionChunksCoverEveryCharacterWithoutSkippingLongMessageMiddle() {
+        val text = "段落开头。" + "中文与ASCII混合0123456789。".repeat(1800) + "中段唯一事实。" + "结尾。".repeat(700)
+        val messages = listOf(Message(id = 1, conversationId = 1, role = "user", content = text),
+            Message(id = 2, conversationId = 1, role = "assistant", content = "完整回答。"))
+        val chunks = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.chunks(messages, 512)
+        assertTrue(chunks.size > 20)
+        assertEquals(text, chunks.flatten().filter { it.id == 1L }.joinToString("") { it.content })
+        assertEquals(messages[1], chunks.last().last())
+        assertTrue(chunks.all { part -> part.sumOf(com.aiassistant.data.repository.helpers.ContextCompressionPlanner::messageTokens) <= 512 })
+    }
+
+    @Test fun smallContextCompressesOldWholeTurnsWithoutDroppingLastTurnOrPinnedText() {
+        val messages = (1L..20L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "事实${id}。".repeat(100), isPinned = id == 3L) }
+        val plan = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.plan(messages,
+            com.aiassistant.domain.model.CompressionTier.L0, 700, null, null)
+        assertTrue(plan.needsSummary)
+        assertEquals(setOf(3L, 4L, 19L, 20L), plan.retainedMessages.map { it.id }.toSet())
+        assertTrue(plan.retainedMessages.first().role == "user")
+        assertTrue(plan.estimatedHistoryTokens > 700) // caller must explain the pinned/latest overflow, never silently drop it.
+    }
+
+    @Test fun compressionChunksPreserveSupplementaryCharactersInEachRequest() {
+        val text = "🌠𠮷".repeat(800) + "最后一个事实。"
+        val chunks = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.chunks(
+            listOf(Message(id = 1, conversationId = 1, role = "user", content = text)), 256)
+        assertTrue(chunks.size > 1)
+        val fragments = chunks.flatten().map { it.content }
+        assertEquals(text, fragments.joinToString(""))
+        assertTrue(fragments.all { !it.first().isLowSurrogate() && !it.last().isHighSurrogate() })
+        assertTrue(fragments.all { String(it.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == it })
+    }
+
+    @Test fun timelineSelectionPreservesChronologyAndRetrievesRelevantOlderFactsWithinBudget() {
+        val nodes = (1..25).map { index -> com.aiassistant.domain.model.TimelineNode(id = index.toLong(),
+            conversationId = 1, timeTag = "第${index}天", event = if (index == 2) "铜钥匙存放在北港灯塔。" else "第${index}段合成行程已经记录。", orderIndex = index) }
+        val selected = com.aiassistant.utils.TimelineMemoryHelper.selectTimelineNodesForContext(nodes, "北港灯塔的铜钥匙在哪里", 220)
+        assertTrue(selected.any { it.id == 2L })
+        assertTrue(selected.any { it.id == 25L })
+        assertTrue(selected.size < nodes.size)
+        assertEquals(selected.sortedBy { it.orderIndex }, selected)
+        assertTrue(selected.sumOf { AiRepository.estimateTokenCount("[${it.timeTag}] ${it.event}") + 12 } <= 220 - 64)
+    }
+
+    @Test fun completeTierDoesNotResummarizeEveryNewShortTurnAfterManualCompression() {
+        val messages = (1L..42L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "短消息$id") }
+        for (tier in listOf(com.aiassistant.domain.model.CompressionTier.L0, com.aiassistant.domain.model.CompressionTier.L2)) {
+            val plan = com.aiassistant.data.repository.helpers.ContextCompressionPlanner.plan(messages, tier, 10000,
+                "已确认前24条的摘要。", 24L)
+            assertFalse("$tier 不应每条短回复都额外付费", plan.needsSummary)
+            assertEquals((25L..42L).toList(), plan.retainedMessages.map { it.id })
+        }
+    }
+
 }

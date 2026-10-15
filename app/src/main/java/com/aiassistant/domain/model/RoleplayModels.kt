@@ -148,7 +148,8 @@ data class RoleplaySession(
                 List::class.java,
                 CharacterProfile::class.java
             ).type
-            val customList: List<CharacterProfile> = com.google.gson.Gson().fromJson(customCharacterData, type) ?: return baseCharacters
+            val decoded: List<CharacterProfile> = com.google.gson.Gson().fromJson(customCharacterData, type) ?: return baseCharacters
+            val customList = StorySessionBindings.normalizeLocalIds(decoded)
             val customMap = customList.associateBy { it.id }
             val merged = baseCharacters.map { base ->
                 customMap[base.id] ?: base
@@ -164,10 +165,24 @@ data class RoleplaySession(
         }
     }
 
+    /** 活跃人物与资料副本分开：取消参与不删除本故事的人物资料。兼容旧版未分配 ID 的本地人物。 */
+    fun getParticipatingCharacters(baseCharacters: List<CharacterProfile>): List<CharacterProfile> {
+        val all = getCustomizedCharacters(baseCharacters)
+        if (characterIds == null) return all
+        val activeIds = getEffectiveCharacterIds().toSet()
+        val legacyLocalIds = runCatching {
+            val type = com.google.gson.reflect.TypeToken.getParameterized(List::class.java, CharacterProfile::class.java).type
+            val raw: List<CharacterProfile> = com.google.gson.Gson().fromJson(customCharacterData, type) ?: emptyList()
+            val normalized = StorySessionBindings.normalizeLocalIds(raw)
+            raw.indices.filter { raw[it].id == 0L }.map { normalized[it].id }.toSet()
+        }.getOrDefault(emptySet())
+        return all.filter { it.id in activeIds || it.id in legacyLocalIds }
+    }
+
     fun getCustomizedScenario(baseScenario: RoleplayScenario?): RoleplayScenario? {
         if (customScenarioData.isNullOrBlank()) return baseScenario
         return try {
-            com.google.gson.Gson().fromJson(customScenarioData, RoleplayScenario::class.java) ?: baseScenario
+            com.google.gson.Gson().fromJson(customScenarioData, RoleplayScenario::class.java)?.let { if (it.id == 0L) it.copy(id = -1L) else it } ?: baseScenario
         } catch (e: Exception) {
             baseScenario
         }

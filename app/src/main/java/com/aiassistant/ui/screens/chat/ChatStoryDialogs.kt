@@ -43,7 +43,8 @@ fun StoryUnifiedSettingsDialog(
         mode: NarrativeMode,
         plotSummary: String,
         newSettings: TempChatSettings,
-        newPrompt: String?
+        newPrompt: String?,
+        onComplete: (Boolean) -> Unit
     ) -> Unit,
     onPlotAction: (PlotAction, String?) -> Unit,
     onSummarizeMemories: () -> Unit,
@@ -56,7 +57,13 @@ fun StoryUnifiedSettingsDialog(
     onDeleteLocalScenario: () -> Unit = {},
     onModelSelected: (ChatModelOption) -> Unit,
     onSavePromptTemplate: (String, String) -> Unit,
-    onModelAvatarChanged: () -> Unit
+    onModelAvatarChanged: () -> Unit,
+    knowledge: com.aiassistant.ui.screens.chat.story.StoryKnowledgeState,
+    knowledgeActions: com.aiassistant.ui.screens.chat.story.StoryKnowledgeActions,
+    onOpenSharedSettings: () -> Unit,
+    onOpenContext: () -> Unit,
+    title: String,
+    initialSection: String = "writing"
 ) {
     com.aiassistant.ui.screens.chat.story.StoryUnifiedSettingsDialog(
         hazeState = hazeState,
@@ -85,7 +92,13 @@ fun StoryUnifiedSettingsDialog(
         onDeleteLocalScenario = onDeleteLocalScenario,
         onModelSelected = onModelSelected,
         onSavePromptTemplate = onSavePromptTemplate,
-        onModelAvatarChanged = onModelAvatarChanged
+        onModelAvatarChanged = onModelAvatarChanged,
+        knowledge = knowledge,
+        knowledgeActions = knowledgeActions,
+        onOpenSharedSettings = onOpenSharedSettings,
+        onOpenContext = onOpenContext,
+        title = title,
+        initialSection = initialSection
     )
 }
 

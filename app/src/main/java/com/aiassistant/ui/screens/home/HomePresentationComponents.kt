@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +41,7 @@ internal fun recentHomeStory(
 internal fun HomePresentationSection(
     workbench: Boolean,
     compact: Boolean,
+    backdropContentColor: Color,
     recentStory: RecentHomeStory?,
     showRecentStory: Boolean,
     onNewChat: () -> Unit,
@@ -63,9 +65,10 @@ internal fun HomePresentationSection(
             verticalAlignment = Alignment.CenterVertically) {
             Text(if (workbench) "会话列表" else "最近会话",
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                color = backdropContentColor,
                 modifier = Modifier.weight(1f))
             Text("长按多选", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = backdropContentColor.copy(alpha = 0.84f))
         }
     }
 }
@@ -94,7 +97,9 @@ private fun HomeNewChatAction(
                 Icon(Icons.Default.Add, contentDescription = null)
             }
         }
-        OutlinedIconButton(onClick = onConfigureChat, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
+        OutlinedIconButton(onClick = onConfigureChat, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium,
+            colors = IconButtonDefaults.outlinedIconButtonColors(containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface)) {
             Icon(Icons.Default.Tune, contentDescription = "选择模型与新对话设置", modifier = Modifier.size(20.dp))
         }
     }

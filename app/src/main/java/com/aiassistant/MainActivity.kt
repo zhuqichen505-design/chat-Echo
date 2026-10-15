@@ -186,14 +186,16 @@ fun AiAssistantNavigation(
 
             // 对话页面
             composable(
-                route = "chat/{conversationId}",
+                route = "chat/{conversationId}?workspace={workspace}",
                 arguments = listOf(
-                    navArgument("conversationId") { type = NavType.LongType }
+                    navArgument("conversationId") { type = NavType.LongType },
+                    navArgument("workspace") { type = NavType.StringType; nullable = true; defaultValue = null }
                 )
             ) { backStackEntry ->
                 val conversationId = backStackEntry.arguments?.getLong("conversationId") ?: return@composable
                 ChatScreen(
                     conversationId = conversationId,
+                    initialStorySection = backStackEntry.arguments?.getString("workspace"),
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -237,6 +239,9 @@ fun AiAssistantNavigation(
                             launchSingleTop = true
                         }
                     },
+                    onNavigateToWorkspace = { conversationId, section ->
+                        navController.navigate("chat/$conversationId?workspace=$section") { launchSingleTop = true }
+                    },
                     onCreateNewSession = {
                         navController.navigate("roleplay_new_session")
                     },
@@ -252,15 +257,17 @@ fun AiAssistantNavigation(
                 NewRoleplaySessionScreen(
                     viewModel = roleplayViewModel,
                     apiConfigs = apiConfigs,
-                    onStartSession = { characterIds, scenarioId, apiConfigId, modelName, narrativeMode ->
+                    onStartSession = { characterIds, scenarioId, apiConfigId, modelName, narrativeMode, title, instructions ->
                         roleplayViewModel.createStorySessionAndStart(
                             characterIds = characterIds,
                             scenarioId = scenarioId,
                             apiConfigId = apiConfigId,
                             modelName = modelName,
                             narrativeMode = narrativeMode,
+                            titleOverride = title,
+                            writingInstructions = instructions,
                             onSuccess = { conversationId ->
-                                navController.navigate("chat/$conversationId") {
+                                navController.navigate("chat/$conversationId?workspace=writing") {
                                     popUpTo("roleplay_studio")
                                     // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片
                                     // 产生两个 ChatViewModel 互相取消/清理生成会话，导致正在连接或回复的请求被中断

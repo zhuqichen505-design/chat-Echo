@@ -31,7 +31,7 @@ import com.aiassistant.domain.model.*
         TimelineNode::class,
         BackupIdentity::class
     ],
-    version = 34,
+    version = 35,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

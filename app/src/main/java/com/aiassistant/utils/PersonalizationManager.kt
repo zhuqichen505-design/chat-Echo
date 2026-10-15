@@ -25,7 +25,7 @@ object EchoHomeLayoutStyle {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: FOCUS
 }
 
-/** 创作阅读页的独立正文排版预设；不改变普通聊天页排版。 */
+/** 创作阅读页的独立正文排版预设；可通过独立开关应用于普通聊天。 */
 object EchoStoryReadingStyle {
     const val IMMERSIVE = "immersive"
     const val PLAIN = "plain"
@@ -36,7 +36,7 @@ object EchoStoryReadingStyle {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: IMMERSIVE
 }
 
-/** 创作正文可独立切换的字体风格；只作用于故事正文，不改变普通对话。 */
+/** 创作正文可独立切换的字体风格；可通过独立开关应用于普通对话。 */
 object EchoStoryFont {
     const val LITERARY = "literary"
     const val CLEAR = "clear"
@@ -74,6 +74,8 @@ data class PersonalizationSettings(
     val appearancePreset: String = EchoAppearancePreset.EXISTING,
     val storyReadingStyle: String = EchoStoryReadingStyle.IMMERSIVE,
     val storyFont: String = EchoStoryFont.LITERARY,
+    val applyReadingStyleToChats: Boolean = false,
+    val applyReadingFontToChats: Boolean = false,
     val streamingAnimationStyle: String = EchoStreamingAnimationStyle.THIN_CURSOR,
     val homeLayoutStyle: String = EchoHomeLayoutStyle.FOCUS,
     val homeCompactList: Boolean = false,
@@ -159,6 +161,8 @@ class PersonalizationManager(private val context: Context) {
             appearancePreset = EchoAppearancePreset.sanitize(prefs.getString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.EXISTING)),
             storyReadingStyle = EchoStoryReadingStyle.sanitize(prefs.getString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.IMMERSIVE)),
             storyFont = EchoStoryFont.sanitize(prefs.getString(KEY_STORY_FONT, EchoStoryFont.LITERARY)),
+            applyReadingStyleToChats = prefs.getBoolean(KEY_APPLY_READING_STYLE_TO_CHATS, false),
+            applyReadingFontToChats = prefs.getBoolean(KEY_APPLY_READING_FONT_TO_CHATS, false),
             streamingAnimationStyle = EchoStreamingAnimationStyle.sanitize(prefs.getString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.THIN_CURSOR)),
             homeLayoutStyle = EchoHomeLayoutStyle.sanitize(prefs.getString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.FOCUS)),
             homeCompactList = prefs.getBoolean(KEY_HOME_COMPACT_LIST, false),
@@ -203,6 +207,8 @@ class PersonalizationManager(private val context: Context) {
             .putString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.sanitize(settings.appearancePreset))
             .putString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.sanitize(settings.storyReadingStyle))
             .putString(KEY_STORY_FONT, EchoStoryFont.sanitize(settings.storyFont))
+            .putBoolean(KEY_APPLY_READING_STYLE_TO_CHATS, settings.applyReadingStyleToChats)
+            .putBoolean(KEY_APPLY_READING_FONT_TO_CHATS, settings.applyReadingFontToChats)
             .putString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.sanitize(settings.streamingAnimationStyle))
             .putString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.sanitize(settings.homeLayoutStyle))
             .putBoolean(KEY_HOME_COMPACT_LIST, settings.homeCompactList)
@@ -292,6 +298,8 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_APPEARANCE_PRESET = "appearance_preset"
         private const val KEY_STORY_READING_STYLE = "story_reading_style"
         private const val KEY_STORY_FONT = "story_font"
+        private const val KEY_APPLY_READING_STYLE_TO_CHATS = "apply_reading_style_to_chats"
+        private const val KEY_APPLY_READING_FONT_TO_CHATS = "apply_reading_font_to_chats"
         private const val KEY_STREAMING_ANIMATION_STYLE = "streaming_animation_style"
         private const val KEY_HOME_LAYOUT_STYLE = "home_layout_style"
         private const val KEY_HOME_COMPACT_LIST = "home_compact_list"

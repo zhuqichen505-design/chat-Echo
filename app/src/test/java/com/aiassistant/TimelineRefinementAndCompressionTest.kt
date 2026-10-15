@@ -63,7 +63,7 @@ class TimelineRefinementAndCompressionTest {
         assertTrue("严禁无过渡突兀跳跃至天黑入睡", contextPrompt.contains("严格禁止在未描写数小时时间自然流逝"))
     }
 
-    // 3. 事件增量去重与智能润色合并测试：多轮同一事件合并，不同事件正常追加
+    // 3. 精确去重保留非同义事实，语义合并须由用户审阅明确的目标节点。
     @Test
     fun testMergeOrAppendEventDeduplication() {
         val existingEvents = listOf(
@@ -82,8 +82,11 @@ class TimelineRefinementAndCompressionTest {
         )
 
         val mergedEvents = TimelineMemoryHelper.mergeOrAppendEvent(existingEvents, enrichedEvent)
-        assertEquals("事件总数不应增加，保持为 1", 1, mergedEvents.size)
-        assertEquals("事件应更新为细节更丰富的描述", "男女主在车站依依不舍告别，并约定周末再次见面", mergedEvents[0].content)
+        assertEquals("共有场景词不能证明事实等同，两个不同描述均保留", 2, mergedEvents.size)
+        assertEquals(existingEvents[0].content, mergedEvents[0].content)
+        assertEquals(enrichedEvent.content, mergedEvents[1].content)
+        assertEquals("标点变化的精确重复应去重", 2,
+            TimelineMemoryHelper.mergeOrAppendEvent(mergedEvents, enrichedEvent.copy(content = enrichedEvent.content + "。")).size)
 
         // 情况二：不同天或不同事件，应当追加
         val newDayEvent = TimelineEventItem(
@@ -93,8 +96,8 @@ class TimelineRefinementAndCompressionTest {
         )
 
         val appendedEvents = TimelineMemoryHelper.mergeOrAppendEvent(mergedEvents, newDayEvent)
-        assertEquals("追加后事件总数应为 2", 2, appendedEvents.size)
-        assertEquals("第二条事件时间锚点经标准化为第 2 天·上午", "第 2 天·上午", appendedEvents[1].timeTag)
+        assertEquals("追加后事件总数应为 3", 3, appendedEvents.size)
+        assertEquals("第三条事件时间锚点经标准化为第 2 天·上午", "第 2 天·上午", appendedEvents[2].timeTag)
     }
 
     // 4. 长对话切片分段与滑动窗口测试：验证分段数量与连续性重叠
@@ -186,10 +189,8 @@ class TimelineRefinementAndCompressionTest {
 
         val consolidated = TimelineMemoryHelper.consolidateFinalTimelineEvents(fragmentedEvents)
 
-        // 验证：3条午餐子事件合并为 1 条，2条车站初遇合并为 1 条
-        assertEquals("原 5 条事件经过全局汇总与去重应浓缩为 2 条宏观里程碑", 2, consolidated.size)
-        assertTrue("午餐事件应当保留核心成果", consolidated[0].content.contains("餐") && consolidated[0].content.contains("共识"))
-        assertTrue("车站相遇事件应当去重合并", consolidated[1].content.contains("车站") && (consolidated[1].content.contains("相遇") || consolidated[1].content.contains("初见")))
+        assertEquals("同场景不同进展均保留，不以场景关键词替代其中一句", 5, consolidated.size)
+        assertEquals(fragmentedEvents.map { it.content }, consolidated.map { it.content })
     }
 
     // 8. 全局常驻与固有设定语义去重测试（需求 2）
@@ -219,7 +220,7 @@ class TimelineRefinementAndCompressionTest {
         )
 
         val consolidated = TimelineMemoryHelper.consolidateFinalAtemporalSettings(rawSettings)
-        assertEquals("相似的咖啡习惯与花生过敏设定应合并，最终浓缩为 3 条核心规则", 3, consolidated.size)
+        assertEquals("未经语义确认的不同表达均应保留，避免字面相似误删条件或对象", 5, consolidated.size)
         assertTrue(consolidated.any { it.content.contains("黑咖啡") })
         assertTrue(consolidated.any { it.content.contains("花生") && it.content.contains("过敏") })
         assertTrue(consolidated.any { it.content.contains("满月") })
@@ -275,11 +276,11 @@ class TimelineRefinementAndCompressionTest {
         )
         // v2.7.1：防停滞指令由“主动推进”收敛为“默认守时 + 明确描写才推进 + 单步顺延”，
         // 防篡改与基准点语义保持不变
-        assertTrue("必须包含时空自然推进与防篡改铁律", prompt.contains("时空自然推进与防篡改铁律"))
-        assertTrue("必须指明当前时空仅为基准点而非永恒固化", prompt.contains("仅代表本轮交互开始时的基准时空，绝非永恒固化的时间"))
-        assertTrue("必须默认保持当前时段，不得主动冒进", prompt.contains("默认保持当前时段不变"))
-        assertTrue("必须约束单轮至多顺延一个相邻时段", prompt.contains("单轮至多推进一个相邻时段"))
-        assertTrue("必须严禁跳跃式推进", prompt.contains("严禁跳跃式推进"))
+        assertTrue("必须区分计划与已发生事实", prompt.contains("回忆、计划和假设不等于已发生"))
+        assertTrue("必须指明当前时间仅为交互起点", prompt.contains("当前节点仅是交互开始时的基准"))
+        assertTrue("必须默认守时", prompt.contains("无时间证据时保持当前时段"))
+        assertTrue("明确时移应尊重新原文", prompt.contains("明确的时间跳跃以新原文为准"))
+        assertTrue("检索只是部分历史", prompt.contains("未列出的历史不代表不存在"))
     }
 
     // 11. 拦截用户输入与指令误当事件测试（问题 1）
@@ -373,7 +374,39 @@ class TimelineRefinementAndCompressionTest {
         val (finalEvents, finalSettings) = TimelineMemoryHelper.crossDeduplicateEventsAndSettings(events, settings)
 
         assertEquals("时间线事件应完整保留 2 条", 2, finalEvents.size)
-        assertEquals("与时间线事件本质一致的 2 条重复设定应被剔除，仅保留 1 条纯粹静态规则", 1, finalSettings.size)
-        assertEquals("保留的设定应当为独立生理禁忌", "对某种特殊寒性药草严重过敏", finalSettings[0].content)
+        assertEquals("非逐字相同的设定应保留供确认，不依据字符重叠自动删除", 3, finalSettings.size)
+        assertTrue("生理禁忌应保留", finalSettings.any { it.content == "对某种特殊寒性药草严重过敏" })
     }
+    @Test fun sameEventDescriptionOnDifferentDaysIsNeverDeduplicatedAcrossTime() {
+        val events = listOf(TimelineEventItem(timeTag = "第 1 天·上午", content = "船队进入北港补充粮食"),
+            TimelineEventItem(timeTag = "第 1 天·傍晚", content = "船队进入北港补充粮食"),
+            TimelineEventItem(timeTag = "第 2 天·上午", content = "船队进入北港补充粮食"))
+        assertEquals(3, TimelineMemoryHelper.consolidateFinalTimelineEvents(events).size)
+        assertEquals(3, TimelineMemoryHelper.mergeOrAppendEvent(events.take(2), events.last()).size)
+    }
+
+    @Test fun similarNamesNegationAndNumericLimitsRemainDistinctSettings() {
+        val settings = listOf("角色甲喜欢咖啡", "角色乙喜欢咖啡", "角色甲不喜欢咖啡", "每天最多使用两次法术", "每天最多使用三次法术")
+            .map { AtemporalSettingItem(content = it) }
+        val dedup = TimelineMemoryHelper.consolidateFinalAtemporalSettings(settings + settings.first().copy(content = settings.first().content + "。"))
+        assertEquals(settings.map { it.content }, dedup.map { it.content })
+    }
+
+    @Test fun sameTimeEventsKeepDifferentPeopleNegationAndQuantities() {
+        val contents = listOf(
+            "北港船队今日向角色甲交付两箱药品",
+            "北港船队今日向角色乙交付两箱药品",
+            "北港船队今日未向角色甲交付两箱药品",
+            "北港船队今日向角色甲交付三箱药品",
+            "角色甲在餐厅等待角色乙，直到深夜仍未收到三箱药品，原先答应的两箱也未交付"
+        )
+        val events = contents.map { TimelineEventItem(timeTag = "第 1 天·上午", content = it) }
+        val duplicates = events + events[0].copy(content = events[0].content + "。")
+        assertEquals(contents, TimelineMemoryHelper.consolidateFinalTimelineEvents(duplicates).map { it.content })
+        val incremental = duplicates.fold(emptyList<TimelineEventItem>()) { acc, event ->
+            TimelineMemoryHelper.mergeOrAppendEvent(acc, event)
+        }
+        assertEquals(contents, incremental.map { it.content })
+    }
+
 }

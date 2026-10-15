@@ -130,7 +130,7 @@ class RoleplayRepository(
         val baseChars = if (characterIds.isNotEmpty()) {
             getCharactersByIds(characterIds)
         } else emptyList()
-        return session.getCustomizedCharacters(baseChars)
+        return session.getParticipatingCharacters(baseChars)
     }
 
     suspend fun getEffectiveScenarioForSession(session: RoleplaySession): RoleplayScenario? {

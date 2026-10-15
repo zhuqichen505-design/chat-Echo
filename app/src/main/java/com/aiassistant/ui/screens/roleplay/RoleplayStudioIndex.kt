@@ -18,7 +18,7 @@ internal fun roleplaySessionLabel(
     characters: List<CharacterProfile>,
     scenarios: List<RoleplayScenario>
 ): String {
-    val characterNames = session.getCustomizedCharacters(characters
+    val characterNames = session.getParticipatingCharacters(characters
         .filter { it.id in session.getEffectiveCharacterIds() }).map { it.name }
     val scenario = session.getCustomizedScenario(scenarios.firstOrNull { it.id == session.scenarioId })
     return when {
@@ -58,7 +58,7 @@ internal fun buildStudioStories(
         val conversation = visibleConversations[session.conversationId] ?: return@mapNotNull null
         if (pinnedOnly && !conversation.isPinned) return@mapNotNull null
         if (narrativeMode != null && session.narrativeMode != narrativeMode) return@mapNotNull null
-        val characterNames = session.getCustomizedCharacters(
+        val characterNames = session.getParticipatingCharacters(
             characters.filter { it.id in session.getEffectiveCharacterIds() }
         ).joinToString("、") { it.name }
         val scenarioName = session.getCustomizedScenario(scenarios.firstOrNull { it.id == session.scenarioId })?.name.orEmpty()

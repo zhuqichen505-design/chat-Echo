@@ -1,7 +1,6 @@
 package com.aiassistant.ui.screens.stats
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -61,6 +60,9 @@ import com.aiassistant.ui.components.rememberReadableBackdropColor
 import com.aiassistant.utils.BackgroundImageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.pow
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -98,31 +100,46 @@ fun StatsScreen(
     // 点击「全部模型」在全选/全不选间切换，点击单个模型行切换其选中态
     var deselectedModels by rememberSaveable { mutableStateOf(setOf<String>()) }
     var refreshKey by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var windowEnd by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var stats by remember { mutableStateOf<List<UsageRow>>(emptyList()) }
     var previousStats by remember { mutableStateOf<List<UsageRow>>(emptyList()) }
     var statusText by remember { mutableStateOf("正在读取统计") }
     // 悬浮筛选栏的下拉展开状态：0=均收起 1=时间范围 2=模型
     var expandedDropdown by remember { mutableStateOf(0) }
 
-    // 一次读取覆盖「当前周期 + 上一周期」两个窗口，用于环比对比
+    // Room 监听真实写入，同时在页面停留时移动时间窗口；查询与图表使用同一个截止时间。
+    LaunchedEffect(Unit) {
+        while (isActive) { delay(60_000); refreshKey = System.currentTimeMillis() }
+    }
     LaunchedEffect(selectedPeriod, refreshKey) {
-        val endTime = System.currentTimeMillis()
+        val endTime = refreshKey
         val startTime = endTime - selectedPeriod.durationMillis
-        val result = readUsageRows(context, startTime - selectedPeriod.durationMillis, endTime)
-        stats = result.rows.filter { it.timestamp >= startTime }
-        previousStats = result.rows.filter { it.timestamp < startTime }
-        statusText = result.message
+        windowEnd = endTime
+        try {
+            com.aiassistant.AiAssistantApp.instance.repository
+                .getUsageStatsByTimeRange(startTime - selectedPeriod.durationMillis, endTime)
+                .collectLatest { records ->
+                    val rows = records.map(::usageRow)
+                    stats = rows.filter { it.timestamp >= startTime }
+                    previousStats = rows.filter { it.timestamp < startTime }
+                    statusText = "截至 ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(endTime))} · 按实际 API 尝试记录"
+                }
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            statusText = "统计暂时无法读取，请刷新重试；已有记录未删除"
+        }
     }
 
+    // 过滤维度必须包含供应商：不同供应商常会使用同名模型，按模型名过滤会把两家的数据混在一起。
     val availableModels = remember(stats) {
-        stats.map { it.modelName }.distinct().sorted()
+        stats.map { it.modelKey }.distinct().sorted()
     }
 
     val filteredStats = remember(stats, deselectedModels) {
-        if (deselectedModels.isEmpty()) stats else stats.filter { it.modelName !in deselectedModels }
+        if (deselectedModels.isEmpty()) stats else stats.filter { it.modelKey !in deselectedModels }
     }
     val filteredPrevious = remember(previousStats, deselectedModels) {
-        if (deselectedModels.isEmpty()) previousStats else previousStats.filter { it.modelName !in deselectedModels }
+        if (deselectedModels.isEmpty()) previousStats else previousStats.filter { it.modelKey !in deselectedModels }
     }
 
     // 筛选摘要标签：全部选中时为 null（标题不带筛选后缀）；单选显示模型名；多选/未选显示计数
@@ -133,7 +150,7 @@ fun StatsScreen(
                 val selectedCount = availableModels.count { it !in deselectedModels }
                 when {
                     selectedCount == 0 -> "未选择模型"
-                    selectedCount == 1 -> availableModels.first { it !in deselectedModels }
+                    selectedCount == 1 -> formatModelKey(availableModels.first { it !in deselectedModels })
                     else -> "已选 $selectedCount 个模型"
                 }
             }
@@ -150,19 +167,19 @@ fun StatsScreen(
         computeDeltaPct(summary.requestCount.toLong(), previousSummary.requestCount.toLong())
     }
 
-    val buckets = remember(filteredStats, selectedPeriod, refreshKey) {
-        buildBuckets(filteredStats, selectedPeriod, System.currentTimeMillis())
+    val buckets = remember(filteredStats, selectedPeriod, windowEnd) {
+        buildBuckets(filteredStats, selectedPeriod, windowEnd)
     }
     val modelRows = remember(filteredStats) { filteredStats.toModelRows() }
     val hourSlices = remember(filteredStats) { filteredStats.toHourSlices() }
     val providerShares = remember(filteredStats) { filteredStats.toProviderShares() }
     val failureSlices = remember(filteredStats) { filteredStats.toFailureSlices() }
     val modelDonutSlices = remember(filteredStats) { filteredStats.toModelDonutSlices() }
-    val modelTokenSeries = remember(filteredStats, selectedPeriod, refreshKey) {
-        buildModelTokenSeries(filteredStats, selectedPeriod, System.currentTimeMillis())
+    val modelTokenSeries = remember(filteredStats, selectedPeriod, windowEnd) {
+        buildModelTokenSeries(filteredStats, selectedPeriod, windowEnd)
     }
-    val healthCells = remember(filteredStats, selectedPeriod, refreshKey) {
-        buildHealthCells(filteredStats, selectedPeriod, System.currentTimeMillis())
+    val healthCells = remember(filteredStats, selectedPeriod, windowEnd) {
+        buildHealthCells(filteredStats, selectedPeriod, windowEnd)
     }
 
     EchoWallpaperBackground(
@@ -202,6 +219,8 @@ fun StatsScreen(
                         readableBackdrop = readableBackdrop
                     )
                 }
+
+                item { UsageQualityCard(filteredStats) }
 
                 if (filteredStats.isEmpty()) {
                     item {
@@ -441,7 +460,7 @@ fun StatsScreen(
                         )
                         availableModels.forEach { model ->
                             DropdownOptionRow(
-                                text = com.aiassistant.domain.model.ModelDisplayName.format(model),
+                                text = formatModelKey(model),
                                 selected = model !in deselectedModels,
                                 contentColor = toolbarContentColor,
                                 onClick = {
@@ -856,7 +875,7 @@ private fun HeroSummaryCard(
                     )
                     MetricPill(
                         icon = Icons.Default.Bolt,
-                        label = "平均生成速度",
+                        label = "端到端吞吐",
                         value = formatTps(summary.avgTps),
                         contentColor = content,
                         iconTint = MaterialTheme.colorScheme.tertiary,
@@ -1253,7 +1272,7 @@ private fun LegendDot(text: String, color: Color, textColor: Color) {
 private fun ModelTokenTrendChart(
     series: List<ModelTokenSeries>,
     buckets: List<Bucket>,
-    maxToken: Int,
+    maxToken: Long,
     labelColor: Color
 ) {
     val chartColors = rememberEchoChartColors()
@@ -1320,9 +1339,9 @@ private fun ModelTokenTrendChart(
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSmoothTokenCurve(
-    values: List<Int>,
+    values: List<Long>,
     color: Color,
-    maxToken: Int
+    maxToken: Long
 ) {
     if (values.isEmpty() || maxToken <= 0) return
     val allZero = values.all { it <= 0 }
@@ -2522,99 +2541,32 @@ private fun EmptyCard(
     }
 }
 
-private suspend fun readUsageRows(
-    context: Context,
-    startTime: Long,
-    endTime: Long
-): StatsReadResult = withContext(Dispatchers.IO) {
-    val dbFile = context.getDatabasePath("ai_assistant_database")
-    if (!dbFile.exists()) {
-        return@withContext StatsReadResult(emptyList(), "暂无统计数据库")
-    }
-
-    try {
-        SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-            if (!hasUsableStatsTable(db)) {
-                return@withContext StatsReadResult(emptyList(), "统计表不可读，之后会重新记录")
-            }
-            StatsReadResult(queryUsageRows(db, startTime, endTime), "读取完成")
-        }
-    } catch (_: Throwable) {
-        StatsReadResult(emptyList(), "统计数据不可读，已自动忽略旧统计")
-    }
-}
-
-private fun hasUsableStatsTable(db: SQLiteDatabase): Boolean {
-    val required = setOf(
-        "id", "apiConfigId", "provider", "modelName", "inputTokens", "outputTokens",
-        "thinkingTokens", "totalTokens", "cachedTokens", "responseTime", "success",
-        "errorMessage", "timestamp"
-    )
-    val columns = mutableSetOf<String>()
-    return try {
-        db.rawQuery("PRAGMA table_info(`api_usage_stats`)", null).use { cursor ->
-            val nameIndex = cursor.getColumnIndex("name")
-            while (cursor.moveToNext()) {
-                columns += cursor.getString(nameIndex)
-            }
-        }
-        columns.containsAll(required)
-    } catch (_: Throwable) {
-        false
-    }
-}
-
-private fun queryUsageRows(db: SQLiteDatabase, startTime: Long, endTime: Long): List<UsageRow> {
-    val rows = mutableListOf<UsageRow>()
-    db.rawQuery(
-        """
-        SELECT provider, modelName, inputTokens, outputTokens, thinkingTokens,
-               totalTokens, cachedTokens, responseTime, success, timestamp, errorMessage
-        FROM api_usage_stats
-        WHERE timestamp >= ? AND timestamp <= ?
-        ORDER BY timestamp ASC
-        """.trimIndent(),
-        arrayOf(startTime.toString(), endTime.toString())
-    ).use { cursor ->
-        while (cursor.moveToNext()) {
-            val inputTokens = cursor.getInt(2).coerceAtLeast(0)
-            val outputTokens = cursor.getInt(3).coerceAtLeast(0)
-            val thinkingTokens = cursor.getInt(4).coerceAtLeast(0)
-            val recordedTotalTokens = cursor.getInt(5).coerceAtLeast(0)
-            val knownTokens = inputTokens + outputTokens + thinkingTokens
-            val totalTokens = maxOf(recordedTotalTokens, knownTokens)
-            val otherTokens = (totalTokens - knownTokens).coerceAtLeast(0)
-            rows += UsageRow(
-                provider = cursor.getString(0) ?: "unknown",
-                modelName = cursor.getString(1) ?: "unknown",
-                inputTokens = inputTokens,
-                outputTokens = outputTokens,
-                thinkingTokens = thinkingTokens,
-                otherTokens = otherTokens,
-                totalTokens = totalTokens,
-                cachedTokens = cursor.getInt(6).coerceIn(0, inputTokens),
-                responseTime = cursor.getLong(7).coerceAtLeast(0L),
-                success = cursor.getInt(8) == 1,
-                timestamp = cursor.getLong(9),
-                errorMessage = cursor.getString(10)
-            )
-        }
-    }
-    return rows
+/** 服务端总量权威；推理是 completion 的组成部分，缓存是 input 的子集，均不可重复相加。 */
+internal fun usageRow(stat: com.aiassistant.domain.model.ApiUsageStat): UsageRow {
+    val input = stat.inputTokens.coerceAtLeast(0)
+    val thinking = stat.thinkingTokens.coerceAtLeast(0)
+    val output = stat.outputTokens.coerceAtLeast(0)
+    val known = input.toLong() + output + thinking
+    val total = maxOf(stat.totalTokens.toLong().coerceAtLeast(0), known).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    return UsageRow(stat.provider, stat.modelName, input, output, thinking,
+        (total.toLong() - known).coerceAtLeast(0).toInt(), total,
+        stat.cachedTokens.coerceIn(0, input), stat.responseTime.coerceAtLeast(0), stat.success,
+        stat.timestamp, stat.errorMessage, stat.requestKind, stat.tokenSource, stat.completionStatus,
+        stat.firstTokenTimeMs.coerceAtLeast(0))
 }
 
 internal fun List<UsageRow>.toSummary(): UsageSummary {
-    val input = sumOf { it.inputTokens }
-    val output = sumOf { it.outputTokens }
-    val thinking = sumOf { it.thinkingTokens }
-    val cached = sumOf { it.cachedTokens }
+    val input = sumOf { it.inputTokens.toLong() }
+    val output = sumOf { it.outputTokens.toLong() }
+    val thinking = sumOf { it.thinkingTokens.toLong() }
+    val cached = sumOf { it.cachedTokens.toLong() }
     val successCount = count { it.success }
-    val timedRows = filter { it.responseTime > 0 }
+    val timedRows = filter { it.success && it.responseTime > 0 }
     // v2.6.4 TPS：生成速度 = 输出 Token 总量 / 有耗时记录请求的总耗时（秒）
-    val timedOutput = timedRows.sumOf { it.outputTokens }
+    val timedOutput = timedRows.sumOf { it.outputTokens.toLong() }
     val timedSeconds = timedRows.sumOf { it.responseTime } / 1000.0
     return UsageSummary(
-        totalTokens = sumOf { it.totalTokens },
+        totalTokens = sumOf { it.totalTokens.toLong() },
         inputTokens = input,
         outputTokens = output,
         thinkingTokens = thinking,
@@ -2631,22 +2583,22 @@ internal fun List<UsageRow>.toSummary(): UsageSummary {
 internal fun List<UsageRow>.toModelRows(): List<ModelRow> {
     return groupBy { it.provider to it.modelName }
         .map { (key, rows) ->
-            val input = rows.sumOf { it.inputTokens }
-            val cached = rows.sumOf { it.cachedTokens }
-            val timedRows = rows.filter { it.responseTime > 0 }
-            val timedOutput = timedRows.sumOf { it.outputTokens }
+            val input = rows.sumOf { it.inputTokens.toLong() }
+            val cached = rows.sumOf { it.cachedTokens.toLong() }
+            val timedRows = rows.filter { it.success && it.responseTime > 0 }
+            val timedOutput = timedRows.sumOf { it.outputTokens.toLong() }
             val timedSeconds = timedRows.sumOf { it.responseTime } / 1000.0
             ModelRow(
                 provider = key.first,
                 modelName = key.second,
                 inputTokens = input,
-                outputTokens = rows.sumOf { it.outputTokens },
-                thinkingTokens = rows.sumOf { it.thinkingTokens },
+                outputTokens = rows.sumOf { it.outputTokens.toLong() },
+                thinkingTokens = rows.sumOf { it.thinkingTokens.toLong() },
                 cachedTokens = cached,
-                totalTokens = rows.sumOf { it.totalTokens },
+                totalTokens = rows.sumOf { it.totalTokens.toLong() },
                 requestCount = rows.size,
                 failedCount = rows.count { !it.success },
-                avgResponseTime = if (rows.isNotEmpty()) rows.map { it.responseTime }.average().toLong() else 0L,
+                avgResponseTime = if (timedRows.isNotEmpty()) timedRows.map { it.responseTime }.average().toLong() else 0L,
                 cacheHitRate = if (input > 0) cached.toFloat() / input else 0f,
                 successRate = if (rows.isNotEmpty()) rows.count { it.success }.toFloat() / rows.size else 0f,
                 tps = if (timedSeconds > 0) timedOutput / timedSeconds.toFloat() else 0f
@@ -2662,16 +2614,16 @@ internal fun buildBuckets(rows: List<UsageRow>, period: StatsPeriod, endTime: Lo
     return List(period.bucketCount) { index ->
         val bucketStart = startTime + bucketSize * index
         val bucketEnd = if (index == period.bucketCount - 1) endTime else bucketStart + bucketSize
-        val bucketRows = rows.filter { it.timestamp >= bucketStart && it.timestamp < bucketEnd }
-        val input = bucketRows.sumOf { it.inputTokens }
-        val cached = bucketRows.sumOf { it.cachedTokens }
+        val bucketRows = rows.filter { it.timestamp >= bucketStart && (it.timestamp < bucketEnd || (index == period.bucketCount - 1 && it.timestamp == endTime)) }
+        val input = bucketRows.sumOf { it.inputTokens.toLong() }
+        val cached = bucketRows.sumOf { it.cachedTokens.toLong() }
         Bucket(
             label = formatter.format(Date(bucketStart)),
             inputTokens = input,
-            outputTokens = bucketRows.sumOf { it.outputTokens },
-            thinkingTokens = bucketRows.sumOf { it.thinkingTokens },
-            otherTokens = bucketRows.sumOf { it.otherTokens },
-            totalTokens = bucketRows.sumOf { it.totalTokens },
+            outputTokens = bucketRows.sumOf { it.outputTokens.toLong() },
+            thinkingTokens = bucketRows.sumOf { it.thinkingTokens.toLong() },
+            otherTokens = bucketRows.sumOf { it.otherTokens.toLong() },
+            totalTokens = bucketRows.sumOf { it.totalTokens.toLong() },
             requestCount = bucketRows.size,
             cacheHitRate = if (input > 0) cached.toFloat() / input else 0f,
             successRate = if (bucketRows.isNotEmpty()) bucketRows.count { it.success }.toFloat() / bucketRows.size else 0f
@@ -2682,7 +2634,7 @@ internal fun buildBuckets(rows: List<UsageRow>, period: StatsPeriod, endTime: Lo
 /** 按 0-23 小时聚合调用次数与 Token 消耗（使用设备本地时区） */
 internal fun List<UsageRow>.toHourSlices(): List<HourSlice> {
     val counts = IntArray(24)
-    val tokens = IntArray(24)
+    val tokens = LongArray(24)
     val calendar = Calendar.getInstance()
     forEach { row ->
         calendar.timeInMillis = row.timestamp
@@ -2695,19 +2647,17 @@ internal fun List<UsageRow>.toHourSlices(): List<HourSlice> {
 
 /** 按供应商聚合 Token 占比（降序，含占比 0~1） */
 internal fun List<UsageRow>.toProviderShares(): List<ProviderShare> {
-    val total = sumOf { it.totalTokens }
+    val total = sumOf { it.totalTokens.toLong() }
     if (total <= 0) return emptyList()
-    return groupBy { it.provider.ifBlank { "unknown" } }
+    val shares = groupBy { it.provider.ifBlank { "unknown" } }
         .map { (provider, rows) ->
-            ProviderShare(
-                provider = provider,
-                totalTokens = rows.sumOf { it.totalTokens },
-                requestCount = rows.size,
-                share = rows.sumOf { it.totalTokens }.toFloat() / total
-            )
-        }
-        .sortedByDescending { it.totalTokens }
-        .take(6)
+            val tokens = rows.sumOf { it.totalTokens.toLong() }
+            ProviderShare(provider, tokens, rows.size, tokens.toFloat() / total)
+        }.sortedByDescending { it.totalTokens }
+    if (shares.size <= 6) return shares
+    val rest = shares.drop(5)
+    return shares.take(5) + ProviderShare("其他供应商", rest.sumOf { it.totalTokens },
+        rest.sumOf { it.requestCount }, rest.sumOf { it.totalTokens }.toFloat() / total)
 }
 
 /** 失败原因 Top 归纳：按首行文案分组（截断 48 字），取出现频次前 4 */
@@ -2733,7 +2683,7 @@ internal fun formatDeltaPct(deltaPct: Float): String {
 }
 
 /** Token 构成切片（不含配色，配色由 UI 按序号映射） */
-internal data class DonutSlice(val label: String, val value: Int)
+internal data class DonutSlice(val label: String, val value: Long)
 
 internal fun buildDonutSlices(summary: UsageSummary): List<DonutSlice> {
     val other = (summary.totalTokens - summary.inputTokens - summary.outputTokens - summary.thinkingTokens)
@@ -2748,9 +2698,9 @@ internal fun buildDonutSlices(summary: UsageSummary): List<DonutSlice> {
 
 /** Token 构成 · 模型占比视图：Top N 模型 + 其余合并为「其他」 */
 internal fun List<UsageRow>.toModelDonutSlices(topN: Int = 4): List<DonutSlice> {
-    if (isEmpty() || sumOf { it.totalTokens } <= 0) return emptyList()
-    val byModel = groupBy { it.modelName.ifBlank { "unknown" } }
-        .map { (name, rows) -> name to rows.sumOf { it.totalTokens } }
+    if (isEmpty() || sumOf { it.totalTokens.toLong() } <= 0) return emptyList()
+    val byModel = groupBy { it.modelKey }
+        .map { (name, rows) -> formatModelKey(name) to rows.sumOf { it.totalTokens.toLong() } }
         .sortedByDescending { it.second }
     if (byModel.size <= topN) {
         return byModel.map { DonutSlice(it.first, it.second) }
@@ -2763,8 +2713,8 @@ internal fun List<UsageRow>.toModelDonutSlices(topN: Int = 4): List<DonutSlice> 
 /** 每模型 Token 趋势序列：Top N 模型 + 其余合并为「其他」，values 与分桶一一对应 */
 internal data class ModelTokenSeries(
     val modelName: String,
-    val values: List<Int>,
-    val totalTokens: Int
+    val values: List<Long>,
+    val totalTokens: Long
 )
 
 internal fun buildModelTokenSeries(
@@ -2782,9 +2732,9 @@ internal fun buildModelTokenSeries(
         return idx.coerceIn(0, period.bucketCount - 1)
     }
 
-    val byModel = rows.groupBy { it.modelName.ifBlank { "unknown" } }
+    val byModel = rows.filter { it.timestamp in startTime..endTime }.groupBy { it.modelKey }
         .mapValues { (_, modelRows) ->
-            val values = IntArray(period.bucketCount)
+            val values = LongArray(period.bucketCount)
             modelRows.forEach { values[bucketIndexOf(it.timestamp)] += it.totalTokens }
             values
         }
@@ -2795,10 +2745,10 @@ internal fun buildModelTokenSeries(
     val rest = byModel.drop(topN)
     val series = mutableListOf<ModelTokenSeries>()
     series.addAll(topEntries.map { (name, values) ->
-        ModelTokenSeries(modelName = name, values = values.toList(), totalTokens = values.sum())
+        ModelTokenSeries(modelName = formatModelKey(name), values = values.toList(), totalTokens = values.sum())
     })
     if (rest.isNotEmpty()) {
-        val restValues = IntArray(period.bucketCount)
+        val restValues = LongArray(period.bucketCount)
         rest.forEach { (_, values) ->
             values.forEachIndexed { idx, v -> restValues[idx] += v }
         }
@@ -2813,7 +2763,7 @@ internal data class HealthCell(
     val endTs: Long,
     val requestCount: Int,
     val failedCount: Int,
-    val totalTokens: Int
+    val totalTokens: Long
 )
 
 /** 按周期定制的热力格数量聚合请求结果（成功/失败/Token 消耗） */
@@ -2848,17 +2798,17 @@ internal fun formatHealthCellRange(cell: HealthCell): String {
  * 环形图各切片扫过角度：切片连续无缝（v2.7.0 修复切片间灰色间隔），总扫角恒为 360°。
  * 全零输入返回空列表；零值切片扫角为 0（绘制层跳过）。
  */
-internal fun donutSweepDegrees(values: List<Int>): List<Float> {
-    val total = values.sumOf { it.coerceAtLeast(0) }
+internal fun donutSweepDegrees(values: List<Number>): List<Float> {
+    val total = values.sumOf { it.toLong().coerceAtLeast(0) }
     if (total <= 0) return emptyList()
     return values.map { value ->
-        if (value <= 0) 0f else 360f * value / total
+        if (value.toLong() <= 0) 0f else 360f * value.toFloat() / total
     }
 }
 
-private fun niceAxisMax(value: Int): Int {
-    if (value <= 0) return 1
-    val magnitude = 10.0.pow((value.toString().length - 1).toDouble()).toInt()
+private fun niceAxisMax(value: Long): Long {
+    if (value <= 0) return 1L
+    val magnitude = 10.0.pow((value.toString().length - 1).toDouble()).toLong()
     val normalized = value.toFloat() / magnitude
     val nice = when {
         normalized <= 1f -> 1
@@ -2869,7 +2819,8 @@ private fun niceAxisMax(value: Int): Int {
     return nice * magnitude
 }
 
-internal fun formatNumber(value: Int): String {
+internal fun formatNumber(value: Number): String {
+    val value = value.toLong()
     return when {
         value >= 1_000_000 -> String.format(Locale.getDefault(), "%.1fM", value / 1_000_000.0)
         value >= 1_000 -> String.format(Locale.getDefault(), "%.1fK", value / 1_000.0)
@@ -2924,11 +2875,6 @@ internal enum class StatsPeriod(
     Quarter("90天", 90L * 24L * 60L * 60L * 1000L, 30, "MM-dd", 84)
 }
 
-private data class StatsReadResult(
-    val rows: List<UsageRow>,
-    val message: String
-)
-
 internal data class UsageRow(
     val provider: String,
     val modelName: String,
@@ -2941,15 +2887,34 @@ internal data class UsageRow(
     val responseTime: Long,
     val success: Boolean,
     val timestamp: Long,
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val requestKind: String = "legacy",
+    val tokenSource: String = "legacy",
+    val completionStatus: String = "legacy",
+    val firstTokenTimeMs: Long = 0
+) {
+    /** 供应商和模型共同构成筛选键，避免同名模型跨服务商串数据。 */
+    val modelKey: String
+        get() = usageModelKey(provider, modelName)
+}
+
+private fun usageModelKey(provider: String, modelName: String): String =
+    "${provider.trim().ifBlank { "unknown" }}\u0000${modelName.trim().ifBlank { "unknown" }}"
+
+internal fun formatModelKey(key: String): String {
+    val separator = key.indexOf('\u0000')
+    if (separator < 0) return com.aiassistant.domain.model.ModelDisplayName.format(key)
+    val provider = key.substring(0, separator).ifBlank { "unknown" }
+    val model = key.substring(separator + 1).ifBlank { "unknown" }
+    return "${com.aiassistant.domain.model.ModelDisplayName.format(model)} · $provider"
+}
 
 internal data class UsageSummary(
-    val totalTokens: Int,
-    val inputTokens: Int = 0,
-    val outputTokens: Int = 0,
-    val thinkingTokens: Int = 0,
-    val cachedTokens: Int = 0,
+    val totalTokens: Long,
+    val inputTokens: Long = 0,
+    val outputTokens: Long = 0,
+    val thinkingTokens: Long = 0,
+    val cachedTokens: Long = 0,
     val requestCount: Int,
     val failedCount: Int = 0,
     val cacheHitRate: Float,
@@ -2960,11 +2925,11 @@ internal data class UsageSummary(
 
 internal data class Bucket(
     val label: String,
-    val inputTokens: Int,
-    val outputTokens: Int,
-    val thinkingTokens: Int,
-    val otherTokens: Int,
-    val totalTokens: Int,
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val thinkingTokens: Long,
+    val otherTokens: Long,
+    val totalTokens: Long,
     val requestCount: Int = 0,
     val cacheHitRate: Float,
     val successRate: Float
@@ -2973,11 +2938,11 @@ internal data class Bucket(
 internal data class ModelRow(
     val provider: String,
     val modelName: String,
-    val inputTokens: Int,
-    val outputTokens: Int,
-    val thinkingTokens: Int,
-    val cachedTokens: Int,
-    val totalTokens: Int,
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val thinkingTokens: Long,
+    val cachedTokens: Long,
+    val totalTokens: Long,
     val requestCount: Int,
     val failedCount: Int = 0,
     val avgResponseTime: Long,
@@ -2989,12 +2954,12 @@ internal data class ModelRow(
 internal data class HourSlice(
     val hour: Int,
     val requestCount: Int,
-    val totalTokens: Int
+    val totalTokens: Long
 )
 
 internal data class ProviderShare(
     val provider: String,
-    val totalTokens: Int,
+    val totalTokens: Long,
     val requestCount: Int,
     val share: Float
 )

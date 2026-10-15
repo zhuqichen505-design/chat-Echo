@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import androidx.compose.ui.graphics.luminance
 
 /**
  * UI 细节统一修复回归：
@@ -15,6 +16,40 @@ import org.junit.Test
  * 2. SmoothReorderState 抬升量与按 key 高度记录
  */
 class UiPolishRegressionTest {
+    @Test fun allPresetThemeTextPairsMeetReadableContrastInBothModes() {
+        fun contrast(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float =
+            (maxOf(a.luminance(), b.luminance()) + 0.05f) / (minOf(a.luminance(), b.luminance()) + 0.05f)
+        for (preset in com.aiassistant.utils.EchoAppearancePreset.values) {
+            for (dark in listOf(false, true)) {
+                val colors = com.aiassistant.ui.theme.echoColorScheme(preset, dark)
+                val pairs = listOf(
+                    "body" to (colors.onSurface to colors.surface),
+                    "secondary text" to (colors.onSurfaceVariant to colors.surfaceVariant),
+                    "primary action" to (colors.onPrimary to colors.primary),
+                    "secondary action" to (colors.onSecondary to colors.secondary),
+                    "tertiary action" to (colors.onTertiary to colors.tertiary),
+                    "error action" to (colors.onError to colors.error),
+                    "selected option" to (colors.onPrimaryContainer to colors.primaryContainer),
+                    "inverse" to (colors.inverseOnSurface to colors.inverseSurface)
+                )
+                pairs.forEach { (role, pair) ->
+                    val ratio = contrast(pair.first, pair.second)
+                    assertTrue("$preset dark=$dark $role contrast=$ratio", ratio >= 4.5f)
+                }
+            }
+        }
+    }
+
+    @Test fun solidBackgroundSwatchesKeepTheirChosenColorInDarkMode() {
+        val presets = com.aiassistant.utils.BackgroundImageManager.PRESET_SOLID_COLORS
+        assertEquals(12, presets.map { it.id }.distinct().size)
+        presets.forEach { assertEquals(it.lightColorInt, it.darkColorInt) }
+        val darkSwatches = presets.filter { androidx.compose.ui.graphics.Color(it.lightColorInt).luminance() < 0.1f }
+        assertEquals(6, darkSwatches.size)
+        assertEquals(6, darkSwatches.map { it.lightColorInt }.distinct().size)
+        assertTrue(darkSwatches.all { (it.lightColorInt and 0xFFFFFF) != 0 })
+    }
+
 
     @Test fun recentHomeStoryUsesLatestVisibleStoryRatherThanPinnedOrOrdinaryConversation() {
         fun conversation(id: Long, updated: Long, pinned: Boolean = false, tags: String? = null) =

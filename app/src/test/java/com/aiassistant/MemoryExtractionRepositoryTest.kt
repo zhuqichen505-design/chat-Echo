@@ -28,6 +28,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
@@ -260,7 +261,7 @@ class MemoryExtractionRepositoryTest {
                 val conversation = f.db.conversationDao().getConversationById(id)!!
                 f.db.conversationDao().updateConversation(conversation.copy(
                     compressionTier = CompressionTier.LC.level, compressionCustomPercent = 10,
-                    contextWindowTokens = 128000, rollingSummary = "合成历史摘要。"
+                    contextWindowTokens = 128000, rollingSummary = "合成历史摘要。", summaryUpdatedMessageId = 18L
                 ))
                 for (index in 0 until 20) {
                     f.db.messageDao().insertMessage(Message(
@@ -477,6 +478,100 @@ class MemoryExtractionRepositoryTest {
         } }
     }
 
+    @Test fun actualIncrementalExtractionRejectsTruncatedJsonAndReasoningOnlyResults() = runBlocking {
+        val syntacticallyComplete = """{"newStoryTime":null,"action":"APPEND","newEvent":{"timeTag":"第1天·上午","content":"合成船队交付两箱药品"},"atemporalSettings":[{"category":"世界规则","content":"合成码头需要通行证"}]}"""
+        for (protocol in listOf("openai", "anthropic")) for (truncated in listOf(true, false)) {
+            Endpoint { socket, _ ->
+                val response = if (protocol == "openai") {
+                    mapOf("choices" to listOf(mapOf("finish_reason" to if (truncated) "length" else "stop",
+                        "message" to if (truncated) mapOf("content" to syntacticallyComplete)
+                            else mapOf("reasoning_content" to syntacticallyComplete))))
+                } else {
+                    mapOf("stop_reason" to if (truncated) "max_tokens" else "end_turn",
+                        "content" to listOf(if (truncated) mapOf("type" to "text", "text" to syntacticallyComplete)
+                            else mapOf("type" to "thinking", "text" to syntacticallyComplete)))
+                }
+                reply(socket, Gson().toJson(response))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-model", protocol)
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", "合成船队交付两箱药品，码头需要通行证", config.id, config.modelName)!!
+                assertNotNull("截断或只有推理时必须显示提取错误", proposal.extractionErrorMessage)
+                assertNull(proposal.newEvent)
+                assertTrue(proposal.atemporalSettings.isEmpty())
+                assertTrue(f.repository.getTimelineNodes(id).isEmpty())
+                assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+                assertEquals("不能把失败正文当格式错误再发一次严格JSON请求", 1, endpoint.payloads.size)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertEquals("timeline", stat.requestKind)
+                assertFalse(stat.success)
+                assertEquals(if (truncated) "interrupted" else "failed", stat.completionStatus)
+            } }
+        }
+    }
+
+    @Test fun incrementalExtractionIncludesTheEntireLongTurnWhenItsWindowFits() = runBlocking {
+        Endpoint { socket, _ -> memoryReply(socket, "NO_UPDATE") }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 128000))
+            val user = "合成请求。".repeat(900) + "用户尾段唯一约束：蓝印不得改为红印。"
+            val assistant = "合成铺垫。".repeat(3000) + "正文中段唯一事实：铜钥匙仍由角色乙保管。" + "合成后续。".repeat(3000)
+            f.repository.evaluateAndAutoUpdateTimeline(id, user, assistant, config.id, config.modelName)
+            val prompt = endpoint.payloads.single().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            assertTrue(prompt.contains(user))
+            assertTrue(prompt.contains(assistant))
+            assertFalse(prompt.contains("超长正文中段省略"))
+            assertTrue(f.repository.getTimelineNodes(id).isEmpty())
+        } }
+    }
+
+    @Test fun oversizedIncrementalExtractionRequestsChunkedReconciliationWithoutSendingTruncatedText() = runBlocking {
+        Endpoint { socket, _ -> memoryReply(socket, "NO_UPDATE") }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 4000))
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", "合成超长原文。".repeat(8000), config.id, config.modelName)!!
+            assertTrue(proposal.extractionErrorMessage.orEmpty().contains("全历史分块梳理"))
+            assertNull(proposal.newEvent)
+            assertTrue(proposal.atemporalSettings.isEmpty())
+            assertEquals(0, endpoint.payloads.size)
+            assertTrue(f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).isEmpty())
+        } }
+    }
+
+    @Test fun incrementalUpdateKeepsTheOriginalSnapshotWhenSourceIsEditedDuringTheRequest() = runBlocking {
+        val entered = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        var targetNodeId = 0L
+        val oldText = "北港船队今日向角色甲交付两箱药品"
+        val newText = "人工更正：船队尚未交付药品"
+        Endpoint { socket, _ ->
+            entered.countDown()
+            check(released.await(10, TimeUnit.SECONDS))
+            memoryReply(socket, """{"action":"UPDATE","targetNodeId":$targetNodeId,"newEvent":{"timeTag":"第1天·上午","content":"北港船队交付两箱药品并收到签收单"},"atemporalSettings":[]}""")
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-model")
+            targetNodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "第1天·上午", event = oldText))
+            val job = async(Dispatchers.IO) {
+                f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", "船队交付药品后收到签收单", config.id, config.modelName)
+            }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                f.db.timelineNodeDao().updateTimelineNode(f.repository.getTimelineNodes(id).single().copy(event = newText))
+                released.countDown()
+                val proposal = withTimeout(5000) { job.await() }!!
+                assertEquals("UPDATE", proposal.action)
+                assertEquals(oldText, proposal.previousEventContent)
+                try {
+                    f.repository.applyAutoTimelineProposal(id, proposal)
+                    fail("生成期间编辑原事件后，不能用新正文冒充提案的旧快照")
+                } catch (expected: IllegalStateException) {
+                    assertTrue(expected.message.orEmpty().contains("已被修改"))
+                }
+                assertEquals(newText, f.repository.getTimelineNodes(id).single().event)
+            } finally { released.countDown(); job.cancelAndJoin() }
+        } }
+    }
+
     @Test fun differentTimeUpdateAndSimilarAppendNeverOverwriteEarlierEvent() = runBlocking {
         for (action in listOf("UPDATE", "APPEND")) {
             var nodeId = 0L
@@ -509,7 +604,7 @@ class MemoryExtractionRepositoryTest {
                 timeTag = "第1天·清晨", event = "守门人开启石门", category = "PLOT_EVENT", orderIndex = 1))
             val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(null,
                 com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·清晨", content = "林岚抵达古塔并与守门人缔结盟约"),
-                "待确认", action = "UPDATE", targetNodeId = nodeId,
+                "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = "林岚抵达古塔",
                 atemporalSettings = listOf(
                     com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "古塔禁止一切火焰魔法", targetScope = "global"),
                     com.aiassistant.utils.AtemporalSettingItem(content = "未选中不应保存", isSelected = false)))
@@ -527,6 +622,57 @@ class MemoryExtractionRepositoryTest {
             val rp = f.db.roleplayMemoryDao().getMemoriesListBySession(rpId).single()
             assertEquals(memory.content, rp.content)
             assertTrue(rp.isPinned)
+        }
+    }
+
+    @Test fun sameTimeSimilarEventsNeverInferAnUpdateWithoutAnExplicitTarget() = runBlocking {
+        val existingText = "北港船队今日向角色甲交付两箱药品"
+        val differentFacts = listOf("北港船队今日向角色乙交付两箱药品", "北港船队今日未向角色甲交付两箱药品", "北港船队今日向角色甲交付三箱药品")
+        for (action in listOf("APPEND", "UPDATE")) for (incoming in differentFacts) {
+            Endpoint { socket, _ -> memoryReply(socket, Gson().toJson(mapOf(
+                "action" to action, "targetNodeId" to null,
+                "newEvent" to mapOf("timeTag" to "第1天·上午", "category" to "PLOT_EVENT", "content" to incoming),
+                "atemporalSettings" to emptyList<String>()
+            ))) }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第1天·上午", event = existingText, category = "PLOT_EVENT"))
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", incoming, config.id, config.modelName)!!
+                assertEquals("APPEND", proposal.action)
+                assertNull(proposal.targetNodeId)
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                f.repository.applyAutoTimelineProposal(id, proposal.copy(newEvent = proposal.newEvent!!.copy(content = incoming + "。")))
+                val nodes = f.repository.getTimelineNodes(id)
+                assertEquals("两个不同事实保留，标点变化的重复不新增", 2, nodes.size)
+                assertEquals(existingText, nodes.single { it.id == nodeId }.event)
+                assertEquals(incoming, nodes.single { it.id != nodeId }.event)
+                assertEquals(1, endpoint.payloads.size)
+            } }
+        }
+    }
+
+    @Test fun applyingStaleTimelineUpdatePreservesManualEditAndRollsBackOtherProposalChanges() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.conversation("https://example.invalid/v1")
+            f.repository.updateStoryTime(id, "第1天·上午")
+            val before = "北港船队今日向角色甲交付两箱药品"
+            val manual = "人工更正：北港船队尚未交付药品"
+            val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                timeTag = "第1天·上午", event = before, category = "PLOT_EVENT"))
+            val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult("第1天·中午",
+                com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·上午", content = "北港船队交付两箱药品并收回签收单"),
+                "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = before,
+                atemporalSettings = listOf(com.aiassistant.utils.AtemporalSettingItem(content = "本提案未确认成功，不应保存")))
+            f.db.timelineNodeDao().updateTimelineNode(f.repository.getTimelineNodes(id).single().copy(event = manual))
+            try {
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                fail("陈旧提案必须要求重新审阅，不能覆盖人工修改")
+            } catch (expected: IllegalStateException) {
+                assertTrue(expected.message.orEmpty().contains("已被修改"))
+            }
+            assertEquals(manual, f.repository.getTimelineNodes(id).single().event)
+            assertEquals("第1天·上午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
         }
     }
 
@@ -832,4 +978,248 @@ class MemoryExtractionRepositoryTest {
             assertEquals(1, f.db.memoryDao().getCandidateMemories(id).size)
         } }
     }
+    @Test fun compressionCoversAllEarlyMessagesAndNextRequestUsesSummaryWithRecentTurns() = runBlocking {
+        val summary = "【核心背景与用户固定约束】\n合成探险队必须保留铜钥匙并遵守北港通行规则。\n【历史关键里程碑与决策推进】\n已完成各阶段的合成航海记录并在港口集结。\n【当前未决议题与待办上下文】\n接下来等待领航员确认新的航线。"
+        Endpoint { socket, payload ->
+            if (payload.get("stream")?.asBoolean == true) streamReply(socket) else memoryReply(socket, summary)
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-model", enabled = false)
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 128000))
+            val ids = (1..106).map { index -> f.db.messageDao().insertMessage(Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "独立合成事实 [$index]。".repeat(3), createdAt = index.toLong())) }
+            val result = f.repository.compressConversationContext(id).getOrThrow()
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(summary, saved.rollingSummary)
+            assertEquals(ids[89], saved.summaryUpdatedMessageId)
+            assertEquals(106, f.db.messageDao().getMessagesList(id).size)
+            val summaries = endpoint.payloads.filter { it.get("stream")?.asBoolean != true }
+            assertEquals(3, summaries.size)
+            val sentSources = summaries.joinToString("\n") { it.toString() }
+            for (messageId in ids.take(90)) assertTrue("未覆盖原文ID $messageId", sentSources.contains("原文ID $messageId]"))
+            assertTrue(summaries[1].toString().contains("铜钥匙"))
+            assertFalse(result.canCompress)
+            assertEquals(16, result.recentMessageCount)
+            chat(f, config, id)
+            val chatBody = endpoint.payloads.last().toString()
+            assertTrue(chatBody.contains("铜钥匙"))
+            assertTrue(chatBody.contains("独立合成事实 [106]"))
+            assertFalse(chatBody.contains("独立合成事实 [1]"))
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun failedSummaryNeverAdvancesCoverageOrDeletesOriginalMessages() = runBlocking {
+        Endpoint { socket, _ -> reply(socket, "{\"error\":{\"message\":\"synthetic unavailable\"}}", "503 Service Unavailable") }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            val (_, id) = f.conversation(endpoint.url, "synthetic-model")
+            val ids = (1..24).map { index -> f.db.messageDao().insertMessage(Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "待总结原文 $index。", createdAt = index.toLong())) }
+            val old = f.db.conversationDao().getConversationById(id)!!
+            f.db.conversationDao().updateConversation(old.copy(rollingSummary = "上次确认的摘要。", summaryUpdatedMessageId = ids[1], contextWindowTokens = 32768))
+            assertTrue(f.repository.compressConversationContext(id).isFailure)
+            val latest = f.db.conversationDao().getConversationById(id)!!
+            assertEquals("上次确认的摘要。", latest.rollingSummary)
+            assertEquals(ids[1], latest.summaryUpdatedMessageId)
+            assertEquals(24, f.db.messageDao().getMessagesList(id).size)
+            assertTrue(f.db.timelineNodeDao().getTimelineNodes(id).isEmpty())
+            assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+            assertEquals(1, endpoint.payloads.size)
+        } }
+    }
+
+    @Test fun editingAndDeletingCoveredHistoryInvalidatesSummaryAndManualEditKeepsRealCoverage() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.conversation("https://model.invalid")
+            val first = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "原始合成事实。"))
+            val second = f.repository.saveMessage(Message(conversationId = id, role = "assistant", content = "已确认原始事实。"))
+            suspend fun summary() = f.db.conversationDao().updateRollingSummary(id, "原始合成摘要。", second)
+            summary()
+            f.repository.updateRollingSummary(id, "人工更正的摘要。")
+            assertEquals(second, f.db.conversationDao().getConversationById(id)!!.summaryUpdatedMessageId)
+            val original = f.db.messageDao().getMessageById(first)!!
+            f.repository.updateMessage(original.copy(content = "用户已更正合成事实。"))
+            assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+            summary()
+            f.repository.deleteMessage(f.db.messageDao().getMessageById(second)!!)
+            assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+            f.repository.updateRollingSummary(id, "没有覆盖原文的手工背景。")
+            assertEquals(0L, f.db.conversationDao().getConversationById(id)!!.summaryUpdatedMessageId)
+        }
+    }
+
+    @Test fun summaryCompletingAfterSourceEditCannotOverwriteCurrentHistory() = runBlocking {
+        val entered = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        Endpoint { socket, _ ->
+            entered.countDown(); check(released.await(10, TimeUnit.SECONDS))
+            memoryReply(socket, "【核心背景与用户固定约束】\n合成的原始目标是向北港送信。\n【历史关键里程碑与决策推进】\n旧资料记载船队已经顺利抵达港口。")
+        }.use { endpoint -> Fixture().use { f ->
+            val (_, id) = f.conversation(endpoint.url, "synthetic-model")
+            val ids = (1..24).map { index -> f.repository.saveMessage(Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成旧事实 $index。", createdAt = index.toLong())) }
+            val job = async(Dispatchers.IO) { f.repository.compressConversationContext(id) }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                val source = f.db.messageDao().getMessageById(ids.first())!!
+                f.repository.updateMessage(source.copy(content = "更正：船队尚未抵达。"))
+                released.countDown()
+                assertTrue(withTimeout(5000) { job.await() }.isFailure)
+                assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                assertEquals("更正：船队尚未抵达。", f.db.messageDao().getMessageById(source.id)!!.content)
+            } finally { released.countDown(); job.cancelAndJoin() }
+        } }
+    }
+
+    @Test fun httpRetryRecordsEveryAttemptInsteadOfOnlyTheFinalSuccess() = runBlocking {
+        val attempt = AtomicInteger()
+        Endpoint { socket, _ ->
+            if (attempt.incrementAndGet() <= 2) reply(socket, "{\"error\":{\"message\":\"synthetic temporary error\"}}", "500 Internal Server Error")
+            else streamReply(socket)
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(true)
+            f.settings.setBackupKeyFallbackEnabled(false)
+            f.settings.saveRetryRule(RetryErrorType.SERVER, RetryRule(enabled = true, maxRetries = 2))
+            val (config, id) = f.conversation(endpoint.url, "synthetic-retry-model", enabled = false)
+            chat(f, config, id)
+            val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+            assertEquals(3, endpoint.payloads.size)
+            assertEquals(3, stats.size)
+            assertTrue(stats.all { it.apiConfigId == config.id && it.modelName == config.modelName && it.requestKind == "chat" })
+            val failures = stats.filterNot { it.success }
+            assertEquals(2, failures.size)
+            assertTrue(failures.all { it.completionStatus == "failed" && it.tokenSource == "unknown" && it.totalTokens == 0 })
+            val completed = stats.single { it.success }
+            assertEquals("completed", completed.completionStatus)
+            assertEquals("estimated", completed.tokenSource)
+            assertTrue(completed.totalTokens > 0)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun auxiliaryExtractionRecordsReportedUsageAndDoesNotDoubleCountReasoningOrCache() = runBlocking {
+        val distilled = "用户偏好：长期使用Kotlin开发Android应用"
+        Endpoint { socket, _ -> reply(socket, Gson().toJson(mapOf(
+            "choices" to listOf(mapOf("finish_reason" to "stop", "message" to mapOf("content" to distilled))),
+            "usage" to mapOf("prompt_tokens" to 100, "completion_tokens" to 30, "total_tokens" to 130,
+                "completion_tokens_details" to mapOf("reasoning_tokens" to 10),
+                "prompt_tokens_details" to mapOf("cached_tokens" to 20))
+        ))) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-memory-model")
+            val messageId = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "我长期使用Kotlin开发Android应用"))
+            val candidate = f.repository.processSavedMessageMemory(messageId, config.id, config.modelName)!!
+            val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+            assertEquals("memory", stat.requestKind)
+            assertEquals("reported", stat.tokenSource)
+            assertEquals("completed", stat.completionStatus)
+            assertTrue(stat.success)
+            assertEquals(config.modelName, stat.modelName)
+            assertEquals(100, stat.inputTokens)
+            assertEquals(20, stat.outputTokens)
+            assertEquals(10, stat.thinkingTokens)
+            assertEquals(20, stat.cachedTokens)
+            assertEquals(130, stat.totalTokens)
+            assertEquals(candidate.distilledContent, f.db.memoryDao().getBySourceMessage(messageId)!!.content)
+            assertTrue(candidate.distilledContent.contains("长期使用Kotlin开发Android应用"))
+            assertEquals(1, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun anthropicAuxiliaryUsageKeepsMissingInputEstimatedAndSaturatesCacheAddition() = runBlocking {
+        for (reportedInput in listOf<Int?>(null, 100, Int.MAX_VALUE)) {
+            Endpoint { socket, _ -> reply(socket, Gson().toJson(mapOf(
+                "stop_reason" to "end_turn",
+                "content" to listOf(mapOf("type" to "text", "text" to "用户偏好：长期使用Kotlin开发Android应用")),
+                "usage" to mapOf("input_tokens" to reportedInput, "output_tokens" to 30,
+                    "cache_read_input_tokens" to 20, "cache_creation_input_tokens" to 10)
+            ))) }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, "synthetic-memory-model", "anthropic")
+                val messageId = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "我长期使用Kotlin开发Android应用"))
+                assertNotNull(f.repository.processSavedMessageMemory(messageId, config.id, config.modelName))
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                val prompt = endpoint.payloads.single().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                val expectedInput = reportedInput?.let { (it.toLong() + 30).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
+                    ?: (AiRepository.estimateTokenCount(prompt) + 24)
+                assertEquals(expectedInput, stat.inputTokens)
+                assertEquals(if (reportedInput == null) "mixed" else "reported", stat.tokenSource)
+                assertEquals(30, stat.outputTokens)
+                assertEquals(0, stat.thinkingTokens)
+                assertEquals(20, stat.cachedTokens)
+                assertEquals((expectedInput.toLong() + 30).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), stat.totalTokens)
+                assertEquals("memory", stat.requestKind)
+                assertEquals("completed", stat.completionStatus)
+                assertTrue(stat.success)
+            } }
+        }
+    }
+
+    @Test fun lengthTruncatedSummaryCannotAdvanceCoverageEvenWhenTextEndsWithPeriod() = runBlocking {
+        val plausible = "【核心背景与用户固定约束】\n这是看起来完整的合成设定与目标。\n【历史关键里程碑与决策推进】\n最后一句也以句号结束但接口明确报告截断。"
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                val response = if (protocol == "openai") mapOf("choices" to listOf(mapOf("finish_reason" to "length", "message" to mapOf("content" to plausible))))
+                    else mapOf("stop_reason" to "max_tokens", "content" to listOf(mapOf("type" to "text", "text" to plausible)))
+                reply(socket, Gson().toJson(response))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                val (_, id) = f.conversation(endpoint.url, "synthetic-model", protocol)
+                (1..20).forEach { index -> f.repository.saveMessage(Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成消息$index。", createdAt = index.toLong())) }
+                assertTrue(f.repository.compressConversationContext(id).isFailure)
+                assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                assertNull(f.db.conversationDao().getConversationById(id)!!.summaryUpdatedMessageId)
+                assertEquals(20, f.db.messageDao().getMessagesList(id).size)
+                assertEquals(1, endpoint.payloads.size)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertEquals("summary", stat.requestKind)
+                assertEquals("interrupted", stat.completionStatus)
+                assertFalse(stat.success)
+            } }
+        }
+    }
+
+    @Test fun quickExtractionRejectsTruncatedTextForBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                val response = if (protocol == "openai") mapOf("choices" to listOf(mapOf("finish_reason" to "length", "message" to mapOf("content" to "合成记录的前半部分。"))))
+                    else mapOf("stop_reason" to "max_tokens", "content" to listOf(mapOf("type" to "text", "text" to "合成记录的前半部分。")))
+                reply(socket, Gson().toJson(response))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                val (config, _) = f.conversation(endpoint.url, "synthetic-model", protocol)
+                assertTrue(f.repository.executeQuickCompletionWithResult(config, "整理合成记录", kind = "timeline").isFailure)
+                assertEquals(1, endpoint.payloads.size)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertEquals("timeline", stat.requestKind)
+                assertEquals("interrupted", stat.completionStatus)
+                assertFalse(stat.success)
+            } }
+        }
+    }
+
+    @Test fun manualSummaryEditDuringGenerationCannotBeOverwritten() = runBlocking {
+        val entered = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        Endpoint { socket, _ ->
+            entered.countDown()
+            check(released.await(10, TimeUnit.SECONDS))
+            memoryReply(socket, "【核心背景与用户固定约束】\n合成探险队仍需遵守北港通行规则。\n【历史关键里程碑与决策推进】\n船队已在合成码头集结。")
+        }.use { endpoint -> Fixture().use { f ->
+            val (_, id) = f.conversation(endpoint.url, "synthetic-model")
+            val ids = (1..24).map { index -> f.repository.saveMessage(Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成消息$index。", createdAt = index.toLong())) }
+            f.db.conversationDao().updateRollingSummary(id, "既有的合成摘要。", ids[3])
+            val job = async(Dispatchers.IO) { f.repository.compressConversationContext(id) }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                f.repository.updateRollingSummary(id, "人工更正：角色仍在旧港，尚未出发。")
+                released.countDown()
+                assertTrue(withTimeout(5000) { job.await() }.isFailure)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals("人工更正：角色仍在旧港，尚未出发。", saved.rollingSummary)
+                assertEquals(ids[3], saved.summaryUpdatedMessageId)
+            } finally { released.countDown(); job.cancelAndJoin() }
+        } }
+    }
+
 }

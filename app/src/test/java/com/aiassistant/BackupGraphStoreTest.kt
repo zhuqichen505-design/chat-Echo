@@ -7,6 +7,7 @@ import com.aiassistant.data.local.migrations.AppDatabaseMigrations
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.BackupGraphStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -165,6 +166,26 @@ class BackupGraphStoreTest {
         }
     }
 
+    @Test fun storyLocalIdentitiesSurviveBackupWithoutGlobalCharacterRows() = runBlocking {
+        database().use { source -> database().use { destination ->
+            val conversation = seed(source, "Synthetic story")
+            source.roleplaySessionDao().insertSession(RoleplaySession(conversationId = conversation,
+                characterIds = "[-1,-2]", customCharacterData = com.google.gson.Gson().toJson(listOf(
+                    CharacterProfile(id = -1, name = "Synthetic A"), CharacterProfile(id = -2, name = "Synthetic B"))),
+                customScenarioData = com.google.gson.Gson().toJson(RoleplayScenario(id = -1, name = "Synthetic local world"))))
+            val snapshot = BackupGraphStore.export(source, null, { it })
+            BackupGraphStore.restore(destination, snapshot, { it }, {})
+            val restoredConversation = destination.conversationDao().getAllConversations().first().single()
+            val restored = destination.roleplaySessionDao().getSessionByConversationId(restoredConversation.id)!!
+            assertEquals(listOf(-1L, -2L), restored.getEffectiveCharacterIds())
+            assertEquals(listOf("Synthetic A", "Synthetic B"), restored.getCustomizedCharacters(emptyList()).map { it.name })
+            assertEquals(-1L, restored.getCustomizedScenario(null)?.id)
+            assertNull(restored.characterId)
+            assertNull(restored.scenarioId)
+            destination.openHelper.readableDatabase.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+        } }
+    }
+
     @Test fun fullSnapshotRemapsWorldBooksTagsSummaryAndBranches() = runBlocking {
         database().use { a -> database().use { b ->
             val parent = seed(a, "parent")
@@ -218,10 +239,10 @@ class BackupGraphStoreTest {
             sql.version = 32
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
         try {
             assertEquals("retained", upgraded.messageDao().getMessagesList(id).single().content)
-            assertEquals(34, upgraded.openHelper.readableDatabase.version)
+            assertEquals(35, upgraded.openHelper.readableDatabase.version)
             upgraded.openHelper.readableDatabase.query("SELECT COUNT(*) FROM backup_identities").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
@@ -260,13 +281,42 @@ class BackupGraphStoreTest {
             sql.version = 33
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
         try {
             val conv = upgraded.conversationDao().getConversationById(1)!!
             assertEquals("retained", conv.title); assertFalse(conv.enableReplyDirections); assertEquals(2, conv.replyDirectionCount)
-            assertEquals(34, upgraded.openHelper.readableDatabase.version)
+            assertEquals(35, upgraded.openHelper.readableDatabase.version)
             assertEquals("old message", upgraded.messageDao().getMessagesList(1).single().content)
             assertNull(upgraded.messageDao().getMessagesList(1).single().replyDirection)
+        } finally { upgraded.close(); context.deleteDatabase(name) }
+    }
+
+    @Test fun usageMigrationPreservesV34StatisticsAndMarksUnknownMetadata() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "usage-${java.util.UUID.randomUUID()}.db"
+        val schema = com.google.gson.JsonParser.parseString(java.io.File("schemas/com.aiassistant.data.local.AppDatabase/34.json").readText()).asJsonObject.getAsJsonObject("database")
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { sql ->
+            schema.getAsJsonArray("entities").forEach { entity ->
+                val obj = entity.asJsonObject
+                val table = obj.get("tableName").asString
+                sql.execSQL(obj.get("createSql").asString.replace("\${TABLE_NAME}", table))
+                obj.getAsJsonArray("indices")?.forEach { index -> sql.execSQL(index.asJsonObject.get("createSql").asString.replace("\${TABLE_NAME}", table)) }
+            }
+            schema.getAsJsonArray("setupQueries").forEach { sql.execSQL(it.asString) }
+            sql.execSQL("INSERT INTO api_usage_stats(id,apiConfigId,provider,modelName,inputTokens,outputTokens,thinkingTokens,totalTokens,cachedTokens,responseTime,success,timestamp) VALUES(1,1,'synthetic','model-test',100,20,5,125,40,900,1,100)")
+            sql.version = 34
+        }
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
+            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
+        try {
+            val stat = upgraded.usageStatDao().getStatsListByTimeRange(0, 200).single()
+            assertEquals(125, stat.totalTokens)
+            assertEquals(40, stat.cachedTokens)
+            assertEquals("legacy", stat.tokenSource)
+            assertEquals("legacy", stat.requestKind)
+            assertEquals("legacy", stat.completionStatus)
+            assertEquals(0L, stat.firstTokenTimeMs)
+            assertEquals(35, upgraded.openHelper.readableDatabase.version)
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 

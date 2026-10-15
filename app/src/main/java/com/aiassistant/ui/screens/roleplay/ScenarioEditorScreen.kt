@@ -90,7 +90,7 @@ fun ScenarioEditorScreen(
                                 tint = if (isFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        IconButton(onClick = { showDeleteDialog = true }) {
+                        if (onDelete != null) IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Default.Delete, contentDescription = "删除")
                         }
                     }

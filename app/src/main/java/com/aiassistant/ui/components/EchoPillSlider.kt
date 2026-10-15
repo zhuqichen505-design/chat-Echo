@@ -68,7 +68,7 @@ fun EchoPillSlider(
     modifier: Modifier = Modifier,
     valueRange: ClosedFloatingPointRange<Float> = 0f..4f,
     steps: Int = 3, // 中间停靠点数量，总离散点数 = steps + 2
-    activeColor: Color = Color(0xFF22C55E),
+    activeColor: Color = MaterialTheme.colorScheme.primary,
     inactiveColor: Color? = null,
     trackHeight: Dp = 26.dp,
     thumbSize: Dp = 28.dp,
@@ -77,7 +77,7 @@ fun EchoPillSlider(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val resolvedInactiveColor = inactiveColor ?: if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E7EB)
+    val resolvedInactiveColor = inactiveColor ?: MaterialTheme.colorScheme.surfaceContainerHighest
 
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentValue by rememberUpdatedState(value)
@@ -267,7 +267,7 @@ fun EchoPillSlider(
                     .size(thumbSize)
                     .shadow(elevation = EchoTokens.Elevation.raised(isDark).elevation, shape = CircleShape, ambientColor = EchoTokens.Elevation.raised(isDark).ambient, spotColor = EchoTokens.Elevation.raised(isDark).spot)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.onPrimary)
             )
         }
     }

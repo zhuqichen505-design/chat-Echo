@@ -74,8 +74,8 @@ object TokenEstimationHelper {
             is List<*> -> {
                 content.sumOf { part ->
                     when (part) {
-                        is ContentPart -> estimateTokenCount(part.text.orEmpty())
-                        is AnthropicContent -> estimateTokenCount(part.text.orEmpty())
+                        is ContentPart -> if (part.type == "image_url") 1536 else estimateTokenCount(part.text.orEmpty())
+                        is AnthropicContent -> if (part.type == "image") 1536 else estimateTokenCount(part.text.orEmpty())
                         else -> estimateTokenCount(part?.toString().orEmpty())
                     }
                 }

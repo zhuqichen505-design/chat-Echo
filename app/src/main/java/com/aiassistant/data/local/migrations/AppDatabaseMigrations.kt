@@ -515,6 +515,15 @@ object AppDatabaseMigrations {
             }
         }
 
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                addColumnIfMissing(database, "api_usage_stats", "requestKind", "TEXT NOT NULL DEFAULT 'legacy'")
+                addColumnIfMissing(database, "api_usage_stats", "tokenSource", "TEXT NOT NULL DEFAULT 'legacy'")
+                addColumnIfMissing(database, "api_usage_stats", "completionStatus", "TEXT NOT NULL DEFAULT 'legacy'")
+                addColumnIfMissing(database, "api_usage_stats", "firstTokenTimeMs", "INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         val LEGACY_REPAIR_MIGRATIONS: Array<Migration> = ((1..22)
             .map { startVersion ->
                 object : Migration(startVersion, 23) {
@@ -522,7 +531,7 @@ object AppDatabaseMigrations {
                         repairSchema(database)
                     }
                 }
-            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34)
+            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35)
             .toTypedArray()
 
         private fun repairSchema(database: SupportSQLiteDatabase) {

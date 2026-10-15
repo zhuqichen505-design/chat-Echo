@@ -492,173 +492,33 @@ internal fun ContextOptimizationActions(
     onEditRollingSummary: (() -> Unit)?,
     onCompress: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // 卡片 1：时间线梳理与记忆沉淀
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "时间线与会话记忆 (Timeline & Memory)",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = "已沉淀 · ${usage.memoryItemCount} 条记忆",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = "过往超出最近未压缩窗口的历史对话，已自动梳理沉淀为时间线节点与会话专属记忆。最近十几次对话（16+ 条）无条件无损保留，剧情自然向前推移，绝不在陈旧过去时间点原地踏步。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onGenerateRollingSummary,
-                        enabled = !state.isGeneratingSummary,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        if (state.isGeneratingSummary) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("梳理中...", style = MaterialTheme.typography.labelSmall)
-                        } else {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("梳理时间线与提炼记忆", style = MaterialTheme.typography.labelSmall)
-                        }
+    val busy = state.isCompressing || state.isGeneratingSummary
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("历史摘要", style = MaterialTheme.typography.titleSmall)
+                Text(if (usage.hasRollingSummary) "已保存 · ${formatTokenCount(usage.summaryTokens)} tokens · 覆盖至消息 #${usage.compressedThroughMessageId}"
+                    else "尚未生成。摘要用于承接早期事实、决定与未完成事项。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("摘要可能遗漏细节，可随时审阅和修订。编辑或删除原文会使旧摘要失效；时间线与会话设定需在对应页面单独确认。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (onEditRollingSummary != null) TextButton(onClick = onEditRollingSummary, enabled = !busy) { Text("审阅 / 编辑") }
+                    FilledTonalButton(onClick = onGenerateRollingSummary, enabled = !busy) {
+                        Text(if (state.isGeneratingSummary) "正在更新…" else "更新摘要")
                     }
                 }
             }
         }
-
-        // 卡片 2：主动上下文压缩
-        val isCompressed = usage.compressedThroughMessageId != null
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Compress,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "主动上下文压缩 (Compression)",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = if (isCompressed) "已裁剪至 #${usage.compressedThroughMessageId}" else "尚未压缩",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = "【释放 Token 空间】基于时间线梳理与会话专属记忆，将早期历史对话沉淀归档，无条件完整保留最近十几次活跃对话（16+ 条），释放窗口空间同时确保剧情连贯推动。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onCompress,
-                        enabled = !state.isCompressing,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiary,
-                            contentColor = MaterialTheme.colorScheme.onTertiary
-                        ),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        if (state.isCompressing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onTertiary
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("正在压缩...", style = MaterialTheme.typography.labelSmall)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isCompressed) "重新压缩 / 更新水线" else "立即压缩释放空间", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("释放上下文空间", style = MaterialTheme.typography.titleSmall)
+                Text("连续总结较早原文，保留最近完整对话轮次和置顶内容。摘要成功且原文未变化后才更新覆盖范围；失败时保留原文和原摘要。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onCompress, enabled = !busy && usage.canCompress, modifier = Modifier.align(Alignment.End)) {
+                    Text(if (state.isCompressing) "正在压缩…" else if (usage.canCompress) "压缩较早对话" else "暂无待压缩历史")
                 }
             }
         }
@@ -945,15 +805,15 @@ internal fun ContextUsageDetails(
                 value = "${usage.olderMessageCount} 条"
             )
             ContextUsageRow(
-                label = "时间线/记忆成果",
+                label = "本轮记忆与时间线",
                 value = "${usage.memoryItemCount} 条记忆 · ${formatTokenCount(usage.memoryTokens)} tokens"
             )
             ContextUsageRow(
-                label = "压缩沉淀水线",
-                value = usage.compressedThroughMessageId?.let { "已沉淀至 #$it" } ?: "未触发压缩"
+                label = "摘要覆盖范围",
+                value = usage.compressedThroughMessageId?.takeIf { usage.hasRollingSummary && it > 0 }?.let { "截至消息 #$it" } ?: "无已确认覆盖"
             )
             ContextUsageRow(
-                label = "沉淀梳理时间",
+                label = "摘要更新时间",
                 value = usage.summaryUpdatedAt?.let(::formatContextTimestamp) ?: "暂无"
             )
         }
@@ -967,11 +827,11 @@ internal fun ContextUsageStatus(
 ) {
     val isHighPressure = usage.usagePercent >= 0.60f
     val message = statusMessage ?: if (usage.canCompress && isHighPressure) {
-        "上下文负载较高，可主动梳理时间线与提炼记忆以释放容量。"
+        "上下文负载较高，可压缩较早对话。发送前会再次核对消息、提示词、附件和输出预算。"
     } else if (usage.canCompress) {
-        "检测到较多早期历史对话，可按需梳理时间线与提炼记忆。"
+        "存在未压缩的较早历史，可生成连续摘要后释放空间。"
     } else {
-        "当前上下文容量充裕，最近十几次历史对话完整保留。"
+        "暂无新的可压缩历史。数值为本机估算，实际 Token 用量以接口报告为准。"
     }
     val icon = if (isHighPressure) Icons.Default.Warning else Icons.Default.CheckCircle
     val color = if (isHighPressure) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
@@ -1099,7 +959,7 @@ internal fun RollingSummaryEditDialog(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp)
                 )
-                Text("会话历史梳理与记忆", style = MaterialTheme.typography.titleLarge)
+                Text("审阅历史摘要", style = MaterialTheme.typography.titleLarge)
             }
         },
         content = {
@@ -1110,7 +970,7 @@ internal fun RollingSummaryEditDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "过往历史对话已梳理沉淀为时间线节点与会话专属记忆。您可以直接审阅或按需微调修改：",
+                    text = "修订摘要中的事实、时间和未完成事项。保存保留原有覆盖范围；新建的手动摘要不会把未总结的历史标为已压缩。清除后下一次发送会重新读取原文。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1121,7 +981,7 @@ internal fun RollingSummaryEditDialog(
                         .fillMaxWidth()
                         .heightIn(min = 180.dp, max = 460.dp),
                     maxLines = 30,
-                    placeholder = { Text("暂无历史梳理内容...") },
+                    placeholder = { Text("暂无历史摘要") },
                     textStyle = MaterialTheme.typography.bodyMedium
                 )
             }

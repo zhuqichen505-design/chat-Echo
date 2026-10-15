@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.aiassistant.AiAssistantApp
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.RoleplayRepository
@@ -415,7 +416,9 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         apiConfigId: Long,
         modelName: String? = null,
         narrativeMode: NarrativeMode,
-        onSuccess: (Long) -> Unit
+        onSuccess: (Long) -> Unit,
+        titleOverride: String = "",
+        writingInstructions: String = ""
     ) {
         viewModelScope.launch {
             try {
@@ -442,7 +445,9 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 val targetModelName = modelName?.ifBlank { null } ?: apiConfig.modelName
 
                 val conversation = Conversation(
-                    title = title,
+                    title = titleOverride.trim().ifBlank { title },
+                    systemPrompt = writingInstructions.trim().ifBlank { null },
+                    enableSessionMemory = true,
                     apiConfigId = apiConfig.id,
                     modelName = targetModelName,
                     temperature = apiConfig.temperature ?: 0.95f,
@@ -453,22 +458,20 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                     enableWebSearch = apiConfig.enableWebSearch ?: false
                 )
 
-                val conversationId = database.conversationDao().insertConversation(conversation)
-
-                val charIdsJson = if (characterIds.isNotEmpty()) {
-                    com.google.gson.Gson().toJson(characterIds)
-                } else null
-
-                val roleplaySession = RoleplaySession(
-                    characterId = characterIds.firstOrNull(),
-                    characterIds = charIdsJson,
-                    scenarioId = scenarioId,
-                    conversationId = conversationId,
-                    narrativeMode = narrativeMode.value,
-                    currentPlotSummary = scenario?.premise ?: ""
-                )
-
-                val sessionId = repository.insertSession(roleplaySession)
+                val (conversationId, sessionId) = database.withTransaction {
+                    val conversationId = database.conversationDao().insertConversation(conversation)
+                    val roleplaySession = RoleplaySession(
+                        characterId = characterIds.firstOrNull(),
+                        characterIds = com.google.gson.Gson().toJson(characterIds),
+                        scenarioId = scenarioId,
+                        conversationId = conversationId,
+                        narrativeMode = narrativeMode.value,
+                        customCharacterData = characters.takeIf { it.isNotEmpty() }?.let { com.google.gson.Gson().toJson(it) },
+                        customScenarioData = scenario?.let { com.google.gson.Gson().toJson(it) },
+                        currentPlotSummary = scenario?.premise.orEmpty()
+                    )
+                    conversationId to repository.insertSession(roleplaySession)
+                }
                 _currentSession.value = repository.getSessionById(sessionId)
 
                 // 初始问候语不自动插入，由用户在故事中自主发起与掌控

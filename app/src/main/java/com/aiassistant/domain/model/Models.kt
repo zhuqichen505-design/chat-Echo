@@ -182,7 +182,11 @@ data class ApiUsageStat(
     val responseTime: Long = 0,
     val success: Boolean = true,
     val errorMessage: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'legacy'") val requestKind: String = "legacy",
+    @ColumnInfo(defaultValue = "'legacy'") val tokenSource: String = "legacy",
+    @ColumnInfo(defaultValue = "'legacy'") val completionStatus: String = "legacy",
+    @ColumnInfo(defaultValue = "0") val firstTokenTimeMs: Long = 0
 )
 
 // 模型使用统计汇总

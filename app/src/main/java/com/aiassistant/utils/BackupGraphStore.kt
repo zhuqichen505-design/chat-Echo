@@ -267,7 +267,7 @@ object BackupGraphStore {
                         if (replacement == null) item.add(field, com.google.gson.JsonNull.INSTANCE) else item.addProperty(field, replacement)
                     }
                     listOf("activeWorldBookIds" to "world_books", "characterIds" to "character_profiles").forEach { (field, target) ->
-                        item.get(field)?.takeUnless { it.isJsonNull }?.let { value -> item.addProperty(field, ids(value.asString).mapNotNull { mapped(target, it) }.joinToString(",")) }
+                        item.get(field)?.takeUnless { it.isJsonNull }?.let { value -> item.addProperty(field, ids(value.asString).mapNotNull { if (field == "characterIds" && it < 0) it else mapped(target, it) }.joinToString(",")) }
                     }
                     if (table == "roleplay_sessions") {
                         item.get("customCharacterData")?.takeUnless { it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }?.let { raw ->

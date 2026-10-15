@@ -90,8 +90,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 // 批量删除弹窗专属"柔和删除"视觉（方案 §九：保留浅红柔和删除风格，不入语义 error）
-private val DeleteDialogPink = Color(0xFFFFE4E6)
-private val DeleteDialogContent = Color(0xFFBE123C)
 private const val EchoWordmarkActiveVariant = "liquid-script"
 
 private data class EchoWordmarkPreset(
@@ -147,6 +145,7 @@ fun HomeScreen(
     }.collectAsState(initial = null)
     val hazeState = rememberEchoHazeState()
     val readableBackdrop = rememberReadableBackdropColor(homeBackgroundBitmap)
+    val backdropTextColor = readableTextColorFor(readableBackdrop)
     val conversationListState = rememberLazyListState()
     val showScrollControls by rememberLazyListControlsVisible(conversationListState)
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -324,6 +323,7 @@ fun HomeScreen(
                                 HomePresentationSection(
                                     workbench = workbench,
                                     compact = compactCards,
+                                    backdropContentColor = backdropTextColor,
                                     recentStory = recentStory,
                                     showRecentStory = showRecentStory,
                                     onNewChat = ::startNewConversation,
@@ -340,14 +340,15 @@ fun HomeScreen(
                                     Text(
                                         if (searchQuery.isNotBlank()) "没有找到匹配的会话"
                                         else if (selectedFolderId != null) "这里还没有会话" else "还没有会话",
-                                        style = MaterialTheme.typography.titleMedium
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = backdropTextColor
                                     )
                                     Text(
                                         if (searchQuery.isNotBlank()) "试试其他关键词，或从历史记录中查找。"
                                         else if (selectedFolderId != null) "可以切回全部会话，或在这里新建对话。"
                                         else "点击上方按钮开始，之后可以在这里继续。",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = backdropTextColor.copy(alpha = 0.84f)
                                     )
                                 }
                             }
@@ -358,6 +359,7 @@ fun HomeScreen(
                             item {
                                 PinnedSectionHeader(
                                     count = pinnedConversations.size,
+                                    contentColor = backdropTextColor,
                                     expanded = pinnedExpanded,
                                     onToggle = { pinnedExpanded = !pinnedExpanded }
                                 )
@@ -428,7 +430,7 @@ fun HomeScreen(
                                 Text(
                                     text = "其他",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = backdropTextColor.copy(alpha = 0.84f),
                                     modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
@@ -1040,8 +1042,8 @@ private fun BatchSelectionBar(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(999.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = DeleteDialogPink,
-                    contentColor = DeleteDialogContent
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )
             ) {
                 Icon(
@@ -1066,32 +1068,32 @@ private fun BatchDeleteConfirmDialog(
     EchoGlassDialog(
         hazeState = hazeState,
         onDismissRequest = onDismiss,
-        containerColor = DeleteDialogPink,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
         icon = {
             Icon(
                 Icons.Default.DeleteForever,
                 contentDescription = null, // decorative
-                tint = DeleteDialogContent
+                tint = MaterialTheme.colorScheme.onErrorContainer
             )
         },
         title = {
             Text(
                 text = "确认删除 $selectedCount 个对话？",
-                color = DeleteDialogContent
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
         },
         text = {
             Text(
                 text = "删除后这些对话和消息记录将无法恢复。请再次确认是否继续删除。",
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
         },
         confirmButton = {
             Button(
                 onClick = onConfirm,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DeleteDialogContent,
-                    contentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
                 )
             ) {
                 Text("确认删除")
@@ -1100,7 +1102,7 @@ private fun BatchDeleteConfirmDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(contentColor = DeleteDialogContent)
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)
             ) {
                 Text("取消")
             }
@@ -1111,6 +1113,7 @@ private fun BatchDeleteConfirmDialog(
 @Composable
 private fun PinnedSectionHeader(
     count: Int,
+    contentColor: Color,
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
@@ -1129,26 +1132,26 @@ private fun PinnedSectionHeader(
                 Icons.Default.PushPin,
                 contentDescription = null, // decorative
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = contentColor
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "置顶",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
+                color = contentColor
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "$count",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = contentColor.copy(alpha = 0.84f)
             )
             Spacer(modifier = Modifier.weight(1f))
             Icon(
                 if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = if (expanded) "收起置顶对话" else "展开置顶对话",
                 modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = contentColor.copy(alpha = 0.84f)
             )
         }
     }

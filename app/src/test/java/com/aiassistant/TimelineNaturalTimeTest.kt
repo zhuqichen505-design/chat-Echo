@@ -217,8 +217,8 @@ class TimelineNaturalTimeTest {
             )
         )
         val nodesContext = TimelineMemoryHelper.buildTimelineNodesPromptContext(nodes, "第 1 天·上午")
-        assertTrue(nodesContext.contains("唯一权威的时间记忆"))
-        assertTrue(nodesContext.contains("单轮至多推进一个相邻时段"))
+        assertTrue(nodesContext.contains("近期明确修订优先"))
+        assertTrue(nodesContext.contains("无时间证据时保持当前时段"))
 
         val roleplayContext = TimelineMemoryHelper.buildTimelinePromptContext(
             currentStoryTime = "第 2 天·上午",

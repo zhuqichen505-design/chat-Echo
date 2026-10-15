@@ -195,8 +195,8 @@ fun echoSwitchColors(forcedThinking: Boolean = false): SwitchColors {
 
     return SwitchDefaults.colors(
         // 开启状态
-        checkedThumbColor = colorScheme.onPrimary,
-        checkedTrackColor = if (forcedThinking) Color(0xFFB9DEFF) else colorScheme.primary,
+        checkedThumbColor = if (forcedThinking) colorScheme.onSecondaryContainer else colorScheme.onPrimary,
+        checkedTrackColor = if (forcedThinking) colorScheme.secondaryContainer else colorScheme.primary,
         checkedBorderColor = Color.Transparent,
         checkedIconColor = colorScheme.primary,
 
@@ -207,8 +207,8 @@ fun echoSwitchColors(forcedThinking: Boolean = false): SwitchColors {
         uncheckedIconColor = colorScheme.surfaceContainerHighest,
 
         // 禁用状态
-        disabledCheckedThumbColor = colorScheme.onSurface.copy(alpha = 0.38f),
-        disabledCheckedTrackColor = if (forcedThinking) Color(0xFFB9DEFF) else colorScheme.onSurface.copy(alpha = 0.12f),
+        disabledCheckedThumbColor = if (forcedThinking) colorScheme.onSecondaryContainer else colorScheme.onSurface.copy(alpha = 0.38f),
+        disabledCheckedTrackColor = if (forcedThinking) colorScheme.secondaryContainer else colorScheme.onSurface.copy(alpha = 0.12f),
         disabledCheckedBorderColor = Color.Transparent,
         disabledUncheckedThumbColor = colorScheme.onSurface.copy(alpha = 0.38f),
         disabledUncheckedTrackColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.38f),

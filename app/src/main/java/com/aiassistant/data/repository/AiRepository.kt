@@ -30,6 +30,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import okhttp3.Call
@@ -93,10 +97,11 @@ class AiRepository(
     private val activeMemoryCalls = ConcurrentHashMap<retrofit2.Call<*>, Long>()
     private val activeMemoryJobs = ConcurrentHashMap<Long, Pair<Long, Job>>()
     private val modelContextWindowCache = ConcurrentHashMap<String, Int>()
+    private val summaryLocks = ConcurrentHashMap<Long, Mutex>()
 
     companion object {
         const val UNCOMPRESSED_RECENT_MESSAGE_COUNT = 16 // 最近十几次对话不做压缩，原汁原味无损保留（涵盖8~10轮对话）
-        const val SUMMARY_BUDGET_RATIO = 0.0f // 彻底废除滚动摘要预算占用
+        const val SUMMARY_BUDGET_RATIO = 0.12f // 摘要在总上下文中拥有明确预算
         const val MEMORY_BUDGET_RATIO = 0.12f // 充裕预算分配给会话记忆与时间线系统
         const val SYSTEM_PROMPT_TOKEN_RESERVE = 900
         const val MIN_RECENT_CONTEXT_TOKENS = 16_000
@@ -1023,129 +1028,42 @@ class AiRepository(
         contextWindowOverrideTokens: Int? = null
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
         runCatching {
-            val conversation = getConversationById(conversationId)
-                ?: throw IllegalStateException("对话不存在")
-            val config = getDecryptedConfig(conversation.apiConfigId)
-                ?: throw IllegalStateException("API配置不存在")
-            val messages = getMessagesList(conversationId).collapseVariantsForHistory()
-            val modelName = modelNameOverride
-                ?.takeIf { it.isNotBlank() }
-                ?: resolveRequestModel(config.copy(modelName = conversation.modelName), resolveChatRequestOptions(config, null))
-
-            val snapshot = buildContextUsageSnapshot(
-                conversation = conversation,
-                messages = messages,
-                modelName = modelName,
-                maxOutputTokens = maxOutputTokens,
-                contextWindowOverrideTokens = contextWindowOverrideTokens ?: conversation.contextWindowTokens
-            )
-            val usableMessages = messages.filter { message ->
-                (message.role == "user" || message.role == "assistant") &&
-                    message.content.isNotBlank() &&
-                    !message.isExcluded &&
-                    !isErrorPlaceholderMessage(message.content)
+            val conversation = getConversationById(conversationId) ?: error("对话不存在")
+            val config = getDecryptedConfig(conversation.apiConfigId) ?: error("API 配置不存在")
+            val model = modelNameOverride?.takeIf { it.isNotBlank() } ?: conversation.modelName
+            val messages = getMessagesList(conversationId).collapseVariantsForHistory().filter {
+                it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
             }
-            if (usableMessages.size <= UNCOMPRESSED_RECENT_MESSAGE_COUNT) {
-                // 当前对话处于最近十几次（16条）未压缩无损保留窗口，无需压缩
-                return@runCatching snapshot
+            val budget = estimatePromptBudgetTokens(model, maxOutputTokens, contextWindowOverrideTokens ?: conversation.contextWindowTokens)
+            val plan = ContextCompressionPlanner.plan(messages, CompressionTier.fromLevel(conversation.compressionTier),
+                (budget * 0.65f).toInt(), conversation.rollingSummary, conversation.summaryUpdatedMessageId,
+                conversation.compressionRecentRounds, conversation.compressionCustomPercent, forceCompression = true)
+            if (plan.summarySource.isNotEmpty()) {
+                ensureRollingSummary(conversation.copy(contextWindowTokens = contextWindowOverrideTokens ?: conversation.contextWindowTokens), config, model, plan.summarySource, (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
             }
-
-            // 超出最近 16 条无损保留窗口的较早历史对话，全部作为提炼压缩的目标
-            val olderMessages = usableMessages.dropLast(UNCOMPRESSED_RECENT_MESSAGE_COUNT)
-
-            if (olderMessages.isNotEmpty()) {
-                // 1. 将较早对话梳理并沉淀为时间线节点 (作为时空演变压缩成果)
-                try {
-                    val localResult = fallbackLocalTimelineScan(olderMessages)
-                    if (localResult.events.isNotEmpty()) {
-                        val currentNodes = timelineNodeDao?.getTimelineNodes(conversationId).orEmpty()
-                        val newNodes = localResult.events.mapIndexedNotNull { idx, item ->
-                            val cleanEvent = item.content.trim()
-                            if (cleanEvent.isBlank() || currentNodes.any { it.event == cleanEvent }) null
-                            else {
-                                TimelineNode(
-                                    conversationId = conversationId,
-                                    timeTag = item.timeTag.ifBlank { "早期剧情" },
-                                    event = cleanEvent,
-                                    category = item.category.name,
-                                    orderIndex = currentNodes.size + idx
-                                )
-                            }
-                        }
-                        if (newNodes.isNotEmpty()) {
-                            timelineNodeDao?.insertTimelineNodes(newNodes)
-                        }
-                    }
-                    if (localResult.currentStoryTime.isNotBlank() && localResult.currentStoryTime != "未确定") {
-                        if (conversation.currentStoryTime.isNullOrBlank() || conversation.currentStoryTime == "未确定") {
-                            conversationDao.updateConversation(conversation.copy(currentStoryTime = localResult.currentStoryTime))
-                        }
-                    }
-                } catch (e: Throwable) {
-                    Log.w(tag, "Failed to persist timeline nodes during context compression: ${e.message}")
-                }
-
-                // 2. 将较早对话的核心事实提炼为会话专属记忆 (作为设定事实压缩成果)
-                try {
-                    val extractive = AdvancedMemoryEngine.generateExtractiveStructuredSummary(olderMessages)
-                    val candidateFacts = (extractive.coreConstraints + extractive.openItems).map { it.trim() }.filter { it.isNotBlank() }
-                    val existingMemories = memoryDao.getCandidateMemories(conversationId).map { it.content.trim() }.toSet()
-                    val memoriesToInsert: List<MemoryItem> = candidateFacts.filter { fact: String ->
-                        !existingMemories.contains(fact)
-                    }.take(8).map { fact: String ->
-                        MemoryItem(
-                            conversationId = conversationId,
-                            content = fact,
-                            scope = "conversation",
-                            confidence = 0.85f,
-                            isEnabled = true
-                        )
-                    }
-                    for (item: MemoryItem in memoriesToInsert) {
-                        memoryDao.insertMemory(item)
-                    }
-                } catch (e: Throwable) {
-                    Log.w(tag, "Failed to persist memory items during context compression: ${e.message}")
-                }
-
-                // 3. 记录压缩截断水线，并彻底清空旧的 rollingSummary (置为 null)，杜绝陈旧摘要锁死时间点
-                val lastOlderMessageId = olderMessages.last().id
-                conversationDao.updateRollingSummary(
-                    conversationId = conversationId,
-                    summary = null,
-                    messageId = lastOlderMessageId,
-                    timestamp = System.currentTimeMillis()
-                )
-            }
-
-            val refreshedConversation = getConversationById(conversationId) ?: conversation
-            buildContextUsageSnapshot(
-                conversation = refreshedConversation,
-                messages = messages,
-                modelName = modelName,
-                maxOutputTokens = maxOutputTokens,
-                contextWindowOverrideTokens = contextWindowOverrideTokens ?: refreshedConversation.contextWindowTokens
-            )
-        }
+            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
+        }.onFailure { if (it is CancellationException) throw it }
     }
 
-    /**
-     * 按需生成/重新生成滚动摘要（由用户在界面显式触发）：
-     * 不受后台自动归约 16 条的高门槛限制，只要会话有 >= 2 条有效对话，即可根据当前对话提炼前序摘要并入库。
-     */
+    /** Updating a summary is explicit and may also summarize a short conversation; it never deletes the original messages. */
     suspend fun generateRollingSummaryNow(
         conversationId: Long,
         modelNameOverride: String? = null,
         maxOutputTokens: Int? = null,
         contextWindowOverrideTokens: Int? = null
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
-        // 废除滚动摘要：主动整理统一委托至 compressConversationContext，执行时间线梳理与会话记忆沉淀，最近十几次对话无损保留
-        compressConversationContext(
-            conversationId = conversationId,
-            modelNameOverride = modelNameOverride,
-            maxOutputTokens = maxOutputTokens,
-            contextWindowOverrideTokens = contextWindowOverrideTokens
-        )
+        runCatching {
+            val conversation = getConversationById(conversationId) ?: error("对话不存在")
+            val config = getDecryptedConfig(conversation.apiConfigId) ?: error("API 配置不存在")
+            val model = modelNameOverride?.takeIf { it.isNotBlank() } ?: conversation.modelName
+            val messages = getMessagesList(conversationId).collapseVariantsForHistory().filter {
+                it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+            }
+            require(messages.isNotEmpty()) { "尚无可整理的对话" }
+            val budget = estimatePromptBudgetTokens(model, maxOutputTokens, contextWindowOverrideTokens ?: conversation.contextWindowTokens)
+            ensureRollingSummary(conversation.copy(contextWindowTokens = contextWindowOverrideTokens ?: conversation.contextWindowTokens), config, model, messages, (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
+            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
+        }.onFailure { if (it is CancellationException) throw it }
     }
 
     suspend fun updateRollingSummary(
@@ -1157,7 +1075,7 @@ class AiRepository(
         conversationDao.updateRollingSummary(
             conversationId = conversationId,
             summary = summaryToSave,
-            messageId = if (summaryToSave != null) System.currentTimeMillis() else 0L
+            messageId = if (summaryToSave != null) getConversationById(conversationId)?.summaryUpdatedMessageId ?: 0L else 0L
         )
     }
 
@@ -1209,7 +1127,9 @@ class AiRepository(
 
     suspend fun updateMessage(message: Message) {
         com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+            val previous = messageDao.getMessageById(message.id)
             messageDao.updateMessage(message)
+            if (previous?.content != message.content || previous.isExcluded != message.isExcluded) clearRollingSummary(message.conversationId)
             updateConversationStats(message.conversationId)
         }
     }
@@ -1224,11 +1144,13 @@ class AiRepository(
 
     suspend fun deleteMessage(message: Message) {
         messageDao.deleteMessage(message)
+        clearRollingSummary(message.conversationId)
         updateConversationStats(message.conversationId)
     }
 
     suspend fun deleteMessagesFrom(conversationId: Long, createdAt: Long) {
         messageDao.deleteMessagesFrom(conversationId, createdAt)
+        clearRollingSummary(conversationId)
         updateConversationStats(conversationId)
     }
 
@@ -1266,22 +1188,7 @@ class AiRepository(
                 Log.e(tag, "发送消息失败", e)
                 onError(e.message ?: "未知错误")
 
-                // 记录失败统计
-                try {
-                    val failedConfig = getApiConfigById(configId)
-                    failedConfig?.let { cfg ->
-                        val stat = ApiUsageStat(
-                            apiConfigId = configId,
-                            provider = cfg.provider,
-                            modelName = cfg.modelName,
-                            success = false,
-                            errorMessage = e.message
-                        )
-                        usageStatDao.insertStat(stat)
-                    }
-                } catch (statEx: Exception) {
-                    Log.e(tag, "记录失败统计异常", statEx)
-                }
+
             }
         }
     }
@@ -1420,20 +1327,12 @@ class AiRepository(
             Log.e(tag, "发送消息失败", e)
             onError(e.message ?: "未知错误")
 
-            // 记录失败统计
-            try {
-                val stat = ApiUsageStat(
-                    apiConfigId = config.id,
-                    provider = config.provider,
-                    modelName = config.modelName,
-                    success = false,
-                    errorMessage = e.message
-                )
-                usageStatDao.insertStat(stat)
-            } catch (statEx: Exception) {
-                Log.e(tag, "记录失败统计异常", statEx)
-            }
+
         }
+    }
+
+    private suspend fun recordUsage(stat: ApiUsageStat) = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+        try { usageStatDao.insertStat(stat) } catch (error: Exception) { Log.w(tag, "统计写入失败", error) }
     }
 
     private suspend fun dispatchChatMessageWithConfig(
@@ -1498,6 +1397,13 @@ class AiRepository(
                 } catch (rawError: Exception) {
                     val e = deadline.failure(rawError)
                     deadline.close()
+                    if (deadline.hasStarted) recordUsage(ApiUsageStat(
+                        apiConfigId = config.id, provider = config.provider,
+                        modelName = resolveRequestModel(config, resolveChatRequestOptions(config, options)),
+                        responseTime = deadline.elapsedMillis, firstTokenTimeMs = deadline.firstTokenTimeMs,
+                        success = false, errorMessage = if (isRequestCancellation(e)) "用户取消" else RetryErrorType.classify(e).label,
+                        requestKind = if (options?.directionPlanningCount != null) "reply_direction" else "chat",
+                        tokenSource = "unknown", completionStatus = if (isRequestCancellation(e)) "cancelled" else "failed"))
                     currentCoroutineContext().ensureActive()
                     if (isRequestCancellation(e)) throw e
                     lastException = e
@@ -1611,7 +1517,7 @@ class AiRepository(
             conversationDao.updateContextWindowTokens(conversationId, retryWindow, System.currentTimeMillis())
         }
 
-        val safeRetryOutput = maxOf(options?.maxTokens ?: 4096, 4096).coerceIn(4096, 16384)
+        val safeRetryOutput = (options?.maxTokens ?: 4096).coerceIn(256, (retryWindow / 4).coerceIn(256, 16384))
 
         runCatching {
             compressConversationContext(
@@ -1754,13 +1660,19 @@ class AiRepository(
             (effectiveOptions.enableThinking == true || config.enableThinking || vendorPolicy.alwaysThinking)
         val providerMaxOutput = vendorPolicy.maxOutputTokensCap.coerceIn(1_024, 1_048_576)
         // 输出Token安全预算：按厂商上限收敛，思考模型预留充足预算防截断
-        val safeMaxTokens = when {
+        val requestedMaxTokens = when {
             vendorPolicy.usesMaxCompletionTokens -> maxOf(configuredMax, 8192)
                 .coerceIn(4096, minOf(vendorPolicy.defaultMaxOutputTokens.coerceAtLeast(8192), providerMaxOutput))
             isReasoningOrThinkingModel -> maxOf(configuredMax, 8192)
                 .coerceIn(8192, minOf(64_000, providerMaxOutput))
             else -> configuredMax.coerceIn(1024, minOf(32_768, providerMaxOutput))
         }
+
+        val wireInputTokens = normalizedChatMessages.sumOf { estimateContentTokenCount(it.content) + 24 }
+        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens)
+        val outputHeadroom = wireContextWindow - wireInputTokens - 512
+        require(outputHeadroom >= 256) { "当前提示词、附件和消息已超过模型上下文上限，请缩短内容后再发送" }
+        val safeMaxTokens = minOf(requestedMaxTokens, outputHeadroom)
 
         val reasoningSelection = ReasoningControls.selected(requestModel, "openai", effectiveOptions.enableThinking ?: config.enableThinking, effectiveOptions.thinkingEffort, reasoningEvidence)
         val omitTemperature = vendorPolicy.temperaturePolicy == com.aiassistant.domain.model.TemperaturePolicy.FIXED_ONE ||
@@ -1830,6 +1742,9 @@ class AiRepository(
                 var isInThinkTag = false
                 var totalTokens = 0
                 var inputTokens = 0
+                var hasInputUsage = false
+                var hasOutputUsage = false
+                var hasReasoningUsage = false
                 var outputTokens = 0
                 var thinkingTokens = 0
                 var cachedTokens = 0
@@ -1882,6 +1797,7 @@ class AiRepository(
                             // 检测流式返回的内联错误
                             if (!chunkResult.inlineErrorMessage.isNullOrBlank()) {
                                 if (contentBuilder.isNotEmpty() || thinkingBuilder.isNotEmpty()) {
+                                    streamReadException = ApiException(500, "流中断")
                                     Log.w(tag, "流式接收过程中遇到内联错误: ${chunkResult.inlineErrorMessage}，但已接收到部分内容，保留已收到内容平稳完成")
                                     break
                                 } else {
@@ -1952,15 +1868,17 @@ class AiRepository(
                             }
 
                             chunkResult.usage?.let { usage ->
+                                hasInputUsage = hasInputUsage || usage.prompt_tokens != null
+                                hasOutputUsage = hasOutputUsage || usage.completion_tokens != null
+                                hasReasoningUsage = hasReasoningUsage || usage.completion_tokens_details?.reasoning_tokens != null
                                 inputTokens = usage.prompt_tokens ?: inputTokens
-                                val rawCompletionTokens = usage.completion_tokens ?: outputTokens
+                                outputTokens = usage.completion_tokens ?: outputTokens
                                 thinkingTokens = usage.completion_tokens_details?.reasoning_tokens ?: thinkingTokens
-                                outputTokens = (rawCompletionTokens - thinkingTokens).coerceAtLeast(0)
                                 val parsedCached = extractCachedTokensFromUsage(usage)
                                 if (parsedCached > 0) {
                                     cachedTokens = parsedCached
                                 }
-                                totalTokens = usage.total_tokens ?: (inputTokens + outputTokens + thinkingTokens)
+                                totalTokens = usage.total_tokens ?: (inputTokens + outputTokens)
                             }
                         }
                     }
@@ -1970,7 +1888,7 @@ class AiRepository(
                     Log.w(tag, "流式解析外层异常: ${streamEx.javaClass.simpleName}: ${streamEx.message}")
                 }
 
-                val responseTime = System.currentTimeMillis() - startTime
+                val responseTime = firstTokenDeadline.elapsedMillis
                 var fullContent = contentBuilder.toString()
                 var fullThinking = thinkingBuilder.toString().ifEmpty { null }
 
@@ -2025,19 +1943,15 @@ class AiRepository(
                     Log.w(tag, "流式响应结束但缺少 finish_reason 或 [DONE] (finished: false, finishReason: $lastFinishReason, hasDone: $hasReceivedDone, streamException: ${streamReadException?.message}), 内容正常保留输出 (${fullContent.length} 字符)")
                 }
 
-                // v2.6.4 真实性：API 已给出 reasoning_tokens 时 output 已扣除思考量直接使用；
-                // 否则思考量为估算值，需从 completion_tokens（含思考文本）中扣除，避免总量双重计入
-                val apiReportedThinking = thinkingTokens > 0
-                val finalThinkingTokens = if (apiReportedThinking) thinkingTokens else estimateTokenCount(fullThinking.orEmpty())
-                val finalOutputTokens = when {
-                    outputTokens <= 0 -> estimateTokenCount(fullContent)
-                    apiReportedThinking -> outputTokens
-                    else -> (outputTokens - finalThinkingTokens).coerceAtLeast(0)
-                }
-                val finalInputTokens = inputTokens.takeIf { it > 0 }
-                    ?: chatMessages.sumOf { estimateTokenCount(it.content.toString()) }
-                val finalTotalTokens = totalTokens.takeIf { it > 0 }
-                    ?: (finalInputTokens + finalOutputTokens + finalThinkingTokens)
+                val counts = UsageTokenAccounting.normalize(
+                    inputTokens.takeIf { hasInputUsage }, outputTokens.takeIf { hasOutputUsage },
+                    thinkingTokens.takeIf { hasReasoningUsage }, totalTokens.takeIf { it > 0 }, cachedTokens,
+                    normalizedChatMessages.sumOf { TokenEstimationHelper.estimateContentTokenCount(it.content) + 24 },
+                    estimateTokenCount(contentBuilder.toString()), estimateTokenCount(fullThinking.orEmpty()))
+                val finalInputTokens = counts.input
+                val finalOutputTokens = counts.output
+                val finalThinkingTokens = counts.reasoning
+                val finalTotalTokens = counts.total
 
                 // 保存助手消息
                 val assistantMsg = Message(
@@ -2065,15 +1979,16 @@ class AiRepository(
                     outputTokens = finalOutputTokens,
                     thinkingTokens = finalThinkingTokens,
                     totalTokens = finalTotalTokens,
-                    cachedTokens = cachedTokens,
+                    cachedTokens = counts.cached,
                     responseTime = responseTime,
-                    success = true
+                    success = isFinished,
+                    errorMessage = if (isFinished) null else "输出中断或缺少完成标记",
+                    requestKind = if (effectiveOptions.directionPlanningCount != null) "reply_direction" else "chat",
+                    tokenSource = counts.source,
+                    completionStatus = if (!isFinished) "interrupted" else if (isTruncatedByLength) "length_limited" else "completed",
+                    firstTokenTimeMs = firstTokenDeadline.firstTokenTimeMs
                 )
-                try {
-                    usageStatDao.insertStat(stat)
-                } catch (statEx: Exception) {
-                    Log.e(tag, "记录成功统计异常", statEx)
-                }
+                recordUsage(stat)
 
                 onComplete(fullContent, fullThinking, toolCalls)
             } else {
@@ -2174,13 +2089,18 @@ class AiRepository(
         val reasoningSelection = ReasoningControls.selected(requestModel, "anthropic", thinkingEnabled, effectiveOptions.thinkingEffort, reasoningEvidence)
         val thinkingType = ReasoningControls.wireThinkingType(requestModel, "anthropic", thinkingEnabled, reasoningEvidence)
         val adaptive = thinkingType == "adaptive"
-        val thinkingBudget = if (thinkingEnabled && thinkingType == "enabled") {
+        var thinkingBudget = if (thinkingEnabled && thinkingType == "enabled") {
             thinkingBudgetForEffort(reasoningSelection.value, config.thinkingBudget).coerceAtMost(60000)
         } else null
         val rawConfiguredMaxTokens = effectiveOptions.maxTokens ?: config.maxTokens
         val configuredMaxTokens = if (rawConfiguredMaxTokens == 50000) 4096 else rawConfiguredMaxTokens
         // Anthropic 协议要求 max_tokens 必须大于 budget_tokens，且保留充裕正文额度
-        val safeRequestMaxTokens = maxOf(configuredMaxTokens, (thinkingBudget ?: 0) + 4096).coerceIn(4096, 64000)
+        val wireInputTokens = estimateTokenCount(systemPrompt.orEmpty()) + anthropicMessages.sumOf { estimateContentTokenCount(it.content) + 24 }
+        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens)
+        val outputHeadroom = wireContextWindow - wireInputTokens - 512
+        require(outputHeadroom >= if (thinkingBudget != null) 2048 else 256) { "当前提示词、附件和消息已超过上下文预算，请缩短内容或关闭思考后再发送" }
+        val safeRequestMaxTokens = minOf(maxOf(configuredMaxTokens, (thinkingBudget ?: 0) + 4096).coerceIn(256, 64000), outputHeadroom)
+        thinkingBudget = thinkingBudget?.coerceAtMost(safeRequestMaxTokens - 1024)
 
         // 创建请求 - Anthropic格式支持top_k
         val request = AnthropicRequest(
@@ -2227,10 +2147,14 @@ class AiRepository(
                 val thinkingBuilder = StringBuilder()
                 var totalTokens = 0
                 var inputTokens = 0
+                var hasInputUsage = false
+                var hasOutputUsage = false
+                var hasReasoningUsage = false
                 var outputTokens = 0
                 var cachedTokens = 0
 
                 var anthropicStreamReadException: Exception? = null
+                var messageStopped = false
 
                 // 读取SSE流
                 try {
@@ -2254,17 +2178,19 @@ class AiRepository(
 
                             if (lineStr.startsWith("data:")) {
                                 val data = lineStr.removePrefix("data:").trimStart()
-                                if (data == "[DONE]") break
+                                if (data == "[DONE]") { messageStopped = true; break }
 
                                 try {
                                     val event = gson.fromJson(data, AnthropicStreamEvent::class.java)
 
                                     when (event.type) {
+                                        "message_stop" -> { messageStopped = true; break }
                                         "message_start" -> {
                                             event.message?.usage?.let { usage ->
                                                 // v2.6.4 真实性：Anthropic 的 input_tokens 不含缓存读写部分，
                                                 // 与 OpenAI（prompt_tokens 含缓存）对齐，将缓存读/写并入输入口径，
                                                 // 修复缓存命中率可能超过 100% 与总量偏低的问题；命中量仅计 cache_read
+                                                hasInputUsage = usage.input_tokens != null
                                                 inputTokens = (usage.input_tokens ?: 0) +
                                                     (usage.cache_read_input_tokens ?: 0) +
                                                     (usage.cache_creation_input_tokens ?: 0)
@@ -2292,6 +2218,8 @@ class AiRepository(
                                                 if (recomputedInput > 0) {
                                                     inputTokens = recomputedInput
                                                 }
+                                                hasInputUsage = hasInputUsage || usage.input_tokens != null
+                                                hasOutputUsage = hasOutputUsage || usage.output_tokens != null
                                                 outputTokens = usage.output_tokens ?: outputTokens
                                                 cachedTokens = usage.cache_read_input_tokens ?: cachedTokens
                                                 totalTokens = inputTokens + outputTokens
@@ -2300,6 +2228,7 @@ class AiRepository(
                                         "error" -> {
                                             val errDetail = event.error?.message ?: "Anthropic流式返回未知错误"
                                             if (contentBuilder.isNotEmpty() || thinkingBuilder.isNotEmpty()) {
+                                                anthropicStreamReadException = ApiException(500, "流中断")
                                                 Log.w(tag, "Anthropic流式输出过程中遇到错误: $errDetail，保留已输出内容平稳完成")
                                                 break
                                             } else {
@@ -2321,7 +2250,7 @@ class AiRepository(
                     Log.w(tag, "Anthropic流式读取外层异常: ${streamEx.javaClass.simpleName}: ${streamEx.message}")
                 }
 
-                val responseTime = System.currentTimeMillis() - startTime
+                val responseTime = firstTokenDeadline.elapsedMillis
                 var fullContent = contentBuilder.toString()
                 var fullThinking = thinkingBuilder.toString().ifEmpty { null }
 
@@ -2359,19 +2288,16 @@ class AiRepository(
                     anthropicStreamReadException?.let { throw it }
                     throw ApiException(500, "Anthropic 模型回复内容为空 (empty response detected)，可能触发限制或API Key异常")
                 }
-                // v2.6.4 真实性：Anthropic 的 output_tokens 已包含 thinking，而思考量此处为估算值——
-                // 从输出中扣除估算思考量，避免「输出 + 思考」双重计入总量；total 保持 API 真实值
-                val estimatedThinkingTokens = estimateTokenCount(fullThinking.orEmpty())
-                val finalThinkingTokens = estimatedThinkingTokens
-                val finalOutputTokens = when {
-                    outputTokens <= 0 -> estimateTokenCount(fullContent)
-                    estimatedThinkingTokens > 0 -> (outputTokens - estimatedThinkingTokens).coerceAtLeast(0)
-                    else -> outputTokens
-                }
-                val finalInputTokens = inputTokens.takeIf { it > 0 }
-                    ?: anthropicMessages.sumOf { estimateTokenCount(it.content.toString()) }
-                val finalTotalTokens = totalTokens.takeIf { it > 0 }
-                    ?: (finalInputTokens + finalOutputTokens + finalThinkingTokens)
+                val counts = UsageTokenAccounting.normalize(
+                    inputTokens.takeIf { hasInputUsage }, outputTokens.takeIf { hasOutputUsage }, null,
+                    totalTokens.takeIf { it > 0 }, cachedTokens,
+                    anthropicMessages.sumOf { TokenEstimationHelper.estimateContentTokenCount(it.content) + 24 } + estimateTokenCount(systemPrompt.orEmpty()),
+                    estimateTokenCount(contentBuilder.toString()), estimateTokenCount(fullThinking.orEmpty()))
+                val finalInputTokens = counts.input
+                val finalOutputTokens = counts.output
+                val finalThinkingTokens = counts.reasoning
+                val finalTotalTokens = counts.total
+                val isFinished = messageStopped && anthropicStreamReadException == null
 
                 // 保存助手消息
                 val assistantMsg = Message(
@@ -2399,15 +2325,16 @@ class AiRepository(
                     outputTokens = finalOutputTokens,
                     thinkingTokens = finalThinkingTokens,
                     totalTokens = finalTotalTokens,
-                    cachedTokens = cachedTokens,
+                    cachedTokens = counts.cached,
                     responseTime = responseTime,
-                    success = true
+                    success = isFinished,
+                    errorMessage = if (isFinished) null else "输出中断或缺少完成标记",
+                    requestKind = if (effectiveOptions.directionPlanningCount != null) "reply_direction" else "chat",
+                    tokenSource = counts.source,
+                    completionStatus = if (isFinished) "completed" else "interrupted",
+                    firstTokenTimeMs = firstTokenDeadline.firstTokenTimeMs
                 )
-                try {
-                    usageStatDao.insertStat(stat)
-                } catch (statEx: Exception) {
-                    Log.e(tag, "记录成功统计异常", statEx)
-                }
+                recordUsage(stat)
 
                 onComplete(fullContent, fullThinking, toolCalls)
             } else {
@@ -2614,6 +2541,12 @@ class AiRepository(
         val recentMessages: List<Message>
     )
 
+    private suspend fun resolveContextWindow(conversation: Conversation?, modelName: String, override: Int?): Int =
+        override ?: conversation?.contextWindowTokens ?: conversation?.let { conv ->
+            selectedModelDao.getModelsByConfig(conv.apiConfigId).first()
+                .firstOrNull { it.modelName.equals(modelName, ignoreCase = true) }?.contextWindowTokens
+        } ?: estimateModelContextWindowTokens(modelName)
+
     private suspend fun buildContextUsageSnapshot(
         conversation: Conversation,
         messages: List<Message>,
@@ -2621,138 +2554,51 @@ class AiRepository(
         maxOutputTokens: Int? = null,
         contextWindowOverrideTokens: Int? = null
     ): ConversationContextUsage {
-        val usableMessages = messages.filter { message ->
-            (message.role == "user" || message.role == "assistant") &&
-                message.content.isNotBlank() &&
-                !message.isExcluded &&
-                !isErrorPlaceholderMessage(message.content)
+        val usable = messages.filter { it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
+            !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
+        val contextWindow = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens).coerceIn(4000, 2000000)
+        val promptBudget = estimatePromptBudgetTokens(modelName, maxOutputTokens, contextWindow)
+        val memory = buildRelevantMemoryBlock(conversation, usable.lastOrNull { it.role == "user" }?.content.orEmpty(),
+            (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400))
+        val memoryTokens = memory?.let(::estimateTokenCount) ?: 0
+        val options = ChatRequestOptions(enableSessionMemory = conversation.enableSessionMemory)
+        val custom = resolveSystemPromptWithPriority(conversation, options)
+        val systemTokens = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, null, options,
+            custom.second, isRoleplayConversation(conversation)).orEmpty()) + 64
+        val summaryBudget = (promptBudget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400)
+        val historyBudget = (promptBudget - memoryTokens - systemTokens - summaryBudget).coerceAtLeast(0)
+        val baseline = systemTokens + memoryTokens + usable.sumOf(ContextCompressionPlanner::messageTokens)
+        fun plan(tier: CompressionTier) = ContextCompressionPlanner.plan(usable, tier, historyBudget,
+            conversation.rollingSummary, conversation.summaryUpdatedMessageId,
+            conversation.compressionRecentRounds, conversation.compressionCustomPercent)
+        val tier = CompressionTier.fromLevel(conversation.compressionTier)
+        val active = plan(tier)
+        val summaryTokens = conversation.rollingSummary?.let(::estimateTokenCount) ?: 0
+        // Until a checked summary exists, the current usage must still count the uncovered original text.
+        val actualHistory = if (active.needsSummary) usable else active.retainedMessages
+        val currentTokens = systemTokens + memoryTokens + actualHistory.sumOf(ContextCompressionPlanner::messageTokens) + summaryTokens
+        val previews = CompressionTier.entries.map { candidate ->
+            val projected = plan(candidate)
+            val cost = systemTokens + memoryTokens + projected.estimatedHistoryTokens +
+                if (projected.summarySource.isNotEmpty()) maxOf(summaryTokens, summaryBudget) else 0
+            TierCompressionPreview(candidate, cost, baseline, (baseline - cost).coerceAtLeast(0),
+                if (baseline > 0) ((baseline - cost).coerceAtLeast(0).toFloat() / baseline) else 0f,
+                CompressionTierPolicy.getRetainedRoundsDesc(candidate, conversation.compressionRecentRounds, conversation.compressionCustomPercent),
+                candidate.detailLossNote)
         }
-
-        val effectiveContextOverride = contextWindowOverrideTokens
-            ?: conversation.contextWindowTokens?.let {
-                if (it == 32_000 || it == 32_768) 200_000 else it
-            }
-            ?: runCatching {
-                selectedModelDao.getModelsByConfig(conversation.apiConfigId).first()
-                    .firstOrNull { it.modelName.equals(modelName, ignoreCase = true) }
-                    ?.contextWindowTokens
-            }.getOrNull()
-
-        val modelDefaultTokens = estimateModelContextWindowTokens(modelName)
-        val contextWindow = effectiveContextOverride
-            ?.coerceIn(4_000, 2_000_000)
-            ?: modelDefaultTokens
-        val promptBudget = estimatePromptBudgetTokens(modelName, maxOutputTokens, effectiveContextOverride)
-        val memoryBudget = (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(400, 2_400)
-        val recentBudget = (
-            promptBudget - memoryBudget - SYSTEM_PROMPT_TOKEN_RESERVE
-        ).coerceAtLeast(MIN_RECENT_CONTEXT_TOKENS)
-
-        val resolution = resolveActiveContextMessages(
-            usableMessages = usableMessages,
-            compressedThrough = conversation.summaryUpdatedMessageId ?: 0L,
-            recentBudget = recentBudget
-        )
-
-        val latestUserMessage = usableMessages.lastOrNull { it.role == "user" }?.content.orEmpty()
-        val memoryBlock = buildRelevantMemoryBlock(conversation, latestUserMessage, memoryBudget)
-        val memoryTokens = memoryBlock?.let(::estimateTokenCount) ?: 0
-        val memoryItemCount = memoryDao.getCandidateMemories(conversation.id).size
-
-        val currentTier = com.aiassistant.domain.model.CompressionTier.fromLevel(conversation.compressionTier)
-        val l2Rounds = (conversation.compressionRecentRounds).coerceIn(
-            com.aiassistant.domain.model.CompressionTierPolicy.MIN_L2_RECENT_ROUNDS,
-            com.aiassistant.domain.model.CompressionTierPolicy.MAX_L2_RECENT_ROUNDS
-        )
-        val customPercent = (conversation.compressionCustomPercent).coerceIn(
-            com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT,
-            com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT
-        )
-
-        // 基础 L0 组装结果
-        val l0Res = ChatContextAssemblyHelper.assembleTieredContextMessages(
-            tier = com.aiassistant.domain.model.CompressionTier.L0,
-            usableMessages = usableMessages,
-            recentBudget = recentBudget,
-            l2RecentRounds = l2Rounds,
-            existingRollingSummary = conversation.rollingSummary,
-            customRetainPercent = customPercent
-        )
-        val baselineTokens = (
-            SYSTEM_PROMPT_TOKEN_RESERVE +
-                l0Res.recentTokens +
-                memoryTokens.coerceAtMost(memoryBudget)
-        ).coerceAtLeast(0)
-
-        // 计算各档位的对比预览快照
-        val previews = com.aiassistant.domain.model.CompressionTier.values().map { t ->
-            val res = if (t == com.aiassistant.domain.model.CompressionTier.L0) l0Res else {
-                ChatContextAssemblyHelper.assembleTieredContextMessages(
-                    tier = t,
-                    usableMessages = usableMessages,
-                    recentBudget = recentBudget,
-                    l2RecentRounds = l2Rounds,
-                    existingRollingSummary = conversation.rollingSummary,
-                    customRetainPercent = customPercent
-                )
-            }
-            val tierTokens = (
-                SYSTEM_PROMPT_TOKEN_RESERVE +
-                    res.recentTokens +
-                    memoryTokens.coerceAtMost(memoryBudget)
-            ).coerceAtLeast(0)
-            val tokensSaved = (baselineTokens - tierTokens).coerceAtLeast(0)
-            val savingsPercent = if (baselineTokens > 0) (tokensSaved / baselineTokens.toFloat()).coerceIn(0f, 1f) else 0f
-            com.aiassistant.domain.model.TierCompressionPreview(
-                tier = t,
-                estimatedTokens = tierTokens,
-                baselineTokens = baselineTokens,
-                tokensSaved = tokensSaved,
-                savingsPercent = savingsPercent,
-                retainedRoundsDesc = com.aiassistant.domain.model.CompressionTierPolicy.getRetainedRoundsDesc(t, l2Rounds, customPercent),
-                lossNote = t.detailLossNote
-            )
-        }
-
-        val currentPreview = previews.firstOrNull { it.tier == currentTier } ?: previews.first()
-        val estimatedInputTokens = currentPreview.estimatedTokens
-        val calculatedUsagePercent = (estimatedInputTokens / promptBudget.toFloat()).coerceIn(0f, 1f)
-
-        val activeRes = when (currentTier) {
-            com.aiassistant.domain.model.CompressionTier.L0 -> l0Res
-            else -> ChatContextAssemblyHelper.assembleTieredContextMessages(
-                tier = currentTier,
-                usableMessages = usableMessages,
-                recentBudget = recentBudget,
-                l2RecentRounds = l2Rounds,
-                existingRollingSummary = conversation.rollingSummary,
-                customRetainPercent = customPercent
-            )
-        }
-
-        return ConversationContextUsage(
-            contextWindowTokens = contextWindow,
-            modelDefaultContextTokens = modelDefaultTokens,
-            promptBudgetTokens = promptBudget,
-            estimatedInputTokens = estimatedInputTokens,
-            usagePercent = calculatedUsagePercent,
-            recentMessageCount = activeRes.activeMessages.size,
-            olderMessageCount = activeRes.uncompressedOlderCount,
-            recentTokens = activeRes.recentTokens,
-            summaryTokens = if (activeRes.injectedSummary != null) TokenEstimationHelper.estimateTokenCount(activeRes.injectedSummary) else 0,
-            memoryTokens = memoryTokens,
-            memoryItemCount = memoryItemCount,
-            hasRollingSummary = !conversation.rollingSummary.isNullOrBlank(),
-            summaryUpdatedAt = conversation.summaryUpdatedAt,
-            compressedThroughMessageId = conversation.summaryUpdatedMessageId,
-            canCompress = activeRes.canCompress,
-            compressionTier = currentTier,
-            compressionRecentRounds = l2Rounds,
-            compressionCustomPercent = customPercent,
-            tierPreviews = previews
-        )
+        val manualPlan = ContextCompressionPlanner.plan(usable, tier, historyBudget, conversation.rollingSummary,
+            conversation.summaryUpdatedMessageId, conversation.compressionRecentRounds, conversation.compressionCustomPercent, true)
+        return ConversationContextUsage(contextWindowTokens = contextWindow, modelDefaultContextTokens = estimateModelContextWindowTokens(modelName),
+            promptBudgetTokens = promptBudget, estimatedInputTokens = currentTokens,
+            usagePercent = (currentTokens.toFloat() / promptBudget).coerceIn(0f, 1f), recentMessageCount = actualHistory.size,
+            olderMessageCount = manualPlan.summarySource.count { it.id > (conversation.summaryUpdatedMessageId ?: 0) },
+            recentTokens = actualHistory.sumOf(ContextCompressionPlanner::messageTokens), summaryTokens = summaryTokens,
+            memoryTokens = memoryTokens, memoryItemCount = memoryDao.getCandidateMemories(conversation.id).count { it.isEnabled },
+            hasRollingSummary = !conversation.rollingSummary.isNullOrBlank(), summaryUpdatedAt = conversation.summaryUpdatedAt,
+            compressedThroughMessageId = conversation.summaryUpdatedMessageId, canCompress = manualPlan.needsSummary,
+            compressionTier = tier, compressionRecentRounds = conversation.compressionRecentRounds,
+            compressionCustomPercent = conversation.compressionCustomPercent, tierPreviews = previews)
     }
-
 
     private suspend fun buildContextBundle(
         conversation: Conversation?,
@@ -2764,95 +2610,40 @@ class AiRepository(
         currentUserMessage: String,
         options: ChatRequestOptions? = null
     ): ContextBundle {
-        val usableMessages = messages.filter { message ->
-            (message.role == "user" || message.role == "assistant") &&
-                message.content.isNotBlank() &&
-                !message.isExcluded &&
-                !isErrorPlaceholderMessage(message.content)
+        val usable = messages.filter { it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
+            !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
+        val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens)
+        val promptBudget = estimatePromptBudgetTokens(modelName, maxOutputTokens, window)
+        val memory = conversation?.let { buildRelevantMemoryBlock(it, currentUserMessage,
+            (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400), options) }
+        val effectiveOptions = options ?: ChatRequestOptions()
+        val custom = resolveSystemPromptWithPriority(conversation, effectiveOptions)
+        val lore = if (effectiveOptions.enableWorldBook == true) {
+            val ids = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
+            matchWorldBookEntries(WorldBookActivation.scanText(currentUserMessage, usable), ids).let(::formatWorldBookPrompt)
+        } else ""
+        val fixedCost = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, memory, effectiveOptions,
+            custom.second, isRoleplayConversation(conversation), lore).orEmpty()) + estimateTokenCount(currentUserMessage) + 128
+        val summaryBudget = (promptBudget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400)
+        val historyBudget = (promptBudget - fixedCost - summaryBudget).coerceAtLeast(0)
+        val tier = CompressionTier.fromLevel(conversation?.compressionTier)
+        val plan = ContextCompressionPlanner.plan(usable, tier, historyBudget, conversation?.rollingSummary,
+            conversation?.summaryUpdatedMessageId, conversation?.compressionRecentRounds ?: 8, conversation?.compressionCustomPercent ?: 30)
+        check(fixedCost + plan.estimatedHistoryTokens + (if (plan.needsSummary) summaryBudget else estimateTokenCount(conversation?.rollingSummary.orEmpty())) <= promptBudget) {
+            "当前输入、置顶内容或设定超过上下文预算。请缩短内容或提高上下文上限后继续；尚未发起额外摘要请求。"
         }
-
-        val effectiveContextOverride = contextWindowOverrideTokens
-            ?: conversation?.contextWindowTokens?.let {
-                if (it == 32_000 || it == 32_768) 200_000 else it
-            }
-            ?: runCatching {
-                conversation?.let { conv ->
-                    selectedModelDao.getModelsByConfig(conv.apiConfigId).first()
-                        .firstOrNull { it.modelName.equals(modelName, ignoreCase = true) }
-                        ?.contextWindowTokens
-                }
-            }.getOrNull()
-
-        val promptBudget = estimatePromptBudgetTokens(
-            modelName = modelName,
-            maxOutputTokens = maxOutputTokens,
-            contextWindowOverrideTokens = effectiveContextOverride
-        )
-        val memoryBudget = (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(400, 2_400)
-        val recentBudget = (
-            promptBudget - memoryBudget - SYSTEM_PROMPT_TOKEN_RESERVE
-        ).coerceAtLeast(MIN_RECENT_CONTEXT_TOKENS)
-
-        // 上下文组装：过往历史压缩成果由会话专属记忆与独立时间线系统 (memoryBlock) 完整承载
-        val memoryBlock = conversation?.let {
-            buildRelevantMemoryBlock(it, currentUserMessage, memoryBudget, options)
+        val summary = if (plan.needsSummary) {
+            ensureRollingSummary(conversation?.copy(contextWindowTokens = window), config, modelName, plan.summarySource, summaryBudget)
+        } else conversation?.rollingSummary
+        check(!plan.needsSummary || !summary.isNullOrBlank()) { "上下文需要压缩但摘要未生成，请重试压缩后继续" }
+        val retained = if (tier == CompressionTier.L1) plan.retainedMessages.mapIndexed { index, message ->
+            if (index < plan.retainedMessages.size - 2 && !message.isPinned)
+                message.copy(content = ContentPruningHelper.pruneMessageContent(message.content)) else message
+        } else plan.retainedMessages
+        check(fixedCost + retained.sumOf(ContextCompressionPlanner::messageTokens) + estimateTokenCount(summary.orEmpty()) <= promptBudget) {
+            "当前消息、置顶内容或提示设定超过上下文预算。已保留完整原文，请缩短本轮内容、减少置顶或提高上下文上限后继续。"
         }
-
-        var activeTier = com.aiassistant.domain.model.CompressionTier.fromLevel(conversation?.compressionTier)
-        val l2Rounds = (conversation?.compressionRecentRounds ?: com.aiassistant.domain.model.CompressionTierPolicy.DEFAULT_L2_RECENT_ROUNDS).coerceIn(
-            com.aiassistant.domain.model.CompressionTierPolicy.MIN_L2_RECENT_ROUNDS,
-            com.aiassistant.domain.model.CompressionTierPolicy.MAX_L2_RECENT_ROUNDS
-        )
-        val customRetainPercent = (conversation?.compressionCustomPercent ?: com.aiassistant.domain.model.CompressionTierPolicy.DEFAULT_CUSTOM_RETAIN_PERCENT).coerceIn(
-            com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT,
-            com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT
-        )
-
-        val structuredSummary = if (
-            activeTier == com.aiassistant.domain.model.CompressionTier.L2 ||
-            activeTier == com.aiassistant.domain.model.CompressionTier.L3 ||
-            activeTier == com.aiassistant.domain.model.CompressionTier.LC
-        ) {
-            conversation?.rollingSummary?.takeIf { it.isNotBlank() }
-                ?: runCatching {
-                    com.aiassistant.utils.AdvancedMemoryEngine.generateExtractiveStructuredSummary(usableMessages).toPromptBlock()
-                }.getOrNull()
-        } else null
-
-        var tieredResult = ChatContextAssemblyHelper.assembleTieredContextMessages(
-            tier = activeTier,
-            usableMessages = usableMessages,
-            recentBudget = recentBudget,
-            l2RecentRounds = l2Rounds,
-            existingRollingSummary = conversation?.rollingSummary,
-            structuredSummary = structuredSummary,
-            customRetainPercent = customRetainPercent
-        )
-
-        // 溢出安全回退：若当前档位组装后仍超 promptBudget 上限，自动降一档，直到 L4
-        val memoryTokensCost = memoryBlock?.let(::estimateTokenCount) ?: 0
-        var totalEstimated = SYSTEM_PROMPT_TOKEN_RESERVE + tieredResult.recentTokens + memoryTokensCost
-        while (totalEstimated > promptBudget && activeTier != com.aiassistant.domain.model.CompressionTier.L4) {
-            val fallback = com.aiassistant.domain.model.CompressionTierPolicy.fallbackOnContextOverflow(activeTier, totalEstimated, promptBudget)
-                ?: break
-            activeTier = fallback
-            tieredResult = ChatContextAssemblyHelper.assembleTieredContextMessages(
-                tier = activeTier,
-                usableMessages = usableMessages,
-                recentBudget = recentBudget,
-                l2RecentRounds = l2Rounds,
-                existingRollingSummary = conversation?.rollingSummary,
-                structuredSummary = structuredSummary,
-                customRetainPercent = customRetainPercent
-            )
-            totalEstimated = SYSTEM_PROMPT_TOKEN_RESERVE + tieredResult.recentTokens + memoryTokensCost
-        }
-
-        return ContextBundle(
-            summary = tieredResult.injectedSummary,
-            memoryBlock = memoryBlock,
-            recentMessages = tieredResult.activeMessages
-        )
+        return ContextBundle(summary, memory, retained)
     }
 
     private fun estimatePromptBudgetTokens(
@@ -2892,7 +2683,6 @@ class AiRepository(
                     cachedName.endsWith("/$name")
             }?.value
             ?.coerceIn(4_000, 2_000_000)
-            ?.takeIf { it >= 128_000 }
             ?.let { return it }
 
         return com.aiassistant.domain.model.ModelCapabilityEngine.evaluateModel(modelName).contextWindowTokens
@@ -2983,8 +2773,44 @@ class AiRepository(
         olderMessages: List<Message>,
         tokenBudget: Int
     ): String? {
-        // 彻底废除滚动摘要：过往历史由时间线梳理与会话记忆承载，不再生成长文本滚动摘要
-        return null
+        if (conversation == null || olderMessages.isEmpty()) return conversation?.rollingSummary
+        return summaryLocks.getOrPut(conversation.id) { Mutex() }.withLock {
+            val latest = getConversationById(conversation.id) ?: error("对话已删除")
+            val coveredId = latest.summaryUpdatedMessageId?.takeIf { id ->
+                !latest.rollingSummary.isNullOrBlank() && olderMessages.any { it.id == id }
+            } ?: 0L
+            val pending = olderMessages.filter { it.id > coveredId }
+            if (pending.isEmpty() && !latest.rollingSummary.isNullOrBlank()) return@withLock latest.rollingSummary
+            val epoch = ChatGenerationManager.mutationEpoch(conversation.id)
+            val contextWindow = conversation.contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
+            val summaryBudget = tokenBudget.coerceIn(300, 2400)
+            val chunkBudget = (contextWindow - summaryBudget * 2 - 1024 - 2400).coerceIn(256, 12000)
+            var summary = latest.rollingSummary.takeIf { coveredId > 0 }
+            for (chunk in ContextCompressionPlanner.chunks(pending, chunkBudget)) {
+                currentCoroutineContext().ensureActive()
+                summary = generateRollingSummary(config, modelName, summary, chunk, summaryBudget,
+                    latestTimelineAnchor = resolveLatestTimelineAnchor(conversation.id),
+                    existingPreferencesAndConstraints = resolveExistingPreferencesAndConstraints(conversation.id), contextWindowTokens = contextWindow)
+                    ?: error("摘要生成失败，已保留原文与上次摘要；请检查模型后重试或增大上下文窗口")
+                check(estimateTokenCount(summary) <= summaryBudget) { "摘要超过预算，已保留原文与上次摘要，请重试压缩" }
+            }
+            currentCoroutineContext().ensureActive()
+            com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+                check(epoch == ChatGenerationManager.mutationEpoch(conversation.id)) { "压缩期间对话已变化，请重新整理" }
+                val currentConversation = getConversationById(conversation.id) ?: error("对话已删除")
+                check(currentConversation.rollingSummary == latest.rollingSummary &&
+                    currentConversation.summaryUpdatedMessageId == latest.summaryUpdatedMessageId &&
+                    currentConversation.summaryUpdatedAt == latest.summaryUpdatedAt) {
+                    "压缩期间摘要已被修改，请重新整理；已保留您的修改"
+                }
+                val current = getMessagesList(conversation.id).collapseVariantsForHistory().associateBy { it.id }
+                check(olderMessages.all { original -> current[original.id]?.let {
+                    it.content == original.content && it.isExcluded == original.isExcluded
+                } == true }) { "压缩期间原文已编辑，请重新整理" }
+                conversationDao.updateRollingSummary(conversation.id, summary, olderMessages.last().id, System.currentTimeMillis())
+            }
+            summary
+        }
     }
 
     private suspend fun generateRollingSummary(
@@ -2994,7 +2820,8 @@ class AiRepository(
         pendingMessages: List<Message>,
         tokenBudget: Int,
         latestTimelineAnchor: String? = null,
-        existingPreferencesAndConstraints: List<String>? = null
+        existingPreferencesAndConstraints: List<String>? = null,
+        contextWindowTokens: Int? = null
     ): String? {
         val transcript = buildSummaryTranscript(pendingMessages, maxMessages = SUMMARY_TRANSCRIPT_MESSAGE_LIMIT)
         val prompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(
@@ -3004,13 +2831,10 @@ class AiRepository(
             latestTimelineAnchor = latestTimelineAnchor,
             existingPreferencesAndConstraints = existingPreferencesAndConstraints
         )
-        // 内部滚动摘要调用统一使用保守预算（与 2026 厂商输出上限无关，仅控制摘要生成长度）：
-        // 8,192（Anthropic Haiku 为 4,096）足以容纳完整摘要，并对仅支持旧上限的第三方网关保持兼容。
-        val isHaiku = modelName.contains("haiku", ignoreCase = true)
-        val completionTokens = when {
-            config.apiType == "anthropic" -> if (isHaiku) 4096 else 8192
-            else -> 8192
-        }
+        val summaryWindow = contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
+        val headroom = summaryWindow - estimateTokenCount(prompt) - 512
+        require(headroom >= tokenBudget) { "摘要提示与输出预算超过模型窗口，请减少设定或提高上下文上限" }
+        val completionTokens = minOf((tokenBudget + 1024).coerceIn(512, 4096), headroom)
 
         val normalizedUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType)
         val allKeys = parseApiKeys(config.apiKey).ifEmpty { listOf(config.apiKey) }.let {
@@ -3038,15 +2862,14 @@ class AiRepository(
                             max_tokens = completionTokens,
                             temperature = null
                         )
-                        val response = RetrofitClient.getAnalysisService(normalizedUrl)
-                            .anthropicMessages(apiKey = cleanKey, request = request)
-                            .execute()
+                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                            .anthropicMessages(apiKey = cleanKey, request = request), pendingMessages.firstOrNull()?.conversationId ?: 0L, config.copy(modelName = modelName), "summary", prompt)
                         if (!response.isSuccessful) {
                             val errBody = response.errorBody()?.string()?.take(300).orEmpty()
                             throw Exception("HTTP ${response.code()}: $errBody")
                         }
-                        val text = response.body()?.content?.firstOrNull { it.type == "text" }?.text
-                            ?: response.body()?.content?.firstOrNull()?.text
+                        check(response.body()?.stop_reason !in setOf("max_tokens", "refusal", "pause_turn")) { "摘要未完整结束，保留原文与上次摘要" }
+                        val text = response.body()?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }
                         val sanitized = sanitizeSummaryCompletion(text)
                         if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
                     } else {
@@ -3059,17 +2882,16 @@ class AiRepository(
                             max_completion_tokens = if (isModernOpenAiStyle) completionTokens else null,
                             stream = false
                         )
-                        val response = RetrofitClient.getAnalysisService(normalizedUrl)
-                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request)
-                            .execute()
+                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), pendingMessages.firstOrNull()?.conversationId ?: 0L, config.copy(modelName = modelName), "summary", prompt)
                         if (response.isSuccessful) {
                             val body = response.body()
                             if (body?.error != null) {
                                 throw Exception(body.error.message ?: "OpenAI API 返回错误")
                             }
                             val choice = body?.choices?.firstOrNull()
+                            check(choice?.finish_reason !in setOf("length", "content_filter", "tool_calls", "function_call")) { "摘要未完整结束，保留原文与上次摘要" }
                             val text = choice?.message?.content?.ifBlank { null }
-                                ?: choice?.message?.reasoning_content?.ifBlank { null }
                             val sanitized = sanitizeSummaryCompletion(text)
                             if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
                         } else {
@@ -3083,7 +2905,7 @@ class AiRepository(
                             config = config.copy(baseUrl = normalizedUrl, modelName = modelName),
                             key = cleanKey,
                             prompt = prompt,
-                            maxTokens = completionTokens
+                            maxTokens = completionTokens, kind = "summary"
                         )
                         val sanitized = sanitizeSummaryCompletion(streamResult)
                         if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) {
@@ -3111,19 +2933,9 @@ class AiRepository(
     }
 
     private fun buildSummaryTranscript(messages: List<Message>, maxMessages: Int): String {
-        // 先进行智能信息密度提纯 (Loss-Aware Pre-pruning)，剥离无意义口语废话
-        val pruned = AdvancedMemoryEngine.pruneLowInformationTurns(messages)
-        val candidateMessages = if (pruned.isNotEmpty()) pruned else messages
-        // 彻底根除断层跳跃切片：严禁提取开场几条与末尾几条进行强行拼凑（防止模型将最初开场与最新事件错误因果连接）
-        // 严格提取单一连续的近期对话切片，保持因果与时间线连贯
-        val selectedMessages = if (candidateMessages.size > maxMessages) {
-            candidateMessages.takeLast(maxMessages)
-        } else {
-            candidateMessages
-        }
-        return selectedMessages.joinToString("\n") { message ->
+        return messages.joinToString("\n") { message ->
             val role = if (message.role == "user") "用户" else "助手"
-            "$role: ${compactMessageForHistory(message.content, SUMMARY_TRANSCRIPT_CHAR_LIMIT)}"
+            "[$role · 原文ID ${message.id}] ${message.content.trim()}"
         }
     }
 
@@ -3155,7 +2967,8 @@ class AiRepository(
     ): String? {
         if (isRoleplay) {
             // 角色扮演/剧情创作：以角色设定与场景为核心，隔绝通用 AI 助手套话，同时有机装载会话记忆、时间线与世界书
-            return formatRoleplaySystemPrompt(customPrompt, memoryBlock, worldBookBlock)
+            return formatRoleplaySystemPrompt(customPrompt,
+                listOfNotNull(olderSummary?.let { "<conversation_summary>\n历史摘要（已发生的早期背景，当前状态以近期原文和已确认设定为准）：\n$it\n</conversation_summary>" }, memoryBlock).joinToString("\n\n").ifBlank { null }, worldBookBlock)
         }
 
         val basePrompt = """
@@ -3509,11 +3322,12 @@ class AiRepository(
         )
     }
 
-    private suspend fun <T> awaitMemoryCall(call: retrofit2.Call<T>, conversationId: Long): retrofit2.Response<T> {
+    private suspend fun <T> awaitMemoryCall(call: retrofit2.Call<T>, conversationId: Long, config: ApiConfig, kind: String, prompt: String): retrofit2.Response<T> {
+        val started = System.nanoTime()
         currentCoroutineContext().ensureActive()
         activeMemoryCalls[call] = conversationId
         try {
-            return suspendCancellableCoroutine { continuation ->
+            val response = suspendCancellableCoroutine<retrofit2.Response<T>> { continuation ->
                 continuation.invokeOnCancellation { call.cancel() }
                 call.enqueue(object : retrofit2.Callback<T> {
                     override fun onResponse(call: retrofit2.Call<T>, response: retrofit2.Response<T>) {
@@ -3526,9 +3340,54 @@ class AiRepository(
                     }
                 })
             }
+            recordAuxiliaryResponse(config, kind, prompt, response, (System.nanoTime() - started) / 1_000_000)
+            return response
+        } catch (error: Exception) {
+            recordUsage(ApiUsageStat(apiConfigId = config.id, provider = config.provider, modelName = config.modelName,
+                responseTime = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1),
+                success = false, errorMessage = if (isRequestCancellation(error)) "用户取消" else RetryErrorType.classify(error).label,
+                requestKind = kind, tokenSource = "unknown", completionStatus = if (isRequestCancellation(error)) "cancelled" else "failed"))
+            throw error
         } finally {
             activeMemoryCalls.remove(call)
         }
+    }
+
+    private suspend fun <T> recordAuxiliaryResponse(config: ApiConfig, kind: String, prompt: String,
+        response: retrofit2.Response<T>, elapsed: Long) {
+        val body = response.body()
+        val open = body as? ChatCompletionResponse
+        val anth = body as? AnthropicResponse
+        val text = open?.choices?.firstOrNull()?.message?.content
+            ?: anth?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }.orEmpty()
+        val thinking = open?.choices?.firstOrNull()?.message?.reasoning_content.orEmpty()
+        val usage = open?.usage
+        val anthropicInput = anth?.usage?.let { reported ->
+            reported.input_tokens?.let { input ->
+                (input.coerceAtLeast(0).toLong() + (reported.cache_read_input_tokens ?: 0).coerceAtLeast(0) +
+                    (reported.cache_creation_input_tokens ?: 0).coerceAtLeast(0))
+                    .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            }
+        }
+        val counts = UsageTokenAccounting.normalize(
+            usage?.prompt_tokens ?: anthropicInput,
+            usage?.completion_tokens ?: anth?.usage?.output_tokens, usage?.completion_tokens_details?.reasoning_tokens,
+            usage?.total_tokens, usage?.let(::extractCachedTokensFromUsage) ?: anth?.usage?.cache_read_input_tokens,
+            if (response.isSuccessful) estimateTokenCount(prompt) + 24 else 0, estimateTokenCount(text), estimateTokenCount(thinking))
+        val interrupted = open?.choices?.firstOrNull()?.finish_reason in setOf("length", "max_tokens", "refusal", "content_filter", "tool_calls", "function_call") ||
+            anth?.stop_reason in setOf("max_tokens", "refusal", "pause_turn", "tool_use")
+        val success = response.isSuccessful && open?.error == null && !interrupted && text.isNotBlank()
+        recordUsage(ApiUsageStat(apiConfigId = config.id, provider = config.provider, modelName = config.modelName,
+            inputTokens = counts.input, outputTokens = counts.output, thinkingTokens = counts.reasoning,
+            totalTokens = counts.total, cachedTokens = counts.cached, responseTime = elapsed.coerceAtLeast(1),
+            success = success, errorMessage = when {
+                success -> null
+                !response.isSuccessful -> "HTTP ${response.code()}"
+                interrupted -> "模型未完整完成回复"
+                else -> "空回复或服务端错误"
+            },
+            requestKind = kind, tokenSource = if (!response.isSuccessful) "unknown" else counts.source,
+            completionStatus = if (success) "completed" else if (response.isSuccessful && interrupted) "interrupted" else "failed"))
     }
 
     private suspend fun generateOpenAIMemoryExtraction(config: ApiConfig, prompt: String, conversationId: Long): String? {
@@ -3552,14 +3411,16 @@ class AiRepository(
                         stream = false
                     )
                     val response = awaitMemoryCall(RetrofitClient.getService(normalizeApiBaseUrl(config.baseUrl, config.apiType))
-                        .chatCompletion(RetrofitClient.formatApiKey(key), request), conversationId)
+                        .chatCompletion(RetrofitClient.formatApiKey(key), request), conversationId, config, "memory", prompt)
                     if (!response.isSuccessful) {
                         val err = response.errorBody()?.string()?.take(200).orEmpty()
                         throw Exception("HTTP ${response.code()}: $err")
                     }
                     val choice = response.body()?.choices?.firstOrNull()
+                    if (choice?.finish_reason in setOf("length", "content_filter", "tool_calls", "function_call")) {
+                        throw Exception("记忆提取未完整完成，请调整输出上限后重试")
+                    }
                     val text = choice?.message?.content?.ifBlank { null }
-                        ?: choice?.message?.reasoning_content?.ifBlank { null }
                     if (!text.isNullOrBlank()) return text
                     throw Exception("模型未返回有效内容")
                 } catch (e: Exception) {
@@ -3596,10 +3457,13 @@ class AiRepository(
                         temperature = null
                     )
                     val response = awaitMemoryCall(RetrofitClient.getService(normalizeApiBaseUrl(config.baseUrl, config.apiType))
-                        .anthropicMessages(apiKey = key.removePrefix("Bearer ").trim(), request = request), conversationId)
+                        .anthropicMessages(apiKey = key.removePrefix("Bearer ").trim(), request = request), conversationId, config, "memory", prompt)
                     if (!response.isSuccessful) {
                         val err = response.errorBody()?.string()?.take(200).orEmpty()
                         throw Exception("HTTP ${response.code()}: $err")
+                    }
+                    if (response.body()?.stop_reason in setOf("max_tokens", "refusal", "pause_turn")) {
+                        throw Exception("记忆提取未完整完成，请调整输出上限后重试")
                     }
                     val text = response.body()?.content?.firstOrNull { it.type == "text" }?.text
                     if (!text.isNullOrBlank()) return text
@@ -3739,22 +3603,7 @@ class AiRepository(
         targetModel: String,
         fallbackCurrentTime: String?
     ): TimelineReconcileResult {
-        val totalChars = messagesChunk.sumOf { it.content.length }
-        val messagesToAnalyze = if (totalChars <= 50000) {
-            messagesChunk
-        } else {
-            val head = messagesChunk.take(20)
-            val headChars = head.sumOf { it.content.length }
-            val tailBudget = 45000 - headChars
-            val tail = mutableListOf<Message>()
-            var acc = 0
-            for (msg in messagesChunk.drop(20).reversed()) {
-                if (acc + msg.content.length > tailBudget) break
-                tail.add(msg)
-                acc += msg.content.length
-            }
-            (head + tail.reversed()).sortedBy { it.createdAt }
-        }
+        val messagesToAnalyze = messagesChunk
 
         val formattedHistory = messagesToAnalyze.joinToString("\n") { msg ->
             val contentTrimmed = msg.content.trim()
@@ -3889,8 +3738,8 @@ class AiRepository(
         onProgress: ((step: Int, total: Int, detail: String) -> Unit)? = null,
         onIntermediateResult: ((TimelineReconcileDraft) -> Unit)? = null
     ): TimelineReconcileResult = withContext(Dispatchers.IO) {
-        val allMessages = messageDao.getMessagesList(conversationId)
-            .filter { !it.isExcluded && it.role != "system" && it.content.isNotBlank() }
+        val allMessages = messageDao.getMessagesList(conversationId).collapseVariantsForHistory()
+            .filter { !it.isExcluded && it.role in listOf("user", "assistant") && it.content.isNotBlank() && !isErrorPlaceholderMessage(it.content) }
             .sortedBy { it.createdAt }
 
         val baselineEvents = existingTimelineNodes?.map { node ->
@@ -3970,11 +3819,12 @@ class AiRepository(
         val userMessages = allMessages.filter { it.role == "user" }.map { it.content }
 
         // 分段切片：如果消息数 <= 25，直接执行单段分析；如果 > 25，按每 20~25 条切片分段梳理后汇总 (Map-Reduce)
-        val chunks = TimelineMemoryHelper.chunkMessagesForAnalysis(messages, chunkSize = 25, overlap = 3)
+        val analysisWindow = resolveContextWindow(conversation, targetModel, null)
+        val chunks = ContextCompressionPlanner.chunks(messages, (analysisWindow - 12000).coerceIn(512, 14000), maxMessages = 25)
         if (chunks.size <= 1) {
             currentCoroutineContext().ensureActive()
             onProgress?.invoke(1, 1, if (baselineEvents.isNotEmpty()) "正在结合原有时间线梳理后续对话..." else "正在梳理时间线与核心设定...")
-            val singleResult = analyzeTimelineChunk(messages, config, targetModel, existingStoryTime)
+            val singleResult = analyzeTimelineChunk(chunks.firstOrNull().orEmpty(), config, targetModel, existingStoryTime)
             val mergedEvents = if (startFromDraft != null) {
                 (startFromDraft.events + singleResult.events).distinctBy { it.content }
             } else singleResult.events
@@ -4044,7 +3894,9 @@ class AiRepository(
                         aggregatedSettings.add(setting)
                     }
                 }
-                val chunkLastMsgId = chunk.lastOrNull()?.id ?: 0L
+                val incompleteIds = chunks.drop(idx + 1).flatten().map { it.id }.toSet()
+                val chunkLastMsgId = chunks.take(idx + 1).flatten().lastOrNull { it.id !in incompleteIds }?.id
+                    ?: startFromDraft?.lastProcessedMessageId ?: reconcileCheckpoint?.lastReconciledMessageId ?: 0L
                 val intermediateDraft = TimelineReconcileDraft(
                     conversationId = conversationId,
                     lastProcessedMessageId = chunkLastMsgId,
@@ -4059,7 +3911,7 @@ class AiRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(tag, "分段 $step 梳理发生局部异常，继续处理后续分段: ${e.message}")
+                throw IllegalStateException("第 $step 段提取失败，已保留前面完成的草稿；重试将从已确认范围继续", e)
             }
         }
 
@@ -4141,25 +3993,25 @@ class AiRepository(
             请对上述内容进行【结合原有时间线的整体统筹、去重与深化优化】：
             1.【继承时序基准】：【此前已确立的时间线】是已经发生并确认的时序基准。请确保基准时间线中的核心历史事件在因果与时序上得到保全与延续。
             2.【吸收与深化】：后续新增事件（包括在此期间自动记录的事件节点），请精准确定其时间标签、归纳事件内容，并顺畅衔接在基准时间线之后。
-            3.【同一事件合并与补充】：如果后续对话是对之前某个事件的补充、反转、完结或延伸，必须在原有事件基础上进行深化合并或改写补充，避免同一事件被多次重复记录！
+            3.【同一事件合并与补充】：只合并同时间、同人物且含义完全相同的重复事实。补充、反转、完结或延伸仍须保留原事件与后续变化，不用新事实覆盖旧事实；不同人物、肯否、数量、条件或时间的条目分别保留。
             4.【设定去重与本质提炼】：提取后续对话中新明确的世界观规则、角色固有设定，消除与事件列表的冗余！
             5.【按时序排列】：确保输出的全部事件按时间发展严格单调递增排列。
 
             请严格输出以下 JSON：
             ```json
             {
-              "currentStoryTime": "${rawResult.currentStoryTime.ifBlank { "第 1 天·起始" }}",
+              "currentStoryTime": "${rawResult.currentStoryTime.ifBlank { "未确定" }}",
               "timelineEvents": [
                 {
                   "timeTag": "时间标签",
                   "category": "PLOT_EVENT",
-                  "content": "精简凝练的完整事实（12~25字，拒绝截断）"
+                  "content": "保留人物、肯否、数量与因果的完整事实"
                 }
               ],
               "atemporalSettings": [
                 {
                   "category": "角色核心特质",
-                  "content": "精简规则事实（8~25字）",
+                  "content": "保留对象、条件与例外的完整规则",
                   "targetScope": "session"
                 }
               ]
@@ -4180,10 +4032,10 @@ class AiRepository(
 
             请对上述列表进行【最后的整体汇总、去重与浓缩优化】：
             1.【同一事件合并与精炼（拒绝流水账与截断）】：
-               - 若某一件事被拆分为了多个细分子事件（如同一顿饭记录了点餐、交谈、吃完等多条，或同一场战斗记录了多次交手，或同一场景反复对话），必须彻底合并为 1 条精炼的最终里程碑总结（12~25字）！
-               - 必须是句意完整的主谓宾单句，严禁出现半句腰斩！严禁保留微观动作或高度相似的同一事件！
+               - 只去除同时间、同人物且含义完全相同的重复事实。同场景或句首相似不足以证明重复；不同人物、否定、数量、条件和因果分别保留。
+               - 保留完整句意及关键变化，不为缩短字数删除原文事实；无法确定是否重复时保留供用户审核。
             2.【设定去重与本质提炼】：
-               - 若有多个表述相近、含义重叠的设定，必须合并为 1 条最核心精炼的规则（8~25字），消除所有冗余！
+               - 仅去除含义完全相同的重复设定；表述相近但人物、肯否、数字或适用条件不同的规则分别保留，冲突需标明来源并交由用户审核。
             3.【跨界去重消歧（核心铁律）】：
                - 若某个事实已经在【初步事件列表】中作为特定时空的动态事件记录（例如在某天结识、前往某处、答应某事），【严禁在设定列表中重复记录该事件】！
                - 设定列表只保留长期的静态法则、生理禁忌与常态属性，坚决消除事件与设定两头并存、本质一致的冗余！
@@ -4192,18 +4044,18 @@ class AiRepository(
             请严格输出以下 JSON：
             ```json
             {
-              "currentStoryTime": "${rawResult.currentStoryTime.ifBlank { "第 1 天·起始" }}",
+              "currentStoryTime": "${rawResult.currentStoryTime.ifBlank { "未确定" }}",
               "timelineEvents": [
                 {
                   "timeTag": "时间标签",
                   "category": "PLOT_EVENT",
-                  "content": "精简凝练的完整事实（12~25字，拒绝截断）"
+                  "content": "保留人物、肯否、数量与因果的完整事实"
                 }
               ],
               "atemporalSettings": [
                 {
                   "category": "角色核心特质",
-                  "content": "精简规则事实（8~25字）",
+                  "content": "保留对象、条件与例外的完整规则",
                   "targetScope": "session"
                 }
               ]
@@ -4228,11 +4080,12 @@ class AiRepository(
                 }
             }
         } catch (e: Exception) {
+            if (isRequestCancellation(e)) throw CancellationException("时间线整理已取消", e)
             Log.w(tag, "大模型全局终审汇总异常，使用本地算法去重汇总: ${e.message}")
         }
 
         val fallbackResult = if (baselineEvents.isNotEmpty()) {
-            val combined = (baselineEvents + rawResult.events).distinctBy { it.content }
+            val combined = (baselineEvents + rawResult.events)
             rawResult.copy(events = combined.toMutableList())
         } else {
             rawResult
@@ -4273,7 +4126,7 @@ class AiRepository(
         val existingStoryTime = conversation.currentStoryTime?.takeIf { it.isNotBlank() && it != "未确定" }
             ?: memoryDao.getCandidateMemories(conversationId)
                 .firstOrNull { it.content.startsWith("【当前故事时间】：") || it.content.startsWith("当前故事时间：") }
-                ?.content?.substringAfter("：")?.trim() ?: "第 1 天·起始"
+                ?.content?.substringAfter("：")?.trim() ?: "未确定"
 
         val recentNodes = currentTimelineNodes.takeLast(4)
         val recentNodesContext = if (recentNodes.isEmpty()) {
@@ -4304,12 +4157,16 @@ class AiRepository(
                 $recentNodesContext
 
                 【已确认的会话常驻设定（不要重复提取）】：
-                ${existingSettings.joinToString("\n") { it.content }.take(6000)}
+                ${existingSettings.joinToString("\n") { it.content }}
 
                 以下是最新的一轮对话交互：
-                [用户发言/指令]: ${userMessage.take(4000)}
-                [助手剧情正文]: ${if (assistantReply.length <= 24000) assistantReply else assistantReply.take(12000) + "\n（超长正文中段省略）\n" + assistantReply.takeLast(12000)}
+                [用户发言/指令]: $userMessage
+                [助手剧情正文]: $assistantReply
 
+                提取边界：只记录已经明确成立的事实。愿望、假设、计划、未选择的回复方向和导演要求不能当作已经发生的事件。
+                普通对话记录已确认的决定、进展与待办；没有故事时间时保留“未确定”，不创造“第1天”。
+                用户明确宣布的角色/世界长期设定可提取为设定；角色台词中的猜测、谎言、梦境和引用须保留来源与不确定性。
+                newEvent 和每条 atemporalSettings 可附 evidence 字段，引用本轮原文中的短片段便于核对；没有证据时不提取。
                 请深度理解正文对话，敏锐判断并智能提取：
                 1.【时间流逝与时空防篡改铁律（核心）】：
                    - 对话中角色活动是否发生变化或结束？时间是否有自然向前推移？
@@ -4349,12 +4206,22 @@ class AiRepository(
                 ```
             """.trimIndent()
 
+            val analysisWindow = resolveContextWindow(
+                conversation.copy(apiConfigId = config.id, contextWindowTokens = conversation.contextWindowTokens.takeIf {
+                    config.id == conversation.apiConfigId && targetModel.equals(conversation.modelName, ignoreCase = true)
+                }), targetModel, null).coerceIn(4000, 2000000)
+            val analysisMaxOutput = (analysisWindow / 4).coerceIn(512, 8192)
+            if (estimateTokenCount(prompt) + analysisMaxOutput + 512 > analysisWindow) {
+                return@withContext AutoTimelineUpdateResult(null, null, "本轮提取未执行",
+                    extractionErrorMessage = "本轮完整原文与设定超过提取模型上下文窗口，请使用时间线中的全历史分块梳理，或提高提取模型上下文上限；未截断原文、未发送请求")
+            }
+
             var analysisText = try {
                 val cfg = config.copy(modelName = targetModel)
                 if (cfg.apiType == "anthropic") {
-                    generateAnthropicTimelineAnalysis(cfg, prompt, conversationId)
+                    generateAnthropicTimelineAnalysis(cfg, prompt, conversationId, analysisMaxOutput)
                 } else {
-                    generateOpenAITimelineAnalysis(cfg, prompt, conversationId)
+                    generateOpenAITimelineAnalysis(cfg, prompt, conversationId, analysisMaxOutput)
                 }
             } catch (e: Exception) {
                 if (isRequestCancellation(e)) throw CancellationException("本轮提取已取消", e)
@@ -4376,9 +4243,9 @@ class AiRepository(
                         val strictPrompt = "$prompt\n\n注意：只输出纯 JSON 或 NO_UPDATE，不要输出任何解释文字。"
                         val cfg = config.copy(modelName = targetModel)
                         if (cfg.apiType == "anthropic") {
-                            generateAnthropicTimelineAnalysis(cfg, strictPrompt, conversationId)
+                            generateAnthropicTimelineAnalysis(cfg, strictPrompt, conversationId, analysisMaxOutput)
                         } else {
-                            generateOpenAITimelineAnalysis(cfg, strictPrompt, conversationId)
+                            generateOpenAITimelineAnalysis(cfg, strictPrompt, conversationId, analysisMaxOutput)
                         }
                     } catch (e: Exception) {
                         if (isRequestCancellation(e)) throw CancellationException("本轮提取已取消", e)
@@ -4409,7 +4276,9 @@ class AiRepository(
                             val tag = newEventObj.get("timeTag")?.asString?.trim().orEmpty()
                             val content = newEventObj.get("content")?.asString?.trim().orEmpty()
                             val cat = TimelineCategory.fromKey(newEventObj.get("category")?.asString)
-                            if (content.isNotBlank() && !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(content, listOf(userMessage))) {
+                            val evidence = newEventObj.get("evidence")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+                            val evidenceMatches = evidence.isBlank() || userMessage.contains(evidence) || assistantReply.contains(evidence)
+                            if (evidenceMatches && content.isNotBlank() && !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(content, listOf(userMessage))) {
                                 val cleanContent = TimelineMemoryHelper.compactSentenceKeepComplete(content, 28)
                                 if (cleanContent.isNotBlank() && !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(cleanContent, listOf(userMessage))) {
                                     newEvent = TimelineEventItem(timeTag = tag, content = cleanContent, category = cat)
@@ -4473,35 +4342,14 @@ class AiRepository(
         if (conversationDao.getConversationById(conversationId) == null) return@withContext null
         if (!isStoryTimeChanged && !hasEvent && newSettings.isEmpty() && extractionError == null) return@withContext null
 
-        // 匹配修改目标节点
-        var resolvedTargetNode: TimelineNode? = null
-        if (hasEvent) {
+        // Only an explicitly identified, same-time node may become a reviewed UPDATE.
+        // Similar prefixes, participants or scenes are never evidence of an identical fact.
+        val resolvedTargetNode = if (hasEvent && parsedAction == "UPDATE" && (parsedTargetNodeId ?: 0L) > 0L) {
             val eventTime = newEvent!!.timeTag.ifBlank { resolvedNewStoryTime ?: existingStoryTime.orEmpty() }
-            val existingNodes = (timelineNodeDao?.getTimelineNodes(conversationId) ?: emptyList()).filter {
-                TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime)
+            currentTimelineNodes.firstOrNull {
+                it.id == parsedTargetNodeId && TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime)
             }
-            if (parsedAction == "UPDATE") {
-                resolvedTargetNode = if (parsedTargetNodeId != null && parsedTargetNodeId > 0L) {
-                    existingNodes.firstOrNull { it.id == parsedTargetNodeId }
-                } else null
-                if (resolvedTargetNode == null) {
-                    resolvedTargetNode = existingNodes.takeLast(4).firstOrNull { node ->
-                        val cleanNode = node.event.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
-                        val cleanIncoming = newEvent!!.content.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
-                        cleanNode.contains(cleanIncoming) || cleanIncoming.contains(cleanNode) ||
-                        (cleanNode.length >= 6 && cleanIncoming.length >= 6 && cleanNode.take(6) == cleanIncoming.take(6))
-                    }
-                }
-            } else {
-                // 如果是 APPEND 但与最后一条高度重叠，智能转为 UPDATE
-                resolvedTargetNode = existingNodes.takeLast(2).firstOrNull { node ->
-                    val cleanNode = node.event.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
-                    val cleanIncoming = newEvent!!.content.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
-                    cleanNode.contains(cleanIncoming) || cleanIncoming.contains(cleanNode) ||
-                    (cleanNode.length >= 8 && cleanIncoming.length >= 8 && cleanNode.take(8) == cleanIncoming.take(8))
-                }
-            }
-        }
+        } else null
 
         val finalAction = if (resolvedTargetNode != null) "UPDATE" else if (hasEvent) "APPEND" else if (newSettings.isNotEmpty()) "SETTINGS_ONLY" else "TIME_ONLY"
 
@@ -4546,9 +4394,17 @@ class AiRepository(
                     it.id == proposal.targetNodeId && TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime)
                 } else null
                 if (existing != null) {
+                    // Reapplying the same accepted proposal is harmless; a concurrent edit is not.
+                    check(existing.event == event.content.trim() ||
+                        (proposal.previousEventContent != null && existing.event == proposal.previousEventContent)) {
+                        "该时间线事件已被修改，请重新提取或审阅；已保留现有内容"
+                    }
                     dao.updateTimelineNode(existing.copy(timeTag = event.timeTag.ifBlank { existing.timeTag },
                         event = event.content.trim(), category = event.category.key, updatedAt = System.currentTimeMillis()))
-                } else if (nodes.none { it.event == event.content.trim() && it.timeTag == eventTime }) {
+                } else if (nodes.none {
+                    TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime) &&
+                        TimelineMemoryHelper.isSameTimelineFact(it.event, event.content)
+                }) {
                     dao.insertTimelineNode(TimelineNode(conversationId = conversationId,
                         timeTag = eventTime,
                         event = event.content.trim(), category = event.category.key,
@@ -4569,7 +4425,7 @@ class AiRepository(
         }
     }
 
-    private suspend fun generateOpenAITimelineAnalysis(config: ApiConfig, prompt: String, conversationId: Long = 0L): String? {
+    private suspend fun generateOpenAITimelineAnalysis(config: ApiConfig, prompt: String, conversationId: Long = 0L, maxTokens: Int = 8192): String? {
         val normalizedUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType)
         val completionLimit = ReasoningControls.policy(config.modelName,
             ReasoningCapabilityCatalog.get(config.baseUrl, config.apiType, config.modelName)).usesMaxCompletionTokens
@@ -4577,8 +4433,8 @@ class AiRepository(
             model = config.modelName,
             messages = listOf(ChatMessage(role = "user", content = prompt)),
             temperature = null,
-            max_tokens = if (completionLimit) null else 8192,
-            max_completion_tokens = if (completionLimit) 8192 else null,
+            max_tokens = if (completionLimit) null else maxTokens,
+            max_completion_tokens = if (completionLimit) maxTokens else null,
             stream = false
         )
         val allKeys = parseApiKeys(config.apiKey).ifEmpty { listOf(config.apiKey) }.let {
@@ -4591,7 +4447,7 @@ class AiRepository(
             for (attempt in 1..(com.aiassistant.domain.model.RetryPolicy.MAX_RETRIES + 1)) {
                 try {
                     val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
-                        .chatCompletion(RetrofitClient.formatApiKey(key), request), conversationId)
+                        .chatCompletion(RetrofitClient.formatApiKey(key), request), conversationId, config, "timeline", prompt)
                     if (!response.isSuccessful) {
                         val errBody = response.errorBody()?.string()?.take(300).orEmpty()
                         throw Exception("HTTP ${response.code()}: $errBody")
@@ -4601,8 +4457,10 @@ class AiRepository(
                         throw Exception(body.error.message ?: "OpenAI API 返回错误")
                     }
                     val choice = body?.choices?.firstOrNull()
+                    check(choice?.finish_reason !in setOf("length", "content_filter", "tool_calls", "function_call")) {
+                        "时间线提取未完整结束，请调整输出上限后重试"
+                    }
                     val content = choice?.message?.content?.ifBlank { null }
-                        ?: choice?.message?.reasoning_content?.ifBlank { null }
                     if (!content.isNullOrBlank()) return content
                     throw Exception("模型未返回有效内容")
                 } catch (e: Exception) {
@@ -4621,12 +4479,12 @@ class AiRepository(
         throw lastException ?: Exception("未能获取大模型有效输出")
     }
 
-    private suspend fun generateAnthropicTimelineAnalysis(config: ApiConfig, prompt: String, conversationId: Long = 0L): String? {
+    private suspend fun generateAnthropicTimelineAnalysis(config: ApiConfig, prompt: String, conversationId: Long = 0L, maxTokens: Int = 8192): String? {
         val normalizedUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType)
         val request = AnthropicRequest(
             model = config.modelName,
             messages = listOf(AnthropicMessage(role = "user", content = prompt)),
-            max_tokens = 8192,
+            max_tokens = maxTokens,
             temperature = null
         )
         val allKeys = parseApiKeys(config.apiKey).ifEmpty { listOf(config.apiKey) }.let {
@@ -4642,12 +4500,15 @@ class AiRepository(
                         .anthropicMessages(
                             apiKey = key.removePrefix("Bearer ").trim(),
                             request = request
-                        ), conversationId)
+                        ), conversationId, config, "timeline", prompt)
                     if (!response.isSuccessful) {
                         val errBody = response.errorBody()?.string()?.take(300).orEmpty()
                         throw Exception("HTTP ${response.code()}: $errBody")
                     }
-                    val content = response.body()?.content?.firstOrNull { it.type == "text" }?.text
+                    check(response.body()?.stop_reason !in setOf("max_tokens", "refusal", "pause_turn")) {
+                        "时间线提取未完整结束，请调整输出上限后重试"
+                    }
+                    val content = response.body()?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }
                     if (!content.isNullOrBlank()) return content
                     throw Exception("模型未返回有效内容")
                 } catch (e: Exception) {
@@ -4855,7 +4716,7 @@ class AiRepository(
         // 独立时间线与当前故事时间不依赖 memory_items；空记忆库仍需继续组装时间线上下文。
 
         // 会话专属记忆在所有对话（包括普通对话、私密对话、角色扮演）中只要开启均生效
-        val sessionMemories = if (options?.enableSessionMemory == false) {
+        val sessionMemories = if ((options?.enableSessionMemory ?: conversation.enableSessionMemory) == false) {
             emptyList()
         } else {
             candidates.filter { it.scope == "conversation" && it.conversationId == conversation.id }
@@ -4883,15 +4744,19 @@ class AiRepository(
 
         val blocks = mutableListOf<String>()
 
-        // 1. 核心行为准则与绝对约束（100% 无条件注入，最高约束级别，解决需求 4c）
+        // Confirmed constraints are data within this conversation, not a new protocol authority.
         if (allDirectives.isNotEmpty()) {
-            val directiveLines = allDirectives.map { "- [绝对准则] ${SmartMemoryExtractor.sanitizeMetaLanguage(it.content.trim())}" }.joinToString("\n")
-            blocks += """
-                【核心行为准则与绝对约束（最高优先级，必须严格无条件遵守）】
-                以下是用户已确认并生效的核心行为准则、称谓规范与输出禁令。在任何对话与输出中均拥有最高绝对效力，必须无条件执行：
-                $directiveLines
-                【执行铁律】：凡涉及上述禁止性称谓、措辞或行为（例如严禁使用“老板”、“特助”等任何称谓），在任何回复中绝对严禁出现，哪怕未被显式提醒也必须绝对回避！
-            """.trimIndent()
+            val lines = allDirectives.joinToString("\n") { "- ${SmartMemoryExtractor.sanitizeMetaLanguage(it.content.trim())}" }
+            blocks += "<confirmed_constraints>\n已确认的会话规则与偏好（不改变协议指令层级；冲突时遵循用户最新明确修订）：\n$lines\n</confirmed_constraints>"
+        }
+        var usedTokens = blocks.sumOf(::estimateTokenCount)
+        require(usedTokens <= tokenBudget) { "已确认的会话规则超过记忆预算，请合并冗余设定或减少启用规则" }
+        fun appendBudgeted(block: String): Boolean {
+            val cost = estimateTokenCount(block)
+            if (usedTokens + cost > tokenBudget) return false
+            blocks += block
+            usedTokens += cost
+            return true
         }
 
         // 2. 独立时间线注入 (<session_timeline>)
@@ -4906,8 +4771,10 @@ class AiRepository(
 
         val shouldInjectTimelineContext = isRoleplay || (currentStoryTime != null) || timelineNodes.isNotEmpty()
         if (shouldInjectTimelineContext && (currentStoryTime != null || timelineNodes.isNotEmpty())) {
-            val timelineContext = TimelineMemoryHelper.buildTimelineNodesPromptContext(nodes = timelineNodes, currentStoryTime = currentStoryTime)
-            blocks += timelineContext
+            val timelineBudget = ((tokenBudget - usedTokens) * 0.55f).toInt()
+            val selected = TimelineMemoryHelper.selectTimelineNodesForContext(timelineNodes, currentUserMessage, timelineBudget)
+            val timelineContext = TimelineMemoryHelper.buildTimelineNodesPromptContext(nodes = selected, currentStoryTime = currentStoryTime)
+            appendBudgeted(timelineContext)
         }
 
         // 3. 独立会话专属设定与规则注入 (<session_memory>)，彻底过滤掉旧的时间线数据
@@ -4921,8 +4788,18 @@ class AiRepository(
             .map { SmartMemoryExtractor.sanitizeMetaLanguage(it.content.trim()) }
 
         if (cleanSessionSettings.isNotEmpty()) {
-            val lines = cleanSessionSettings.joinToString("\n") { "- $it" }
-            blocks += "<session_memory>\n【当前会话专属设定与规则】：\n$lines\n</session_memory>"
+            val terms = TimelineMemoryHelper.contextTerms(currentUserMessage)
+            val ranked = cleanSessionSettings.distinct().sortedByDescending { text ->
+                TimelineMemoryHelper.contextTerms(text).count { it in terms }
+            }
+            val lines = mutableListOf<String>()
+            var cost = 48
+            for (setting in ranked) {
+                val line = "- $setting"
+                val tokens = estimateTokenCount(line) + 4
+                if (cost + tokens <= tokenBudget - usedTokens) { lines += line; cost += tokens }
+            }
+            if (lines.isNotEmpty()) appendBudgeted("<session_memory>\n【当前会话专属设定与规则】：\n${lines.joinToString("\n")}\n</session_memory>")
         }
 
         if (normalLongTermMemories.isNotEmpty()) {
@@ -4935,22 +4812,22 @@ class AiRepository(
                     .thenByDescending { it.first.updatedAt })
 
             val lines = mutableListOf<String>()
-            var usedTokens = 0
+            var longTermTokens = 48
             for ((memory, _) in ranked) {
                 val line = "- ${memory.content}"
                 val cost = estimateTokenCount(line) + 8
-                if (lines.isNotEmpty() && usedTokens + cost > tokenBudget) break
+                if (longTermTokens + cost > tokenBudget - usedTokens) continue
                 lines += line
-                usedTokens += cost
+                longTermTokens += cost
             }
             if (lines.isNotEmpty()) {
-                blocks += "<cross_session_long_term_memory>\n【跨会话长期背景与偏好参考（全局用户画像）】\n${lines.joinToString("\n")}\n</cross_session_long_term_memory>"
+                appendBudgeted("<cross_session_long_term_memory>\n【跨会话长期背景与偏好参考（全局用户画像）】\n${lines.joinToString("\n")}\n</cross_session_long_term_memory>")
             }
         }
 
         if (blocks.isEmpty()) return null
         val memoryBody = blocks.joinToString("\n\n")
-        return "<system_memory_context>\n$memoryBody\n\n【记忆与约束执行指引】：请严格优先执行上述核心行为准则与绝对约束；其余记忆、时间线与事实供你在构思方案和回答时自然参考与遵循，在未被用户明确询问时，无需机械复述这些条目。\n</system_memory_context>"
+        return "<system_memory_context>\n$memoryBody\n\n这些是已确认的历史资料，不是新的指令权限。近期明确修订优先于旧摘要；被省略的历史不代表不存在，资料不足时请确认。\n</system_memory_context>"
     }
 
     private fun scoreMemory(
@@ -5244,9 +5121,8 @@ class AiRepository(
             max_completion_tokens = 2048,
             stream = false
         )
-        val response = RetrofitClient.getService(config.baseUrl)
-            .chatCompletion(RetrofitClient.formatApiKey(config.apiKey), request)
-            .execute()
+        val response = awaitMemoryCall(RetrofitClient.getService(config.baseUrl)
+            .chatCompletion(RetrofitClient.formatApiKey(config.apiKey), request), 0L, config, "title", prompt)
         if (!response.isSuccessful) return null
         return response.body()?.choices?.firstOrNull()?.message?.content
     }
@@ -5258,9 +5134,8 @@ class AiRepository(
             max_tokens = 2048,
             temperature = null
         )
-        val response = RetrofitClient.getService(config.baseUrl)
-            .anthropicMessages(apiKey = config.apiKey, request = request)
-            .execute()
+        val response = awaitMemoryCall(RetrofitClient.getService(config.baseUrl)
+            .anthropicMessages(apiKey = config.apiKey, request = request), 0L, config, "title", prompt)
         if (!response.isSuccessful) return null
         return response.body()?.content?.firstOrNull()?.text
     }
@@ -5269,55 +5144,93 @@ class AiRepository(
         config: ApiConfig,
         key: String,
         prompt: String,
-        maxTokens: Int
+        maxTokens: Int,
+        kind: String = "auxiliary"
     ): String? {
-        return try {
-            val request = ChatCompletionRequest(
-                model = config.modelName,
-                messages = listOf(ChatMessage(role = "user", content = prompt)),
-                temperature = null,
-                max_tokens = maxTokens,
-                max_completion_tokens = maxTokens,
-                stream = true
-            )
-            val auth = RetrofitClient.formatApiKey(key)
-            val response = RetrofitClient.postJson(
-                baseUrl = config.baseUrl,
-                path = "chat/completions",
-                headers = mapOf(
-                    "Authorization" to auth,
-                    "Accept" to "text/event-stream",
-                    "Cache-Control" to "no-cache"
-                ),
-                json = gson.toJson(request)
-            )
-            response.use { okResponse ->
-                if (!okResponse.isSuccessful) return@use null
-                val body = okResponse.body ?: return@use null
-                val reader = body.charStream().buffered()
-                val contentBuilder = StringBuilder()
-                val thinkingBuilder = StringBuilder()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val lineStr = line?.trim().orEmpty()
-                    if (lineStr.isBlank()) continue
-                    val chunk = parseOpenAiStreamLine(lineStr, gson) ?: continue
-                    chunk.contentDelta?.let { contentBuilder.append(it) }
-                    chunk.thinkingDelta?.let { thinkingBuilder.append(it) }
-                }
-                val res = contentBuilder.toString().trim()
-                if (res.isNotBlank()) res else thinkingBuilder.toString().trim().ifBlank { null }
+        val started = System.nanoTime()
+        val content = StringBuilder()
+        val thinking = StringBuilder()
+        var usage: Usage? = null
+        var finished = false
+        var truncated = false
+        var failed = false
+        var cancelled = false
+        var firstMs = 0L
+        var activeCall: Call? = null
+        try {
+            val completionLimit = ReasoningControls.policy(config.modelName,
+                ReasoningCapabilityCatalog.get(config.baseUrl, config.apiType, config.modelName)).usesMaxCompletionTokens
+            val request = ChatCompletionRequest(model = config.modelName,
+                messages = listOf(ChatMessage(role = "user", content = prompt)), temperature = null,
+                max_tokens = if (completionLimit) null else maxTokens,
+                max_completion_tokens = if (completionLimit) maxTokens else null,
+                stream = true, stream_options = StreamOptions(include_usage = true))
+            val owner = currentCoroutineContext()[Job]
+            val cancellation = kotlinx.coroutines.CoroutineScope(currentCoroutineContext()).launch(
+                Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED
+            ) {
+                try { kotlinx.coroutines.awaitCancellation() } finally { activeCall?.cancel() }
             }
-        } catch (e: Exception) {
-            Log.w(tag, "executeStreamingCompletion 流式备用异常: ${e.message}")
-            null
+            try {
+                RetrofitClient.postJson(config.baseUrl, "chat/completions",
+                    headers = mapOf("Authorization" to RetrofitClient.formatApiKey(key), "Accept" to "text/event-stream"),
+                    json = gson.toJson(request), onCallCreated = { activeCall = it; if (owner?.isActive == false) it.cancel() }).use { response ->
+                    check(response.isSuccessful) { "HTTP ${response.code}" }
+                    val body = response.body ?: error("响应体为空")
+                    body.charStream().buffered().use { reader ->
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val line = reader.readLine() ?: break
+                            val chunk = parseOpenAiStreamLine(line.trim(), gson) ?: continue
+                            if (!chunk.inlineErrorMessage.isNullOrBlank()) error("流式回复错误")
+                            if ((!chunk.contentDelta.isNullOrEmpty() || !chunk.thinkingDelta.isNullOrEmpty()) && firstMs == 0L)
+                                firstMs = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
+                            chunk.contentDelta?.let(content::append)
+                            chunk.thinkingDelta?.let(thinking::append)
+                            chunk.usage?.let { usage = it }
+                            if (!chunk.finishReason.isNullOrBlank()) {
+                                finished = true
+                                truncated = chunk.finishReason !in setOf("stop", "end_turn", "stop_sequence")
+                            }
+                            if (chunk.isDone) { finished = true; break }
+                        }
+                    }
+                }
+            } finally { cancellation.cancel() }
+            if (!finished || truncated) return null // 截断文本不得作为有效压缩摘要覆盖原文。
+            return content.toString().trim().ifBlank { null }
+        } catch (error: Exception) {
+            failed = true
+            cancelled = isRequestCancellation(error) || !currentCoroutineContext().isActive
+            if (cancelled) throw CancellationException("辅助请求已取消", error)
+            Log.w(tag, "辅助流式调用未完成", error)
+            return null
+        } finally {
+            val counts = UsageTokenAccounting.normalize(usage?.prompt_tokens, usage?.completion_tokens,
+                usage?.completion_tokens_details?.reasoning_tokens, usage?.total_tokens,
+                usage?.let(::extractCachedTokensFromUsage), if (content.isNotEmpty() || thinking.isNotEmpty()) estimateTokenCount(prompt) + 24 else 0,
+                estimateTokenCount(content.toString()), estimateTokenCount(thinking.toString()))
+            val success = finished && !truncated && !failed && content.isNotBlank()
+            recordUsage(ApiUsageStat(apiConfigId = config.id, provider = config.provider, modelName = config.modelName,
+                inputTokens = counts.input, outputTokens = counts.output, thinkingTokens = counts.reasoning,
+                totalTokens = counts.total, cachedTokens = counts.cached,
+                responseTime = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1), firstTokenTimeMs = firstMs,
+                success = success, errorMessage = if (success) null else if (cancelled) "用户取消" else "辅助流式请求未完成",
+                requestKind = kind, tokenSource = if (usage == null && content.isEmpty() && thinking.isEmpty()) "unknown" else counts.source,
+                completionStatus = when {
+                    cancelled -> "cancelled"
+                    success -> "completed"
+                    failed && content.isEmpty() && thinking.isEmpty() -> "failed"
+                    else -> "interrupted"
+                }))
         }
     }
 
     suspend fun executeQuickCompletionWithResult(
         config: ApiConfig,
         prompt: String,
-        maxTokens: Int = 1000
+        maxTokens: Int = 1000,
+        kind: String = "auxiliary"
     ): Result<String> = withContext(Dispatchers.IO) {
         if (!config.isEnabled) {
             return@withContext Result.failure(Exception("当前 API 配置已关闭，请在设置中开启后重试"))
@@ -5343,15 +5256,16 @@ class AiRepository(
                             max_tokens = maxTokens,
                             temperature = null
                         )
-                        val response = RetrofitClient.getAnalysisService(normalizedUrl)
-                            .anthropicMessages(apiKey = cleanKey, request = request)
-                            .execute()
+                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                            .anthropicMessages(apiKey = cleanKey, request = request), 0L, config, kind, prompt)
                         if (!response.isSuccessful) {
                             val errBody = response.errorBody()?.string()?.take(300).orEmpty()
                             throw Exception("HTTP ${response.code()}: $errBody")
                         }
-                        val text = response.body()?.content?.firstOrNull { it.type == "text" }?.text
-                            ?: response.body()?.content?.firstOrNull()?.text
+                        check(response.body()?.stop_reason !in setOf("max_tokens", "refusal", "pause_turn")) {
+                            "辅助请求未完整结束，请调整输出上限后重试"
+                        }
+                        val text = response.body()?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }
                         if (!text.isNullOrBlank()) {
                             return@withContext Result.success(text.trim())
                         }
@@ -5364,17 +5278,18 @@ class AiRepository(
                             max_tokens = maxTokens,
                             stream = false
                         )
-                        val response = RetrofitClient.getAnalysisService(normalizedUrl)
-                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request)
-                            .execute()
+                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), 0L, config, kind, prompt)
                         if (response.isSuccessful) {
                             val body = response.body()
                             if (body?.error != null) {
                                 throw Exception(body.error.message ?: "OpenAI API 返回错误")
                             }
                             val choice = body?.choices?.firstOrNull()
+                            check(choice?.finish_reason !in setOf("length", "content_filter", "tool_calls", "function_call")) {
+                                "辅助请求未完整结束，请调整输出上限后重试"
+                            }
                             val text = choice?.message?.content?.ifBlank { null }
-                                ?: choice?.message?.reasoning_content?.ifBlank { null }
                             if (!text.isNullOrBlank()) {
                                 return@withContext Result.success(text.trim())
                             }
@@ -5389,7 +5304,7 @@ class AiRepository(
                             config = config.copy(baseUrl = normalizedUrl),
                             key = cleanKey,
                             prompt = prompt,
-                            maxTokens = maxTokens
+                            maxTokens = maxTokens, kind = kind
                         )
                         if (!streamResult.isNullOrBlank()) {
                             return@withContext Result.success(streamResult.trim())
@@ -5445,7 +5360,7 @@ class AiRepository(
             """.trimIndent()
 
             val maxOut = (thinkingText.length * 2).coerceIn(1024, 4096)
-            executeQuickCompletionWithResult(effectiveConfig, prompt, maxTokens = maxOut)
+            executeQuickCompletionWithResult(effectiveConfig, prompt, maxTokens = maxOut, kind = "translation")
         } catch (e: Exception) {
             Log.e(tag, "思考链翻译异常", e)
             Result.failure(e)

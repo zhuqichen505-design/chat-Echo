@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aiassistant.utils.TimelineMemoryHelper
@@ -157,7 +158,8 @@ fun ChatScreen(
     conversationId: Long,
     onNavigateBack: () -> Unit,
     onNavigateToChat: (Long) -> Unit = {},
-    onNavigateToRoleplayMemory: (Long) -> Unit = {}
+    onNavigateToRoleplayMemory: (Long) -> Unit = {},
+    initialStorySection: String? = null
 ) {
     val context = LocalContext.current
     val chatBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
@@ -170,7 +172,7 @@ fun ChatScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     val appearanceSettings = rememberChatPersonalizationSettings()
-    val showStoryContext = uiState.isRoleplay &&
+    val showStoryContext = (uiState.isRoleplay || appearanceSettings.applyReadingStyleToChats) &&
         appearanceSettings.storyReadingStyle == com.aiassistant.utils.EchoStoryReadingStyle.SPLIT
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
@@ -209,6 +211,7 @@ fun ChatScreen(
     val pendingContextFallbackPrompt by viewModel.pendingContextFallbackPrompt.collectAsState()
     val pendingReplyDirection by viewModel.pendingReplyDirection.collectAsState()
     var replyDirectionDismissed by remember(pendingReplyDirection) { mutableStateOf(false) }
+    var showReplyDirectionSettings by remember { mutableStateOf(false) }
     val reconnectStatus by viewModel.reconnectStatus.collectAsState()
 
     val hazeState = rememberEchoHazeState()
@@ -244,7 +247,7 @@ fun ChatScreen(
     var showConvertToRoleplayDialog by remember { mutableStateOf(false) }
     var showContextUsageDialog by remember { mutableStateOf(false) }
     var showRollingSummaryDialog by remember { mutableStateOf(false) }
-    var showStoryManagerDialog by remember { mutableStateOf(false) }
+    var showStoryManagerDialog by rememberSaveable(conversationId) { mutableStateOf(initialStorySection != null) }
     var showStorySmartAnalyzeDialog by remember { mutableStateOf(false) }
     var showPlotActionDialog by remember { mutableStateOf(false) }
     var showThinkingPopover by remember { mutableStateOf(false) }
@@ -1553,7 +1556,9 @@ fun ChatScreen(
                         uiState = uiState,
                         settings = tempSettings,
                         expandedByDefault = true,
-                        onOpenSettings = { showStoryManagerDialog = true },
+                        memories = sessionMemories,
+                        timeline = timelineNodes,
+                        onOpenSettings = { if (uiState.isRoleplay) showStoryManagerDialog = true else showSettingsDialog = true },
                         modifier = Modifier.align(Alignment.TopEnd).width(252.dp).fillMaxHeight()
                             .padding(top = statusBarTopPadding + topFloatingBarHeight, bottom = listBottomPadding, end = 12.dp)
                     )
@@ -1562,7 +1567,9 @@ fun ChatScreen(
                         uiState = uiState,
                         settings = tempSettings,
                         expandedByDefault = false,
-                        onOpenSettings = { showStoryManagerDialog = true },
+                        memories = sessionMemories,
+                        timeline = timelineNodes,
+                        onOpenSettings = { if (uiState.isRoleplay) showStoryManagerDialog = true else showSettingsDialog = true },
                         modifier = Modifier.align(Alignment.TopCenter)
                             .padding(top = statusBarTopPadding + topFloatingBarHeight + 8.dp, start = 12.dp, end = 12.dp)
                             .fillMaxWidth().heightIn(max = maxHeight * 0.35f)
@@ -1696,6 +1703,18 @@ fun ChatScreen(
                                         showContextUsageDialog = true
                                     }
                                 )
+                                IconButton(
+                                    onClick = {
+                                        if (pendingReplyDirection != null) replyDirectionDismissed = false
+                                        else showReplyDirectionSettings = true
+                                    },
+                                    enabled = !isGenerating || pendingReplyDirection != null,
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(Icons.Default.List,
+                                        contentDescription = if (pendingReplyDirection != null) "继续选择回复方向" else "多方向回复选择",
+                                        tint = if (tempSettings.enableReplyDirections) MaterialTheme.colorScheme.primary else toolbarContentColor)
+                                }
                                 if (uiState.isRoleplay) {
                                     IconButton(
                                         onClick = { showStoryManagerDialog = true },
@@ -2426,9 +2445,14 @@ fun ChatScreen(
             currentPrompt = uiState.systemPrompt,
             templates = promptTemplates,
             onDismiss = { showStoryManagerDialog = false },
-            onSaveAll = { charIds, scenarioId, mode, plotSummary, settings, prompt ->
-                viewModel.saveStorySettings(charIds, scenarioId, mode, plotSummary, settings, prompt)
-                showStoryManagerDialog = false
+            onSaveAll = { charIds, scenarioId, mode, plotSummary, settings, prompt, onComplete ->
+                scope.launch {
+                    val saveJob = viewModel.saveStorySettings(charIds, scenarioId, mode, plotSummary, settings, prompt)
+                    saveJob.join()
+                    val saved = !saveJob.isCancelled
+                    if (saved) showStoryManagerDialog = false
+                    onComplete(saved)
+                }
             },
             onPlotAction = { action, custom ->
                 viewModel.sendPlotAction(action, custom)
@@ -2474,7 +2498,32 @@ fun ChatScreen(
             onSavePromptTemplate = { name, content ->
                 viewModel.savePromptTemplate(name, content)
             },
-            onModelAvatarChanged = { modelAvatarRevision++ }
+            onModelAvatarChanged = { modelAvatarRevision++ },
+            title = uiState.conversationTitle,
+            initialSection = initialStorySection ?: "writing",
+            onOpenSharedSettings = { showStoryManagerDialog = false; showSettingsDialog = true },
+            onOpenContext = { showStoryManagerDialog = false; showContextUsageDialog = true },
+            knowledge = com.aiassistant.ui.screens.chat.story.StoryKnowledgeState(
+                memories = sessionMemories, timeline = timelineNodes, currentTime = uiState.currentStoryTime,
+                isExtracting = isReconcilingTimeline, extractionProgress = timelineReconcileProgress,
+                hasDraft = liveReconcileDraft != null || viewModel.hasTimelineDraft(),
+                checkpoint = timelineCheckpoint, newMessageCount = viewModel.getNewMessagesCountSinceCheckpoint()
+            ),
+            knowledgeActions = com.aiassistant.ui.screens.chat.story.StoryKnowledgeActions(
+                addMemory = viewModel::addSessionMemory, updateMemory = viewModel::updateSessionMemory,
+                toggleMemory = viewModel::toggleSessionMemory, deleteMemory = viewModel::deleteSessionMemory,
+                clearMemories = viewModel::clearSessionMemories, updateTime = viewModel::updateCurrentStoryTime,
+                addEvent = viewModel::addTimelineNode, updateEvent = viewModel::updateTimelineNode,
+                deleteEvent = viewModel::deleteTimelineNode, clearTimeline = viewModel::clearTimeline,
+                extractAll = { viewModel.startTimelineReconciliation(startFromDraft = false, fromCheckpoint = false) },
+                continueExtraction = { viewModel.startTimelineReconciliation(startFromDraft = true, fromCheckpoint = false) },
+                extractNew = { viewModel.startTimelineReconciliation(startFromDraft = false, fromCheckpoint = true) },
+                reviewDraft = {
+                    showStoryManagerDialog = false
+                    if (isReconcilingTimeline) viewModel.openLiveDraftForReview() else viewModel.openSavedDraftForReview()
+                },
+                clearDraft = viewModel::clearTimelineDraft, cancelExtraction = viewModel::cancelTimelineReconciliation
+            )
         )
     }
 
@@ -2538,6 +2587,12 @@ fun ChatScreen(
                     onError = { Toast.makeText(context, it, Toast.LENGTH_LONG).show() })
             }
         )
+    }
+
+    if (showReplyDirectionSettings) {
+        ReplyDirectionSettingsDialog(tempSettings.enableReplyDirections, tempSettings.replyDirectionCount,
+            onChange = { enabled, count -> viewModel.updateTempSettings(tempSettings.copy(enableReplyDirections = enabled, replyDirectionCount = count)) },
+            onDismiss = { showReplyDirectionSettings = false })
     }
 
     pendingReplyDirection?.let { prompt ->

@@ -368,4 +368,98 @@ class RoleplayModelsTest {
         assertEquals("资深工程师", settings.aboutUser)
         assertEquals("优先使用 Kotlin", settings.preferences)
     }
+
+    @Test
+    fun localStoryCharactersHaveStableDistinctIdsWithoutDatabaseForeignKeys() {
+        val gson = com.google.gson.Gson()
+        val legacy = RoleplaySession(conversationId = 1, customCharacterData = gson.toJson(listOf(
+            CharacterProfile(name = "Synthetic A"), CharacterProfile(name = "Synthetic B"))))
+        val characters = legacy.getCustomizedCharacters(emptyList())
+        assertEquals(2, characters.map { it.id }.distinct().size)
+        assertTrue(characters.all { it.id < 0 })
+        assertEquals(characters, legacy.getCustomizedCharacters(emptyList()))
+        val changed = com.aiassistant.domain.model.StorySessionBindings.upsertCharacter(legacy, characters,
+            characters.first().copy(personality = "Revised"))
+        assertEquals(null, changed.characterId)
+        assertEquals(2, changed.getCustomizedCharacters(emptyList()).size)
+        assertEquals("Revised", changed.getCustomizedCharacters(emptyList()).first().personality)
+    }
+
+    @Test
+    fun deselectingCharacterRemovesItsSnapshotFromTheGeneratedStoryContext() {
+        val a = CharacterProfile(id = 1, name = "Synthetic A")
+        val b = CharacterProfile(id = -1, name = "Synthetic B")
+        val original = RoleplaySession(conversationId = 1, characterId = 1, characterIds = "[1,-1]",
+            customCharacterData = com.google.gson.Gson().toJson(listOf(a, b)))
+        val selected = com.aiassistant.domain.model.StorySessionBindings.select(original, listOf(a, b), listOf(-1),
+            null, NarrativeMode.AUTHOR, "Summary")
+        assertEquals(listOf(-1L), selected.getEffectiveCharacterIds())
+        assertEquals(null, selected.characterId)
+        assertEquals(listOf("Synthetic B"), selected.getParticipatingCharacters(emptyList()).map { it.name })
+        val cleared = com.aiassistant.domain.model.StorySessionBindings.select(selected, listOf(b), emptyList(),
+            null, NarrativeMode.AUTHOR, "Summary")
+        assertTrue(cleared.getParticipatingCharacters(emptyList()).isEmpty())
+        assertEquals(1, cleared.getCustomizedCharacters(emptyList()).size)
+        assertTrue(cleared.getEffectiveCharacterIds().isEmpty())
+    }
+
+    @Test
+    fun changingScenarioDoesNotKeepPreviousWorldOverride() {
+        val world = RoleplayScenario(id = 3, name = "Synthetic world")
+        val original = RoleplaySession(conversationId = 1, scenarioId = 3,
+            customScenarioData = com.google.gson.Gson().toJson(world))
+        val changed = com.aiassistant.domain.model.StorySessionBindings.select(original, emptyList(), emptyList(),
+            4, NarrativeMode.AUTHOR, "")
+        assertEquals(4L, changed.scenarioId)
+        assertEquals(null, changed.customScenarioData)
+        val kept = com.aiassistant.domain.model.StorySessionBindings.select(original, emptyList(), emptyList(),
+            3, NarrativeMode.AUTHOR, "")
+        assertEquals(original.customScenarioData, kept.customScenarioData)
+    }
+
+    @Test
+    fun localWorldCanBeSelectedAndClearedWithoutRoomForeignKey() {
+        val original = RoleplaySession(conversationId = 1, customScenarioData =
+            com.google.gson.Gson().toJson(RoleplayScenario(name = "Synthetic local world")))
+        val localId = original.getCustomizedScenario(null)!!.id
+        assertTrue(localId < 0)
+        val kept = com.aiassistant.domain.model.StorySessionBindings.select(original, emptyList(), emptyList(),
+            localId, NarrativeMode.AUTHOR, "")
+        assertEquals(null, kept.scenarioId)
+        assertEquals("Synthetic local world", kept.getCustomizedScenario(null)?.name)
+        val cleared = com.aiassistant.domain.model.StorySessionBindings.select(kept, emptyList(), emptyList(),
+            null, NarrativeMode.AUTHOR, "")
+        assertEquals(null, cleared.getCustomizedScenario(null))
+    }
+
+    @Test
+    fun workspaceRefreshDoesNotOverwriteWritingDraftAndMergesNewCharacters() {
+        val session = RoleplaySession(conversationId = 1, characterIds = "[1]")
+        val initial = com.aiassistant.ui.screens.chat.story.StoryWorkspaceDraft.from(session, "Original",
+            com.aiassistant.ui.screens.chat.TempChatSettings())
+        val local = initial.copy(instructions = "Unsaved writing goal", characterIds = emptySet(),
+            settings = initial.settings.copy(enableWorldBook = true))
+        val incoming = initial.copy(characterIds = setOf(1, -1), summary = "New extraction",
+            settings = initial.settings.copy(maxTokens = 8192))
+        val merged = com.aiassistant.ui.screens.chat.story.mergeStoryWorkspaceDraft(local, initial, incoming)
+        assertEquals("Unsaved writing goal", merged.instructions)
+        assertEquals(setOf(-1L), merged.characterIds)
+        assertEquals("New extraction", merged.summary)
+        assertTrue(merged.settings.enableWorldBook)
+        assertEquals(8192, merged.settings.maxTokens)
+    }
+
+    @Test
+    fun inactiveCharacterCanBeReenabledWithoutLosingStoryEdits() {
+        val profile = CharacterProfile(id = -1L, name = "Synthetic local", personality = "Story-specific")
+        val session = RoleplaySession(conversationId = 1, characterIds = "[]", customCharacterData = com.google.gson.Gson().toJson(listOf(profile)))
+        assertTrue(session.getParticipatingCharacters(emptyList()).isEmpty())
+        val selected = com.aiassistant.domain.model.StorySessionBindings.select(session,
+            session.getCustomizedCharacters(emptyList()), listOf(-1L), null, NarrativeMode.AUTHOR, "")
+        assertEquals(listOf(profile), selected.getParticipatingCharacters(emptyList()))
+        val newCharacter = com.aiassistant.domain.model.StorySessionBindings.upsertCharacter(session,
+            session.getCustomizedCharacters(emptyList()), CharacterProfile(name = "Synthetic new"))
+        assertEquals(listOf("Synthetic new"), newCharacter.getParticipatingCharacters(emptyList()).map { it.name })
+        assertEquals(2, newCharacter.getCustomizedCharacters(emptyList()).size)
+    }
 }
