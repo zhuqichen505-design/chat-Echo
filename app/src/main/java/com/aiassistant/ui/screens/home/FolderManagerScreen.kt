@@ -44,7 +44,7 @@ fun FolderManagerScreen(
     val repository = AiAssistantApp.instance.repository
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val folderBackgroundBitmap = remember(context) {
+    val folderBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
         BackgroundImageManager.getHomeBackgroundBitmap(context)
     }
     val hazeState = rememberEchoHazeState()

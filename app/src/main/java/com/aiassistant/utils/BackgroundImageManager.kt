@@ -4,12 +4,26 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.AtomicFile
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import java.io.File
+import java.security.MessageDigest
 
 object BackgroundImageManager {
     private const val HOME_BACKGROUND_FILE = "home_background.jpg"
     private const val CHAT_BACKGROUND_FILE = "chat_background.jpg"
     private const val MAX_BACKGROUND_SIDE = 2160
+    private const val HISTORY_PREFIX = "background_history_"
+    private const val HISTORY_SUFFIX = ".img"
+    var revision by mutableIntStateOf(0)
+        private set
+
+    data class BackgroundHistoryEntry(
+        val id: String,
+        val updatedAt: Long
+    )
 
     data class SolidColorPreset(
         val id: String,
@@ -27,6 +41,22 @@ object BackgroundImageManager {
         SolidColorPreset("pale_yellow", "浅暖杏", 0xFFFAF8F0.toInt(), 0xFF15140D.toInt(), "#FAF8F0"),
         SolidColorPreset("pale_cyan", "浅山岚", 0xFFF0F7F7.toInt(), 0xFF0C1414.toInt(), "#F0F7F7")
     )
+
+    /** The active theme paints its own solid backdrop; custom images stay available in history. */
+    fun applyThemeBackground(context: Context): Boolean {
+        return runCatching {
+            listOf(HOME_BACKGROUND_FILE, CHAT_BACKGROUND_FILE).forEach { fileName ->
+                val current = backgroundFile(context, fileName)
+                if (current.isFile && current.length() > 0) {
+                    check(recordBackgroundHistory(context, current))
+                    check(current.delete())
+                }
+            }
+            synchronized(backgroundBitmapCache) { backgroundBitmapCache.clear() }
+            revision++
+            true
+        }.getOrDefault(false)
+    }
 
     fun saveHomeBackgroundFromUri(context: Context, uri: Uri): Boolean {
         return saveBackgroundFromUri(context, uri, HOME_BACKGROUND_FILE)
@@ -46,10 +76,12 @@ object BackgroundImageManager {
 
     private fun saveBackgroundBitmap(context: Context, bitmap: Bitmap, fileName: String): Boolean {
         return try {
-            backgroundFile(context, fileName).outputStream().use { output ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
-            }
+            val target = backgroundFile(context, fileName)
+            check(recordBackgroundHistory(context, target))
+            atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)) }
+            check(recordBackgroundHistory(context, target))
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
+            revision++
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -58,11 +90,11 @@ object BackgroundImageManager {
     }
 
     fun saveHomeBackgroundSolidColor(context: Context, colorInt: Int): Boolean {
-        return saveSolidColor(context, HOME_BACKGROUND_FILE, colorInt)
+        return saveSolidColor(context, HOME_BACKGROUND_FILE, colorInt, recordHistory = true)
     }
 
     fun saveChatBackgroundSolidColor(context: Context, colorInt: Int): Boolean {
-        return saveSolidColor(context, CHAT_BACKGROUND_FILE, colorInt)
+        return saveSolidColor(context, CHAT_BACKGROUND_FILE, colorInt, recordHistory = true)
     }
 
     fun getHomeBackgroundBitmap(context: Context): Bitmap? {
@@ -82,25 +114,36 @@ object BackgroundImageManager {
     }
 
     fun deleteHomeBackground(context: Context) {
-        backgroundFile(context, HOME_BACKGROUND_FILE).delete()
+        val file = backgroundFile(context, HOME_BACKGROUND_FILE)
+        if (recordBackgroundHistory(context, file)) file.delete()
         synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(HOME_BACKGROUND_FILE) }
+        revision++
     }
 
     fun deleteChatBackground(context: Context) {
-        backgroundFile(context, CHAT_BACKGROUND_FILE).delete()
+        val file = backgroundFile(context, CHAT_BACKGROUND_FILE)
+        if (recordBackgroundHistory(context, file)) file.delete()
         synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(CHAT_BACKGROUND_FILE) }
+        revision++
     }
 
-    private fun saveSolidColor(context: Context, fileName: String, colorInt: Int): Boolean {
+    private fun saveSolidColor(
+        context: Context,
+        fileName: String,
+        colorInt: Int,
+        recordHistory: Boolean
+    ): Boolean {
         return try {
             val bitmap = Bitmap.createBitmap(120, 240, Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(bitmap)
             canvas.drawColor(colorInt)
-            backgroundFile(context, fileName).outputStream().use { output ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-            }
+            val target = backgroundFile(context, fileName)
+            check(recordBackgroundHistory(context, target))
+            atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) }
+            if (recordHistory) check(recordBackgroundHistory(context, target))
             bitmap.recycle()
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
+            revision++
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -111,17 +154,95 @@ object BackgroundImageManager {
     private fun saveBackgroundFromUri(context: Context, uri: Uri, fileName: String): Boolean {
         return try {
             val bitmap = decodeScaledBitmap(context, uri) ?: return false
-            backgroundFile(context, fileName).outputStream().use { output ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
-            }
+            val target = backgroundFile(context, fileName)
+            check(recordBackgroundHistory(context, target))
+            atomicWrite(target) { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) }
+            check(recordBackgroundHistory(context, target))
             bitmap.recycle()
             synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(fileName) }
+            revision++
             true
         } catch (e: Exception) {
             e.printStackTrace()
             false
         }
     }
+
+    fun listBackgroundHistory(context: Context): List<BackgroundHistoryEntry> {
+        listOf(HOME_BACKGROUND_FILE, CHAT_BACKGROUND_FILE).forEach { recordBackgroundHistory(context, backgroundFile(context, it)) }
+        return historyFiles(context).map { BackgroundHistoryEntry(it.name, it.lastModified()) }
+    }
+
+    fun getBackgroundHistoryBitmap(context: Context, entry: BackgroundHistoryEntry): Bitmap? {
+        val file = historyFile(context, entry.id) ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val options = BitmapFactory.Options().apply {
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 320) sample *= 2
+            inSampleSize = sample
+        }
+        return BitmapFactory.decodeFile(file.absolutePath, options)
+    }
+
+    fun restoreHomeBackground(context: Context, entry: BackgroundHistoryEntry): Boolean =
+        restoreBackground(context, entry, HOME_BACKGROUND_FILE)
+
+    fun restoreChatBackground(context: Context, entry: BackgroundHistoryEntry): Boolean =
+        restoreBackground(context, entry, CHAT_BACKGROUND_FILE)
+
+    private fun restoreBackground(context: Context, entry: BackgroundHistoryEntry, targetName: String): Boolean {
+        val source = historyFile(context, entry.id) ?: return false
+        return runCatching {
+            check(recordBackgroundHistory(context, backgroundFile(context, targetName)))
+            atomicWrite(backgroundFile(context, targetName)) { output -> source.inputStream().use { it.copyTo(output) } }
+            synchronized(backgroundBitmapCache) { backgroundBitmapCache.remove(targetName) }
+            revision++
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun recordBackgroundHistory(context: Context, source: File): Boolean {
+        if (!source.isFile || source.length() <= 0L) return true
+        return runCatching {
+            val digest = MessageDigest.getInstance("SHA-256")
+            source.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var count = input.read(buffer)
+                while (count > 0) {
+                    digest.update(buffer, 0, count)
+                    count = input.read(buffer)
+                }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val history = File(context.filesDir, "$HISTORY_PREFIX$hash$HISTORY_SUFFIX")
+            if (history.isFile && history.length() == source.length()) return@runCatching true
+            atomicWrite(history) { output -> source.inputStream().use { it.copyTo(output) } }
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun atomicWrite(file: File, write: (java.io.OutputStream) -> Unit) {
+        val atomic = AtomicFile(file)
+        val stream = atomic.startWrite()
+        try {
+            write(stream)
+            atomic.finishWrite(stream)
+        } catch (error: Exception) {
+            atomic.failWrite(stream)
+            throw error
+        }
+    }
+
+    private fun historyFile(context: Context, id: String): File? {
+        if (!id.matches(Regex("background_history_[a-f0-9]{64}\\.img"))) return null
+        return File(context.filesDir, id).takeIf { it.isFile }
+    }
+
+    private fun historyFiles(context: Context): List<File> = context.filesDir.listFiles()
+        ?.filter { it.isFile && it.name.startsWith(HISTORY_PREFIX) && it.name.endsWith(HISTORY_SUFFIX) }
+        ?.sortedByDescending { it.lastModified() }
+        ?: emptyList()
 
     // v2.7.3 流畅度：背景图位图缓存（key=文件名，lastModified 校验失效）——聊天/首页/历史/
     // 统计/设置/文件夹六个页面原先各自在组合期同步解码同一张大背景图（主线程几十至几百 ms +

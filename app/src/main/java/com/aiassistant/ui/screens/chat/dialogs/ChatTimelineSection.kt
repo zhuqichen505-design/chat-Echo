@@ -171,7 +171,13 @@ fun ChatSettingsTimelineSection(
     onAddTimelineNode: (timeTag: String, event: String, category: String) -> Unit,
     onUpdateTimelineNode: (TimelineNode) -> Unit,
     onDeleteTimelineNode: (Long) -> Unit,
-    onClearTimeline: () -> Unit
+    onClearTimeline: () -> Unit,
+    /**
+     * 折叠状态由对话设置弹窗持有。时间线内容会随着后台提炼状态变化而重组，
+     * 若在此处使用 remember，LazyColumn item 被重新建立时会回到默认展开状态。
+     */
+    isExpanded: Boolean = true,
+    onExpandedChange: (Boolean) -> Unit = {}
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var nodeToEdit by remember { mutableStateOf<TimelineNode?>(null) }
@@ -187,7 +193,6 @@ fun ChatSettingsTimelineSection(
     var editCategory by remember { mutableStateOf(TimelineCategory.PLOT_EVENT) }
 
     var storyTimeInput by remember { mutableStateOf("") }
-    var isTimelineExpanded by remember { mutableStateOf(true) }
 
     val glass = echoGlassPalette()
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -204,41 +209,34 @@ fun ChatSettingsTimelineSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 标题行
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().clickable { onExpandedChange(!isExpanded) }
+                    .heightIn(min = 48.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Default.HistoryEdu,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
+                Icon(Icons.Default.HistoryEdu, contentDescription = null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("时间线", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = contentColor)
+                    Text(
+                        "${sortedNodes.size} 个节点 · ${currentStoryTime?.takeIf { it.isNotBlank() } ?: "未设置故事时间"}" +
+                            if (isReconcilingTimeline) " · 梳理中" else if (hasSavedTimelineDraft) " · 有待确认草稿" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = secondaryColor,
+                        maxLines = 2
                     )
-                    Column {
-                        Text(
-                            "🕒 故事时间线 (Timeline)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = contentColor
-                        )
-                        Text(
-                            "独立时序存放 · 关键事件与时间节点 · 支持编辑",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = secondaryColor
-                        )
-                    }
                 }
+                Icon(
+                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (isExpanded) "收起时间线" else "展开时间线",
+                    tint = primaryColor
+                )
             }
 
+            if (isExpanded) {
             // 当前故事推进节点展示与就地编辑（满足需求 1）
             Surface(
                 shape = RoundedCornerShape(10.dp),
@@ -557,42 +555,14 @@ fun ChatSettingsTimelineSection(
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { isTimelineExpanded = !isTimelineExpanded }
-                        .padding(vertical = 4.dp, horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "时间节点编年表 (${sortedNodes.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = if (isTimelineExpanded) "收起" else "展开",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = primaryColor,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Icon(
-                            imageVector = if (isTimelineExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (isTimelineExpanded) "收起" else "展开",
-                            tint = primaryColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                Text(
+                    "时间节点 · ${sortedNodes.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = secondaryColor
+                )
 
                 AnimatedVisibility(
-                    visible = isTimelineExpanded,
+                    visible = isExpanded,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
@@ -716,6 +686,7 @@ fun ChatSettingsTimelineSection(
                         }
                     }
                 }
+            }
             }
         }
     }

@@ -5,12 +5,22 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import android.util.AtomicFile
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
 
 object AvatarManager {
     private const val AVATAR_FILE = "user_avatar.dat"
     private const val MODEL_AVATAR_FILE = "model_avatar.dat"
+    private const val USER_AVATAR_HISTORY_PREFIX = "user_avatar_history_"
+    private const val USER_AVATAR_HISTORY_SUFFIX = ".dat"
+
+    /** A previously used avatar. The encoded payload is loaded only when its thumbnail is shown. */
+    data class AvatarHistoryEntry(
+        val id: String,
+        val updatedAt: Long
+    )
 
     private fun apiModelAvatarFileName(apiConfigId: Long): String =
         "model_avatar_api_$apiConfigId.dat"
@@ -49,16 +59,15 @@ object AvatarManager {
 
     fun saveCharacterAvatarBitmap(context: Context, bitmap: Bitmap): String? {
         return try {
-            val fileName = "character_avatar_${System.currentTimeMillis()}.png"
+            val fileName = "character_avatar_${java.util.UUID.randomUUID()}.png"
             val file = File(context.filesDir, fileName)
             val resized = if (bitmap.width > 512 || bitmap.height > 512) {
                 Bitmap.createScaledBitmap(bitmap, 256, 256, true)
             } else {
                 bitmap
             }
-            file.outputStream().use { output ->
-                resized.compress(Bitmap.CompressFormat.PNG, 90, output)
-            }
+            atomicWrite(file) { output -> check(resized.compress(Bitmap.CompressFormat.PNG, 90, output)) }
+            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
             if (resized != bitmap) resized.recycle()
             Uri.fromFile(file).toString()
         } catch (e: Exception) {
@@ -69,16 +78,15 @@ object AvatarManager {
 
     fun saveConversationModelAvatarBitmap(context: Context, conversationId: Long, bitmap: Bitmap): String? {
         return try {
-            val fileName = "conversation_avatar_${conversationId}_${System.currentTimeMillis()}.png"
+            val fileName = "conversation_avatar_${conversationId}_${java.util.UUID.randomUUID()}.png"
             val file = File(context.filesDir, fileName)
             val resized = if (bitmap.width > 512 || bitmap.height > 512) {
                 Bitmap.createScaledBitmap(bitmap, 256, 256, true)
             } else {
                 bitmap
             }
-            file.outputStream().use { output ->
-                resized.compress(Bitmap.CompressFormat.PNG, 90, output)
-            }
+            atomicWrite(file) { output -> check(resized.compress(Bitmap.CompressFormat.PNG, 90, output)) }
+            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
             if (resized != bitmap) resized.recycle()
             Uri.fromFile(file).toString()
         } catch (e: Exception) {
@@ -94,7 +102,9 @@ object AvatarManager {
             val path = uri.path
             if (path != null) {
                 val file = File(path)
-                if (file.exists() && file.name.startsWith("conversation_avatar_")) {
+                if (file.isFile && file.parentFile?.canonicalFile == context.filesDir.canonicalFile &&
+                    file.name.startsWith("conversation_avatar_")) {
+                    recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
                     file.delete()
                 }
             }
@@ -119,7 +129,84 @@ object AvatarManager {
 
     private fun saveAvatar(context: Context, fileName: String, base64Data: String) {
         val file = File(context.filesDir, fileName)
-        file.writeText(base64Data)
+        if (file.isFile) recordUserAvatarHistory(context, file.readText())
+        recordUserAvatarHistory(context, base64Data)
+        atomicWrite(file) { it.write(base64Data.toByteArray(Charsets.UTF_8)) }
+        avatarBitmapCache.evictAll()
+    }
+
+    /**
+     * Returns user avatars that have been used before, newest first. Existing installs are
+     * migrated lazily: the current avatar is added to the history the first time this is read.
+     */
+    fun listAvatarHistory(context: Context): List<AvatarHistoryEntry> {
+        // Include user, model, API, character and conversation avatars from existing installs.
+        context.filesDir.listFiles()?.filter { file ->
+            file.isFile && (file.name == AVATAR_FILE || file.name == MODEL_AVATAR_FILE ||
+                file.name.matches(Regex("model_avatar_api_\\d+\\.dat")))
+        }?.forEach { file -> runCatching { recordUserAvatarHistory(context, file.readText()) } }
+        context.filesDir.listFiles()?.filter { file ->
+            file.isFile && (file.name.startsWith("character_avatar_") || file.name.startsWith("conversation_avatar_")) &&
+                file.extension == "png"
+        }?.forEach { file -> runCatching {
+            recordUserAvatarHistory(context, Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+        } }
+        return historyFiles(context).mapNotNull { file ->
+            runCatching {
+                AvatarHistoryEntry(
+                    id = file.name,
+                    updatedAt = file.lastModified()
+                )
+            }.getOrNull()
+        }.sortedByDescending { it.updatedAt }
+    }
+
+    fun getAvatarHistoryBitmap(context: Context, entry: AvatarHistoryEntry): Bitmap? {
+        if (!entry.id.matches(Regex("user_avatar_history_[a-f0-9]{64}\\.dat"))) return null
+        return runCatching { base64ToBitmap(File(context.filesDir, entry.id).readText()) }.getOrNull()
+    }
+
+    /** Restores an item from the history as the active user avatar. */
+    fun restoreAvatarHistory(context: Context, entry: AvatarHistoryEntry): Boolean {
+        if (!entry.id.matches(Regex("user_avatar_history_[a-f0-9]{64}\\.dat"))) {
+            return false
+        }
+        val source = File(context.filesDir, entry.id)
+        if (!source.isFile) return false
+        return runCatching {
+            val base64 = source.readText().takeIf { it.isNotBlank() } ?: return@runCatching false
+            saveAvatar(context, AVATAR_FILE, base64)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun recordUserAvatarHistory(context: Context, base64Data: String) {
+        if (base64Data.isBlank()) return
+        val bytes = runCatching { Base64.decode(base64Data, Base64.DEFAULT) }.getOrNull() ?: return
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return
+        val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val file = File(context.filesDir, "$USER_AVATAR_HISTORY_PREFIX$hash$USER_AVATAR_HISTORY_SUFFIX")
+        if (!file.isFile) atomicWrite(file) { it.write(Base64.encodeToString(bytes, Base64.NO_WRAP).toByteArray(Charsets.UTF_8)) }
+    }
+
+    private fun historyFiles(context: Context): List<File> = context.filesDir.listFiles()
+        ?.filter { it.isFile && it.name.startsWith(USER_AVATAR_HISTORY_PREFIX) && it.name.endsWith(USER_AVATAR_HISTORY_SUFFIX) }
+        ?.sortedByDescending { it.lastModified() }
+        ?: emptyList()
+
+    private fun atomicWrite(file: File, write: (java.io.OutputStream) -> Unit) {
+        val atomic = AtomicFile(file)
+        val stream = atomic.startWrite()
+        try {
+            write(stream)
+            atomic.finishWrite(stream)
+        } catch (error: Exception) {
+            atomic.failWrite(stream)
+            throw error
+        }
     }
 
     fun saveTempAvatarBitmap(context: Context, bitmap: Bitmap): Uri? {
@@ -246,7 +333,11 @@ object AvatarManager {
 
     private fun deleteAvatar(context: Context, fileName: String) {
         val file = File(context.filesDir, fileName)
-        if (file.exists()) file.delete()
+        if (file.exists()) {
+            recordUserAvatarHistory(context, file.readText())
+            file.delete()
+        }
+        avatarBitmapCache.evictAll()
     }
 
     // 检查是否有自定义头像

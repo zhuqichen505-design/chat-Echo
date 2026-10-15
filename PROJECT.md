@@ -4,11 +4,11 @@
 
 Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
 
-**当前源码版本**: v2.8.4（versionCode 190）
+**当前源码版本**: v2.8.5（versionCode 191）
 **数据库版本**: 34（20 个实体）
-**本版范围（2026-10-16）**: 聚焦对话/侧栏工作台两种首页及四入口导航；独立的主题、阅读和动画选择；世界书基础 JSON 导入与范围/触发/预算统一；创作提示精简、附件重新生成、故事设置保存、当前时间注入及流式落库衔接修复。
+**本版范围（2026-10-16）**: 紧凑底栏与高密度首页/设置；分区对话设置和 API/重试管理；与真实会话联动的创作工作台、世界书导入说明；头像/背景历史、完整主题语义色、创作正文字体及回复完成不滚动。
 **验证状态**: 2026-10-16，`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合命令退出 0；84 套件 / 643 项全部通过，失败、错误、跳过均为 0；Lint 0 Error / 88 Warning；`git diff --check` 退出 0。首页滚动位置读取已改为派生状态，新增 Lint 警告已修复。
-**发布状态**: 安装包定名 `Echo-v2.8.4.apk`，安装包与发布核验结果见 [release-notes/latest.md](release-notes/latest.md)。沿用非正式生产签名，设备安装、启动和视觉效果尚未验收。
+**发布状态**: 安装包定名 `Echo-v2.8.5.apk`，安装包与发布核验结果见 [release-notes/latest.md](release-notes/latest.md)。沿用非正式生产签名，设备安装、启动和视觉效果尚未验收。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 

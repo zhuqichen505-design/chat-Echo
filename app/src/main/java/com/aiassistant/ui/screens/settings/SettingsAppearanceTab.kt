@@ -26,6 +26,7 @@ import com.aiassistant.ui.components.ImageCropEditDialog
 import com.aiassistant.ui.components.CropShapeMode
 import com.aiassistant.ui.components.ExpandableText
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -103,6 +104,7 @@ import com.aiassistant.utils.AppThemeMode
 import com.aiassistant.utils.EchoAppearancePreset
 import com.aiassistant.utils.EchoHomeLayoutStyle
 import com.aiassistant.utils.EchoStoryReadingStyle
+import com.aiassistant.utils.EchoStoryFont
 import com.aiassistant.utils.EchoStreamingAnimationStyle
 import com.aiassistant.utils.PersonalizationSettings
 import androidx.compose.foundation.selection.selectable
@@ -137,6 +139,10 @@ fun AppearanceTab(
     val manager = AiAssistantApp.instance.personalizationManager
 
     var avatarBase64 by remember { mutableStateOf(AvatarManager.getAvatar(context)) }
+    var avatarHistoryRevision by remember { mutableIntStateOf(0) }
+    val avatarHistory = remember(avatarHistoryRevision, avatarBase64) {
+        AvatarManager.listAvatarHistory(context)
+    }
 
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
     var pendingCropTarget by remember { mutableStateOf("avatar") } // "avatar", "home_bg", "chat_bg"
@@ -155,6 +161,7 @@ fun AppearanceTab(
     var fontSizeScale by remember(settings) { mutableFloatStateOf(settings.fontSizeScale) }
     var savedMessage by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    var backgroundRevision by remember { mutableIntStateOf(0) }
 
     fun performSave() {
         val saved = manager.saveSettings(
@@ -168,9 +175,18 @@ fun AppearanceTab(
     }
 
     fun saveVisualPreference(message: String, update: (PersonalizationSettings) -> PersonalizationSettings) {
-        val updated = update(manager.getSettings())
+        val current = manager.getSettings()
+        val updated = update(current)
         if (manager.saveSettings(updated)) {
             settings = manager.getSettings()
+            if (updated.appearancePreset != current.appearancePreset) {
+                val backgroundSaved = BackgroundImageManager.applyThemeBackground(context)
+                backgroundRevision++
+                if (!backgroundSaved) {
+                    savedMessage = "主题已更新，背景切换失败；原图片仍保留，请重试"
+                    return
+                }
+            }
             onAppearancePresetChange(settings.appearancePreset)
             savedMessage = message
         } else {
@@ -185,7 +201,9 @@ fun AppearanceTab(
         }
     }
 
-    var backgroundRevision by remember { mutableIntStateOf(0) }
+    val backgroundHistory = remember(backgroundRevision) {
+        BackgroundImageManager.listBackgroundHistory(context)
+    }
     val hasHomeBackground = remember(backgroundRevision) {
         BackgroundImageManager.hasHomeBackground(context)
     }
@@ -312,12 +330,95 @@ fun AppearanceTab(
             }
         }
 
+        if (avatarHistory.isNotEmpty()) {
+            item {
+                SettingsGlassCard(hazeState = hazeState) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("头像历史", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "用户、模型与角色头像统一保留，也可以设为壁纸。横向滑动查看全部 ${avatarHistory.size} 张。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(avatarHistory, key = { it.id }) { entry ->
+                            val bitmap = remember(entry.id) { AvatarManager.getAvatarHistoryBitmap(context, entry) }
+                            if (bitmap != null) {
+                                var showActions by remember { mutableStateOf(false) }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(54.dp)
+                                            .clip(CircleShape)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                            .clickable { showActions = true }
+                                    ) {
+                                        Image(
+                                            bitmap = bitmap.asImageBitmap(),
+                                            contentDescription = "历史头像",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    TextButton(onClick = { showActions = true }, contentPadding = PaddingValues(0.dp)) {
+                                        Text("预览 / 应用", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (showActions) {
+                                    AlertDialog(onDismissRequest = { showActions = false },
+                                        title = { Text("历史头像") },
+                                        text = {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Image(bitmap.asImageBitmap(), "历史头像预览", modifier = Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
+                                                TextButton(onClick = {
+                                                    val saved = AvatarManager.restoreAvatarHistory(context, entry)
+                                                    if (saved) { avatarBase64 = AvatarManager.getAvatar(context); avatarHistoryRevision++ }
+                                                    savedMessage = if (saved) "已恢复历史头像" else "头像恢复失败，请重试"
+                                                    showActions = false
+                                                }) { Text("设为用户头像") }
+                                                TextButton(onClick = {
+                                                    val saved = BackgroundImageManager.saveHomeBackgroundBitmap(context, bitmap)
+                                                    backgroundRevision++
+                                                    savedMessage = if (saved) "已设置首页壁纸" else "壁纸保存失败，请重试"
+                                                    showActions = false
+                                                }) { Text("设为首页壁纸") }
+                                                TextButton(onClick = {
+                                                    val saved = BackgroundImageManager.saveChatBackgroundBitmap(context, bitmap)
+                                                    backgroundRevision++
+                                                    savedMessage = if (saved) "已设置对话壁纸" else "壁纸保存失败，请重试"
+                                                    showActions = false
+                                                }) { Text("设为对话壁纸") }
+                                            }
+                                        }, confirmButton = { TextButton(onClick = { showActions = false }) { Text("关闭") } })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. 应用主题模式
         item {
             ThemeModeCard(
                 hazeState = hazeState,
                 selected = themeMode,
-                onSelected = onThemeModeChange
+                onSelected = { mode ->
+                    if (mode != themeMode) {
+                        onThemeModeChange(mode)
+                        val saved = BackgroundImageManager.applyThemeBackground(context)
+                        backgroundRevision++
+                        savedMessage = if (saved) "已切换${mode.label}，背景已同步为主题底色" else "背景切换失败，原图片仍保留，请重试"
+                    }
+                }
             )
         }
 
@@ -366,7 +467,7 @@ fun AppearanceTab(
         item {
             SettingsGlassCard(hazeState = hazeState) {
                 Text("主题预设", style = MaterialTheme.typography.titleMedium)
-                Text("选择应用配色，明暗模式沿用上方设置。", style = MaterialTheme.typography.bodySmall,
+                Text("切换主题会同步首页与对话页的纯色背景。用过的图片保留在背景历史中，可随时恢复。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Column(Modifier.fillMaxWidth().selectableGroup()) {
                     val presets = listOf(
@@ -417,6 +518,26 @@ fun AppearanceTab(
                             onClick = { saveVisualPreference("创作阅读页已切换为$label") { it.copy(storyReadingStyle = value) } },
                             label = { Text(label) }, colors = echoFilterChipColors(),
                             border = echoFilterChipBorder(settings.storyReadingStyle == value))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("创作正文字体", style = MaterialTheme.typography.titleSmall)
+                Text("只改变故事正文，不影响普通对话和设置文字。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        EchoStoryFont.LITERARY to "沉浸衬线",
+                        EchoStoryFont.CLEAR to "清晰无衬线",
+                        EchoStoryFont.TYPEWRITER to "稿纸等宽"
+                    ).forEach { (value, label) ->
+                        FilterChip(
+                            selected = settings.storyFont == value,
+                            onClick = { saveVisualPreference("创作正文字体已切换为$label") { it.copy(storyFont = value) } },
+                            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(settings.storyFont == value),
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
@@ -555,7 +676,7 @@ fun AppearanceTab(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("界面背景", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "可为首页和对话页选择内置低饱和护眼纯色或自定义相册图片背景。",
+                            "首页与对话页可分别设置图片或纯色。切换主题后，可在历史中恢复以前的背景。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -565,12 +686,12 @@ fun AppearanceTab(
                 // 内置低饱和度纯色背景选择区
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "内置极低饱和纯色背景（护眼高可读性）",
+                        "纯色背景",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "精选极低饱和度（<5%）淡雅纯色，完全不影响文字清晰度与对比度（符合 WCAG AAA）。轻触选择并一键应用：",
+                        "选择颜色后设置到首页、对话页或两处。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -724,6 +845,46 @@ fun AppearanceTab(
                         savedMessage = "已恢复对话页默认背景"
                     }
                 )
+                if (backgroundHistory.isNotEmpty()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Text("背景历史", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("图片与纯色均保留，横向滑动查看全部 ${backgroundHistory.size} 张。", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(backgroundHistory, key = { it.id }) { entry ->
+                            val bitmap = remember(entry.id) { BackgroundImageManager.getBackgroundHistoryBitmap(context, entry) }
+                            if (bitmap != null) {
+                                Column(modifier = Modifier.width(110.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Image(bitmap = bitmap.asImageBitmap(), contentDescription = "历史背景",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxWidth().height(74.dp).clip(RoundedCornerShape(10.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)))
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        TextButton(onClick = {
+                                            if (BackgroundImageManager.restoreHomeBackground(context, entry)) {
+                                                backgroundRevision++
+                                                savedMessage = "已恢复首页背景"
+                                            }
+                                        }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f)) {
+                                            Text("首页", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                        TextButton(onClick = {
+                                            if (BackgroundImageManager.restoreChatBackground(context, entry)) {
+                                                backgroundRevision++
+                                                savedMessage = "已恢复对话页背景"
+                                            }
+                                        }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f)) {
+                                            Text("对话", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

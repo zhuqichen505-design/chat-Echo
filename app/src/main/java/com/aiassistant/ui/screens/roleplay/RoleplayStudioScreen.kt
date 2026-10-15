@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,9 +68,10 @@ fun RoleplayStudioScreen(
     val context = LocalContext.current
     val repository = remember { AiAssistantApp.instance.repository }
     val hazeState = rememberEchoHazeState()
-    val characters by viewModel.characters.collectAsState()
-    val scenarios by viewModel.scenarios.collectAsState()
+    val characters by viewModel.allCharacters.collectAsState()
+    val scenarios by viewModel.allScenarios.collectAsState()
     val sessions by viewModel.sessions.collectAsState()
+    val conversations by viewModel.conversations.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
     val currentTab = viewModel.studioTab
@@ -77,6 +79,16 @@ fun RoleplayStudioScreen(
     var showStudioMenu by remember { mutableStateOf(false) }
     var showSmartAnalyzeDialog by remember { mutableStateOf(false) }
     var analyzedBundle by remember { mutableStateOf<AnalyzedRoleplayBundle?>(null) }
+    var sessionSearchQuery by rememberSaveable { mutableStateOf("") }
+    var pinnedStoriesOnly by rememberSaveable { mutableStateOf(false) }
+    var storyModeFilter by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val stories = remember(sessions, conversations, characters, scenarios) {
+        buildStudioStories(sessions, conversations, characters, scenarios)
+    }
+    val visibleStories = remember(sessions, conversations, characters, scenarios, sessionSearchQuery, pinnedStoriesOnly, storyModeFilter) {
+        buildStudioStories(sessions, conversations, characters, scenarios, sessionSearchQuery, pinnedStoriesOnly, storyModeFilter)
+    }
 
     Scaffold(
         topBar = {
@@ -132,38 +144,33 @@ fun RoleplayStudioScreen(
                 StudioGuideCard(onDismiss = { showGuide = false })
             }
 
-            // 标签页导航
-            ScrollableTabRow(
-                selectedTabIndex = currentTab,
-                edgePadding = 0.dp,
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-            ) {
-                Tab(
-                    selected = currentTab == 0,
-                    onClick = { viewModel.studioTab = 0 },
-                    text = { Text("故事 (${sessions.size})") },
-                    icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) }
-                )
-                Tab(
-                    selected = currentTab == 1,
-                    onClick = { viewModel.studioTab = 1 },
-                    text = { Text("角色 (${characters.size})") },
-                    icon = { Icon(Icons.Default.Person, contentDescription = null) }
-                )
-                Tab(
-                    selected = currentTab == 2,
-                    onClick = { viewModel.studioTab = 2 },
-                    text = { Text("世界观 (${scenarios.size})") },
-                    icon = { Icon(Icons.Default.Landscape, contentDescription = null) }
-                )
-            }
+            // 紧凑分段导航：三个资源集合保持同一层级，顶部操作位置不跳动。
+            StudioCollectionTabs(
+                selected = currentTab,
+                sessionCount = stories.size,
+                characterCount = characters.size,
+                scenarioCount = scenarios.size,
+                onSelect = { viewModel.studioTab = it }
+            )
 
             // 内容区域
             when (currentTab) {
                 0 -> SessionsTab(
-                    sessions = sessions,
+                    stories = visibleStories,
+                    hasStories = stories.isNotEmpty(),
                     characters = characters,
                     scenarios = scenarios,
+                    searchQuery = sessionSearchQuery,
+                    onSearch = { sessionSearchQuery = it },
+                    pinnedOnly = pinnedStoriesOnly,
+                    onPinnedOnlyChange = { pinnedStoriesOnly = it },
+                    modeFilter = storyModeFilter,
+                    onModeFilterChange = { storyModeFilter = it },
+                    onRename = viewModel::renameStory,
+                    onPin = viewModel::setStoryPinned,
+                    onDuplicate = { viewModel.duplicateStory(it, onNavigateToSession) },
+                    onHide = viewModel::hideStories,
+                    onDeleteMultiple = viewModel::deleteStories,
                     onSessionClick = { onNavigateToSession(it.conversationId) },
                     onDeleteSession = { viewModel.deleteSession(it) },
                     onUpdateSessionContext = { session, cIds, scId, mode, summary ->
@@ -191,7 +198,7 @@ fun RoleplayStudioScreen(
                     onFavoriteClick = { id, isFavorite -> viewModel.setCharacterFavorite(id, isFavorite) },
                     onDeleteMultiple = { viewModel.deleteCharacters(it) },
                     onSmartAnalyze = { showSmartAnalyzeDialog = true },
-                    onSearch = { viewModel.searchCharacters(it) }
+                    onSearch = {}
                 )
                 2 -> ScenariosTab(
                     scenarios = scenarios,
@@ -200,7 +207,7 @@ fun RoleplayStudioScreen(
                     onFavoriteClick = { id, isFavorite -> viewModel.setScenarioFavorite(id, isFavorite) },
                     onDeleteMultiple = { viewModel.deleteScenarios(it) },
                     onSmartAnalyze = { showSmartAnalyzeDialog = true },
-                    onSearch = { viewModel.searchScenarios(it) }
+                    onSearch = {}
                 )
             }
         }
@@ -259,6 +266,49 @@ fun RoleplayStudioScreen(
             }
         }
         else -> {}
+    }
+}
+
+@Composable
+private fun StudioCollectionTabs(
+    selected: Int,
+    sessionCount: Int,
+    characterCount: Int,
+    scenarioCount: Int,
+    onSelect: (Int) -> Unit
+) {
+    val tabs = listOf("故事  $sessionCount", "角色  $characterCount", "世界观  $scenarioCount")
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = EchoTokens.Spacing.screenHorizontal),
+        shape = EchoTokens.Radius.shapeMd,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f)
+    ) {
+        Row(modifier = Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            tabs.forEachIndexed { index, label ->
+                val active = selected == index
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(EchoTokens.Radius.shapeSm)
+                        .clickable { onSelect(index) },
+                    shape = EchoTokens.Radius.shapeSm,
+                    color = if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
+                    shadowElevation = if (active) 1.dp else 0.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -360,9 +410,21 @@ private fun GuideStepRow(step: String, title: String, desc: String) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionsTab(
-    sessions: List<RoleplaySession>,
+    stories: List<StudioStory>,
+    hasStories: Boolean,
     characters: List<CharacterProfile>,
     scenarios: List<RoleplayScenario>,
+    searchQuery: String,
+    onSearch: (String) -> Unit,
+    pinnedOnly: Boolean,
+    onPinnedOnlyChange: (Boolean) -> Unit,
+    modeFilter: String?,
+    onModeFilterChange: (String?) -> Unit,
+    onRename: (Long, String) -> Unit,
+    onPin: (Collection<Long>, Boolean) -> Unit,
+    onDuplicate: (Long) -> Unit,
+    onHide: (Collection<Long>) -> Unit,
+    onDeleteMultiple: (Collection<Long>) -> Unit,
     onSessionClick: (RoleplaySession) -> Unit,
     onDeleteSession: (RoleplaySession) -> Unit,
     onUpdateSessionContext: (RoleplaySession, List<Long>, Long?, NarrativeMode?, String?) -> Unit,
@@ -373,7 +435,15 @@ private fun SessionsTab(
     onCreateNewSession: () -> Unit,
     onSmartAnalyze: () -> Unit
 ) {
-    if (sessions.isEmpty()) {
+    var selectedIds by remember { mutableStateOf(emptySet<Long>()) }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var showDeleteMultiple by remember { mutableStateOf(false) }
+    var showFilterMenu by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selectionMode) {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+    if (!hasStories && searchQuery.isBlank()) {
         StudioEmptyState(
             icon = Icons.AutoMirrored.Filled.Chat,
             title = "暂无故事创作",
@@ -384,38 +454,142 @@ private fun SessionsTab(
             onSecondaryAction = onSmartAnalyze
         )
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(EchoTokens.Spacing.screenHorizontal),
-            verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.itemSpacing)
-        ) {
-            items(sessions) { session ->
-                SessionCard(
-                    session = session,
-                    characters = characters,
-                    scenarios = scenarios,
-                    onClick = { onSessionClick(session) },
-                    onDelete = { onDeleteSession(session) },
-                    onUpdateContext = { cIds, scId, mode, summary ->
-                        onUpdateSessionContext(session, cIds, scId, mode, summary)
-                    },
-                    onSyncCharacterToDb = onSyncCharacterToDb,
-                    onSyncScenarioToDb = onSyncScenarioToDb,
-                    onSyncCharacterFromDb = { charId -> onSyncCharacterFromDb(session, charId) },
-                    onSyncScenarioFromDb = { scId -> onSyncScenarioFromDb(session, scId) }
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { selectionMode = false; selectedIds = emptySet() }) {
+                        Icon(Icons.Default.Close, "退出选择")
+                    }
+                    Text("已选 ${selectedIds.size}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                    TextButton(onClick = { selectedIds = stories.map { it.conversation.id }.toSet() }) { Text("全选") }
+                    IconButton(enabled = selectedIds.isNotEmpty(), onClick = { onPin(selectedIds, true); selectionMode = false; selectedIds = emptySet() }) {
+                        Icon(Icons.Default.PushPin, "置顶选中故事")
+                    }
+                    IconButton(enabled = selectedIds.isNotEmpty(), onClick = { onHide(selectedIds); selectionMode = false; selectedIds = emptySet() }) {
+                        Icon(Icons.Default.VisibilityOff, "隐藏选中故事")
+                    }
+                    IconButton(enabled = selectedIds.isNotEmpty(), onClick = { showDeleteMultiple = true }) {
+                        Icon(Icons.Default.DeleteOutline, "删除选中故事", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            } else {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearch,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = EchoTokens.Spacing.screenHorizontal, vertical = 6.dp),
+                placeholder = { Text("搜索故事、角色、世界观或剧情摘要") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    Row {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { onSearch("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "清除搜索", modifier = Modifier.size(17.dp))
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { showFilterMenu = true }) {
+                                Icon(Icons.Default.FilterList, "筛选故事",
+                                    tint = if (pinnedOnly || modeFilter != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            DropdownMenu(expanded = showFilterMenu, onDismissRequest = { showFilterMenu = false }) {
+                                DropdownMenuItem(text = { Text(if (pinnedOnly) "✓ 仅置顶" else "仅置顶") }, onClick = { onPinnedOnlyChange(!pinnedOnly); showFilterMenu = false })
+                                DropdownMenuItem(text = { Text("全部叙事模式") }, onClick = { onModeFilterChange(null); showFilterMenu = false })
+                                NarrativeMode.entries.forEach { mode ->
+                                    DropdownMenuItem(text = { Text((if (modeFilter == mode.value) "✓ " else "") + mode.displayName) }, onClick = { onModeFilterChange(mode.value); showFilterMenu = false })
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text("批量管理") }, onClick = { selectionMode = true; showFilterMenu = false })
+                            }
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = EchoTokens.Radius.shapeMd,
+                textStyle = MaterialTheme.typography.bodyMedium
+            )
+            }
+            if (stories.isEmpty()) {
+                StudioEmptyState(
+                    icon = Icons.Default.SearchOff,
+                    title = "没有匹配的故事",
+                    description = "试试角色名、世界观名或剧情摘要中的关键词",
+                    actionText = "清除搜索与筛选",
+                    onAction = { onSearch(""); onPinnedOnlyChange(false); onModeFilterChange(null) }
                 )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = EchoTokens.Spacing.screenHorizontal, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(stories, key = { it.session.id }) { story ->
+                        val session = story.session
+                        SessionCard(
+                            story = story,
+                            session = session,
+                            characters = characters,
+                            scenarios = scenarios,
+                            selectionMode = selectionMode,
+                            selected = story.conversation.id in selectedIds,
+                            onSelect = {
+                                selectionMode = true
+                                selectedIds = if (story.conversation.id in selectedIds) selectedIds - story.conversation.id else selectedIds + story.conversation.id
+                            },
+                            onClick = {
+                                if (selectionMode) {
+                                    selectedIds = if (story.conversation.id in selectedIds) selectedIds - story.conversation.id else selectedIds + story.conversation.id
+                                } else onSessionClick(session)
+                            },
+                            onRename = { onRename(story.conversation.id, it) },
+                            onPin = { onPin(listOf(story.conversation.id), !story.conversation.isPinned) },
+                            onDuplicate = { onDuplicate(story.conversation.id) },
+                            onHide = { onHide(listOf(story.conversation.id)) },
+                            onDelete = { onDeleteSession(session) },
+                            onUpdateContext = { cIds, scId, mode, summary ->
+                                onUpdateSessionContext(session, cIds, scId, mode, summary)
+                            },
+                            onSyncCharacterToDb = onSyncCharacterToDb,
+                            onSyncScenarioToDb = onSyncScenarioToDb,
+                            onSyncCharacterFromDb = { charId -> onSyncCharacterFromDb(session, charId) },
+                            onSyncScenarioFromDb = { scId -> onSyncScenarioFromDb(session, scId) }
+                        )
+                    }
+                }
             }
         }
+    }
+    if (showDeleteMultiple) {
+        EchoConfirmDialog(
+            title = "删除 ${selectedIds.size} 个故事？",
+            text = "对应消息、故事设定和会话记忆将一并删除。此操作无法撤销。",
+            confirmText = "删除",
+            isDestructive = true,
+            onConfirm = { onDeleteMultiple(selectedIds); selectedIds = emptySet(); selectionMode = false; showDeleteMultiple = false },
+            onDismiss = { showDeleteMultiple = false }
+        )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionCard(
+    story: StudioStory,
     session: RoleplaySession,
     characters: List<CharacterProfile>,
     scenarios: List<RoleplayScenario>,
     onClick: () -> Unit,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onRename: (String) -> Unit,
+    onPin: () -> Unit,
+    onDuplicate: () -> Unit,
+    onHide: () -> Unit,
     onDelete: () -> Unit,
     onUpdateContext: (List<Long>, Long?, NarrativeMode?, String?) -> Unit,
     onSyncCharacterToDb: (CharacterProfile) -> Unit,
@@ -428,6 +602,8 @@ private fun SessionCard(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showEditContextDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renamedTitle by remember(story.title) { mutableStateOf(story.title) }
 
     val boundCharNames = remember(session.characterIds, session.characterId, characters) {
         val ids = session.getEffectiveCharacterIds()
@@ -437,70 +613,71 @@ private fun SessionCard(
         scenarios.firstOrNull { it.id == session.scenarioId }
     }
 
-    val storyTitle = remember(boundCharNames, boundScenario, session.id) {
-        when {
-            boundCharNames.isNotEmpty() && boundScenario != null -> "${boundCharNames.joinToString("、")} · ${boundScenario.name}"
-            boundCharNames.isNotEmpty() -> "故事：" + boundCharNames.joinToString("、")
-            boundScenario != null -> "世界观：${boundScenario.name}"
-            else -> "故事创作会话 #${session.id}"
-        }
-    }
+    val storyTitle = story.title.ifBlank { roleplaySessionLabel(session, characters, scenarios) }
 
     EchoGlassCard(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,
-        onLongClick = { showActionMenu = true },
-        shape = EchoTokens.Radius.shapeLg
+        onLongClick = onSelect,
+        shape = EchoTokens.Radius.shapeMd,
+        containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Unspecified
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (selectionMode) {
+                Checkbox(checked = selected, onCheckedChange = { onSelect() })
+            }
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = storyTitle,
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif,
-                        fontWeight = FontWeight.Bold)
-                )
-                if (boundCharNames.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "登场角色：${boundCharNames.joinToString("、")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (story.conversation.isPinned) Icon(Icons.Default.PushPin, "已置顶", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(storyTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (story.characterNames.isNotBlank()) {
+                        Text(
+                            text = story.characterNames,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    if (story.scenarioName.isNotBlank()) {
+                        Text(
+                            text = story.scenarioName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
                 if (session.currentPlotSummary.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = session.currentPlotSummary.take(60) + if (session.currentPlotSummary.length > 60) "..." else "",
+                        text = session.currentPlotSummary.take(76) + if (session.currentPlotSummary.length > 76) "…" else "",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    SuggestionChip(
-                        onClick = { showEditContextDialog = true },
-                        label = { Text("叙事模式: ${NarrativeMode.fromValue(session.narrativeMode).displayName}") },
-                        modifier = Modifier.defaultMinSize(minHeight = 26.dp)
-                    )
-                    Text(
-                        text = "长按故事可同步或修改设定",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(NarrativeMode.fromValue(session.narrativeMode).displayName,
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text("${story.conversation.messageCount} 条 · ${story.conversation.modelName}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
             }
-            IconButton(onClick = { showActionMenu = true }) {
+            if (!selectionMode) IconButton(onClick = { showActionMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "操作", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -510,90 +687,47 @@ private fun SessionCard(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showActionMenu = false },
-            title = {
-                Text(storyTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            },
+            title = { Text(storyTitle, style = MaterialTheme.typography.titleMedium) },
             content = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    EchoGlassCard(
-                        onClick = {
-                            showActionMenu = false
-                            showSyncDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = EchoTokens.Radius.shapeSm,
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Sync, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("🔄 双向设定同步 (Sync)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                Text("按故事更新主库，或从主库拉取最新设定", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                Column {
+                    StudioActionRow(Icons.Default.PushPin, if (story.conversation.isPinned) "取消置顶" else "置顶故事") {
+                        showActionMenu = false; onPin()
                     }
-
-                    EchoGlassCard(
-                        onClick = {
-                            showActionMenu = false
-                            showEditContextDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = EchoTokens.Radius.shapeSm
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("✏️ 修改故事设定与模式", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                Text("调整绑定世界观、登场角色与叙事模式", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                    StudioActionRow(Icons.Default.Edit, "重命名") {
+                        showActionMenu = false; showRenameDialog = true
                     }
-
-                    EchoGlassCard(
-                        onClick = {
-                            showActionMenu = false
-                            showDeleteDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = EchoTokens.Radius.shapeSm,
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("🗑️ 删除故事会话", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                                Text("删除本故事及其对话历史", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                    StudioActionRow(Icons.Default.Tune, "人物、世界观与叙事模式") {
+                        showActionMenu = false; showEditContextDialog = true
+                    }
+                    StudioActionRow(Icons.Default.Sync, "与资料库同步设定") {
+                        showActionMenu = false; showSyncDialog = true
+                    }
+                    HorizontalDivider()
+                    StudioActionRow(Icons.Default.ContentCopy, "复制故事（含消息和设定）") {
+                        showActionMenu = false; onDuplicate()
+                    }
+                    StudioActionRow(Icons.Default.Checklist, "批量管理") {
+                        showActionMenu = false; onSelect()
+                    }
+                    StudioActionRow(Icons.Default.VisibilityOff, "隐藏故事") {
+                        showActionMenu = false; onHide()
+                    }
+                    StudioActionRow(Icons.Default.DeleteOutline, "删除故事及对话", destructive = true) {
+                        showActionMenu = false; showDeleteDialog = true
                     }
                 }
             },
-            buttons = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = { showActionMenu = false }) {
-                        Text("取消")
-                    }
-                }
-            }
+            buttons = { TextButton(onClick = { showActionMenu = false }) { Text("关闭") } }
+        )
+    }
+
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("重命名故事") },
+            text = { OutlinedTextField(value = renamedTitle, onValueChange = { renamedTitle = it }, singleLine = true, label = { Text("故事名称") }) },
+            confirmButton = { TextButton(enabled = renamedTitle.isNotBlank(), onClick = { onRename(renamedTitle); showRenameDialog = false }) { Text("保存") } },
+            dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("取消") } }
         )
     }
 
@@ -636,6 +770,24 @@ private fun SessionCard(
             },
             onDismiss = { showDeleteDialog = false }
         )
+    }
+}
+
+@Composable
+private fun StudioActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    val color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
+        Text(title, style = MaterialTheme.typography.bodyMedium, color = color)
     }
 }
 
@@ -1038,7 +1190,7 @@ private fun CharacterCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1071,7 +1223,7 @@ private fun CharacterCard(
                     }
                 }
                 if (character.personality.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "性格：${character.personality}",
                         style = MaterialTheme.typography.bodySmall,
@@ -1080,7 +1232,7 @@ private fun CharacterCard(
                     )
                 }
                 if (!character.tags.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "标签：${character.tags}",
                         style = MaterialTheme.typography.labelSmall,
@@ -1296,7 +1448,7 @@ private fun ScenarioCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1316,7 +1468,7 @@ private fun ScenarioCard(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 if (scenario.worldview.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "世界观：${scenario.worldview}",
                         style = MaterialTheme.typography.bodySmall,
@@ -1325,7 +1477,7 @@ private fun ScenarioCard(
                     )
                 }
                 if (scenario.location.isNotBlank() || scenario.time.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = listOf(scenario.time, scenario.location).filter { it.isNotBlank() }.joinToString(" · "),
                         style = MaterialTheme.typography.labelSmall,

@@ -211,8 +211,12 @@ fun ChatSettingsDialog(
     var activeWorldBookIds by remember { mutableStateOf(tempSettings.activeWorldBookIds) }
     var enableReplyDirections by remember { mutableStateOf(tempSettings.enableReplyDirections) }
     var replyDirectionCount by remember { mutableIntStateOf(tempSettings.replyDirectionCount.coerceIn(2, 4)) }
+    // 这些面板的数据会在后台提炼、保存记忆时刷新。状态放在弹窗根部，
+    // 避免 LazyColumn item 重组后折叠面板意外恢复为展开。
+    var timelineSectionExpanded by rememberSaveable { mutableStateOf(false) }
+    var sessionMemorySectionExpanded by rememberSaveable { mutableStateOf(false) }
     var contextWindowTokens by remember { mutableStateOf(tempSettings.contextWindowTokens) }
-    var promptTextFieldValue by rememberSaveable(currentPrompt, stateSaver = TextFieldValue.Saver) {
+    var promptTextFieldValue by rememberSaveable(conversationId, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(
             TextFieldValue(
                 text = currentPrompt.orEmpty(),
@@ -222,9 +226,16 @@ fun ChatSettingsDialog(
     }
     var showTemplates by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
-    var showAdvancedOptions by remember { mutableStateOf(false) }
+    var settingsTab by rememberSaveable(conversationId) { mutableIntStateOf(0) }
     var avatarRevision by remember { mutableIntStateOf(0) }
-    val dialogListState = rememberLazyListState()
+    val generationListState = rememberLazyListState()
+    val memoryListState = rememberLazyListState()
+    val appearanceListState = rememberLazyListState()
+    val dialogListState = when (settingsTab) {
+        1 -> memoryListState
+        2 -> appearanceListState
+        else -> generationListState
+    }
     val modelOptions = remember(currentOption, fallbackModel, availableOptions) {
         val fallback = currentOption ?: ChatModelOption(
             apiConfigId = 0,
@@ -240,23 +251,44 @@ fun ChatSettingsDialog(
     val tuningProfile = remember(currentOption, fallbackModel, enableThinking) {
         chatTuningProfile(currentOption, fallbackModel, enableThinking)
     }
-    var temperature by remember(tuningProfile.temperatureMax) {
+    var temperature by remember {
         mutableStateOf(tempSettings.temperature.coerceIn(0f, tuningProfile.temperatureMax))
     }
 
+    var lastIncomingSettings by remember { mutableStateOf(tempSettings) }
     LaunchedEffect(tempSettings) {
-        maxTokens = tempSettings.maxTokens.toString()
-        topP = tempSettings.topP
-        enableThinking = tempSettings.enableThinking
-        thinkingEffort = tempSettings.thinkingEffort
-        enableWebSearch = tempSettings.enableWebSearch
-        enableSessionMemory = tempSettings.enableSessionMemory
-        enableExternalMemory = tempSettings.enableExternalMemory
-        enableWorldBook = tempSettings.enableWorldBook
-        activeWorldBookIds = tempSettings.activeWorldBookIds
-        enableReplyDirections = tempSettings.enableReplyDirections
-        replyDirectionCount = tempSettings.replyDirectionCount.coerceIn(2, 4)
-        contextWindowTokens = tempSettings.contextWindowTokens
+        val previous = lastIncomingSettings
+        val local = TempChatSettings(
+            temperature = temperature,
+            maxTokens = maxTokens.toIntOrNull() ?: previous.maxTokens,
+            topP = topP,
+            enableThinking = enableThinking,
+            thinkingEffort = thinkingEffort,
+            enableWebSearch = enableWebSearch,
+            enableSessionMemory = enableSessionMemory,
+            enableExternalMemory = enableExternalMemory,
+            enableWorldBook = enableWorldBook,
+            enableReplyDirections = enableReplyDirections,
+            replyDirectionCount = replyDirectionCount,
+            activeWorldBookIds = activeWorldBookIds,
+            contextWindowTokens = contextWindowTokens
+        )
+        val merged = mergeChatSettingsDraft(local, previous, tempSettings)
+        // 空白/尚未输入完成的数字也属于草稿，不被外部更新替换。
+        if (maxTokens == previous.maxTokens.toString()) maxTokens = merged.maxTokens.toString()
+        temperature = merged.temperature.coerceIn(0f, tuningProfile.temperatureMax)
+        topP = merged.topP
+        enableThinking = merged.enableThinking
+        thinkingEffort = merged.thinkingEffort
+        enableWebSearch = merged.enableWebSearch
+        enableSessionMemory = merged.enableSessionMemory
+        enableExternalMemory = merged.enableExternalMemory
+        enableWorldBook = merged.enableWorldBook
+        activeWorldBookIds = merged.activeWorldBookIds
+        enableReplyDirections = merged.enableReplyDirections
+        replyDirectionCount = merged.replyDirectionCount.coerceIn(2, 4)
+        contextWindowTokens = merged.contextWindowTokens
+        lastIncomingSettings = tempSettings
     }
 
     fun notifyTempSettingsChange() {
@@ -356,333 +388,159 @@ fun ChatSettingsDialog(
             }
         },
         content = {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 500.dp),
-                state = dialogListState,
-                contentPadding = PaddingValues(end = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                item {
-                    ChatSettingsModelSelector(
-                        currentOption = currentOption,
-                        fallbackModel = fallbackModel,
-                        availableOptions = modelOptions,
-                        contentColor = dialogContentColor,
-                        secondaryColor = dialogSecondaryColor,
-                        onModelSelected = onModelSelected
-                    )
-                }
-
-                item {
-                    ChatSettingsSystemPromptSection(
-                        promptTextFieldValue = promptTextFieldValue,
-                        onPromptChange = { promptTextFieldValue = it },
-                        hasTemplates = templates.isNotEmpty(),
-                        contentColor = dialogContentColor,
-                        secondaryColor = dialogSecondaryColor,
-                        onChooseTemplate = { showTemplates = true },
-                        onSaveTemplate = { showSaveDialog = true }
-                    )
-                }
-
-
-                // 思考模式
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 12.dp)
-                        ) {
-                            Text("思考模式", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
-                            Text(
-                                "支持时按厂商协议传入 reasoning_effort，档位与采样参数随模型自动适配",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = dialogSecondaryColor
-                            )
-                        }
-                        Switch(
-                            checked = currentOption?.reasoningCapability?.supportsThinking != false && (enableThinking || tuningProfile.forcedThinking),
-                            enabled = tuningProfile.thinkingToggleEnabled,
-                            onCheckedChange = {
-                                enableThinking = it
-                                notifyTempSettingsChange()
-                            },
-                            colors = echoSwitchColors(forcedThinking = tuningProfile.forcedThinking)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScrollableTabRow(
+                    selectedTabIndex = settingsTab,
+                    edgePadding = 0.dp,
+                    containerColor = Color.Transparent
+                ) {
+                    listOf("模型与生成", "提示与记忆", "外观与模式").forEachIndexed { index, label ->
+                        Tab(
+                            selected = settingsTab == index,
+                            onClick = { settingsTab = index },
+                            text = { Text(label, style = MaterialTheme.typography.labelLarge) }
                         )
                     }
                 }
-
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 12.dp)
-                        ) {
-                            Text("联网", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
-                            Text(
-                                "仅对支持联网的API或模型生效",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = dialogSecondaryColor
-                            )
-                        }
-                        Switch(
-                            checked = enableWebSearch,
-                            onCheckedChange = {
-                                enableWebSearch = it
-                                notifyTempSettingsChange()
-                            },
-                            colors = echoSwitchColors()
-                        )
-                    }
-                }
-
-                // 思考强度
-                if (enableThinking && tuningProfile.thinkingEfforts.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.65f).dp),
+                    state = dialogListState,
+                    contentPadding = PaddingValues(end = 2.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                if (settingsTab == 0) {
                     item {
-                        Column {
-                            Text("思考强度", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(tuningProfile.thinkingEfforts) { level ->
-                                    val selected = thinkingEffort == level.value
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = {
-                                            thinkingEffort = level.value
-                                            notifyTempSettingsChange()
-                                        },
-                                        colors = echoFilterChipColors(),
-                                        border = echoFilterChipBorder(selected),
-                                        elevation = echoFilterChipElevation(),
-                                        label = {
-                                            Text(level.label)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else if (enableThinking && tuningProfile.noThinkingEffortReason != null) {
-                    item {
-                        Text(
-                            text = tuningProfile.noThinkingEffortReason,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = dialogSecondaryColor
+                        ChatSettingsModelSelector(
+                            currentOption = currentOption,
+                            fallbackModel = fallbackModel,
+                            availableOptions = modelOptions,
+                            contentColor = dialogContentColor,
+                            secondaryColor = dialogSecondaryColor,
+                            onModelSelected = onModelSelected
                         )
                     }
-                }
 
-                item {
-                    ChatSettingsTimelineSection(
-                        timelineNodes = timelineNodes,
-                        currentStoryTime = currentStoryTime,
-                        contentColor = dialogContentColor,
-                        secondaryColor = dialogSecondaryColor,
-                        enableTimeline = true,
-                        hazeState = hazeState,
-                        isReconcilingTimeline = isReconcilingTimeline,
-                        reconcileTimelineProgress = reconcileTimelineProgress,
-                        hasSavedTimelineDraft = hasSavedTimelineDraft,
-                        checkpoint = checkpoint,
-                        newMessagesCountSinceCheckpoint = newMessagesCountSinceCheckpoint,
-                        onStartTimelineReconciliation = onStartTimelineReconciliation,
-                        onContinueTimelineReconciliation = onContinueTimelineReconciliation,
-                        onReconcileFromCheckpoint = onReconcileFromCheckpoint,
-                        onOpenTimelineDraft = onOpenTimelineDraft,
-                        onClearTimelineDraft = onClearTimelineDraft,
-                        onCancelTimelineReconciliation = onCancelTimelineReconciliation,
-                        onUpdateCurrentStoryTime = onUpdateCurrentStoryTime,
-                        onAddTimelineNode = onAddTimelineNode,
-                        onUpdateTimelineNode = onUpdateTimelineNode,
-                        onDeleteTimelineNode = onDeleteTimelineNode,
-                        onClearTimeline = onClearTimeline
-                    )
-                }
-
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("回复前选择方向", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
-                                Text("仅当前对话；开启后增加一次模型请求与费用", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
-                            }
-                            Switch(checked = enableReplyDirections, onCheckedChange = {
-                                enableReplyDirections = it
-                                notifyTempSettingsChange()
-                            })
-                        }
-                        if (enableReplyDirections) {
-                            Text("模型方向数量（另有“自行决定”和“其他”）", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                (2..4).forEach { count ->
-                                    FilterChip(selected = replyDirectionCount == count, onClick = {
-                                        replyDirectionCount = count
-                                        notifyTempSettingsChange()
-                                    }, label = { Text("$count 个") })
-                                }
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    ChatSettingsSessionMemorySection(
-                        sessionMemories = sessionMemories,
-                        contentColor = dialogContentColor,
-                        secondaryColor = dialogSecondaryColor,
-                        enableSessionMemory = enableSessionMemory,
-                        onEnableSessionMemoryChange = {
-                            enableSessionMemory = it
-                            notifyTempSettingsChange()
-                        },
-                        hazeState = hazeState,
-                        onAddMemory = onAddSessionMemory,
-                        onUpdateMemory = onUpdateSessionMemory,
-                        onToggleMemory = onToggleSessionMemory,
-                        onDeleteMemory = onDeleteSessionMemory,
-                        onClearMemories = onClearSessionMemories
-                    )
-                }
-
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("模型头像", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                    item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (modelAvatarBitmap != null) {
-                                    Image(
-                                        bitmap = modelAvatarBitmap.asImageBitmap(),
-                                        contentDescription = "模型头像",
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.deepseek),
-                                        contentDescription = "默认模型头像",
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-                            }
                             Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp)
                             ) {
+                                Text("思考模式", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
                                 Text(
-                                    text = when {
-                                        !currentConversationModelAvatarUri.isNullOrBlank() -> "当前使用本会话专属自定义头像（仅限本会话）"
-                                        modelAvatarBitmap != null -> "当前使用全局自定义模型头像"
-                                        else -> "当前使用 deepseek 默认头像"
-                                    },
+                                    "支持时按厂商协议传入 reasoning_effort，档位与采样参数随模型自动适配",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = dialogSecondaryColor
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = { modelAvatarPicker.launch("image/*") },
-                                        shape = RoundedCornerShape(999.dp)
-                                    ) {
-                                        Text("更换", maxLines = 1)
-                                    }
-                                    if (modelAvatarBitmap != null || !currentConversationModelAvatarUri.isNullOrBlank()) {
-                                        TextButton(
-                                            onClick = {
-                                                if (conversationId > 0L && onUpdateConversationModelAvatar != null) {
-                                                    AvatarManager.deleteConversationModelAvatar(context, currentConversationModelAvatarUri)
-                                                    onUpdateConversationModelAvatar(null)
-                                                } else {
-                                                    AvatarManager.deleteModelAvatar(context)
-                                                    onModelAvatarChanged()
-                                                }
-                                                avatarRevision++
-                                            }
-                                        ) {
-                                            Text("恢复默认", maxLines = 1)
-                                        }
-                                    }
-                                }
                             }
-                        }
-                    }
-                }
-
-                // 更多高级选项 (折叠区域)
-                item {
-                    EchoGlassCard(
-                        onClick = { showAdvancedOptions = !showAdvancedOptions },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = EchoTokens.Radius.shapeMd,
-                        containerColor = echoGlassPalette().control.copy(alpha = 0.65f)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = null,
-                                    tint = dialogContentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "更多高级选项",
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = dialogContentColor
-                                    )
-                                    Text(
-                                        text = if (showAdvancedOptions) "点击收起参数调节与扩展功能" else "温度、最大Token、上下文上限、TopP、角色扮演",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = dialogSecondaryColor
-                                    )
-                                }
-                            }
-                            Icon(
-                                imageVector = if (showAdvancedOptions) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = if (showAdvancedOptions) "收起" else "展开",
-                                tint = dialogSecondaryColor
+                            Switch(
+                                checked = currentOption?.reasoningCapability?.supportsThinking != false && (enableThinking || tuningProfile.forcedThinking),
+                                enabled = tuningProfile.thinkingToggleEnabled,
+                                onCheckedChange = {
+                                    enableThinking = it
+                                    notifyTempSettingsChange()
+                                },
+                                colors = echoSwitchColors(forcedThinking = tuningProfile.forcedThinking)
                             )
                         }
                     }
-                }
 
-                if (showAdvancedOptions) {
-                    // 温度
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp)
+                            ) {
+                                Text("联网", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                                Text(
+                                    "仅对支持联网的API或模型生效",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = dialogSecondaryColor
+                                )
+                            }
+                            Switch(
+                                checked = enableWebSearch,
+                                onCheckedChange = {
+                                    enableWebSearch = it
+                                    notifyTempSettingsChange()
+                                },
+                                colors = echoSwitchColors()
+                            )
+                        }
+                    }
+
+                    if (enableThinking && tuningProfile.thinkingEfforts.isNotEmpty()) {
+                        item {
+                            Column {
+                                Text("思考强度", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(tuningProfile.thinkingEfforts) { level ->
+                                        val selected = thinkingEffort == level.value
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = {
+                                                thinkingEffort = level.value
+                                                notifyTempSettingsChange()
+                                            },
+                                            colors = echoFilterChipColors(),
+                                            border = echoFilterChipBorder(selected),
+                                            elevation = echoFilterChipElevation(),
+                                            label = {
+                                                Text(level.label)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else if (enableThinking && tuningProfile.noThinkingEffortReason != null) {
+                        item {
+                            Text(
+                                text = tuningProfile.noThinkingEffortReason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = dialogSecondaryColor
+                            )
+                        }
+                    }
+
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("回复前选择方向", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                                    Text("仅当前对话；开启后增加一次模型请求与费用", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
+                                }
+                                Switch(checked = enableReplyDirections, onCheckedChange = {
+                                    enableReplyDirections = it
+                                    notifyTempSettingsChange()
+                                })
+                            }
+                            if (enableReplyDirections) {
+                                Text("模型方向数量（另有“自行决定”和“其他”）", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    (2..4).forEach { count ->
+                                        FilterChip(selected = replyDirectionCount == count, onClick = {
+                                            replyDirectionCount = count
+                                            notifyTempSettingsChange()
+                                        }, label = { Text("$count 个") })
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         Column {
                             Row(
@@ -733,7 +591,6 @@ fun ChatSettingsDialog(
                         }
                     }
 
-                    // 最大Token
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
@@ -783,7 +640,6 @@ fun ChatSettingsDialog(
                         }
                     }
 
-                    // 上下文上限
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
@@ -886,7 +742,6 @@ fun ChatSettingsDialog(
                         }
                     }
 
-                    // Top P
                     item {
                         Column {
                             Row(
@@ -911,8 +766,71 @@ fun ChatSettingsDialog(
                             )
                         }
                     }
+                }
 
-                    // 转为角色扮演
+                if (settingsTab == 1) {
+                    item {
+                        ChatSettingsSystemPromptSection(
+                            promptTextFieldValue = promptTextFieldValue,
+                            onPromptChange = { promptTextFieldValue = it },
+                            hasTemplates = templates.isNotEmpty(),
+                            contentColor = dialogContentColor,
+                            secondaryColor = dialogSecondaryColor,
+                            onChooseTemplate = { showTemplates = true },
+                            onSaveTemplate = { showSaveDialog = true }
+                        )
+                    }
+
+                    item {
+                        ChatSettingsSessionMemorySection(
+                            sessionMemories = sessionMemories,
+                            contentColor = dialogContentColor,
+                            secondaryColor = dialogSecondaryColor,
+                            enableSessionMemory = enableSessionMemory,
+                            onEnableSessionMemoryChange = {
+                                enableSessionMemory = it
+                                notifyTempSettingsChange()
+                            },
+                            hazeState = hazeState,
+                            onAddMemory = onAddSessionMemory,
+                            onUpdateMemory = onUpdateSessionMemory,
+                            onToggleMemory = onToggleSessionMemory,
+                            onDeleteMemory = onDeleteSessionMemory,
+                            onClearMemories = onClearSessionMemories,
+                            isExpanded = sessionMemorySectionExpanded,
+                            onExpandedChange = { sessionMemorySectionExpanded = it }
+                        )
+                    }
+
+                    item {
+                        ChatSettingsTimelineSection(
+                            timelineNodes = timelineNodes,
+                            currentStoryTime = currentStoryTime,
+                            contentColor = dialogContentColor,
+                            secondaryColor = dialogSecondaryColor,
+                            enableTimeline = true,
+                            hazeState = hazeState,
+                            isReconcilingTimeline = isReconcilingTimeline,
+                            reconcileTimelineProgress = reconcileTimelineProgress,
+                            hasSavedTimelineDraft = hasSavedTimelineDraft,
+                            checkpoint = checkpoint,
+                            newMessagesCountSinceCheckpoint = newMessagesCountSinceCheckpoint,
+                            onStartTimelineReconciliation = onStartTimelineReconciliation,
+                            onContinueTimelineReconciliation = onContinueTimelineReconciliation,
+                            onReconcileFromCheckpoint = onReconcileFromCheckpoint,
+                            onOpenTimelineDraft = onOpenTimelineDraft,
+                            onClearTimelineDraft = onClearTimelineDraft,
+                            onCancelTimelineReconciliation = onCancelTimelineReconciliation,
+                            onUpdateCurrentStoryTime = onUpdateCurrentStoryTime,
+                            onAddTimelineNode = onAddTimelineNode,
+                            onUpdateTimelineNode = onUpdateTimelineNode,
+                            onDeleteTimelineNode = onDeleteTimelineNode,
+                            onClearTimeline = onClearTimeline,
+                            isExpanded = timelineSectionExpanded,
+                            onExpandedChange = { timelineSectionExpanded = it }
+                        )
+                    }
+
                     item {
                         ChatSettingsWorldBookAndExternalMemorySection(
                             enableExternalMemory = enableExternalMemory,
@@ -934,6 +852,85 @@ fun ChatSettingsDialog(
                             secondaryColor = dialogSecondaryColor,
                             hazeState = hazeState
                         )
+                    }
+                }
+
+                if (settingsTab == 2) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("模型头像", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (modelAvatarBitmap != null) {
+                                        Image(
+                                            bitmap = modelAvatarBitmap.asImageBitmap(),
+                                            contentDescription = "模型头像",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.deepseek),
+                                            contentDescription = "默认模型头像",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = when {
+                                            !currentConversationModelAvatarUri.isNullOrBlank() -> "当前使用本会话专属自定义头像（仅限本会话）"
+                                            modelAvatarBitmap != null -> "当前使用全局自定义模型头像"
+                                            else -> "当前使用 deepseek 默认头像"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = dialogSecondaryColor
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedButton(
+                                            onClick = { modelAvatarPicker.launch("image/*") },
+                                            shape = RoundedCornerShape(999.dp)
+                                        ) {
+                                            Text("更换", maxLines = 1)
+                                        }
+                                        if (modelAvatarBitmap != null || !currentConversationModelAvatarUri.isNullOrBlank()) {
+                                            TextButton(
+                                                onClick = {
+                                                    if (conversationId > 0L && onUpdateConversationModelAvatar != null) {
+                                                        AvatarManager.deleteConversationModelAvatar(context, currentConversationModelAvatarUri)
+                                                        onUpdateConversationModelAvatar(null)
+                                                    } else {
+                                                        AvatarManager.deleteModelAvatar(context)
+                                                        onModelAvatarChanged()
+                                                    }
+                                                    avatarRevision++
+                                                }
+                                            ) {
+                                                Text("恢复默认", maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     item {
@@ -959,6 +956,7 @@ fun ChatSettingsDialog(
                             }
                         }
                     }
+                }
                 }
             }
         },

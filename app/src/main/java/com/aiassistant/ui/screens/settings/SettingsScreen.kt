@@ -608,7 +608,7 @@ fun SettingsScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val glass = echoGlassPalette()
-    val settingsBackgroundBitmap = remember(context) {
+    val settingsBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
         BackgroundImageManager.getHomeBackgroundBitmap(context)
     }
     val hazeState = rememberEchoHazeState()
@@ -655,8 +655,8 @@ fun SettingsScreen(
         )
 
         val topBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        val topBarHeight = topBarPadding + 56.dp + 12.dp
-        val tabContentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topBarHeight + 8.dp, bottom = 28.dp)
+        val topBarHeight = topBarPadding + 48.dp + 8.dp
+        val tabContentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = topBarHeight + 6.dp, bottom = 16.dp)
 
         Box(
             modifier = Modifier
@@ -730,7 +730,7 @@ fun SettingsScreen(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Surface(
                     modifier = Modifier
@@ -752,7 +752,7 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp)
+                            .heightIn(min = 48.dp)
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -793,6 +793,13 @@ fun SettingsScreen(
     }
 }
 
+private data class SettingsMenuEntry(
+    val route: String,
+    val title: String,
+    val summary: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
 @Composable
 fun SettingsMenu(
     hazeState: dev.chrisbanes.haze.HazeState,
@@ -800,103 +807,61 @@ fun SettingsMenu(
     contentPadding: PaddingValues = PaddingValues(16.dp),
     onSectionSelected: (String) -> Unit
 ) {
+    val groups = listOf(
+        "模型与连接" to listOf(
+            SettingsMenuEntry("api_config", "API 配置", "连接、密钥、可用模型", Icons.Default.Key),
+            SettingsMenuEntry("model_retry", "模型失败与重试", "错误类型、重试次数与备用 Key", Icons.Default.Refresh),
+            SettingsMenuEntry("http_access", "HTTP 访问", "明文连接与地址白名单", Icons.Default.Security)
+        ),
+        "使用偏好" to listOf(
+            SettingsMenuEntry("appearance", "界面与外观", "布局、主题、字体、头像与背景", Icons.Default.Palette),
+            SettingsMenuEntry("prompts_memory", "提示词与记忆", "默认提示词、个人偏好与世界书", Icons.Default.AutoAwesome),
+            SettingsMenuEntry("model_features", "模型辅助与思考", "辅助任务、翻译与思考显示", Icons.Default.Psychology),
+            SettingsMenuEntry("web_search", "搜索与工具", "搜索引擎、天气与设备能力", Icons.Default.Search)
+        ),
+        "数据与应用" to listOf(
+            SettingsMenuEntry("hidden_conversations", "其他对话", "通过密码查看隐藏会话", Icons.Default.VisibilityOff),
+            SettingsMenuEntry("backup", "数据备份", "导出与恢复对话、角色和配置", Icons.Default.Backup),
+            SettingsMenuEntry("about", "关于", "版本信息与功能说明", Icons.Default.Info)
+        )
+    )
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.cardGap) // T-1：主菜单与各 Tab 统一 12dp
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { EchoSectionHeader(title = "核心") }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Key,
-                title = "API配置",
-                subtitle = "管理AI模型API密钥和服务商配置",
-                onClick = { onSectionSelected("api_config") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Palette,
-                title = "界面与外观",
-                subtitle = "主题模式、用户头像、字体大小与壁纸设置",
-                onClick = { onSectionSelected("appearance") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Security,
-                title = "HTTP 访问",
-                subtitle = "允许 HTTP 开关与自定义地址白名单",
-                onClick = { onSectionSelected("http_access") }
-            )
-        }
-        item { EchoSectionHeader(title = "智能") }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Refresh,
-                title = "模型失败与重试",
-                subtitle = "自动重试总开关、各类错误重试次数与备用 Key",
-                onClick = { onSectionSelected("model_retry") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Psychology,
-                title = "模型辅助与思考",
-                subtitle = "全模型自由直选自动命名、思考翻译与思考胶囊",
-                onClick = { onSectionSelected("model_features") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.AutoAwesome,
-                title = "提示词与记忆",
-                subtitle = "全局提示词、创作规范、关于我画像与长记忆",
-                onClick = { onSectionSelected("prompts_memory") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Search,
-                title = "联网搜索与智能工具箱",
-                subtitle = "Exa 免Key搜索、Open-Meteo天气、健康步数与设备硬件",
-                onClick = { onSectionSelected("web_search") }
-            )
-        }
-        item { EchoSectionHeader(title = "数据") }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.VisibilityOff,
-                title = "其他对话",
-                subtitle = "输入 6 位数字密码查看隐藏对话",
-                onClick = { onSectionSelected("hidden_conversations") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Backup,
-                title = "数据备份",
-                subtitle = "备份和恢复应用数据与角色设定",
-                onClick = { onSectionSelected("backup") }
-            )
-        }
-        item {
-            SettingsMenuItem(
-                hazeState = hazeState,
-                icon = Icons.Default.Info,
-                title = "关于",
-                subtitle = "版本信息和功能介绍",
-                onClick = { onSectionSelected("about") }
-            )
+        groups.forEach { (label, entries) ->
+            item(key = label) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        label,
+                        modifier = Modifier.padding(start = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column {
+                            entries.forEachIndexed { index, entry ->
+                                if (index > 0) HorizontalDivider(
+                                    modifier = Modifier.padding(start = 44.dp, end = 12.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                                )
+                                SettingsMenuItem(
+                                    hazeState = hazeState,
+                                    icon = entry.icon,
+                                    title = entry.title,
+                                    subtitle = entry.summary,
+                                    onClick = { onSectionSelected(entry.route) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -964,67 +929,27 @@ fun SettingsMenuItem(
     subtitle: String,
     onClick: () -> Unit
 ) {
-    val itemShape = SettingsPanelShape
-    val glass = echoGlassPalette()
-    EchoGlassCard(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 78.dp),
-        shape = itemShape,
-        containerColor = glass.panel,
-        borderColor = glass.outline,
-        showBorder = true
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(onClick = onClick)
+            .heightIn(min = 60.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.SansSerif),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.size(20.dp)
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
+        Icon(Icons.Default.ChevronRight, contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }
 

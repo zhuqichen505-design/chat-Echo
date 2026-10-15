@@ -100,7 +100,12 @@ private fun lightColorSchemeFor(appearancePreset: String): ColorScheme = when (E
         onSurfaceVariant = Color(0xFF526779),
         outline = Color(0xFF718496),
         outlineVariant = Color(0xFFE0E8F0),
-        surfaceTint = Color(0xFF2C73B7)
+        surfaceTint = Color(0xFF2C73B7),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceContainerLow = Color(0xFFF5F9FE),
+        surfaceContainer = Color(0xFFEDF4FC),
+        surfaceContainerHigh = Color(0xFFE6EFF8),
+        surfaceContainerHighest = Color(0xFFDEE8F3)
     )
     EchoAppearancePreset.NIGHT_VOYAGE -> LightColorScheme.copy(
         primary = Color(0xFF486657),
@@ -174,7 +179,21 @@ private fun darkColorSchemeFor(appearancePreset: String): ColorScheme = when (Ec
         tertiary = Color(0xFFB8C6FF),
         onTertiary = Color(0xFF202F63),
         tertiaryContainer = Color(0xFF394A82),
-        onTertiaryContainer = Color(0xFFE0E7FF)
+        onTertiaryContainer = Color(0xFFE0E7FF),
+        background = Color(0xFF0E1925),
+        onBackground = Color(0xFFE4EDF6),
+        surface = Color(0xFF172838),
+        onSurface = Color(0xFFE4EDF6),
+        surfaceVariant = Color(0xFF243B4E),
+        onSurfaceVariant = Color(0xFFB8CADB),
+        outline = Color(0xFF8298AB),
+        outlineVariant = Color(0xFF3B5367),
+        surfaceTint = Color(0xFF9CC4FF),
+        surfaceContainerLowest = Color(0xFF09131D),
+        surfaceContainerLow = Color(0xFF132331),
+        surfaceContainer = Color(0xFF192C3B),
+        surfaceContainerHigh = Color(0xFF213747),
+        surfaceContainerHighest = Color(0xFF2A4254)
     )
     EchoAppearancePreset.NIGHT_VOYAGE -> DarkColorScheme.copy(
         primary = Color(0xFFD6BB83),
@@ -235,6 +254,20 @@ private fun darkColorSchemeFor(appearancePreset: String): ColorScheme = when (Ec
     else -> DarkColorScheme
 }
 
+/** Complete the semantic surface roles so menus, sheets, snackbars and dialogs use the same preset. */
+internal fun echoColorScheme(appearancePreset: String, darkTheme: Boolean): ColorScheme {
+    val colors = if (darkTheme) darkColorSchemeFor(appearancePreset) else lightColorSchemeFor(appearancePreset)
+    val inverse = if (darkTheme) lightColorSchemeFor(appearancePreset) else darkColorSchemeFor(appearancePreset)
+    return colors.copy(
+        surfaceBright = if (darkTheme) colors.surfaceContainerHighest else colors.surface,
+        surfaceDim = if (darkTheme) colors.background else colors.surfaceContainerHigh,
+        inverseSurface = inverse.surface,
+        inverseOnSurface = inverse.onSurface,
+        inversePrimary = inverse.primary,
+        scrim = Color.Black
+    )
+}
+
 @Composable
 fun AiApiAssistantTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -248,8 +281,7 @@ fun AiApiAssistantTheme(
             if (darkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         }
-        darkTheme -> darkColorSchemeFor(appearancePreset)
-        else -> lightColorSchemeFor(appearancePreset)
+        else -> echoColorScheme(appearancePreset, darkTheme)
     }
 
     val view = LocalView.current

@@ -8,33 +8,47 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import com.aiassistant.R
 import androidx.compose.ui.unit.dp
+import com.aiassistant.utils.EchoStoryFont
 import com.aiassistant.utils.EchoStoryReadingStyle
 
 /** 仅调整故事正文；普通问答、思考过程和消息操作保持原有样式。 */
 @Composable
-internal fun StoryReadingTypography(style: String?, content: @Composable () -> Unit) {
+internal fun StoryReadingTypography(
+    style: String?,
+    font: String = EchoStoryFont.LITERARY,
+    content: @Composable () -> Unit
+) {
     if (style == null) {
         content()
         return
     }
     val typography = MaterialTheme.typography
     val immersive = style == EchoStoryReadingStyle.IMMERSIVE
-    val family = if (immersive) FontFamily.Serif else FontFamily.SansSerif
+    val family = when (EchoStoryFont.sanitize(font)) {
+        EchoStoryFont.TYPEWRITER -> FontFamily.Monospace
+        EchoStoryFont.CLEAR -> FontFamily.SansSerif
+        else -> EchoLiteraryFont
+    }
+    val lineMultiplier = if (immersive) 1.95f else 1.65f
     MaterialTheme(
         typography = typography.copy(
             bodyLarge = typography.bodyLarge.copy(
                 fontFamily = family,
-                lineHeight = typography.bodyLarge.fontSize * if (immersive) 1.95f else 1.65f
+                lineHeight = typography.bodyLarge.fontSize * lineMultiplier
             ),
             bodyMedium = typography.bodyMedium.copy(
                 fontFamily = family,
-                lineHeight = typography.bodyMedium.fontSize * if (immersive) 1.95f else 1.65f
+                lineHeight = typography.bodyMedium.fontSize * lineMultiplier
             )
         ),
         content = content
     )
 }
+
+internal val EchoLiteraryFont = FontFamily(Font(R.font.echo_literary_regular))
 
 /** 分栏模式只显示已保存的故事资料，不冒充本轮模型实际触发的上下文。 */
 @Composable

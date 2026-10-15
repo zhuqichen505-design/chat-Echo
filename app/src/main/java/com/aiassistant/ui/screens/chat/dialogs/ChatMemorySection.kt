@@ -285,14 +285,16 @@ fun ChatSettingsSessionMemorySection(
     onUpdateMemory: (MemoryItem) -> Unit,
     onToggleMemory: (Long, Boolean) -> Unit,
     onDeleteMemory: (Long) -> Unit,
-    onClearMemories: () -> Unit
+    onClearMemories: () -> Unit,
+    /** 由对话设置弹窗持有，避免会话记忆刷新时折叠状态被重置。 */
+    isExpanded: Boolean = true,
+    onExpandedChange: (Boolean) -> Unit = {}
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var memoryToEdit by remember { mutableStateOf<MemoryItem?>(null) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var addMemoryText by remember { mutableStateOf("") }
     var editMemoryText by remember { mutableStateOf("") }
-    var isMemoriesExpanded by remember { mutableStateOf(true) }
 
     val glass = echoGlassPalette()
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -315,44 +317,32 @@ fun ChatSettingsSessionMemorySection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).clickable { onExpandedChange(!isExpanded) },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Psychology,
-                        contentDescription = null,
-                        tint = primaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Column {
-                        Text(
-                            "会话专属设定与规则",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = contentColor
-                        )
-                        Text(
-                            "角色特征 · 世界观规则 · 行为约束（与时间线物理隔离）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = secondaryColor
-                        )
+                    Icon(Icons.Default.Psychology, contentDescription = null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("会话设定与规则", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = contentColor)
+                        Text("${displayMemories.size} 条 · ${if (enableSessionMemory) "发送时附带" else "已停用"}",
+                            style = MaterialTheme.typography.labelSmall, color = secondaryColor)
                     }
+                    Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isExpanded) "收起会话设定" else "展开会话设定", tint = primaryColor)
                 }
-                EchoSwitch(
-                    checked = enableSessionMemory,
-                    onCheckedChange = onEnableSessionMemoryChange
-                )
+                EchoSwitch(checked = enableSessionMemory, onCheckedChange = onEnableSessionMemoryChange)
             }
+
+            if (isExpanded) {
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -432,42 +422,11 @@ fun ChatSettingsSessionMemorySection(
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { isMemoriesExpanded = !isMemoriesExpanded }
-                        .padding(vertical = 4.dp, horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "专属设定清单 (${displayMemories.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = if (isMemoriesExpanded) "收起" else "展开",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = primaryColor,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Icon(
-                            imageVector = if (isMemoriesExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (isMemoriesExpanded) "收起" else "展开",
-                            tint = primaryColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                Text("设定清单 · ${displayMemories.size}",
+                    style = MaterialTheme.typography.labelMedium, color = secondaryColor)
 
                 AnimatedVisibility(
-                    visible = isMemoriesExpanded,
+                    visible = isExpanded,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
@@ -540,6 +499,7 @@ fun ChatSettingsSessionMemorySection(
                         }
                     }
                 }
+            }
             }
         }
     }

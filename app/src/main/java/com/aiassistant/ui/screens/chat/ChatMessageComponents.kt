@@ -649,7 +649,7 @@ internal fun MessageBubble(
                             )
                         }
                     } else {
-                        StoryReadingTypography(readingStyle) {
+                        StoryReadingTypography(readingStyle, personalizationSettings.storyFont) {
                         MarkdownText(
                             content = message.content,
                             color = contentColor,

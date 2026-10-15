@@ -58,7 +58,7 @@ fun HistoryScreen(
     val repository = AiAssistantApp.instance.repository
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val historyBackgroundBitmap = remember(context) {
+    val historyBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
         BackgroundImageManager.getHomeBackgroundBitmap(context)
     }
     val hazeState = rememberEchoHazeState()

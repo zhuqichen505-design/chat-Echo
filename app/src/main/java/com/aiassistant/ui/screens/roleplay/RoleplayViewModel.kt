@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aiassistant.AiAssistantApp
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.RoleplayRepository
 import com.aiassistant.domain.model.*
@@ -21,12 +22,16 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         roleplayScenarioDao = database.roleplayScenarioDao(),
         roleplaySessionDao = database.roleplaySessionDao(),
         roleplayMemoryDao = database.roleplayMemoryDao(),
-        characterTagDao = database.characterTagDao()
+        characterTagDao = database.characterTagDao(),
+        conversationDao = database.conversationDao(),
+        messageDao = database.messageDao()
     )
 
     // ============ 角色卡相关状态 ============
     private val _characters = MutableStateFlow<List<CharacterProfile>>(emptyList())
     val characters: StateFlow<List<CharacterProfile>> = _characters.asStateFlow()
+    val allCharacters: StateFlow<List<CharacterProfile>> = repository.getAllCharacters()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selectedCharacter = MutableStateFlow<CharacterProfile?>(null)
     val selectedCharacter: StateFlow<CharacterProfile?> = _selectedCharacter.asStateFlow()
@@ -40,6 +45,8 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
     // ============ 场景卡相关状态 ============
     private val _scenarios = MutableStateFlow<List<RoleplayScenario>>(emptyList())
     val scenarios: StateFlow<List<RoleplayScenario>> = _scenarios.asStateFlow()
+    val allScenarios: StateFlow<List<RoleplayScenario>> = repository.getAllScenarios()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selectedScenario = MutableStateFlow<RoleplayScenario?>(null)
     val selectedScenario: StateFlow<RoleplayScenario?> = _selectedScenario.asStateFlow()
@@ -50,6 +57,9 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
     // ============ 会话相关状态 ============
     private val _sessions = MutableStateFlow<List<RoleplaySession>>(emptyList())
     val sessions: StateFlow<List<RoleplaySession>> = _sessions.asStateFlow()
+    val conversations: StateFlow<List<Conversation>> = database.conversationDao()
+        .getAllConversations()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _currentSession = MutableStateFlow<RoleplaySession?>(null)
     val currentSession: StateFlow<RoleplaySession?> = _currentSession.asStateFlow()
@@ -82,8 +92,11 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
     // ============ 角色卡操作 ============
 
+    private var charactersJob: Job? = null
+
     private fun loadCharacters() {
-        viewModelScope.launch {
+        charactersJob?.cancel()
+        charactersJob = viewModelScope.launch {
             repository.getAllCharacters().collect { list ->
                 _characters.value = list
             }
@@ -96,6 +109,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
     fun searchCharacters(query: String) {
         _characterSearchQuery.value = query
+        charactersJob?.cancel()
         characterSearchJob?.cancel()
         characterSearchJob = viewModelScope.launch {
             if (query.isBlank()) {
@@ -202,8 +216,11 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
     // ============ 场景卡操作 ============
 
+    private var scenariosJob: Job? = null
+
     private fun loadScenarios() {
-        viewModelScope.launch {
+        scenariosJob?.cancel()
+        scenariosJob = viewModelScope.launch {
             repository.getAllScenarios().collect { list ->
                 _scenarios.value = list
             }
@@ -215,6 +232,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
     fun searchScenarios(query: String) {
         _scenarioSearchQuery.value = query
+        scenariosJob?.cancel()
         scenarioSearchJob?.cancel()
         scenarioSearchJob = viewModelScope.launch {
             if (query.isBlank()) {
@@ -277,8 +295,11 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
     // ============ 会话操作 ============
 
+    private var sessionsJob: Job? = null
+
     private fun loadSessions() {
-        viewModelScope.launch {
+        sessionsJob?.cancel()
+        sessionsJob = viewModelScope.launch {
             repository.getAllSessions().collect { list ->
                 _sessions.value = list
             }
@@ -676,6 +697,8 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
     fun deleteSession(session: RoleplaySession) {
         viewModelScope.launch {
             try {
+                // 与普通会话共用事务删除：取消生成并一并清除消息、会话记忆和分支。
+                // 只删除 RoleplaySession 会留下“失去故事身份”的聊天与残留记录。
                 repository.deleteSession(session)
                 if (_currentSession.value?.id == session.id) {
                     _currentSession.value = null
@@ -683,6 +706,72 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 _uiState.value = RoleplayUiState.SaveSuccess("会话已删除")
             } catch (e: Exception) {
                 _uiState.value = RoleplayUiState.Error("删除会话失败: ${e.message}")
+            }
+        }
+    }
+
+    fun renameStory(conversationId: Long, title: String) {
+        val normalized = title.trim()
+        if (normalized.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val current = database.conversationDao().getConversationById(conversationId) ?: return@launch
+                database.conversationDao().updateConversation(current.copy(title = normalized))
+                _uiState.value = RoleplayUiState.SaveSuccess("故事已重命名")
+            } catch (e: Exception) {
+                _uiState.value = RoleplayUiState.Error("重命名失败: ${e.message}")
+            }
+        }
+    }
+
+    fun setStoryPinned(conversationIds: Collection<Long>, pinned: Boolean) {
+        viewModelScope.launch {
+            try {
+                conversationIds.forEach { database.conversationDao().setPinned(it, pinned) }
+            } catch (e: Exception) {
+                _uiState.value = RoleplayUiState.Error("置顶操作失败: ${e.message}")
+            }
+        }
+    }
+
+    fun duplicateStory(conversationId: Long, onSuccess: (Long) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val id = AiAssistantApp.instance.repository.duplicateConversation(conversationId)
+                if (id > 0) {
+                    _uiState.value = RoleplayUiState.SaveSuccess("已复制故事、消息及设定")
+                    onSuccess(id)
+                } else {
+                    _uiState.value = RoleplayUiState.Error("原故事不存在")
+                }
+            } catch (e: Exception) {
+                _uiState.value = RoleplayUiState.Error("复制故事失败: ${e.message}")
+            }
+        }
+    }
+
+    fun hideStories(conversationIds: Collection<Long>) {
+        viewModelScope.launch {
+            try {
+                AiAssistantApp.instance.repository.setConversationsHidden(conversationIds, true)
+                _uiState.value = RoleplayUiState.SaveSuccess("故事已隐藏，可在会话的隐藏列表恢复")
+            } catch (e: Exception) {
+                _uiState.value = RoleplayUiState.Error("隐藏故事失败: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteStories(conversationIds: Collection<Long>) {
+        viewModelScope.launch {
+            try {
+                conversationIds.forEach { conversationId ->
+                    val story = repository.getSessionByConversationId(conversationId)
+                    if (story != null) repository.deleteSession(story)
+                    else AiAssistantApp.instance.repository.deleteConversation(conversationId)
+                }
+                _uiState.value = RoleplayUiState.SaveSuccess("已删除 ${conversationIds.size} 个故事及其对话记录")
+            } catch (e: Exception) {
+                _uiState.value = RoleplayUiState.Error("删除故事失败: ${e.message}")
             }
         }
     }

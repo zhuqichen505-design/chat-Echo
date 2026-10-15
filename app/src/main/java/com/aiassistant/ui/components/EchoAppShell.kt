@@ -2,6 +2,8 @@ package com.aiassistant.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -14,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.aiassistant.utils.EchoHomeLayoutStyle
 import androidx.navigation.NavHostController
@@ -64,7 +67,7 @@ internal fun EchoAppShell(
                 Column(
                     modifier = Modifier
                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
-                        .width(76.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                        .width(68.dp).fillMaxHeight().verticalScroll(rememberScrollState())
                         .padding(vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -102,23 +105,32 @@ internal fun EchoAppShell(
             Box(Modifier.weight(1f).fillMaxWidth().then(insetsModifier)) { content() }
             if (useBottomBar) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                        .heightIn(min = 56.dp).selectableGroup(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     EchoDestination.entries.forEach { destination ->
-                        NavigationBarItem(
-                            selected = selected == destination,
-                            onClick = { onSelect(destination) },
-                            icon = { Icon(destination.icon, contentDescription = null) },
-                            label = { Text(destination.title) },
-                            alwaysShowLabel = true,
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        )
+                        val active = selected == destination
+                        val color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(
+                            Modifier.weight(1f).heightIn(min = 56.dp)
+                                .selectable(selected = active, role = Role.Tab, onClick = { onSelect(destination) })
+                                .padding(vertical = 5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Surface(shape = MaterialTheme.shapes.small,
+                                color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface) {
+                                Icon(destination.icon, contentDescription = null, tint = color,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp).size(21.dp))
+                            }
+                            Text(destination.title, color = color, style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                        }
                     }
+                }
                 }
             }
         }

@@ -160,7 +160,7 @@ fun ChatScreen(
     onNavigateToRoleplayMemory: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val chatBackgroundBitmap = remember(context) {
+    val chatBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
         BackgroundImageManager.getChatBackgroundBitmap(context)
     }
     val scope = rememberCoroutineScope()
@@ -382,8 +382,6 @@ fun ChatScreen(
         addAttachments(uris, forceOcr = true)
     }
 
-    var previousMessageIds by remember(conversationId) { mutableStateOf(messages.map { it.id }.toSet()) }
-
     LaunchedEffect(listState) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
@@ -416,20 +414,9 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages) {
-        val hasNewInput = hasNewUserMessage(previousMessageIds, messages)
-        previousMessageIds = messages.map { it.id }.toSet()
-        if (!hasNewInput) return@LaunchedEffect
-        if (autoFollowOutput && !preserveScrollForBranchGeneration && !listState.isScrollInProgress) {
-            androidx.compose.runtime.withFrameNanos { }
-            val totalCount = listState.layoutInfo.totalItemsCount
-            if (totalCount > 0) {
-                try {
-                    listState.followMeasuredBottom()
-                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            }
-        }
-    }
+    // Room 写入 assistant 回复时不要再根据 messages 变化移动页面。
+    // 流式输出期间的跟随由下方 isGenerating effect 控制；回复落库只更新当前视口，
+    // 因而不会在生成结束时把阅读位置拉回新回复的开头。
 
     var lastStreamScrollTime by remember { mutableLongStateOf(0L) }
     // v2.7.3 流畅度：原先以 (currentResponse.length, currentThinking.length, isGenerating) 为 key 的

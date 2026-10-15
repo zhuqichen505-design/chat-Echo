@@ -126,7 +126,7 @@ fun HomeScreen(
     val context = LocalContext.current
     // v2.7.3 流畅度：对话备份涉及 DB 全量查询+序列化+写盘，统一经 IO 协程执行，点击回调不再冻结主线程
     val backupScope = rememberCoroutineScope()
-    val homeBackgroundBitmap = remember(context) {
+    val homeBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
         BackgroundImageManager.getHomeBackgroundBitmap(context)
     }
     val viewModel: HomeViewModel = viewModel()
@@ -638,13 +638,14 @@ fun HomeDashboardHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 10.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 EchoWordmark()
                 Text(if (workbench) "会话工作台" else "会话",
                     style = MaterialTheme.typography.labelMedium,

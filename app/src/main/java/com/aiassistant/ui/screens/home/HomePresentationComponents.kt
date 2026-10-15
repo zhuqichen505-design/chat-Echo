@@ -47,36 +47,13 @@ internal fun HomePresentationSection(
     onContinueStory: (Long) -> Unit,
     onOpenStudio: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 18.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp)) {
         if (workbench) {
+            HomeNewChatAction(compact = true, onNewChat, onConfigureChat)
             if (showRecentStory) {
                 HomeStorySpotlight(recentStory, prominent = true, onContinueStory, onOpenStudio)
             }
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text("创作资料", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = onOpenStudio, contentPadding = PaddingValues(vertical = 6.dp)) {
-                        Icon(Icons.Default.Bookmarks, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("角色、世界观与世界书", modifier = Modifier.weight(1f),
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-            HomeNewChatAction(compact = true, onNewChat, onConfigureChat)
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("今天想聊什么？", style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
-                Text("继续一个想法，或开启新的对话。", style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
             HomeNewChatAction(compact, onNewChat, onConfigureChat)
             if (showRecentStory && recentStory != null) {
                 HomeStorySpotlight(recentStory, prominent = false, onContinueStory, onOpenStudio)
@@ -99,9 +76,9 @@ private fun HomeNewChatAction(
     onNewChat: () -> Unit,
     onConfigureChat: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(min = if (compact) 50.dp else 58.dp)
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                 .echoShapeCombinedClick(
                     shape = MaterialTheme.shapes.medium,
                     onClick = onNewChat,
@@ -112,18 +89,13 @@ private fun HomeNewChatAction(
             color = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
         ) {
-            Row(Modifier.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("开始新对话", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("新对话", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Icon(Icons.Default.Add, contentDescription = null)
             }
         }
-        TextButton(onClick = onConfigureChat, modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
-            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(7.dp))
-            Text("选择模型与对话设置",
-                style = MaterialTheme.typography.labelMedium, maxLines = 1,
-                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        OutlinedIconButton(onClick = onConfigureChat, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
+            Icon(Icons.Default.Tune, contentDescription = "选择模型与新对话设置", modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -156,23 +128,18 @@ private fun HomeStorySpotlight(
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(20.dp))
             }
         } else {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.AutoStories, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(if (conversation == null) "开始创作" else "最近故事", style = MaterialTheme.typography.labelMedium)
                 }
                 Text(conversation?.title?.ifBlank { "未命名故事" } ?: "为下一个故事留一页",
-                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val detail = conversation?.currentStoryTime?.takeIf { it.isNotBlank() }
                     ?: story?.session?.currentPlotSummary?.takeIf { it.isNotBlank() }
                     ?: if (conversation != null) "${conversation.messageCount} 条消息" else "选择角色与世界观，开启新的创作。"
-                Text(detail, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (conversation == null) "打开创作" else "继续故事", style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(20.dp))
-                }
+                Text(detail, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

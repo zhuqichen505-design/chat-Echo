@@ -111,16 +111,16 @@ fun echoGlassPalette(): EchoGlassPalette {
         panel = colors.surface.copy(alpha = panelAlpha),
         panelStrong = colors.surface.copy(alpha = strongAlpha),
         panelSoft = colors.surface.copy(alpha = softAlpha),
-        control = colors.surface.copy(alpha = controlAlpha),
+        control = colors.surfaceContainer.copy(alpha = controlAlpha),
         controlSelected = colors.primaryContainer.copy(alpha = selectedAlpha),
-        input = colors.surface.copy(alpha = inputAlpha),
+        input = colors.surfaceContainerLow.copy(alpha = inputAlpha),
         userBubble = if (isDark) {
             colors.primaryContainer.copy(alpha = 0.90f)
         } else {
             colors.primaryContainer.copy(alpha = 0.94f)
         },
         assistantBubble = Color.Transparent, // 模型回复不使用气泡背景
-        outline = if (isDark) Color.White.copy(alpha = 0.12f) else colors.outlineVariant.copy(alpha = 0.18f),
+        outline = colors.outlineVariant.copy(alpha = if (isDark) 0.66f else 0.72f),
         outlineSelected = colors.primary.copy(alpha = if (isDark) 0.65f else 0.55f),
         textPrimary = colors.onSurface,
         textSecondary = colors.onSurfaceVariant,

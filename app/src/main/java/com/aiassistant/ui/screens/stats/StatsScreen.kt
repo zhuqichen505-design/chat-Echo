@@ -88,7 +88,7 @@ fun StatsScreen(
 ) {
     val localContext = LocalContext.current
     val context = localContext.applicationContext
-    val statsBackgroundBitmap = remember(localContext) {
+    val statsBackgroundBitmap = remember(localContext, BackgroundImageManager.revision) {
         BackgroundImageManager.getHomeBackgroundBitmap(localContext)
     }
     val hazeState = rememberEchoHazeState()

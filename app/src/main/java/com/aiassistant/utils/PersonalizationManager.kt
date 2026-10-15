@@ -36,6 +36,17 @@ object EchoStoryReadingStyle {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: IMMERSIVE
 }
 
+/** 创作正文可独立切换的字体风格；只作用于故事正文，不改变普通对话。 */
+object EchoStoryFont {
+    const val LITERARY = "literary"
+    const val CLEAR = "clear"
+    const val TYPEWRITER = "typewriter"
+
+    val values = listOf(LITERARY, CLEAR, TYPEWRITER)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: LITERARY
+}
+
 /** 流式回复指示动画预设；动画实现由聊天渲染层消费。 */
 object EchoStreamingAnimationStyle {
     const val THIN_CURSOR = "thin_cursor"
@@ -62,6 +73,7 @@ data class PersonalizationSettings(
     val appTheme: String = "system",
     val appearancePreset: String = EchoAppearancePreset.EXISTING,
     val storyReadingStyle: String = EchoStoryReadingStyle.IMMERSIVE,
+    val storyFont: String = EchoStoryFont.LITERARY,
     val streamingAnimationStyle: String = EchoStreamingAnimationStyle.THIN_CURSOR,
     val homeLayoutStyle: String = EchoHomeLayoutStyle.FOCUS,
     val homeCompactList: Boolean = false,
@@ -146,6 +158,7 @@ class PersonalizationManager(private val context: Context) {
             appTheme = prefs.getString(KEY_APP_THEME, "system").orEmpty().ifBlank { "system" },
             appearancePreset = EchoAppearancePreset.sanitize(prefs.getString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.EXISTING)),
             storyReadingStyle = EchoStoryReadingStyle.sanitize(prefs.getString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.IMMERSIVE)),
+            storyFont = EchoStoryFont.sanitize(prefs.getString(KEY_STORY_FONT, EchoStoryFont.LITERARY)),
             streamingAnimationStyle = EchoStreamingAnimationStyle.sanitize(prefs.getString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.THIN_CURSOR)),
             homeLayoutStyle = EchoHomeLayoutStyle.sanitize(prefs.getString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.FOCUS)),
             homeCompactList = prefs.getBoolean(KEY_HOME_COMPACT_LIST, false),
@@ -189,6 +202,7 @@ class PersonalizationManager(private val context: Context) {
             .putString(KEY_APP_THEME, settings.appTheme)
             .putString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.sanitize(settings.appearancePreset))
             .putString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.sanitize(settings.storyReadingStyle))
+            .putString(KEY_STORY_FONT, EchoStoryFont.sanitize(settings.storyFont))
             .putString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.sanitize(settings.streamingAnimationStyle))
             .putString(KEY_HOME_LAYOUT_STYLE, EchoHomeLayoutStyle.sanitize(settings.homeLayoutStyle))
             .putBoolean(KEY_HOME_COMPACT_LIST, settings.homeCompactList)
@@ -277,6 +291,7 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_APPEARANCE_PRESET = "appearance_preset"
         private const val KEY_STORY_READING_STYLE = "story_reading_style"
+        private const val KEY_STORY_FONT = "story_font"
         private const val KEY_STREAMING_ANIMATION_STYLE = "streaming_animation_style"
         private const val KEY_HOME_LAYOUT_STYLE = "home_layout_style"
         private const val KEY_HOME_COMPACT_LIST = "home_compact_list"
