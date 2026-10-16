@@ -30,3 +30,5 @@ APK 25,308,657 字节、446 个条目，SHA256 `BBEF50AE8AD7CF1B33C308D257EA784B
 使用合成数据、Robolectric、Room 与本地 HTTP 回归；没有真机或可用模拟器。安装、启动、触控、Android 视觉、大字号/横屏与第三方真实模型接口尚未验收。请重点检查窄屏和系统字号 1.3/1.5/2.0 下的复杂设置、长模型名及统计大数值；升级前备份。阅读字体及统计仍遵循已有作用域与本机观测边界。
 
 仅手动上传本版 APK；GitHub 自动源码 zip/tar 链接无法关闭。本机历史 APK 保留；旧平台对象及缓存不在本轮核验范围。
+
+GitHub Release：[Echo v2.8.7](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.7)。代码提交 `b5ee86e` 与版本标签远端核验一致，唯一 APK 附件已核对上传 digest 及公开下载 SHA256；旧 v2.8.6 Release/远端标签已撤下，本机历史包和标签保留。
