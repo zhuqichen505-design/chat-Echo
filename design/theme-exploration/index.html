@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Echo · 新主题试色间</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 1-8 8H5l-3 3V11a9 9 0 0 1 18 0Z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v16M3 3c4-1 7 0 9 2 2-2 5-3 9-2v15c-4-1-7 0-9 2-2-2-5-3-9-2Z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4m0 16h17M9 16v-5m5 5V6m5 10V9"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 20V4m-7 7 7-7 7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v12h5"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 8a9 9 0 1 0 0 8M20 3v5h-5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  </defs></svg>
+  <header class="masthead">
+    <a class="brand" href="../roleplay-rework/comparison.html" aria-label="返回之前的主题预览"><span class="brand-mark"></span>Echo</a>
+    <div class="masthead-title">新主题试色间 <span>六种方向，自由比较</span></div>
+    <span class="preview-badge">设计预览 · 尚未应用</span>
+  </header>
+  <main class="workspace">
+    <aside class="controls" aria-label="主题预览控制">
+      <div class="section-heading"><h1>选择一种气质</h1><span>06</span></div>
+      <div id="theme-list" class="theme-list" role="group" aria-label="候选主题"></div>
+      <div class="control-group">
+        <h2>显示模式</h2>
+        <div class="segmented" role="group" aria-label="显示模式">
+          <button data-mode="light" aria-pressed="true">浅色</button><button data-mode="dark" aria-pressed="false">深色</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <h2>纯色背景</h2>
+        <div class="background-options" role="group" aria-label="预览背景">
+          <button data-background="theme" aria-pressed="true"><i class="theme-swatch"></i>随主题</button>
+          <button data-background="white" aria-pressed="false"><i style="background:#fff"></i>纯白</button>
+          <button data-background="black" aria-pressed="false"><i style="background:#000"></i>纯黑</button>
+        </div>
+        <p class="control-note">纯白与纯黑保留原色；文字和控件随背景调整，不改变上方深浅模式的选择。</p>
+      </div>
+      <details class="motion-controls" open>
+        <summary>模型标识与动态</summary>
+        <label for="mark-select">关闭头像后的样式</label>
+        <select id="mark-select"><option value="rings">同心圆</option><option value="orbit">轨道</option><option value="prism">棱镜</option><option value="wave">声纹</option></select>
+        <div class="state-options" role="group" aria-label="模型状态">
+          <button data-state="thinking" aria-pressed="false">思考</button><button data-state="replying" aria-pressed="true">回复</button><button data-state="done" aria-pressed="false">完成</button>
+        </div>
+        <label class="check-row"><input type="checkbox" id="reduce-motion">减弱动态</label>
+        <p class="control-note">思考与回复分别呈现动态；完成后静止，也遵循系统的减弱动态设置。</p>
+      </details>
+    </aside>
+    <section class="stage" aria-label="应用主题预览">
+      <div class="theme-intro">
+        <div><p class="theme-subtitle" id="theme-subtitle">MONO / 墨白</p><h2 id="theme-title">把注意力还给文字。</h2></div>
+        <p id="theme-description">纯白与墨色建立层次，没有彩色干扰。短对话清楚，长文章也舒展。</p>
+      </div>
+      <div class="scene-tabs" role="group" aria-label="窄屏预览页面"><button data-scene="home" aria-pressed="false">首页</button><button data-scene="chat" aria-pressed="true">沉浸会话</button><button data-scene="settings" aria-pressed="false">设置</button></div>
+      <div class="screens" data-scene="chat">
+        <section class="screen-column" data-page="home"><h3 class="screen-label">首页 <span>列表与功能入口</span></h3>
+          <div class="phone app-surface">
+            <div class="status-bar"><span>09:41</span><span class="status-icons" aria-hidden="true">▮▮▮ <span class="battery"></span></span></div>
+            <div class="app-top"><strong>Echo<span class="wordmark-dot">.</span></strong><span class="profile-avatar">我</span></div>
+            <div class="home-content">
+              <div class="home-title"><h2>今天，继续聊。</h2><p>留下想法，让故事生长。</p></div>
+              <div class="search"><svg><use href="#i-search"/></svg><span>搜索会话、人物与故事</span><kbd>⌕</kbd></div>
+              <div class="quick-actions"><button type="button" data-open-scene="chat"><svg><use href="#i-plus"/></svg>新建会话</button><button type="button" data-open-scene="chat"><svg><use href="#i-book"/></svg>进入创作</button></div>
+              <div class="list-label">置顶 <span>2</span></div>
+              <button class="conversation pinned" data-open-scene="chat"><span class="conversation-icon"><svg><use href="#i-book"/></svg></span><span class="conversation-text"><strong>玻璃温室</strong><small>她在叶片背面发现了那枚印记。</small></span><span class="conversation-time">现在</span></button>
+              <button class="conversation" data-open-scene="chat"><span class="conversation-icon"><svg><use href="#i-chat"/></svg></span><span class="conversation-text"><strong>周末散步计划</strong><small>沿河走一段，带上速写本。</small></span><span class="conversation-time">11:20</span></button>
+              <div class="list-label recent-label">最近 <span>3</span></div>
+              <button class="conversation" data-open-scene="chat"><span class="conversation-text"><strong>植物观察笔记</strong><small>如何分辨新叶和缺水的叶片？</small></span><span class="conversation-time">昨天</span></button>
+              <button class="conversation" data-open-scene="chat"><span class="conversation-text"><strong>给未来的备忘</strong><small>先写下来，之后再慢慢整理。</small></span><span class="conversation-time">昨天</span></button>
+              <button class="conversation" data-open-scene="chat"><span class="conversation-text"><strong>一段旋律的名字</strong><small>雨后、桥下和最后一班电车。</small></span><span class="conversation-time">周一</span></button>
+              <div class="home-footnote">5 段会话 · 都在这里</div>
+            </div>
+            <nav class="app-nav" aria-label="首页预览导航"><button class="selected" data-open-scene="home"><svg><use href="#i-chat"/></svg>会话</button><button data-open-scene="chat"><svg><use href="#i-book"/></svg>创作</button><button data-demo-note="统计页不在本轮主题样稿中"><svg><use href="#i-chart"/></svg>统计</button><button data-open-scene="settings"><svg><use href="#i-settings"/></svg>设置</button></nav>
+          </div>
+        </section>
+        <section class="screen-column" data-page="chat"><h3 class="screen-label">沉浸会话 <span>长文本与生成状态</span></h3>
+          <div class="phone app-surface reading-screen">
+            <div class="status-bar"><span>09:41</span><span class="status-icons" aria-hidden="true">▮▮▮ <span class="battery"></span></span></div>
+            <div class="chat-top"><button class="icon-button" aria-label="回到首页预览" data-open-scene="home"><svg><use href="#i-back"/></svg></button><div><strong>玻璃温室</strong><small>互动叙事 · 第二章</small></div><button class="icon-button" aria-label="打开设置预览" data-open-scene="settings"><svg><use href="#i-more"/></svg></button></div>
+            <div class="chat-content">
+              <div class="chapter-label"><span></span>雨停之后<span></span></div>
+              <blockquote class="user-message">我推开温室的门，沿着湿润的石径，走向那株从未开花的植物。</blockquote>
+              <div class="model-header"><span class="model-mark" data-mark="rings" data-state="replying" aria-label="模型正在回复"><i></i><i></i><i></i><i></i><i></i></span><span>Echo</span><span class="model-state">正在回复</span></div>
+              <div class="thinking-note">正在梳理人物、场景与上一轮的线索…</div>
+              <div class="reading-body"><p>门轴发出轻轻的一声响。</p><p>雨水还挂在玻璃顶上。光穿过水珠，在石径上落下一小片晃动的白。你走近时，叶子微微朝向了你，像有人在睡梦中侧过脸。</p><p>“它并不是不会开花。”</p><p>园丁的声音从身后传来。他没有带剪刀，只捧着一本边角发皱的册子。</p><p>“只是我们一直问错了季节。”<span class="text-caret" aria-hidden="true"></span></p></div>
+              <div class="message-tools"><button class="icon-button" aria-label="示例复制操作" data-demo-note="这是合成文本的主题预览"><svg><use href="#i-copy"/></svg></button><button class="icon-button" aria-label="重播回复动画" data-replay><svg><use href="#i-retry"/></svg></button><button class="icon-button" aria-label="查看样稿说明" data-demo-note="主题尚未应用到 App，可先比较颜色与阅读效果"><svg><use href="#i-more"/></svg></button><span class="message-time">1.8 秒 · 236 Token</span></div>
+            </div>
+            <div class="composer"><label for="sample-input" class="visually-hidden">预览输入框</label><textarea id="sample-input" rows="1" placeholder="写下接下来的行动…"></textarea><div class="composer-tools"><button class="icon-button" aria-label="示例添加附件" data-demo-note="此处演示输入框样式，不读取或上传文件"><svg><use href="#i-plus"/></svg></button><span class="context-pill">人物 · 世界书</span><button class="send" aria-label="预览回复状态" data-replay><svg><use href="#i-arrow"/></svg></button></div></div>
+          </div>
+        </section>
+        <section class="screen-column" data-page="settings"><h3 class="screen-label">设置 <span>选中、关闭与辅助文字</span></h3>
+          <div class="phone app-surface settings-screen">
+            <div class="status-bar"><span>09:41</span><span class="status-icons" aria-hidden="true">▮▮▮ <span class="battery"></span></span></div>
+            <div class="app-top"><strong class="settings-title">界面与外观</strong><svg class="top-icon"><use href="#i-settings"/></svg></div>
+            <div class="settings-content">
+              <div class="setting-section">主题与背景</div>
+              <div class="active-theme"><span class="theme-emblem"><span></span><span></span><span></span></span><div><strong id="setting-theme-name">墨白</strong><small id="setting-theme-description">黑白之间，让文字呼吸。</small></div><span class="current-tag">预览中</span></div>
+              <div class="setting-line"><span>显示模式</span><div class="app-segmented"><button data-mode="light" aria-pressed="true">浅色</button><button data-mode="dark" aria-pressed="false">深色</button></div></div>
+              <div class="setting-line"><span>纯色背景</span><div class="app-backgrounds"><button data-background="theme" aria-pressed="true" aria-label="使用主题背景"><i class="theme-swatch"></i></button><button data-background="white" aria-pressed="false" aria-label="使用纯白背景"><i style="background:#fff"></i></button><button data-background="black" aria-pressed="false" aria-label="使用纯黑背景"><i style="background:#000"></i></button></div></div>
+              <div class="setting-section">模型与阅读</div>
+              <div class="setting-line"><div><span>显示模型头像</span><small>关闭后使用动态标识</small></div><button class="toggle" role="switch" aria-checked="false" id="avatar-toggle" aria-label="显示模型头像"><i></i></button></div>
+              <div class="setting-line"><div><span>模型标识</span><small id="setting-mark-name">同心圆 · 生成时动态</small></div><span class="model-mark mini-mark" data-mark="rings" data-state="replying" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div>
+              <div class="setting-line"><div><span>显示思考气泡</span><small>只影响展示，不改变模型思考</small></div><button class="toggle on" role="switch" aria-checked="true" id="thinking-toggle" aria-label="显示思考气泡"><i></i></button></div>
+              <div class="setting-line"><span>阅读字体</span><span class="setting-value">文学宋体 <svg><use href="#i-chevron"/></svg></span></div>
+              <div class="font-sample">文字有自己的呼吸，<br>故事也有它的节奏。</div>
+              <div class="setting-line compact"><span>正文大小</span><span class="setting-value">16</span></div>
+              <input class="font-range" type="range" min="13" max="20" value="16" aria-label="预览正文字号">
+              <div class="settings-note"><span class="note-dot"></span>这些选择仅改变此预览，不会修改 App 设置。</div>
+            </div>
+            <nav class="app-nav" aria-label="设置预览导航"><button data-open-scene="home"><svg><use href="#i-chat"/></svg>会话</button><button data-open-scene="chat"><svg><use href="#i-book"/></svg>创作</button><button data-demo-note="统计页不在本轮主题样稿中"><svg><use href="#i-chart"/></svg>统计</button><button class="selected" data-open-scene="settings"><svg><use href="#i-settings"/></svg>设置</button></nav>
+          </div>
+        </section>
+      </div>
+      <div class="palette-footer"><div id="palette-strip" class="palette-strip" aria-label="当前主题颜色"></div><p id="palette-note">黑白之间，让文字呼吸。</p><span>正文与辅助文字均按 WCAG AA 校验</span></div>
+      <p class="boundary-note">所有对话均为新编写的合成内容。页面用来比较主题、纯色背景和标识动态；排版尺寸为浏览器样稿，实际 Android 效果需在应用后单独验收。</p>
+    </section>
+  </main>
+  <div class="toast" role="status" aria-live="polite"></div>
+  <script src="preview.js"></script>
+</body>
+</html>

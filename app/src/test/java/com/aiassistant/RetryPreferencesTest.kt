@@ -7,6 +7,7 @@ import com.aiassistant.utils.EchoAppearancePreset
 import com.aiassistant.utils.EchoHomeLayoutStyle
 import com.aiassistant.utils.EchoStoryReadingStyle
 import com.aiassistant.utils.EchoStreamingAnimationStyle
+import com.aiassistant.utils.EchoModelMarkStyle
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,6 +18,54 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun modelIdentityChoicesPersistIndependentlyFromThinkingAndPromptPreferences() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        val initial = manager.getSettings().copy(
+            aboutUser = "合成展示偏好", globalSystemPrompt = "合成模型规则",
+            storyReadingStyle = EchoStoryReadingStyle.PLAIN,
+            streamingAnimationStyle = EchoStreamingAnimationStyle.INK_RING,
+            thinkingCapsuleTemplate = "{model} {time}"
+        )
+        assertTrue(initial.showModelAvatar)
+        assertEquals(EchoModelMarkStyle.CONCENTRIC, initial.modelMarkStyle)
+        assertTrue(manager.saveSettings(initial))
+        val initialPrompt = manager.buildPrompt()
+        for (style in EchoModelMarkStyle.values) {
+            for (showAvatar in listOf(false, true)) {
+                for (showThinking in listOf(false, true)) {
+                    val expected = initial.copy(modelMarkStyle = style, showModelAvatar = showAvatar,
+                        showThinkingBubbles = showThinking)
+                    assertTrue(manager.saveSettings(expected))
+                    val restored = PersonalizationManager(context)
+                    assertEquals(expected, restored.getSettings())
+                    assertEquals(initialPrompt, restored.buildPrompt())
+                }
+            }
+        }
+    }
+
+    @Test fun oldAndUnknownModelIdentityPreferencesKeepAvatarAndDefaultConcentricMark() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        prefs.edit().clear().putBoolean("show_thinking_bubbles", false)
+            .putString("appearance_preset", EchoAppearancePreset.NIGHT_VOYAGE).commit()
+        val manager = PersonalizationManager(context)
+        val original = manager.getSettings()
+        assertTrue(original.showModelAvatar)
+        assertEquals(EchoModelMarkStyle.CONCENTRIC, original.modelMarkStyle)
+        assertFalse(original.showThinkingBubbles)
+        for (unknown in listOf("", "future_mark", "ORBIT")) {
+            prefs.edit().putString("model_mark_style", unknown).putBoolean("show_model_avatar", false).commit()
+            assertEquals(original.copy(showModelAvatar = false), PersonalizationManager(context).getSettings())
+            assertTrue(manager.saveSettings(original.copy(showModelAvatar = false, modelMarkStyle = unknown)))
+            assertEquals(EchoModelMarkStyle.CONCENTRIC, prefs.getString("model_mark_style", null))
+        }
+        assertTrue(manager.saveSettings(original.copy(showModelAvatar = true, modelMarkStyle = EchoModelMarkStyle.ORBIT)))
+        assertEquals(EchoModelMarkStyle.ORBIT, PersonalizationManager(context).getSettings().modelMarkStyle)
+    }
+
     @Test fun thinkingBubbleVisibilityPersistsWithoutChangingThinkingOrReadingPreferences() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()

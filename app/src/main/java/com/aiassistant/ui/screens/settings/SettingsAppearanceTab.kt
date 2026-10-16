@@ -76,6 +76,7 @@ import com.aiassistant.domain.model.ModelCustomSettings
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoStreamingIndicator
+import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.echoSwitchColors
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
@@ -106,6 +107,7 @@ import com.aiassistant.utils.EchoHomeLayoutStyle
 import com.aiassistant.utils.EchoStoryReadingStyle
 import com.aiassistant.utils.EchoStoryFont
 import com.aiassistant.utils.EchoStreamingAnimationStyle
+import com.aiassistant.utils.EchoModelMarkStyle
 import com.aiassistant.utils.PersonalizationSettings
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -579,6 +581,44 @@ fun AppearanceTab(
 
         item {
             SettingsGlassCard(hazeState = hazeState) {
+                Text("模型标识", style = MaterialTheme.typography.titleMedium)
+                HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后显示几何标识，不影响用户头像或思考气泡。", settings.showModelAvatar) { enabled ->
+                    saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }
+                }
+                if (!settings.showModelAvatar) {
+                    Text("思考与回复时动画，结束后静止；以下为动态预览。遵循系统移除动画设置。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(
+                        modifier = Modifier.selectableGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            EchoModelMarkStyle.CONCENTRIC to "同心圆",
+                            EchoModelMarkStyle.ORBIT to "轨道",
+                            EchoModelMarkStyle.PRISM to "棱镜",
+                            EchoModelMarkStyle.WAVEFORM to "声纹"
+                        ).forEach { (value, label) ->
+                            FilterChip(
+                                selected = settings.modelMarkStyle == value,
+                                onClick = { saveVisualPreference("模型标识已切换为$label") { it.copy(modelMarkStyle = value) } },
+                                label = { Text(label) },
+                                leadingIcon = {
+                                    EchoModelMark(color = if (settings.modelMarkStyle == value) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.primary,
+                                        style = value, animated = true, modifier = Modifier.size(24.dp))
+                                },
+                                colors = echoFilterChipColors(),
+                                border = echoFilterChipBorder(settings.modelMarkStyle == value)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
                 Text("流式动画", style = MaterialTheme.typography.titleMedium)
                 Text("回复生成时的轻量提示，遵循系统减弱动画设置。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -725,7 +765,7 @@ fun AppearanceTab(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "浅色与深色各 6 种。色卡所见即所得，不随深浅模式变黑；切换主题可恢复主题背景。",
+                        "含浅色、深色及纯白纯黑预设。色卡所见即所得，不随深浅模式变黑；切换主题可恢复主题背景。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

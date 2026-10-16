@@ -28,6 +28,20 @@ import java.nio.file.StandardCopyOption
 class MediaHistoryTest {
     private fun bitmap(color: Int) = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
 
+    @Test fun pureWhiteAndBlackKeepExactPixelsWhenSavedAndRestoredFromHistory() {
+        val context = RuntimeEnvironment.getApplication()
+        for (id in listOf("pure_white", "pure_black")) {
+            val preset = BackgroundImageManager.PRESET_SOLID_COLORS.single { it.id == id }
+            val previousIds = BackgroundImageManager.listBackgroundHistory(context).map { it.id }.toSet()
+            assertTrue(BackgroundImageManager.saveHomeBackgroundSolidColor(context, preset.lightColorInt))
+            assertEquals(preset.lightColorInt, BackgroundImageManager.getHomeBackgroundBitmap(context)!!.getPixel(0, 0))
+            val entry = BackgroundImageManager.listBackgroundHistory(context).single { it.id !in previousIds }
+            assertTrue(BackgroundImageManager.restoreChatBackground(context, entry))
+            assertEquals(preset.darkColorInt, BackgroundImageManager.getChatBackgroundBitmap(context)!!.getPixel(0, 0))
+        }
+        assertEquals(2, BackgroundImageManager.listBackgroundHistory(context).size)
+    }
+
     @Test fun deletingAvatarHistoryPreservesActiveAvatarAndDoesNotReturnAfterMigrationOrReset() {
         val context = RuntimeEnvironment.getApplication()
         val image = bitmap(Color.rgb(30, 80, 150))

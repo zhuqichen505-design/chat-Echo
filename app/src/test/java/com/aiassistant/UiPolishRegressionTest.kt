@@ -42,12 +42,14 @@ class UiPolishRegressionTest {
 
     @Test fun solidBackgroundSwatchesKeepTheirChosenColorInDarkMode() {
         val presets = com.aiassistant.utils.BackgroundImageManager.PRESET_SOLID_COLORS
-        assertEquals(12, presets.map { it.id }.distinct().size)
+        assertEquals(14, presets.map { it.id }.distinct().size)
         presets.forEach { assertEquals(it.lightColorInt, it.darkColorInt) }
         val darkSwatches = presets.filter { androidx.compose.ui.graphics.Color(it.lightColorInt).luminance() < 0.1f }
-        assertEquals(6, darkSwatches.size)
-        assertEquals(6, darkSwatches.map { it.lightColorInt }.distinct().size)
-        assertTrue(darkSwatches.all { (it.lightColorInt and 0xFFFFFF) != 0 })
+        assertEquals(7, darkSwatches.size)
+        assertEquals(7, darkSwatches.map { it.lightColorInt }.distinct().size)
+        assertEquals(0xFFFFFFFF.toInt(), presets.single { it.id == "pure_white" }.lightColorInt)
+        assertEquals(0xFF000000.toInt(), presets.single { it.id == "pure_black" }.darkColorInt)
+        assertTrue(darkSwatches.filter { it.id != "pure_black" }.all { (it.lightColorInt and 0xFFFFFF) != 0 })
     }
 
 

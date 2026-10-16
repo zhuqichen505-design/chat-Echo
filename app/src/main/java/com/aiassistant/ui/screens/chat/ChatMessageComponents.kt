@@ -82,6 +82,8 @@ import com.aiassistant.ui.components.EchoDoubleArcRing
 import com.aiassistant.ui.components.EchoPulseRing
 import com.aiassistant.ui.components.EchoTextToolbar
 import com.aiassistant.ui.components.EchoStreamingIndicator
+import com.aiassistant.ui.components.EchoModelMark
+import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.StreamingAnimationStyle
 import com.aiassistant.ui.components.EchoTextToolbarHost
 import androidx.compose.ui.layout.onSizeChanged
@@ -914,13 +916,24 @@ internal fun MessageBubble(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top
                     ) {
-                        ChatAvatar(
-                            isUser = false,
-                            avatarRevision = assistantAvatarRevision,
-                            apiConfigId = assistantApiConfigId,
-                            customAvatarUri = customAvatarUri,
-                            modifier = Modifier.offset(y = (-1).dp)
-                        )
+                        if (personalizationSettings.showModelAvatar) {
+                            ChatAvatar(
+                                isUser = false,
+                                avatarRevision = assistantAvatarRevision,
+                                apiConfigId = assistantApiConfigId,
+                                customAvatarUri = customAvatarUri,
+                                modifier = Modifier.offset(y = (-1).dp)
+                            )
+                        } else {
+                            EchoModelMark(
+                                color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
+                                style = personalizationSettings.modelMarkStyle,
+                                animated = GenerationUiStateRules.animateModelMark(generationState),
+                                modifier = Modifier.padding(top = 3.dp).size(28.dp),
+                                reducedMotion = reducedMotion,
+                                description = "模型标识"
+                            )
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                         modifier = Modifier
@@ -1101,13 +1114,23 @@ internal fun MessageBubble(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            ChatAvatar(
-                                isUser = false,
-                                avatarRevision = assistantAvatarRevision,
-                                apiConfigId = assistantApiConfigId,
-                                customAvatarUri = customAvatarUri,
-                                avatarSize = 22.dp
-                            )
+                            if (personalizationSettings.showModelAvatar) {
+                                ChatAvatar(
+                                    isUser = false,
+                                    avatarRevision = assistantAvatarRevision,
+                                    apiConfigId = assistantApiConfigId,
+                                    customAvatarUri = customAvatarUri,
+                                    avatarSize = 22.dp
+                                )
+                            } else {
+                                EchoModelMark(
+                                    color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
+                                    style = personalizationSettings.modelMarkStyle,
+                                    animated = GenerationUiStateRules.animateModelMark(generationState),
+                                    modifier = Modifier.size(22.dp),
+                                    reducedMotion = reducedMotion
+                                )
+                            }
                             Text(
                                 text = assistantModelName.ifBlank { "AI" }.displayModelShortName(),
                                 style = MaterialTheme.typography.labelMedium,
@@ -2549,7 +2572,7 @@ fun ToolCallDetailDialog(
     )
 }
 
-// 需求 6：模型回复时排队消息悬浮卡片 (UI 严格按照 media_1789390149204.png 设计落地)
+// 需求 6：模型回复时排队消息悬浮卡片（按设计稿实现）
 @Composable
 internal fun MessageQueueCard(
     queue: List<QueuedMessage>,

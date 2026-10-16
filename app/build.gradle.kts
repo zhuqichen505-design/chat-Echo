@@ -91,11 +91,23 @@ android {
     }
 }
 
-tasks.withType<Test> {
+tasks.withType<Test>().configureEach {
+    // Separate JVMs keep Robolectric, HTTP policy and coroutine Main state isolated.
+    // Keep the default conservative; the bounded override supports measured comparisons.
+    maxParallelForks = providers.gradleProperty("echoTestForks")
+        .map { value ->
+            require(value.toIntOrNull() in 1..2) { "echoTestForks must be 1 or 2" }
+            value.toInt()
+        }.getOrElse(1)
+    val verboseTests = providers.gradleProperty("echoVerboseTests")
+        .map(String::toBoolean).getOrElse(false)
     testLogging {
-        events("passed", "skipped", "failed", "standardOut", "standardError")
+        events("skipped", "failed")
+        if (verboseTests) events("passed", "standardOut", "standardError")
+        showStandardStreams = verboseTests
         showExceptions = true
         showStackTraces = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
 
@@ -174,16 +186,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
-tasks.register<JavaExec>("runUnitTestsDirectly") {
-    dependsOn("compileDebugKotlin", "compileDebugUnitTestKotlin")
-    val debugClasses = layout.buildDirectory.dir("tmp/kotlin-classes/debug")
-    val testClasses = layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest")
-    classpath = files(testClasses, debugClasses) + configurations.getByName("debugUnitTestRuntimeClasspath")
-    mainClass.set("org.junit.runner.JUnitCore")
-    args(
-        "com.aiassistant.ChatEnhancementsTest",
-        "com.aiassistant.RoleplayModelsTest",
-        "com.aiassistant.RoleplayParserAndStreamingTest",
-        "com.aiassistant.LatexAndStatsTest"
-    )
+tasks.register("runUnitTestsDirectly") {
+    group = "verification"
+    description = "Compatibility alias for the complete Android unit test suite."
+    dependsOn("testDebugUnitTest")
 }

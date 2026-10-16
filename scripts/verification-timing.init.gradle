@@ -1,0 +1,37 @@
+import groovy.json.JsonOutput
+import java.util.concurrent.ConcurrentHashMap
+
+// Local timing only: no build scan, network upload, task filtering or test suppression.
+// The verification wrapper disables configuration cache because these listeners
+// observe the current invocation rather than replaying cached configuration.
+def reportPath = System.getProperty('echo.verification.report')
+if (!reportPath) throw new GradleException('echo.verification.report is required')
+def startedAt = System.nanoTime()
+def taskStarts = new ConcurrentHashMap<String, Long>()
+def timings = Collections.synchronizedList([])
+
+gradle.taskGraph.beforeTask { task ->
+    taskStarts[task.path] = System.nanoTime()
+}
+gradle.taskGraph.afterTask { task, state ->
+    def start = taskStarts.remove(task.path)
+    def outcome = state.failure != null ? 'FAILED' :
+        state.noSource ? 'NO-SOURCE' :
+        state.skipMessage == 'FROM-CACHE' ? 'FROM-CACHE' :
+        state.upToDate ? 'UP-TO-DATE' :
+        state.skipped ? 'SKIPPED' : 'EXECUTED'
+    timings.add([
+        task: task.path,
+        outcome: outcome,
+        milliseconds: start == null ? 0L : (System.nanoTime() - start).intdiv(1_000_000L)
+    ])
+}
+gradle.buildFinished { result ->
+    def report = new File(reportPath)
+    report.parentFile.mkdirs()
+    report.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
+        successful: result.failure == null,
+        observedMilliseconds: (System.nanoTime() - startedAt).intdiv(1_000_000L),
+        tasks: timings.toList()
+    ])), 'UTF-8')
+}

@@ -47,7 +47,9 @@ object BackgroundImageManager {
         SolidColorPreset("plum", "暮烟紫", 0xFF40334A.toInt(), 0xFF40334A.toInt(), "#40334A"),
         SolidColorPreset("cocoa", "暖可可", 0xFF44372F.toInt(), 0xFF44372F.toInt(), "#44372F"),
         SolidColorPreset("graphite", "石墨灰", 0xFF343B42.toInt(), 0xFF343B42.toInt(), "#343B42"),
-        SolidColorPreset("deep_teal", "深青绿", 0xFF214148.toInt(), 0xFF214148.toInt(), "#214148")
+        SolidColorPreset("deep_teal", "深青绿", 0xFF214148.toInt(), 0xFF214148.toInt(), "#214148"),
+        SolidColorPreset("pure_white", "纯白", 0xFFFFFFFF.toInt(), 0xFFFFFFFF.toInt(), "#FFFFFF"),
+        SolidColorPreset("pure_black", "纯黑", 0xFF000000.toInt(), 0xFF000000.toInt(), "#000000")
     )
 
     /** The active theme paints its own solid backdrop; custom images stay available in history. */

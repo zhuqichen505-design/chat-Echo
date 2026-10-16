@@ -26,6 +26,13 @@ enum class GenerationUiState {
 
 object GenerationUiStateRules {
 
+    /** 模型标识只在正在生成时运动；等待用户决策、失败和结束均保持静态。 */
+    fun animateModelMark(state: GenerationUiState): Boolean = when (state) {
+        GenerationUiState.Connecting, GenerationUiState.Reconnecting,
+        GenerationUiState.Thinking, GenerationUiState.Streaming -> true
+        else -> false
+    }
+
     /** 隐藏思考气泡后保留必要操作状态；正文开始后不再显示旧重试提示。 */
     fun statusWithoutThinking(state: GenerationUiState, reconnectStatus: String?, contentEmpty: Boolean): String? = when (state) {
         GenerationUiState.Connecting -> "正在连接…"

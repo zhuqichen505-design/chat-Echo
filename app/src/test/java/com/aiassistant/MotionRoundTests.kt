@@ -3,6 +3,9 @@ package com.aiassistant
 import com.aiassistant.ui.components.MarkdownSegmentation
 import com.aiassistant.ui.components.MarkdownSegmentationCache
 import com.aiassistant.ui.components.computeStableSegments
+import com.aiassistant.ui.components.modelMarkColorFor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.aiassistant.ui.screens.chat.GenerationUiState
 import com.aiassistant.ui.screens.chat.GenerationUiStateRules
 import org.junit.Assert.assertEquals
@@ -16,6 +19,36 @@ import org.junit.Test
  * - P0-4：GenerationUiState 状态机派生行为等价
  */
 class MotionRoundTests {
+
+    @Test fun modelMarkMovesDuringThinkingAndStreamingButNotAfterCompletionOrUserChoice() {
+        val activeStates = setOf(GenerationUiState.Connecting, GenerationUiState.Reconnecting,
+            GenerationUiState.Thinking, GenerationUiState.Streaming)
+        GenerationUiState.entries.forEach { state ->
+            assertEquals("模型标识状态 $state", state in activeStates, GenerationUiStateRules.animateModelMark(state))
+        }
+        val flow = listOf(
+            GenerationUiStateRules.derive(true, "", false, null),
+            GenerationUiStateRules.derive(true, "", true, null),
+            GenerationUiStateRules.derive(true, "合成回复", true, null),
+            GenerationUiStateRules.derive(false, "合成回复", true, null)
+        )
+        assertEquals(listOf(true, true, true, false), flow.map(GenerationUiStateRules::animateModelMark))
+    }
+
+    @Test fun modelMarkRetainsReadableThemeColorOnPureAndCustomBackdrops() {
+        for (surface in listOf(Color.White, Color.Black, Color(0xFF536779), Color(0xFF162C29))) {
+            for (accent in listOf(Color.White, Color.Black, Color(0xFFEEE8D8), Color(0xFF324253), Color(0xFF8574AC))) {
+                val chosen = modelMarkColorFor(accent, surface)
+                val foregroundLuminance = chosen.luminance()
+                val backgroundLuminance = surface.luminance()
+                val ratio = (maxOf(foregroundLuminance, backgroundLuminance) + 0.05f) /
+                    (minOf(foregroundLuminance, backgroundLuminance) + 0.05f)
+                assertTrue("自定义背景上的标识对比度不足: $ratio", ratio >= 4.5f)
+            }
+        }
+        assertEquals(Color.Black, modelMarkColorFor(Color.Black, Color.White))
+        assertEquals(Color.White, modelMarkColorFor(Color.White, Color.Black))
+    }
 
     private fun rebuild(seg: MarkdownSegmentation): String = seg.segments.joinToString("") + seg.tail
 

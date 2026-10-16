@@ -13,7 +13,7 @@ class V1922FeaturesTest {
     @Test
     fun testBuiltInSolidColorPresets() {
         val allPresets = BackgroundImageManager.PRESET_SOLID_COLORS
-        assertEquals(12, allPresets.size)
+        assertEquals(14, allPresets.size)
         val presets = allPresets.take(6)
         // 保留原有 6 款精选低饱和护眼纯色
         assertEquals(6, presets.size)

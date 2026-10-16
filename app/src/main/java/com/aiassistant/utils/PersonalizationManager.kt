@@ -58,6 +58,18 @@ object EchoStreamingAnimationStyle {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: THIN_CURSOR
 }
 
+/** 关闭模型头像后的身份标识，与正文末尾的流式动画独立。 */
+object EchoModelMarkStyle {
+    const val CONCENTRIC = "concentric"
+    const val ORBIT = "orbit"
+    const val PRISM = "prism"
+    const val WAVEFORM = "waveform"
+
+    val values = listOf(CONCENTRIC, ORBIT, PRISM, WAVEFORM)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: CONCENTRIC
+}
+
 data class PersonalizationSettings(
     val globalSystemPrompt: String = "",
     val globalRoleplayPrompt: String = "",
@@ -69,6 +81,8 @@ data class PersonalizationSettings(
     val autoMemoryEnabled: Boolean = true,
     val thinkingCapsuleTemplate: String = "{model} {status} {time} {tokens}",
     val showThinkingBubbles: Boolean = true,
+    val showModelAvatar: Boolean = true,
+    val modelMarkStyle: String = EchoModelMarkStyle.CONCENTRIC,
     val fontSizeScale: Float = 1.0f,
     val chatFontSize: Int = 16,
     val appTheme: String = "system",
@@ -157,6 +171,8 @@ class PersonalizationManager(private val context: Context) {
             autoMemoryEnabled = prefs.getBoolean(KEY_AUTO_MEMORY_ENABLED, true),
             thinkingCapsuleTemplate = prefs.getString(KEY_THINKING_TEMPLATE, "{model} {status} {time} {tokens}").orEmpty().ifBlank { "{model} {status} {time} {tokens}" },
             showThinkingBubbles = prefs.getBoolean(KEY_SHOW_THINKING_BUBBLES, true),
+            showModelAvatar = prefs.getBoolean(KEY_SHOW_MODEL_AVATAR, true),
+            modelMarkStyle = EchoModelMarkStyle.sanitize(prefs.getString(KEY_MODEL_MARK_STYLE, EchoModelMarkStyle.CONCENTRIC)),
             fontSizeScale = prefs.getFloat(KEY_FONT_SIZE_SCALE, 1.0f),
             chatFontSize = prefs.getInt(KEY_CHAT_FONT_SIZE, 16),
             appTheme = prefs.getString(KEY_APP_THEME, "system").orEmpty().ifBlank { "system" },
@@ -204,6 +220,8 @@ class PersonalizationManager(private val context: Context) {
             .putBoolean(KEY_AUTO_MEMORY_ENABLED, settings.autoMemoryEnabled)
             .putString(KEY_THINKING_TEMPLATE, settings.thinkingCapsuleTemplate)
             .putBoolean(KEY_SHOW_THINKING_BUBBLES, settings.showThinkingBubbles)
+            .putBoolean(KEY_SHOW_MODEL_AVATAR, settings.showModelAvatar)
+            .putString(KEY_MODEL_MARK_STYLE, EchoModelMarkStyle.sanitize(settings.modelMarkStyle))
             .putFloat(KEY_FONT_SIZE_SCALE, settings.fontSizeScale)
             .putInt(KEY_CHAT_FONT_SIZE, settings.chatFontSize)
             .putString(KEY_APP_THEME, settings.appTheme)
@@ -296,6 +314,8 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_AUTO_MEMORY_ENABLED = "auto_memory_enabled"
         private const val KEY_THINKING_TEMPLATE = "thinking_template"
         private const val KEY_SHOW_THINKING_BUBBLES = "show_thinking_bubbles"
+        private const val KEY_SHOW_MODEL_AVATAR = "show_model_avatar"
+        private const val KEY_MODEL_MARK_STYLE = "model_mark_style"
         private const val KEY_FONT_SIZE_SCALE = "font_size_scale"
         private const val KEY_CHAT_FONT_SIZE = "chat_font_size"
         private const val KEY_APP_THEME = "app_theme"
