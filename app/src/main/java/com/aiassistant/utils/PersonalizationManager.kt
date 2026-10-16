@@ -9,8 +9,9 @@ object EchoAppearancePreset {
     const val CLEAR_SKY = "clear_sky"
     const val NIGHT_VOYAGE = "night_voyage"
     const val INDEX = "index"
+    const val MONO = "mono"
 
-    val values = listOf(EXISTING, CLEAR_SKY, NIGHT_VOYAGE, INDEX)
+    val values = listOf(EXISTING, CLEAR_SKY, NIGHT_VOYAGE, INDEX, MONO)
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: EXISTING
 }

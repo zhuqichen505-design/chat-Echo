@@ -500,14 +500,13 @@ fun PromptsMemoryTab(
                     if (autoMemoryEnabled) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .echoShapeClick(SettingsInnerShape) { isMemoriesExpanded = !isMemoriesExpanded },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     "全局偏好库管理",
                                     style = MaterialTheme.typography.titleSmall,
@@ -528,7 +527,7 @@ fun PromptsMemoryTab(
                                 }
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 IconButton(onClick = { isAddingMemory = true }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.Add, contentDescription = "添加偏好", tint = MaterialTheme.colorScheme.primary)
                                 }
@@ -656,20 +655,19 @@ fun PromptsMemoryTab(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .echoShapeClick(SettingsInnerShape) { isWorldBooksExpanded = !isWorldBooksExpanded },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("世界书列表", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(6.dp))
                             EchoBadge(text = "${allWorldBooks.size} 本", type = EchoBadgeType.Primary)
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(
                                 onClick = {
                                     coroutineScope.launch {
@@ -830,19 +828,18 @@ fun PromptsMemoryTab(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .echoShapeClick(SettingsInnerShape) { isTemplatesExpanded = !isTemplatesExpanded },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("模板库列表", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(6.dp))
                             EchoBadge(text = "${allTemplates.size} 个", type = EchoBadgeType.Primary)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             IconButton(onClick = { isAddingTemplate = true }, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Add, contentDescription = "新建模板", tint = MaterialTheme.colorScheme.primary)
                             }
@@ -947,19 +944,18 @@ fun PromptsMemoryTab(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .echoShapeClick(SettingsInnerShape) { isEnvVarsExpanded = !isEnvVarsExpanded },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("环境变量列表", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(6.dp))
                             EchoBadge(text = "${allEnvVars.size} 个", type = EchoBadgeType.Info)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             IconButton(onClick = { isAddingEnvVar = true }, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Add, contentDescription = "添加变量", tint = MaterialTheme.colorScheme.primary)
                             }

@@ -477,13 +477,12 @@ private fun HiddenConversationCard(
     val dateFormat = remember { SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()) }
 
     SettingsGlassCard(hazeState = hazeState) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -502,7 +501,7 @@ private fun HiddenConversationCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 IconButton(onClick = onTogglePin, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Default.PushPin,
@@ -676,16 +675,16 @@ fun BackupTab(
         }
 
         item {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 OutlinedButton(
                     onClick = {
                         val fileName = "Echo_Backup_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.zip"
                         exportBackupLauncher.launch(fileName)
                     },
-                    modifier = Modifier.weight(1f),
                     enabled = !isBackingUp
                 ) {
                     Icon(Icons.Default.FileUpload, contentDescription = null)
@@ -696,7 +695,6 @@ fun BackupTab(
                     onClick = {
                         importBackupLauncher.launch(arrayOf("application/zip", "application/json", "application/octet-stream", "text/plain", "*/*"))
                     },
-                    modifier = Modifier.weight(1f),
                     enabled = !isBackingUp
                 ) {
                     Icon(Icons.Default.FileDownload, contentDescription = null)

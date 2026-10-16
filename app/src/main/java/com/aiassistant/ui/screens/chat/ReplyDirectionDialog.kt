@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.aiassistant.ui.screens.chat
 
 import androidx.compose.foundation.layout.*
@@ -14,36 +16,6 @@ import androidx.compose.ui.unit.dp
 import com.aiassistant.domain.model.*
 import com.aiassistant.ui.components.EchoGlassDialog
 import dev.chrisbanes.haze.HazeState
-
-@Composable
-fun ReplyDirectionSettingsDialog(
-    enabled: Boolean,
-    count: Int,
-    onChange: (Boolean, Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("多方向回复选择") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("回复前提供多个方向", Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { onChange(it, count) })
-                }
-                Text("普通对话和故事创作均可使用。发送后先生成选项，选定后展开正式回复；会增加一次模型请求。",
-                    style = MaterialTheme.typography.bodyMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (2..4).forEach { value ->
-                        FilterChip(selected = count == value, onClick = { onChange(true, value) },
-                            label = { Text("$value 个方向") })
-                    }
-                }
-                Text("可选具体方向、让模型自行决定，或填写其他方向。关闭选择窗口后，点顶部的列表图标可继续选择。",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } })
-}
 
 @Composable
 fun ReplyDirectionDialog(
@@ -90,7 +62,8 @@ fun ReplyDirectionDialog(
             }
         },
         buttons = {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { onDecision(ReplyDirectionDecision(ReplyDirectionAction.CANCEL)) }) { Text("取消本轮") }
                 TextButton(onClick = onDismiss) { Text("稍后选择") }
             }

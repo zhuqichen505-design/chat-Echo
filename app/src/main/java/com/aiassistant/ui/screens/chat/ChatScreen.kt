@@ -211,7 +211,6 @@ fun ChatScreen(
     val pendingContextFallbackPrompt by viewModel.pendingContextFallbackPrompt.collectAsState()
     val pendingReplyDirection by viewModel.pendingReplyDirection.collectAsState()
     var replyDirectionDismissed by remember(pendingReplyDirection) { mutableStateOf(false) }
-    var showReplyDirectionSettings by remember { mutableStateOf(false) }
     val reconnectStatus by viewModel.reconnectStatus.collectAsState()
 
     val hazeState = rememberEchoHazeState()
@@ -1703,18 +1702,6 @@ fun ChatScreen(
                                         showContextUsageDialog = true
                                     }
                                 )
-                                IconButton(
-                                    onClick = {
-                                        if (pendingReplyDirection != null) replyDirectionDismissed = false
-                                        else showReplyDirectionSettings = true
-                                    },
-                                    enabled = !isGenerating || pendingReplyDirection != null,
-                                    modifier = Modifier.size(44.dp)
-                                ) {
-                                    Icon(Icons.Default.List,
-                                        contentDescription = if (pendingReplyDirection != null) "继续选择回复方向" else "多方向回复选择",
-                                        tint = if (tempSettings.enableReplyDirections) MaterialTheme.colorScheme.primary else toolbarContentColor)
-                                }
                                 if (uiState.isRoleplay) {
                                     IconButton(
                                         onClick = { showStoryManagerDialog = true },
@@ -2587,12 +2574,6 @@ fun ChatScreen(
                     onError = { Toast.makeText(context, it, Toast.LENGTH_LONG).show() })
             }
         )
-    }
-
-    if (showReplyDirectionSettings) {
-        ReplyDirectionSettingsDialog(tempSettings.enableReplyDirections, tempSettings.replyDirectionCount,
-            onChange = { enabled, count -> viewModel.updateTempSettings(tempSettings.copy(enableReplyDirections = enabled, replyDirectionCount = count)) },
-            onDismiss = { showReplyDirectionSettings = false })
     }
 
     pendingReplyDirection?.let { prompt ->

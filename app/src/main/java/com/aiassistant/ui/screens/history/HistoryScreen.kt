@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.aiassistant.ui.screens.history
 
 import androidx.room.withTransaction
@@ -596,7 +598,7 @@ fun ExportSingleDialog(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val jsonSelected = selectedFormat == "json"
                     FilterChip(
                         selected = jsonSelected,

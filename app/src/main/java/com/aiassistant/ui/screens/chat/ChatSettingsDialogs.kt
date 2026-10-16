@@ -517,37 +517,36 @@ fun ChatSettingsDialog(
 
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("回复前选择方向", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
-                                    Text("仅当前对话；开启后增加一次模型请求与费用", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
-                                }
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("多方向回复", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
                                 Switch(checked = enableReplyDirections, onCheckedChange = {
                                     enableReplyDirections = it
                                     notifyTempSettingsChange()
-                                })
+                                }, colors = echoSwitchColors())
                             }
+                            Text("发送后先选择回复方向，再展开正式回复。仅当前对话生效，会增加一次模型请求。",
+                                style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
                             if (enableReplyDirections) {
-                                Text("模型方向数量（另有“自行决定”和“其他”）", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("方向数量", style = MaterialTheme.typography.labelLarge, color = dialogContentColor)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     (2..4).forEach { count ->
                                         FilterChip(selected = replyDirectionCount == count, onClick = {
                                             replyDirectionCount = count
                                             notifyTempSettingsChange()
-                                        }, label = { Text("$count 个") })
+                                        }, label = { Text("$count 个方向", softWrap = false) },
+                                            colors = echoFilterChipColors(), border = echoFilterChipBorder(replyDirectionCount == count))
                                     }
                                 }
+                                Text("每次还可选“自行决定”或填写“其他”方向。稍后选择可从底部提示继续。",
+                                    style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
                             }
                         }
                     }
 
                     item {
                         Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     text = if (tuningProfile.temperatureEnabled) {
                                         "温度: ${String.format("%.2f", temperature)}"
@@ -593,11 +592,7 @@ fun ChatSettingsDialog(
 
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("最大 Token 数", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
                                 Text("限制单次回复的最大生成长度", style = MaterialTheme.typography.labelSmall, color = dialogSecondaryColor)
                             }
@@ -642,13 +637,13 @@ fun ChatSettingsDialog(
 
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = "当前会话上下文上限 (Context Window)",
+                                    text = "上下文上限",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = dialogContentColor
                                 )
@@ -744,11 +739,7 @@ fun ChatSettingsDialog(
 
                     item {
                         Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     text = "Top P: ${String.format("%.2f", topP)}",
                                     style = MaterialTheme.typography.titleSmall,
@@ -904,7 +895,7 @@ fun ChatSettingsDialog(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = dialogSecondaryColor
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         OutlinedButton(
                                             onClick = { modelAvatarPicker.launch("image/*") },
                                             shape = RoundedCornerShape(999.dp)
@@ -961,10 +952,10 @@ fun ChatSettingsDialog(
             }
         },
         buttons = {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 TextButton(onClick = onDismiss) {
                     Text("取消")

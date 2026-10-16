@@ -457,7 +457,7 @@ fun AppearanceTab(
                 Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HomeLayoutChoice(
                         style = EchoHomeLayoutStyle.FOCUS,
-                        label = "聚焦对话（底栏）",
+                        label = "聚焦对话",
                         selected = settings.homeLayoutStyle == EchoHomeLayoutStyle.FOCUS,
                         compact = settings.homeCompactList,
                         showRecentStory = settings.homeShowRecentStory,
@@ -466,7 +466,7 @@ fun AppearanceTab(
                     )
                     HomeLayoutChoice(
                         style = EchoHomeLayoutStyle.WORKBENCH,
-                        label = "侧栏工作台（左栏）",
+                        label = "侧栏工作台",
                         selected = settings.homeLayoutStyle == EchoHomeLayoutStyle.WORKBENCH,
                         compact = settings.homeCompactList,
                         showRecentStory = settings.homeShowRecentStory,
@@ -501,31 +501,36 @@ fun AppearanceTab(
                         AppearancePresetOption(EchoAppearancePreset.EXISTING, "经典", "保留当前 Echo 配色", listOf(0xFF3B82F6, 0xFF38BDF8, 0xFFFB7185)),
                         AppearancePresetOption(EchoAppearancePreset.CLEAR_SKY, "晴空", "蓝白层次，清晰舒展", listOf(0xFF2C73B7, 0xFF83D3F0, 0xFFEDF4FC)),
                         AppearancePresetOption(EchoAppearancePreset.NIGHT_VOYAGE, "夜航", "墨绿与暖金，安静阅读", listOf(0xFF172B29, 0xFFD6BB83, 0xFFA5C9AD)),
-                        AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "纸色与赭红，温和分明", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354))
+                        AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "纸色与赭红，温和分明", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354)),
+                        AppearancePresetOption(EchoAppearancePreset.MONO, "墨白", "黑白对照、细线轮廓、平面材质", listOf(0xFF242424, 0xFFE9E9E9, 0xFFFFFFFF))
                     )
                     presets.forEach { preset ->
                         val selected = settings.appearancePreset == preset.id
                         Row(
                             modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(MaterialTheme.shapes.medium)
                                 .selectable(selected = selected, role = Role.RadioButton, onClick = {
                                     saveVisualPreference("已应用「${preset.label}」主题") { it.copy(appearancePreset = preset.id) }
                                 }).padding(horizontal = 4.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(selected = selected, onClick = null)
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(preset.label, style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(preset.label, modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        preset.colors.forEach { color ->
+                                            Box(Modifier.size(16.dp).clip(CircleShape).background(Color(color))
+                                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                                        }
+                                    }
+                                }
                                 Text(preset.description, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                preset.colors.forEach { color ->
-                                    Box(Modifier.size(16.dp).clip(CircleShape).background(Color(color))
-                                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                                }
                             }
                         }
                     }
@@ -554,7 +559,8 @@ fun AppearanceTab(
                 Text("创作正文字体", style = MaterialTheme.typography.titleSmall)
                 Text("可单独选择是否应用于普通对话；设置与操作按钮保持界面字体。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(
                         EchoStoryFont.LITERARY to "沉浸衬线",
                         EchoStoryFont.CLEAR to "清晰无衬线",
@@ -563,10 +569,9 @@ fun AppearanceTab(
                         FilterChip(
                             selected = settings.storyFont == value,
                             onClick = { saveVisualPreference("创作正文字体已切换为$label") { it.copy(storyFont = value) } },
-                            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            label = { Text(label, softWrap = false) },
                             colors = echoFilterChipColors(),
-                            border = echoFilterChipBorder(settings.storyFont == value),
-                            modifier = Modifier.weight(1f)
+                            border = echoFilterChipBorder(settings.storyFont == value)
                         )
                     }
                 }
@@ -685,11 +690,12 @@ fun AppearanceTab(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text("界面字体缩放", style = MaterialTheme.typography.bodyMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    FlowRow(modifier = Modifier.fillMaxWidth().selectableGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         val scales = listOf(0.85f to "紧凑", 1.0f to "标准", 1.15f to "大", 1.25f to "特大")
-                        scales.forEachIndexed { index, (scale, label) ->
+                        scales.forEach { (scale, label) ->
                             val selected = kotlin.math.abs(fontSizeScale - scale) < 0.05f
-                            SegmentedButton(
+                            FilterChip(
                                 selected = selected,
                                 onClick = {
                                     fontSizeScale = scale
@@ -697,12 +703,10 @@ fun AppearanceTab(
                                     settings = manager.getSettings()
                                     savedMessage = if (saved) "已保存界面字体缩放" else "字体缩放保存失败，请重试"
                                 },
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = scales.size),
-                                colors = echoSegmentedButtonColors(),
-                                border = echoSegmentedButtonBorder(selected)
-                            ) {
-                                Text(label)
-                            }
+                                colors = echoFilterChipColors(),
+                                border = echoFilterChipBorder(selected),
+                                label = { Text(label, softWrap = false) }
+                            )
                         }
                     }
                 }
@@ -843,9 +847,10 @@ fun AppearanceTab(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     val isDark = themeMode == AppThemeMode.Dark || (themeMode == AppThemeMode.System && androidx.compose.foundation.isSystemInDarkTheme())
                                     val targetColorInt = if (isDark) preset.darkColorInt else preset.lightColorInt
@@ -857,8 +862,7 @@ fun AppearanceTab(
                                             savedMessage = if (saved) "已将「${preset.name}」应用为首页背景" else "背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text("设为首页", style = MaterialTheme.typography.labelSmall)
                                     }
@@ -870,8 +874,7 @@ fun AppearanceTab(
                                             savedMessage = if (saved) "已将「${preset.name}」应用为对话页背景" else "背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text("设为对话页", style = MaterialTheme.typography.labelSmall)
                                     }
@@ -884,8 +887,7 @@ fun AppearanceTab(
                                             savedMessage = if (homeSaved && chatSaved) "已将「${preset.name}」应用为全局背景" else "部分背景保存失败，请重试"
                                             selectedColorPreset = null
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text("全部应用", style = MaterialTheme.typography.labelSmall)
                                     }

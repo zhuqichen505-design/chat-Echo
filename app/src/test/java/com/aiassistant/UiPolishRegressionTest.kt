@@ -23,6 +23,7 @@ class UiPolishRegressionTest {
             for (dark in listOf(false, true)) {
                 val colors = com.aiassistant.ui.theme.echoColorScheme(preset, dark)
                 val pairs = listOf(
+                    "page" to (colors.onBackground to colors.background),
                     "body" to (colors.onSurface to colors.surface),
                     "secondary text" to (colors.onSurfaceVariant to colors.surfaceVariant),
                     "primary action" to (colors.onPrimary to colors.primary),
@@ -30,6 +31,10 @@ class UiPolishRegressionTest {
                     "tertiary action" to (colors.onTertiary to colors.tertiary),
                     "error action" to (colors.onError to colors.error),
                     "selected option" to (colors.onPrimaryContainer to colors.primaryContainer),
+                    "secondary container" to (colors.onSecondaryContainer to colors.secondaryContainer),
+                    "tertiary container" to (colors.onTertiaryContainer to colors.tertiaryContainer),
+                    "error container" to (colors.onErrorContainer to colors.errorContainer),
+                    "menu" to (colors.onSurface to colors.surfaceContainer),
                     "inverse" to (colors.inverseOnSurface to colors.inverseSurface)
                 )
                 pairs.forEach { (role, pair) ->

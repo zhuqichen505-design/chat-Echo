@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +91,8 @@ fun EchoPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: androidx.compose.ui.graphics.Shape = EchoTokens.Radius.shapeMd,
+    shape: androidx.compose.ui.graphics.Shape = if (LocalEchoThemeStyle.current.flatSurfaces)
+        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapeMd,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -116,7 +118,8 @@ fun EchoGlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: androidx.compose.ui.graphics.Shape = EchoTokens.Radius.shapeMd,
+    shape: androidx.compose.ui.graphics.Shape = if (LocalEchoThemeStyle.current.flatSurfaces)
+        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapeMd,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit
 ) {

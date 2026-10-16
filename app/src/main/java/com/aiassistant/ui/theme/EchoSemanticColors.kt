@@ -85,6 +85,22 @@ object EchoSemanticColors {
 
 @Composable
 fun rememberEchoSemanticColors(): EchoSemanticPalette {
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val colors = MaterialTheme.colorScheme
+    val isDark = colors.background.luminance() < 0.5f
+    if (LocalEchoThemeStyle.current.isMonochrome) {
+        val neutral = SemanticColorGroup(
+            main = colors.primary,
+            container = colors.surfaceContainerHigh,
+            onContainer = colors.onSurface,
+            border = colors.outlineVariant
+        )
+        // 状态仍由原有图标与文字说明；仅错误保留红色，以突出需要处理的操作。
+        return EchoSemanticPalette(
+            error = SemanticColorGroup(colors.error, colors.errorContainer, colors.onErrorContainer, colors.error),
+            warning = neutral,
+            success = neutral,
+            info = neutral
+        )
+    }
     return if (isDark) EchoSemanticColors.Dark else EchoSemanticColors.Light
 }

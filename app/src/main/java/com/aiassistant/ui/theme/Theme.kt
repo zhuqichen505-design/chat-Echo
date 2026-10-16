@@ -3,13 +3,16 @@ package com.aiassistant.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import androidx.compose.ui.unit.dp
 import com.aiassistant.utils.EchoAppearancePreset
 
 private val LightColorScheme = lightColorScheme(
@@ -79,6 +82,34 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private fun lightColorSchemeFor(appearancePreset: String): ColorScheme = when (EchoAppearancePreset.sanitize(appearancePreset)) {
+    EchoAppearancePreset.MONO -> LightColorScheme.copy(
+        primary = Color(0xFF242424),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFFE9E9E9),
+        onPrimaryContainer = Color(0xFF202020),
+        secondary = Color(0xFF454545),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFEDEDED),
+        onSecondaryContainer = Color(0xFF242424),
+        tertiary = Color(0xFF5A5A5A),
+        onTertiary = Color.White,
+        tertiaryContainer = Color(0xFFF0F0F0),
+        onTertiaryContainer = Color(0xFF303030),
+        background = Color.White,
+        onBackground = Color(0xFF202020),
+        surface = Color.White,
+        onSurface = Color(0xFF202020),
+        surfaceVariant = Color(0xFFF5F5F5),
+        onSurfaceVariant = Color(0xFF606060),
+        outline = Color(0xFF777777),
+        outlineVariant = Color(0xFFD9D9D9),
+        surfaceTint = Color.Transparent,
+        surfaceContainerLowest = Color.White,
+        surfaceContainerLow = Color(0xFFFAFAFA),
+        surfaceContainer = Color(0xFFF5F5F5),
+        surfaceContainerHigh = Color(0xFFEFEFEF),
+        surfaceContainerHighest = Color(0xFFE9E9E9)
+    )
     EchoAppearancePreset.CLEAR_SKY -> LightColorScheme.copy(
         primary = Color(0xFF2C73B7),
         onPrimary = Color.White,
@@ -167,6 +198,34 @@ private fun lightColorSchemeFor(appearancePreset: String): ColorScheme = when (E
 }
 
 private fun darkColorSchemeFor(appearancePreset: String): ColorScheme = when (EchoAppearancePreset.sanitize(appearancePreset)) {
+    EchoAppearancePreset.MONO -> DarkColorScheme.copy(
+        primary = Color(0xFFE0E0E0),
+        onPrimary = Color(0xFF181818),
+        primaryContainer = Color(0xFF303030),
+        onPrimaryContainer = Color(0xFFEEEEEE),
+        secondary = Color(0xFFD0D0D0),
+        onSecondary = Color(0xFF181818),
+        secondaryContainer = Color(0xFF2A2A2A),
+        onSecondaryContainer = Color(0xFFE5E5E5),
+        tertiary = Color(0xFFBBBBBB),
+        onTertiary = Color(0xFF181818),
+        tertiaryContainer = Color(0xFF262626),
+        onTertiaryContainer = Color(0xFFE0E0E0),
+        background = Color(0xFF121212),
+        onBackground = Color(0xFFEEEEEE),
+        surface = Color(0xFF1D1D1D),
+        onSurface = Color(0xFFEEEEEE),
+        surfaceVariant = Color(0xFF262626),
+        onSurfaceVariant = Color(0xFFB0B0B0),
+        outline = Color(0xFF929292),
+        outlineVariant = Color(0xFF454545),
+        surfaceTint = Color.Transparent,
+        surfaceContainerLowest = Color(0xFF0D0D0D),
+        surfaceContainerLow = Color(0xFF171717),
+        surfaceContainer = Color(0xFF1D1D1D),
+        surfaceContainerHigh = Color(0xFF262626),
+        surfaceContainerHighest = Color(0xFF303030)
+    )
     EchoAppearancePreset.CLEAR_SKY -> DarkColorScheme.copy(
         primary = Color(0xFF9CC4FF),
         onPrimary = Color(0xFF08284F),
@@ -275,8 +334,9 @@ fun AiApiAssistantTheme(
     appearancePreset: String = EchoAppearancePreset.EXISTING,
     content: @Composable () -> Unit
 ) {
+    val themeStyle = echoThemeStyleFor(appearancePreset)
     val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor && !themeStyle.isMonochrome && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
@@ -298,9 +358,18 @@ fun AiApiAssistantTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalEchoThemeStyle provides themeStyle) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = echoTypographyFor(appearancePreset),
+            shapes = if (themeStyle.isMonochrome) Shapes(
+                extraSmall = RoundedCornerShape(4.dp),
+                small = RoundedCornerShape(6.dp),
+                medium = RoundedCornerShape(8.dp),
+                large = RoundedCornerShape(10.dp),
+                extraLarge = RoundedCornerShape(12.dp)
+            ) else Shapes(),
+            content = content
+        )
+    }
 }

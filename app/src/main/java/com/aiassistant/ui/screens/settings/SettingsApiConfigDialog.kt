@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import com.aiassistant.domain.model.ChatModelOption
 import com.aiassistant.ui.components.ImageCropEditDialog
 import com.aiassistant.ui.components.CropShapeMode
@@ -321,7 +322,7 @@ fun ApiConfigDialog(
                     item {
                         Text("快速预设", style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             presets.forEach { (key, value) ->
                                 AssistChip(
                                     onClick = {
@@ -339,7 +340,7 @@ fun ApiConfigDialog(
 
                     item {
                         Text("API类型", style = MaterialTheme.typography.titleSmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             val openAiSelected = apiType == "openai"
                             FilterChip(
                                 selected = openAiSelected,
@@ -363,25 +364,29 @@ fun ApiConfigDialog(
 
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                SettingsInputField(
-                                    title = "配置名称",
-                                    value = name,
-                                    onValueChange = { name = it },
-                                    placeholder = "如：官方 OpenAI",
-                                    modifier = Modifier.weight(1f)
-                                )
-                                SettingsInputField(
-                                    title = "提供商",
-                                    value = provider,
-                                    onValueChange = { provider = it },
-                                    placeholder = "OpenAI / DeepSeek",
-                                    modifier = Modifier.weight(1f)
-                                )
+                            val fontScale = LocalDensity.current.fontScale
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    maxItemsInEachRow = if (maxWidth < (360 * fontScale).dp) 1 else 2
+                                ) {
+                                    SettingsInputField(
+                                        title = "配置名称",
+                                        value = name,
+                                        onValueChange = { name = it },
+                                        placeholder = "如：官方 OpenAI",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    SettingsInputField(
+                                        title = "提供商",
+                                        value = provider,
+                                        onValueChange = { provider = it },
+                                        placeholder = "OpenAI / DeepSeek",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                             SettingsInputField(
                                 title = "Base URL",
@@ -415,10 +420,10 @@ fun ApiConfigDialog(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
                                     text = "API Key 密钥列表",
@@ -805,10 +810,10 @@ fun ApiConfigDialog(
                                 .padding(top = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
@@ -1002,14 +1007,13 @@ fun ApiConfigDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                                 )
                             }
-                            Row(
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.clickable { isConfiguredModelsExpanded = !isConfiguredModelsExpanded }
+                                    modifier = Modifier.fillMaxWidth().clickable { isConfiguredModelsExpanded = !isConfiguredModelsExpanded }
                                 ) {
                                     Icon(
                                         Icons.Default.Tune,
@@ -1021,7 +1025,8 @@ fun ApiConfigDialog(
                                     Text(
                                         text = "已配置模型 (${availableModels.size})",
                                         style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     IconButton(
                                         onClick = { isConfiguredModelsExpanded = !isConfiguredModelsExpanded },
@@ -1036,7 +1041,7 @@ fun ApiConfigDialog(
                                     }
                                 }
                                 if (availableModels.isNotEmpty() && isConfiguredModelsExpanded) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         TextButton(
                                             onClick = { enabledModelNames = availableModels.toSet() },
                                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
@@ -1547,7 +1552,8 @@ private fun ModelCustomSettingCard(
                             text = "模型自定义配置",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
                         )
                         Surface(
                             onClick = onResetCustomSettings,
@@ -1790,7 +1796,7 @@ private fun ApiModelAvatarSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     OutlinedButton(onClick = onPickAvatar, shape = RoundedCornerShape(999.dp)) {
                         Text("更换")
                     }

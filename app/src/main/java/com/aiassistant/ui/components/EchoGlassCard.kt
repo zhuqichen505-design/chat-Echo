@@ -18,9 +18,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -38,7 +40,7 @@ enum class CardEmphasis { Standard, Subdued }
 @Composable
 fun EchoGlassCard(
     modifier: Modifier = Modifier,
-    shape: Shape = EchoTokens.Radius.shapeLg,
+    shape: Shape = EchoGlassPagePanelShape,
     containerColor: Color? = null,
     borderColor: Color? = null,
     borderWidth: Dp = EchoTokens.Glass.borderWidth,
@@ -50,6 +52,14 @@ fun EchoGlassCard(
     content: @Composable BoxScope.() -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    if (LocalEchoThemeStyle.current.flatSurfaces) {
+        val surface = (containerColor ?: colorScheme.surface).compositeOver(colorScheme.surface).copy(alpha = 1f)
+        Box(modifier = modifier.clip(shape).background(surface, shape).then(
+            if (showBorder && borderWidth > 0.dp) Modifier.border(borderWidth, borderColor ?: colorScheme.outlineVariant, shape)
+            else Modifier
+        ), content = content)
+        return
+    }
     val isDark = colorScheme.background.luminance() < 0.5f
 
     val defaultBg = containerColor ?: if (isDark) {
@@ -129,7 +139,7 @@ fun EchoGlassCard(
     onLongClick: (() -> Unit)? = null,
     onLongClickLabel: String? = null,
     enabled: Boolean = true,
-    shape: Shape = EchoTokens.Radius.shapeLg,
+    shape: Shape = EchoGlassPagePanelShape,
     containerColor: Color? = null,
     borderColor: Color? = null,
     borderWidth: Dp = EchoTokens.Glass.borderWidth,

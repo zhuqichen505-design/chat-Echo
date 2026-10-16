@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,10 +27,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.constrainHeight
 import com.aiassistant.ui.theme.EchoTokens
 
 /**
@@ -45,6 +49,7 @@ import com.aiassistant.ui.theme.EchoTokens
  * - 默认自带 cardPadding 水平内边距（整卡通栏行使用）；
  *   嵌入已有内边距容器（如 SettingsGlassCard）时传 0.dp 避免双重缩进
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EchoSettingRow(
     title: String,
@@ -76,67 +81,89 @@ fun EchoSettingRow(
             .heightIn(min = minHeight)
     }
 
-    Row(
+    val fontScale = LocalDensity.current.fontScale
+    Layout(
         modifier = rowModifier
             .padding(horizontal = contentPaddingHorizontal)
+            .padding(vertical = 6.dp)
             .alpha(if (enabled) 1f else 0.38f),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start
-    ) {
-        // 图标底色块：42dp 圆角块 + 22dp 图标
-        if (icon != null) {
-            Box(
-                modifier = Modifier
-                    .size(EchoTokens.Component.settingIconBackdrop)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(iconTint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(EchoTokens.IconSize.header),
-                    tint = iconTint
-                )
-            }
-            Spacer(modifier = Modifier.width(EchoTokens.Spacing.inlineGap))
-        }
-
-        // 标题 + 徽章 + 副标题
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
+        content = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    style = EchoTokens.Type.cardTitle,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (badgeText != null) {
-                    Spacer(modifier = Modifier.width(EchoTokens.Spacing.inlineGapTight))
-                    EchoBadge(text = badgeText, type = badgeType)
+                // 图标底色块：42dp 圆角块 + 22dp 图标
+                if (icon != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(EchoTokens.Component.settingIconBackdrop)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(iconTint.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(EchoTokens.IconSize.header),
+                            tint = iconTint
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(EchoTokens.Spacing.inlineGap))
                 }
+
+                // 标题 + 徽章 + 副标题
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.inlineGapTight),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = title,
+                            style = EchoTokens.Type.cardTitle,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            // 设置名称和说明完整展示；徽章另起一行时不挤压标题。
+                        )
+                        if (badgeText != null) {
+                            EchoBadge(text = badgeText, type = badgeType)
+                        }
+                    }
+                    if (subtitle != null) {
+                        Spacer(modifier = Modifier.height(EchoTokens.Spacing.inlineGapTight))
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
             }
-            if (subtitle != null) {
-                Spacer(modifier = Modifier.height(EchoTokens.Spacing.inlineGapTight))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            if (trailing != null) {
+                Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically,
+                    content = trailing)
             }
         }
-
-        // 尾部控件
-        if (trailing != null) {
-            Spacer(modifier = Modifier.width(EchoTokens.Spacing.inlineGap))
-            trailing()
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val action = measurables.getOrNull(1)?.measure(loose)
+        val gap = EchoTokens.Spacing.inlineGap.roundToPx()
+        val iconWidth = if (icon == null) 0 else
+            (EchoTokens.Component.settingIconBackdrop + EchoTokens.Spacing.inlineGap).roundToPx()
+        // 操作自然宽度优先；文字不足约10个汉字时将操作移到下一行。
+        val minimumLabelWidth = (140.dp * fontScale).roundToPx() + iconWidth
+        val inline = action == null || width - action.width - gap >= minimumLabelWidth
+        val labelWidth = if (inline && action != null) width - action.width - gap else width
+        val label = measurables[0].measure(loose.copy(maxWidth = labelWidth.coerceAtLeast(0)))
+        val contentHeight = if (inline) maxOf(label.height, action?.height ?: 0)
+            else label.height + gap + (action?.height ?: 0)
+        val height = constraints.constrainHeight(contentHeight)
+        layout(width, height) {
+            if (inline) {
+                label.placeRelative(0, (height - label.height) / 2)
+                action?.placeRelative(width - action.width, (height - action.height) / 2)
+            } else {
+                label.placeRelative(0, 0)
+                action?.placeRelative(width - action.width, label.height + gap)
+            }
         }
     }
 }

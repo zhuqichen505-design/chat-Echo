@@ -6,6 +6,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.aiassistant.utils.EchoAppearancePreset
 
 // 使用系统默认字体，但设置更人性化的参数
 val DefaultFontFamily = FontFamily.Default
@@ -132,3 +133,24 @@ val Typography = Typography(
         letterSpacing = 0.5.sp
     )
 )
+
+/** 墨白用更利落的标题和中性字距表达层次，正文字号和用户阅读字体不受影响。 */
+internal fun echoTypographyFor(appearancePreset: String): Typography =
+    if (EchoAppearancePreset.sanitize(appearancePreset) == EchoAppearancePreset.MONO) {
+        Typography.copy(
+            displayLarge = Typography.displayLarge.copy(fontWeight = FontWeight.Medium),
+            displayMedium = Typography.displayMedium.copy(fontWeight = FontWeight.Medium),
+            displaySmall = Typography.displaySmall.copy(fontWeight = FontWeight.Medium),
+            headlineLarge = Typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+            headlineMedium = Typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+            headlineSmall = Typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
+            titleLarge = Typography.titleLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+            titleMedium = Typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+            titleSmall = Typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
+            labelLarge = Typography.labelLarge.copy(letterSpacing = 0.sp),
+            labelMedium = Typography.labelMedium.copy(letterSpacing = 0.sp),
+            labelSmall = Typography.labelSmall.copy(letterSpacing = 0.sp)
+        )
+    } else {
+        Typography
+    }

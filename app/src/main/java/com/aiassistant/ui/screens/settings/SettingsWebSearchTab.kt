@@ -276,7 +276,7 @@ fun WebSearchTab(
                         placeholder = "tvly-..."
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("basic", "advanced").forEach { depth ->
                             val selected = searchDepth == depth
                             FilterChip(
@@ -518,10 +518,10 @@ fun WebSearchTab(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             // 标题栏与安装状态徽标
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
@@ -633,10 +633,10 @@ fun WebSearchTab(
                             }
 
                             // 状态详情与更新时间 (使用优雅格式化时间)
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
                                     text = "传感器: ${toolHub.healthDataManager.getSensorStatusText()}",
@@ -651,10 +651,11 @@ fun WebSearchTab(
                                 )
                             }
 
-                            // 操作按钮栏 (清晰分行，响应式三等分)
-                            Row(
+                            // 操作按钮按完整标签宽度换行，避免三等分挤压文字。
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 OutlinedButton(
                                     onClick = {
@@ -667,7 +668,6 @@ fun WebSearchTab(
                                             currentHealthSummary = toolHub.healthDataManager.getHealthDataSummary()
                                         }
                                     },
-                                    modifier = Modifier.weight(1f),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
@@ -678,7 +678,6 @@ fun WebSearchTab(
 
                                 OutlinedButton(
                                     onClick = { showHuaweiHealthSyncDialog = true },
-                                    modifier = Modifier.weight(1f),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
@@ -693,7 +692,6 @@ fun WebSearchTab(
                                             savedMessage = "未检测到已安装的华为运动健康应用"
                                         }
                                     },
-                                    modifier = Modifier.weight(1f),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {

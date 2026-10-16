@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package com.aiassistant.ui.screens.home
 
@@ -77,7 +77,7 @@ fun FolderManagerScreen(
                 val fabShape = RoundedCornerShape(22.dp)
                 Surface(
                     modifier = Modifier
-                        .height(56.dp)
+                        .heightIn(min = 56.dp)
                         .echoHazePanel(
                             hazeState = hazeState,
                             shape = fabShape,
@@ -426,9 +426,10 @@ fun FolderEditDialog(
 
                 // 颜色选择
                 Text("选择颜色", style = MaterialTheme.typography.titleSmall)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     folderColors.forEach { (colorIndex, colorName) ->
                         val color = EchoFolderColors.pastelPalette.getOrElse(colorIndex - 1) {
@@ -458,9 +459,10 @@ fun FolderEditDialog(
 
                 // 图标选择
                 Text("选择图标", style = MaterialTheme.typography.titleSmall)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     folderIcons.take(5).forEach { (iconName, _) ->
                         val icon = when (iconName) {

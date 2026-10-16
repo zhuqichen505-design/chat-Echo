@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Echo · 三种设计语言</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <header class="masthead"><a class="wordmark" href="../theme-exploration/index.html" aria-label="查看上一轮主题预览"><span aria-hidden="true">◎</span> Echo</a><span class="edition">设计提案 / 第二辑</span><span class="status">独立样稿 · 尚未应用</span></header>
+  <main>
+    <section class="intro"><div><p class="overline">装帧 · 讯号 · 浮岛</p><h1>三种气质，<br>三种设计语言。</h1></div><div class="intro-copy"><p>从字的节奏，到页面的骨架。</p><p>目录式的沉静、仪表式的利落、岛屿式的轻盈。三个方向分别设计信息组织、导航、控件与阅读页面，保留 Echo 的完整功能入口。</p><a href="../theme-exploration/index.html#theme=mono&mode=light&bg=theme">已认可方向：墨白 ↗</a></div></section>
+    <section class="preview-controls" aria-label="预览控制">
+      <div class="control"><span>页面</span><div class="segmented" role="group" aria-label="预览页面"><button data-scene="home" aria-pressed="true">首页</button><button data-scene="chat" aria-pressed="false">对话</button><button data-scene="settings" aria-pressed="false">对话设置</button><button data-scene="stats" aria-pressed="false">统计</button></div></div>
+      <div class="control"><label for="layout">首页导航</label><select id="layout"><option value="bottom">底部导航</option><option value="rail">左侧导航</option></select></div>
+      <div class="control"><span>模式</span><div class="segmented" role="group" aria-label="显示模式"><button data-mode="light" aria-pressed="true">浅色</button><button data-mode="dark" aria-pressed="false">深色</button></div></div>
+      <div class="control"><label for="background">背景</label><select id="background"><option value="theme">主题底色</option><option value="white">纯白</option><option value="black">纯黑</option></select></div>
+    </section>
+    <div class="mobile-themes" role="group" aria-label="窄屏选择设计"><button data-theme="binding" aria-pressed="true">装帧</button><button data-theme="signal" aria-pressed="false">讯号</button><button data-theme="island" aria-pressed="false">浮岛</button></div>
+    <section class="studies" aria-label="三套独立设计">
+      <article class="study" data-theme="binding"><div class="study-heading"><div><span class="theme-id">BINDING</span><h2>装帧</h2></div><span class="study-swatch binding-swatch" aria-hidden="true"></span></div><p class="study-description">蓝灰布面与书页留白。衬线标题、目录行、细线索引；长对话像翻阅一本有秩序的书。</p><div class="device binding" data-mode="light" data-layout="bottom" data-background="theme" aria-label="装帧主题预览"></div><div class="design-notes"><span>宋体标题 × 无衬线操作</span><span>书脊 / 页码 / 通栏目录</span><span>硬边、薄线、克制的动效</span></div></article>
+      <article class="study" data-theme="signal"><div class="study-heading"><div><span class="theme-id">SIGNAL</span><h2>讯号</h2></div><span class="study-swatch signal-swatch" aria-hidden="true"></span></div><p class="study-description">冷灰工作台上的清晰信号。方形控件、表格式会话、工具轨；状态和操作一眼可见。</p><div class="device signal" data-mode="light" data-layout="bottom" data-background="theme" aria-label="讯号主题预览"></div><div class="design-notes"><span>粗黑体 × 等宽状态信息</span><span>索引表 / 工具轨 / 平面分区</span><span>方切角、强选中、扫描动态</span></div></article>
+      <article class="study" data-theme="island"><div class="study-heading"><div><span class="theme-id">ISLAND</span><h2>浮岛</h2></div><span class="study-swatch island-swatch" aria-hidden="true"></span></div><p class="study-description">轻盈而有分量的柔软界面。错落圆角、独立内容岛、舒展文字；创作与日常自然相邻。</p><div class="device island" data-mode="light" data-layout="bottom" data-background="theme" aria-label="浮岛主题预览"></div><div class="design-notes"><span>圆润标题 × 人文无衬线</span><span>内容岛 / 双行分组 / 悬浮导航</span><span>非对称圆角、实体层次、柔和动效</span></div></article>
+    </section>
+    <footer><p>所有内容均为合成样例。导航、搜索、输入、设置开关与回复状态可操作；输入只用于本地样稿，不发送请求、不保存数据。</p><p>三套方向尚未加入 App；墨白已获采纳。浅深模式与纯白、纯黑底色均可比较。浏览器样稿的字体取自本机，实际 Android 字体与尺寸需单独适配验收。</p></footer>
+  </main>
+  <div class="toast" role="status" aria-live="polite"></div>
+  <script src="preview.js"></script>
+</body>
+</html>

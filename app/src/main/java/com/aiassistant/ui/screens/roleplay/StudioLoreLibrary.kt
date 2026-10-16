@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.aiassistant.ui.screens.roleplay
 
 import androidx.compose.foundation.clickable
@@ -45,13 +47,15 @@ internal fun StudioLoreLibrary(modifier: Modifier = Modifier) {
     } }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column {
                     Text("世界书资料库", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text("检查词条 → 启用书目 → 在作品中绑定", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                WorldBookImportButton(onImported = { id -> mutate { managing = repository.getWorldBookById(id) } })
-                IconButton(onClick = { creating = true }) { Icon(Icons.Default.Add, "创建世界书") }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    WorldBookImportButton(onImported = { id -> mutate { managing = repository.getWorldBookById(id) } })
+                    TextButton(onClick = { creating = true }) { Icon(Icons.Default.Add, null); Text("创建世界书") }
+                }
             }
         }
         item { OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
@@ -65,11 +69,13 @@ internal fun StudioLoreLibrary(modifier: Modifier = Modifier) {
                         Text(if (book.isEnabled) "已启用 · 点击管理词条" else "已停用 · 绑定到故事也不会注入", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = book.isEnabled, onCheckedChange = { enabled -> mutate { repository.setWorldBookEnabled(book.id, enabled) } })
-                    IconButton(onClick = { editing = book }) { Icon(Icons.Default.Edit, "编辑 ${book.name}") }
-                    IconButton(onClick = { deleting = book }) { Icon(Icons.Default.DeleteOutline, "删除 ${book.name}") }
                 }
                 if (book.description.isNotBlank()) Text(book.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { managing = book }) { Text("管理词条与触发关键词") }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { managing = book }) { Text("管理词条与触发关键词") }
+                    TextButton(onClick = { editing = book }) { Text("编辑") }
+                    TextButton(onClick = { deleting = book }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }
                 HorizontalDivider()
             }
         }

@@ -72,10 +72,10 @@ fun RoleplayStudioScreen(
             TopAppBar(title = { Text("创作", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 navigationIcon = { if (showBackButton) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
-                    TextButton(onClick = { showAnalyze = true }) { Icon(Icons.Default.FileUpload, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("导入素材") }
+                    IconButton(onClick = { showAnalyze = true }) { Icon(Icons.Default.FileUpload, "导入素材") }
                     FilledTonalButton(onClick = onCreateNewSession, modifier = Modifier.padding(end = 12.dp)) { Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Text("新作品") }
                 })
-            TabRow(selectedTabIndex = currentTab, containerColor = MaterialTheme.colorScheme.background) {
+            ScrollableTabRow(selectedTabIndex = currentTab, edgePadding = 16.dp, containerColor = MaterialTheme.colorScheme.background) {
                 listOf("作品", "人物与世界", "世界书").forEachIndexed { index, name ->
                     Tab(selected = currentTab == index, onClick = { viewModel.studioTab = index; selected = emptySet() }, text = { Text(name) })
                 }
@@ -103,13 +103,17 @@ fun RoleplayStudioScreen(
                         }
                     }
                     if (selected.isNotEmpty()) item {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("已选 ${selected.size}", Modifier.weight(1f))
-                            TextButton(onClick = { selected = stories.map { it.conversation.id }.toSet() }) { Text("全选") }
-                            IconButton(onClick = { viewModel.setStoryPinned(selected, true); selected = emptySet() }) { Icon(Icons.Default.PushPin, "置顶") }
-                            IconButton(onClick = { viewModel.hideStories(selected); selected = emptySet() }) { Icon(Icons.Default.VisibilityOff, "隐藏") }
-                            IconButton(onClick = { deleteSelected = true }) { Icon(Icons.Default.DeleteOutline, "删除", tint = MaterialTheme.colorScheme.error) }
-                            IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "退出多选") }
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("已选 ${selected.size}", Modifier.weight(1f))
+                                IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "退出多选") }
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = { selected = stories.map { it.conversation.id }.toSet() }) { Text("全选") }
+                                TextButton(onClick = { viewModel.setStoryPinned(selected, true); selected = emptySet() }) { Text("置顶") }
+                                TextButton(onClick = { viewModel.hideStories(selected); selected = emptySet() }) { Text("隐藏") }
+                                TextButton(onClick = { deleteSelected = true }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                            }
                         }
                     }
                     if (stories.isEmpty()) item {
@@ -147,11 +151,9 @@ fun RoleplayStudioScreen(
                     }
                 } else {
                     item {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             FilterChip(selected = libraryKind == 0, onClick = { libraryKind = 0 }, label = { Text("人物 ${characters.size}") })
-                            Spacer(Modifier.width(8.dp))
                             FilterChip(selected = libraryKind == 1, onClick = { libraryKind = 1 }, label = { Text("世界 ${scenarios.size}") })
-                            Spacer(Modifier.weight(1f))
                             TextButton(onClick = { if (libraryKind == 0) onNavigateToCharacterEditor(null) else onNavigateToScenarioEditor(null) }) { Text("新建") }
                         }
                     }

@@ -947,6 +947,7 @@ private fun HomeSearchRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BatchSelectionBar(
     selectedCount: Int,
@@ -992,14 +993,13 @@ private fun BatchSelectionBar(
                 }
             }
 
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 FilledTonalButton(
                     onClick = onPinSelected,
-                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(999.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
@@ -1007,7 +1007,6 @@ private fun BatchSelectionBar(
                 }
                 FilledTonalButton(
                     onClick = onUnpinSelected,
-                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(999.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
@@ -1015,7 +1014,6 @@ private fun BatchSelectionBar(
                 }
                 FilledTonalButton(
                     onClick = onMoveSelected,
-                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(999.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {

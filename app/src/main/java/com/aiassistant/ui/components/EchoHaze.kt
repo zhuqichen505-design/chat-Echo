@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -58,6 +60,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import dev.chrisbanes.haze.HazeDefaults
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -72,9 +75,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 
-val EchoGlassDialogShape = EchoTokens.Radius.shapeXl
-val EchoGlassPagePanelShape = EchoTokens.Radius.shapeLg
-val EchoGlassControlShape = EchoTokens.Radius.shapePill
+val EchoGlassDialogShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        RoundedCornerShape(LocalEchoThemeStyle.current.dialogCornerRadius) else EchoTokens.Radius.shapeXl
+val EchoGlassPagePanelShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        RoundedCornerShape(LocalEchoThemeStyle.current.panelCornerRadius) else EchoTokens.Radius.shapeLg
+val EchoGlassControlShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapePill
 
 data class EchoGlassPalette(
     val panel: Color,
@@ -97,6 +106,18 @@ data class EchoGlassPalette(
 @Composable
 fun echoGlassPalette(): EchoGlassPalette {
     val colors = MaterialTheme.colorScheme
+    if (LocalEchoThemeStyle.current.flatSurfaces) {
+        return EchoGlassPalette(
+            panel = colors.surface, panelStrong = colors.surface,
+            panelSoft = colors.surfaceContainerLow, control = colors.surfaceContainer,
+            controlSelected = colors.primaryContainer, input = colors.surfaceContainerLow,
+            userBubble = colors.surfaceContainerHigh, assistantBubble = Color.Transparent,
+            outline = colors.outlineVariant, outlineSelected = colors.primary,
+            textPrimary = colors.onSurface, textSecondary = colors.onSurfaceVariant,
+            textMuted = colors.onSurfaceVariant, iconPrimary = colors.primary,
+            iconSecondary = colors.onSurfaceVariant
+        )
+    }
     val isDark = colors.background.luminance() < 0.5f
 
     // 统一消费 EchoTokens.Glass 令牌，消灭双轨（原硬编码值已回写令牌）
@@ -137,7 +158,9 @@ fun rememberEchoHazeState(): HazeState = remember { HazeState() }
 @Composable
 fun Modifier.echoHazeSource(
     hazeState: HazeState
-): Modifier = haze(
+): Modifier {
+    if (LocalEchoThemeStyle.current.flatSurfaces) return this
+    return haze(
     state = hazeState,
     style = HazeDefaults.style(
         backgroundColor = MaterialTheme.colorScheme.surface,
@@ -145,18 +168,26 @@ fun Modifier.echoHazeSource(
         blurRadius = EchoTokens.Glass.blurRadiusStandard,
         noiseFactor = 0f
     )
-)
+    )
+}
 
 @Composable
 fun Modifier.echoHazePanel(
     hazeState: HazeState? = null,
-    shape: Shape = EchoTokens.Radius.shapeLg,
+    shape: Shape = EchoGlassPagePanelShape,
     tint: Color = Color.Unspecified,
     blurRadius: Dp = EchoTokens.Glass.blurRadiusStandard,
     highlightAlpha: Float = 0.08f,
     showBorder: Boolean = true
 ): Modifier {
     val colorScheme = MaterialTheme.colorScheme
+    if (LocalEchoThemeStyle.current.flatSurfaces) {
+        val surface = if (tint == Color.Unspecified) colorScheme.surface
+            else tint.compositeOver(colorScheme.surface).copy(alpha = 1f)
+        return this.clip(shape).background(surface, shape).then(
+            if (showBorder) Modifier.border(1.dp, colorScheme.outlineVariant, shape) else Modifier
+        )
+    }
     val isDark = colorScheme.background.luminance() < 0.5f
     val resolvedTint = if (tint != Color.Unspecified) {
         tint
@@ -232,7 +263,7 @@ fun Modifier.echoHazePanel(
 fun EchoLiquidGlassPanel(
     hazeState: HazeState? = null,
     modifier: Modifier = Modifier,
-    shape: Shape = EchoTokens.Radius.shapeLg,
+    shape: Shape = EchoGlassPagePanelShape,
     tint: Color = Color.Unspecified,
     blurRadius: Dp = EchoTokens.Glass.blurRadiusStandard,
     showBorder: Boolean = true,
@@ -286,7 +317,7 @@ fun EchoGlassDialog(
     hazeState: HazeState? = null,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    shape: Shape = EchoTokens.Radius.shapeXl,
+    shape: Shape = EchoGlassDialogShape,
     tint: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
     containerColor: Color = Color.Unspecified,
@@ -339,7 +370,7 @@ fun EchoGlassDialog(
         val resolvedPaneTitle = paneTitleText
         val configuration = androidx.compose.ui.platform.LocalConfiguration.current
         val maxResponsiveHeight = (configuration.screenHeightDp * 0.88f).dp.coerceAtLeast(240.dp)
-        val maxResponsiveWidth = if (configuration.screenWidthDp > 600) 480.dp else (configuration.screenWidthDp * 0.92f).dp
+        val maxResponsiveWidth = (configuration.screenWidthDp - 24).dp.coerceAtMost(560.dp)
 
         Box(
             modifier = Modifier
@@ -353,10 +384,9 @@ fun EchoGlassDialog(
         ) {
             Surface(
                 modifier = modifier
-                    .fillMaxWidth(0.92f)
                     .widthIn(max = maxResponsiveWidth)
+                    .fillMaxWidth()
                     .heightIn(max = maxResponsiveHeight)
-                    .padding(horizontal = 8.dp)
                     .focusable() // §6.0：弹窗自身可聚焦，配合 Compose 弹窗窗口焦点陷阱，防止键盘焦点逃逸到背景层
                     .semantics { paneTitle = resolvedPaneTitle }
                     .clickable(
@@ -377,7 +407,7 @@ fun EchoGlassDialog(
                 shadowElevation = EchoTokens.Elevation.none
             ) {
                 Column(
-                    modifier = Modifier.padding(EchoTokens.Spacing.lg)
+                    modifier = Modifier.padding(20.dp)
                 ) {
                     if (title != null) {
                         title()
@@ -404,12 +434,13 @@ fun EchoGlassDialog(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EchoGlassDialog(
     hazeState: HazeState? = null,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    shape: Shape = EchoTokens.Radius.shapeXl,
+    shape: Shape = EchoGlassDialogShape,
     tint: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
     containerColor: Color = Color.Unspecified,
@@ -435,17 +466,14 @@ fun EchoGlassDialog(
         } else null,
         content = text,
         buttons = {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                dismissButton?.invoke(this)
-                if (dismissButton != null) {
-                    // §5.7：弹窗按钮间距统一 12dp（调用方不再各自叠加间距）
-                    Spacer(modifier = Modifier.width(EchoTokens.Spacing.md))
-                }
-                confirmButton()
+                if (dismissButton != null) Row(content = dismissButton)
+                Row(modifier = Modifier.padding(start = if (dismissButton != null) EchoTokens.Spacing.md else 0.dp),
+                    content = confirmButton)
             }
         }
     )
@@ -476,10 +504,11 @@ fun EchoGlassDropdownMenu(
 ) {
     val glass = echoGlassPalette()
     val colors = MaterialTheme.colorScheme
-    val menuShape = RoundedCornerShape(18.dp)
+    val menuShape = EchoGlassPagePanelShape
     // 不透明菜单底色：以 surface 为基色手工叠 5% surfaceTint（等价 M3 3dp 色调高度的观感），
     // 但合成结果 alpha = 1，背后内容不会透出，也就不会出现深浅不均的斑块
-    val containerColor = colors.surfaceTint.copy(alpha = 0.05f).compositeOver(colors.surface)
+    val containerColor = if (LocalEchoThemeStyle.current.flatSurfaces) colors.surface
+        else colors.surfaceTint.copy(alpha = 0.05f).compositeOver(colors.surface)
 
     val expandedState = remember { MutableTransitionState(false) }
     expandedState.targetState = expanded

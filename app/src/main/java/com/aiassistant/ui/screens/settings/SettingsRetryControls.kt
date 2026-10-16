@@ -6,6 +6,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aiassistant.domain.model.RetryErrorType
@@ -36,7 +38,6 @@ internal fun SettingsRetryControls(manager: PersonalizationManager) {
         "对话、角色回复及辅助模型共用。次数是首次请求之外的额外尝试；已收到内容或手动停止时不会重发。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 2
     )
     EchoSettingRow(title = "失败后尝试备用 Key", subtitle = "关闭后只使用第一个已启用 Key；分类开关控制同一 Key 的重试", contentPaddingHorizontal = 0.dp) {
         EchoSwitch(checked = backupKeyFallback, enabled = retryEnabled, onCheckedChange = {
@@ -55,7 +56,6 @@ internal fun SettingsRetryControls(manager: PersonalizationManager) {
                 if (expanded) "每个 Key 的额外次数：0–${RetryPolicy.MAX_RETRIES}" else "已折叠；${RetryErrorType.entries.count { policy.rule(it).enabled }} 类错误已开启",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
             )
         }
         TextButton(
@@ -98,25 +98,8 @@ private fun RetryRuleCard(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
         )
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                type.label,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2
-            )
-            EchoSwitch(
-                checked = rule.enabled,
-                size = EchoSwitchSize.Compact,
-                onCheckedChange = { enabled ->
-                    manager.saveRetryRule(type, rule.copy(enabled = enabled))
-                    onPolicyChanged()
-                }
-            )
+        val fontScale = LocalDensity.current.fontScale
+        val countField = @Composable {
             OutlinedTextField(
                 value = count,
                 onValueChange = { value ->
@@ -132,8 +115,40 @@ private fun RetryRuleCard(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.width(68.dp)
+                modifier = Modifier.width((76 * fontScale.coerceAtLeast(1f)).dp)
             )
+        }
+        val toggle = @Composable {
+            EchoSwitch(
+                checked = rule.enabled,
+                size = EchoSwitchSize.Compact,
+                onCheckedChange = { enabled ->
+                    manager.saveRetryRule(type, rule.copy(enabled = enabled))
+                    onPolicyChanged()
+                }
+            )
+        }
+        BoxWithConstraints(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            // 两个控件有稳定的操作宽度；窄屏或大字体时将次数移到下一行。
+            if (maxWidth < (280 * fontScale).dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(type.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        toggle()
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("额外重试次数", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        countField()
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(type.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    toggle()
+                    countField()
+                }
+            }
         }
     }
 }

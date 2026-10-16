@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.aiassistant.ui.screens.stats
 
 import android.content.Context
@@ -38,6 +40,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
@@ -735,7 +738,7 @@ private fun HeroSummaryCard(
             )
 
             // 总量主数字
-            Row(verticalAlignment = Alignment.Bottom) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = formatNumber(summary.totalTokens),
                     style = MaterialTheme.typography.titleLarge.copy(
@@ -745,7 +748,6 @@ private fun HeroSummaryCard(
                     ),
                     color = content
                 )
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Tokens 总消耗",
                     modifier = Modifier.padding(bottom = 4.dp),
@@ -791,11 +793,15 @@ private fun HeroSummaryCard(
                 }
             }
 
-            // 核心指标九宫格
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
+            // 按可用宽度与系统字号决定列数，保留所有指标名称和数值。
+            val fontScale = LocalDensity.current.fontScale
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val columns = (maxWidth.value / (132f * fontScale)).toInt().coerceIn(1, 3)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    maxItemsInEachRow = columns,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     MetricPill(
                         icon = Icons.AutoMirrored.Filled.Send,
@@ -821,12 +827,6 @@ private fun HeroSummaryCard(
                         iconTint = if (summary.failedCount > 0) MaterialTheme.colorScheme.tertiary else content.copy(alpha = 0.55f),
                         modifier = Modifier.weight(1f)
                     )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
                     MetricPill(
                         icon = Icons.Default.Download,
                         label = "输入 Token",
@@ -851,12 +851,6 @@ private fun HeroSummaryCard(
                         iconTint = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.weight(1f)
                     )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
                     MetricPill(
                         icon = Icons.Default.Cached,
                         label = "缓存命中率",
@@ -1173,17 +1167,14 @@ private fun MetricPill(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     color = contentColor.copy(alpha = 0.72f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    modifier = Modifier.weight(1f)
                 )
             }
             Text(
                 text = value,
                 style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.SansSerif,
                     fontWeight = FontWeight.Bold),
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                color = contentColor
             )
         }
     }
@@ -2031,10 +2022,10 @@ private fun HealthTimelineCard(
                 }
 
                 // 图例
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (heatMode == 1) {
                         LegendDot("无请求", emptyColor, content.copy(alpha = 0.7f))
