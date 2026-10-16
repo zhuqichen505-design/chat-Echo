@@ -60,6 +60,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -141,6 +143,7 @@ import com.aiassistant.ui.components.rememberLazyListControlsVisible
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
 import com.aiassistant.utils.FileUtils
+import com.aiassistant.utils.EchoStoryReadingStyle
 import com.aiassistant.utils.RoleplaySmartAnalyzer
 import com.aiassistant.utils.RoleplaySmartParser
 import kotlinx.coroutines.isActive
@@ -429,13 +432,15 @@ internal fun MessageBubble(
     val personalizationSettings = rememberChatPersonalizationSettings()
     val readingStyle = personalizationSettings.storyReadingStyle.takeIf { isStory || personalizationSettings.applyReadingStyleToChats }
     val readingFont = personalizationSettings.storyFont.takeIf { isStory || personalizationSettings.applyReadingFontToChats }
+    val immersiveUserMessage = isUser && readingStyle == EchoStoryReadingStyle.IMMERSIVE
+    val showThinkingBubbles = personalizationSettings.showThinkingBubbles
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }
     val glass = echoGlassPalette()
     val userBubbleTint = glass.userBubble
     val bubbleColor = if (isUser) glass.userBubble else glass.assistantBubble
-    val textBackground = if (isUser) bubbleColor else resolvedReadableBackdrop
+    val textBackground = if (isUser && !immersiveUserMessage) bubbleColor else resolvedReadableBackdrop
     val textColor = readableTextColorFor(
         background = textBackground,
         fallbackSurface = resolvedReadableBackdrop
@@ -563,7 +568,9 @@ internal fun MessageBubble(
         StoryReadingTypography(readingStyle, readingFont) {
         SelectionContainer {
             Column(
-                modifier = if (isUser) {
+                modifier = if (immersiveUserMessage) {
+                    Modifier.fillMaxWidth().padding(start = 14.dp, top = 8.dp, end = 4.dp, bottom = 8.dp)
+                } else if (isUser) {
                     Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 } else {
                     Modifier
@@ -671,7 +678,7 @@ internal fun MessageBubble(
                             )
                         }
                     }
-                } else if (!isGenerating && !hasThinking && attachments.isEmpty()) {
+                } else if (!isGenerating && !hasThinking && attachments.isEmpty() && (isUser || showThinkingBubbles)) {
                     Text(
                         text = "空消息",
                         color = contentColor.copy(alpha = 0.65f),
@@ -692,17 +699,21 @@ internal fun MessageBubble(
                 alpha = if (message.isExcluded) 0.52f else 1f
             }
     ) {
-        val bubbleMaxWidth = (maxWidth - 52.dp).coerceAtLeast(160.dp).coerceAtMost(360.dp)
+        val bubbleMaxWidth = if (immersiveUserMessage) maxWidth.coerceAtMost(720.dp)
+            else (maxWidth - 52.dp).coerceAtLeast(160.dp).coerceAtMost(360.dp)
 
         if (isUser) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = if (immersiveUserMessage) Arrangement.Start else Arrangement.End,
                 verticalAlignment = Alignment.Top
             ) {
                 Column(
-                    modifier = Modifier.widthIn(max = bubbleMaxWidth),
-                    horizontalAlignment = Alignment.End
+                    modifier = Modifier.widthIn(max = bubbleMaxWidth).then(
+                        if (immersiveUserMessage) Modifier.fillMaxWidth().padding(start = 22.dp, top = 8.dp, bottom = 8.dp)
+                        else Modifier
+                    ),
+                    horizontalAlignment = if (immersiveUserMessage) Alignment.Start else Alignment.End
                 ) {
                     if (attachments.isNotEmpty()) {
                         AttachmentGroupBubble(
@@ -714,6 +725,15 @@ internal fun MessageBubble(
                     }
 
                     if (message.content.isNotBlank() || isGenerating) {
+                        if (immersiveUserMessage) {
+                            val quoteLineColor = MaterialTheme.colorScheme.primary
+                            Box(Modifier.fillMaxWidth().drawBehind {
+                                val stroke = 1.dp.toPx()
+                                drawLine(quoteLineColor, Offset(stroke / 2, 0f), Offset(stroke / 2, size.height), stroke)
+                            }) {
+                                MessageContent(textColor)
+                            }
+                        } else {
                         Surface(
                             modifier = Modifier,
                             color = bubbleColor,
@@ -727,6 +747,7 @@ internal fun MessageBubble(
                             )
                         ) {
                             MessageContent(textColor)
+                        }
                         }
                     }
 
@@ -745,14 +766,18 @@ internal fun MessageBubble(
                         onDelete = onDelete,
                         onTogglePin = onTogglePin?.let { cb -> { cb(message) } },
                         onToggleExclude = onToggleExclude?.let { cb -> { cb(message) } },
+                        endAlignMetadata = !immersiveUserMessage,
                         modifier = Modifier
                             .widthIn(max = bubbleMaxWidth)
                             .fillMaxWidth()
+                            .then(if (immersiveUserMessage) Modifier.padding(start = 14.dp) else Modifier)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
-                ChatAvatar(isUser = true)
+                if (!immersiveUserMessage) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    ChatAvatar(isUser = true)
+                }
             }
         } else {
             // 模型回复：头像与身份置顶对齐，正文与思考全宽居中展开，左右对称无空白浪费
@@ -882,6 +907,8 @@ internal fun MessageBubble(
                     val lineHeightPx = textMeasurer.measure("Ag", style = capsuleTextStyle, maxLines = 1).size.height
                     val headerHeightPx = maxOf(lineHeightPx, with(density) { 20.dp.roundToPx() })
                     val headerHeight = with(density) { headerHeightPx.toDp() }
+                    // 关闭思考展示时不保留空头像行；连接、重试和选方向仍有独立提示。
+                    if (showThinkingBubbles) {
                     // 头像与胶囊顶对齐同行：胶囊因文字变高时向下延展，头像相对胶囊位置固定
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1068,6 +1095,35 @@ internal fun MessageBubble(
 
                 }
 
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ChatAvatar(
+                                isUser = false,
+                                avatarRevision = assistantAvatarRevision,
+                                apiConfigId = assistantApiConfigId,
+                                customAvatarUri = customAvatarUri,
+                                avatarSize = 22.dp
+                            )
+                            Text(
+                                text = assistantModelName.ifBlank { "AI" }.displayModelShortName(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = readableTextColorFor(resolvedReadableBackdrop)
+                            )
+                        }
+                        GenerationUiStateRules.statusWithoutThinking(generationState, reconnectStatus, message.content.isBlank())?.let { status ->
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isConnectionFailed) MaterialTheme.colorScheme.error else readableTextColorFor(resolvedReadableBackdrop),
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
                     // P0-1③ 连接等待计时：>30s 弱提示，>60s 升级 error 语义色（仅连接态；重连态由 reconnectStatus 文案承载）。
                     // 提示置于头像+胶囊行正下方：头像与胶囊对齐关系不受影响。
                     // 计时来自气泡级 connectElapsedSec（按生成会话累计），状态闪断不重置、提示不再消失重现。
@@ -1209,7 +1265,7 @@ internal fun MessageBubble(
                     }
                 }
 
-                if (hasThinking) {
+                if (showThinkingBubbles && hasThinking) {
                     AnimatedVisibility(visible = showThinking && hasThinkingContent) {
                         Surface(
                             modifier = Modifier
@@ -1375,7 +1431,7 @@ internal fun MessageBubble(
                         val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
                         AnimatedVisibility(
-                            visible = isErrorReportExpanded,
+                            visible = isErrorReportExpanded || !showThinkingBubbles,
                             enter = fadeIn(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)) + expandVertically(),
                             exit = fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)) + shrinkVertically()
                         ) {
@@ -1462,6 +1518,7 @@ internal fun MessageBubble(
 
                     MessageFooter(
                         isUser = false,
+                        thinkingBubbleVisible = showThinkingBubbles,
                         message = message,
                         backdropContentColor = readableTextColorFor(resolvedReadableBackdrop),
                         variantInfo = variantInfo,
@@ -1516,9 +1573,11 @@ internal fun MessageFooter(
     onDelete: (() -> Unit)?,
     onTogglePin: (() -> Unit)? = null,
     onToggleExclude: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    endAlignMetadata: Boolean = isUser,
+    thinkingBubbleVisible: Boolean = true
 ) {
-    val thinkingTokensInThinkingBubble = message.role == "assistant" &&
+    val thinkingTokensInThinkingBubble = thinkingBubbleVisible && message.role == "assistant" &&
         (!message.thinkingContent.isNullOrBlank() || message.thinkingTokens > 0)
     val responseTimeInThinkingBubble = thinkingTokensInThinkingBubble
 
@@ -1534,7 +1593,7 @@ internal fun MessageFooter(
                 .horizontalScroll(rememberScrollState())
                 .padding(end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+            horizontalArrangement = if (endAlignMetadata) Arrangement.End else Arrangement.Start
         ) {
             if (message.isPinned) {
                 MessageMetaText(
@@ -1848,7 +1907,8 @@ internal fun ChatAvatar(
     avatarRevision: Int = 0,
     apiConfigId: Long? = null,
     customAvatarUri: String? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    avatarSize: androidx.compose.ui.unit.Dp = 36.dp
 ) {
     val context = LocalContext.current
     val userAvatarBitmap = if (isUser) remember(context) { AvatarManager.getAvatarBitmap(context) } else null
@@ -1873,7 +1933,7 @@ internal fun ChatAvatar(
 
     Box(
         modifier = modifier
-            .requiredSize(36.dp)
+            .requiredSize(avatarSize)
             .clip(CircleShape)
             .background(background),
         contentAlignment = Alignment.Center

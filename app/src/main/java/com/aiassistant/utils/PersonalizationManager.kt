@@ -68,6 +68,7 @@ data class PersonalizationSettings(
     val avoid: String = "",
     val autoMemoryEnabled: Boolean = true,
     val thinkingCapsuleTemplate: String = "{model} {status} {time} {tokens}",
+    val showThinkingBubbles: Boolean = true,
     val fontSizeScale: Float = 1.0f,
     val chatFontSize: Int = 16,
     val appTheme: String = "system",
@@ -155,6 +156,7 @@ class PersonalizationManager(private val context: Context) {
             avoid = prefs.getString(KEY_AVOID, "").orEmpty(),
             autoMemoryEnabled = prefs.getBoolean(KEY_AUTO_MEMORY_ENABLED, true),
             thinkingCapsuleTemplate = prefs.getString(KEY_THINKING_TEMPLATE, "{model} {status} {time} {tokens}").orEmpty().ifBlank { "{model} {status} {time} {tokens}" },
+            showThinkingBubbles = prefs.getBoolean(KEY_SHOW_THINKING_BUBBLES, true),
             fontSizeScale = prefs.getFloat(KEY_FONT_SIZE_SCALE, 1.0f),
             chatFontSize = prefs.getInt(KEY_CHAT_FONT_SIZE, 16),
             appTheme = prefs.getString(KEY_APP_THEME, "system").orEmpty().ifBlank { "system" },
@@ -201,6 +203,7 @@ class PersonalizationManager(private val context: Context) {
             .putString(KEY_AVOID, settings.avoid)
             .putBoolean(KEY_AUTO_MEMORY_ENABLED, settings.autoMemoryEnabled)
             .putString(KEY_THINKING_TEMPLATE, settings.thinkingCapsuleTemplate)
+            .putBoolean(KEY_SHOW_THINKING_BUBBLES, settings.showThinkingBubbles)
             .putFloat(KEY_FONT_SIZE_SCALE, settings.fontSizeScale)
             .putInt(KEY_CHAT_FONT_SIZE, settings.chatFontSize)
             .putString(KEY_APP_THEME, settings.appTheme)
@@ -292,6 +295,7 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_AVOID = "avoid"
         private const val KEY_AUTO_MEMORY_ENABLED = "auto_memory_enabled"
         private const val KEY_THINKING_TEMPLATE = "thinking_template"
+        private const val KEY_SHOW_THINKING_BUBBLES = "show_thinking_bubbles"
         private const val KEY_FONT_SIZE_SCALE = "font_size_scale"
         private const val KEY_CHAT_FONT_SIZE = "chat_font_size"
         private const val KEY_APP_THEME = "app_theme"

@@ -571,6 +571,9 @@ fun AppearanceTab(
                 HomeLayoutSwitch("正文字体也用于普通对话", "同时用于消息正文与展开的思考内容。", settings.applyReadingFontToChats) { enabled ->
                     saveVisualPreference("普通对话字体已更新") { it.copy(applyReadingFontToChats = enabled) }
                 }
+                HomeLayoutSwitch("显示思考气泡", "控制普通对话与创作消息中的思考状态与展开内容，不影响模型思考和请求参数。", settings.showThinkingBubbles) { enabled ->
+                    saveVisualPreference(if (enabled) "思考气泡已显示" else "思考气泡已隐藏") { it.copy(showThinkingBubbles = enabled) }
+                }
             }
         }
 

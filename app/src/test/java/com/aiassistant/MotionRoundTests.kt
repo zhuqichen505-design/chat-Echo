@@ -177,6 +177,32 @@ class MotionRoundTests {
     // ---------- P0-4：状态机派生 ----------
 
     @Test
+    fun hiddenThinkingKeepsProgressAndDropsStaleRetryAfterTextArrives() {
+        fun status(generating: Boolean, content: String, thinking: Boolean, retry: String? = null): String? =
+            GenerationUiStateRules.statusWithoutThinking(
+                GenerationUiStateRules.derive(generating, content, thinking, retry), retry, content.isBlank())
+        assertEquals("正在连接…", status(true, "", false))
+        assertEquals("正在生成回复…", status(true, "", true))
+        val retry = "网络波动，正在重连…"
+        assertEquals(retry, status(true, "", false, retry))
+        assertEquals(null, status(true, "合成正文", true, retry))
+        assertEquals(null, status(false, "合成正文", true, retry))
+        assertEquals("未返回回复正文", status(false, "", true))
+    }
+
+    @Test
+    fun hiddenThinkingDoesNotHideDirectionDecisionsOrConnectionFailures() {
+        for (notice in listOf("等待选择回复方向", "回复方向生成失败，等待处理", "连接异常，HTTP 500")) {
+            val state = GenerationUiStateRules.derive(true, "", false, notice)
+            assertEquals(notice, GenerationUiStateRules.statusWithoutThinking(state, notice, true))
+        }
+        val persistedFailure = GenerationUiStateRules.derive(false, "请求失败", true, null, contentIsError = true)
+        assertEquals("模型请求异常", GenerationUiStateRules.statusWithoutThinking(persistedFailure, null, false))
+        assertEquals("模型请求异常", GenerationUiStateRules.statusWithoutThinking(persistedFailure, "正在尝试重新连接…", false))
+        assertEquals("生成已停止", GenerationUiStateRules.statusWithoutThinking(GenerationUiState.Cancelled, null, true))
+    }
+
+    @Test
     fun testGenerationState_idle() {
         assertEquals(
             GenerationUiState.Idle,

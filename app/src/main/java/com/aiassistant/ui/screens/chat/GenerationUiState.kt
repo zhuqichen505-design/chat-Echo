@@ -26,6 +26,18 @@ enum class GenerationUiState {
 
 object GenerationUiStateRules {
 
+    /** 隐藏思考气泡后保留必要操作状态；正文开始后不再显示旧重试提示。 */
+    fun statusWithoutThinking(state: GenerationUiState, reconnectStatus: String?, contentEmpty: Boolean): String? = when (state) {
+        GenerationUiState.Connecting -> "正在连接…"
+        GenerationUiState.Reconnecting -> reconnectStatus?.takeIf { it.isNotBlank() } ?: "正在重新连接…"
+        GenerationUiState.ChoosingDirection -> reconnectStatus?.takeIf { it.isNotBlank() } ?: "等待选择回复方向"
+        GenerationUiState.Thinking -> "正在生成回复…"
+        GenerationUiState.Failed -> if (contentEmpty) reconnectStatus?.takeIf { it.isNotBlank() } ?: "模型请求异常" else "模型请求异常"
+        GenerationUiState.Cancelled -> "生成已停止"
+        GenerationUiState.Idle -> if (contentEmpty) "未返回回复正文" else null
+        GenerationUiState.Streaming, GenerationUiState.Settling -> null
+    }
+
     /**
      * 错误文案匹配——行为等价迁移自 ChatMessageComponents 状态胶囊的 contains 规则
      * （原作用于 reconnectStatus 非空时的 capsuleText，capsuleText 此时即 reconnectStatus）

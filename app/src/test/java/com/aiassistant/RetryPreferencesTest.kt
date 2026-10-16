@@ -17,6 +17,33 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun thinkingBubbleVisibilityPersistsWithoutChangingThinkingOrReadingPreferences() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        assertTrue(manager.getSettings().showThinkingBubbles)
+        val initial = manager.getSettings().copy(
+            thinkingCapsuleTemplate = "{model} {time}",
+            enableThinkingTranslation = false,
+            thinkingTranslationModel = "synthetic-thinking-model",
+            storyReadingStyle = EchoStoryReadingStyle.SPLIT,
+            applyReadingStyleToChats = true,
+            applyReadingFontToChats = true,
+            aboutUser = "合成展示偏好"
+        )
+        assertTrue(manager.saveSettings(initial))
+        val initialPrompt = manager.buildPrompt()
+        assertTrue(manager.saveSettings(manager.getSettings().copy(showThinkingBubbles = false)))
+        val restored = PersonalizationManager(context)
+        assertEquals(initial.copy(showThinkingBubbles = false), restored.getSettings())
+        assertEquals(initialPrompt, restored.buildPrompt())
+        assertTrue(restored.saveSettings(restored.getSettings().copy(appearancePreset = EchoAppearancePreset.INDEX)))
+        val afterThemeChange = PersonalizationManager(context)
+        assertFalse(afterThemeChange.getSettings().showThinkingBubbles)
+        assertTrue(afterThemeChange.saveSettings(afterThemeChange.getSettings().copy(showThinkingBubbles = true)))
+        assertEquals(initial.copy(appearancePreset = EchoAppearancePreset.INDEX), PersonalizationManager(context).getSettings())
+    }
+
     @Test fun readingScopeSwitchesPersistIndependentlyAndDefaultToStoriesOnly() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
@@ -99,6 +126,7 @@ class RetryPreferencesTest {
             .putInt("chat_font_size", 21).putBoolean("auto_name_enabled", false).commit()
         val manager = PersonalizationManager(context)
         val oldPreferences = manager.getSettings()
+        assertTrue(oldPreferences.showThinkingBubbles)
         assertEquals(EchoHomeLayoutStyle.FOCUS, oldPreferences.homeLayoutStyle)
         assertFalse(oldPreferences.homeCompactList)
         assertTrue(oldPreferences.homeShowRecentStory)
