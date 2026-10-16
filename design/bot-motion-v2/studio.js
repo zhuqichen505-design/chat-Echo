@@ -15,7 +15,8 @@ let time = 0;
 let speed = 1;
 let auto = true;
 let paused = false;
-let manualReduce = false;
+// 系统偏好默认生效；用户明确点击播放或取消勾选后，可只在本页选择完整动画。
+let motionPreference = 'system';
 let mono = false;
 let dark = false;
 let background = 'theme';
@@ -32,13 +33,19 @@ let transitionAge = 1;
 let lastMessageLength = -1;
 let heroSize = 235;
 let animationFrameId = null;
-const reduced = () => manualReduce || media.matches;
+const reduced = () => motionPreference === 'reduced' || (motionPreference === 'system' && media.matches);
 const selected = () => BOT_CATALOG.find(bot => bot.id === selection);
 const canvases = [];
 function requestFrame() {
   if (animationFrameId === null && !document.hidden) animationFrameId = requestAnimationFrame(frame);
 }
 function invalidate() { dirty = true; requestFrame(); }
+function releaseTestClock() { testClock = null; lastStamp = null; }
+function playFullMotion() {
+  motionPreference = 'full';
+  paused = false;
+  releaseTestClock();
+}
 
 $('.cast').innerHTML = BOT_CATALOG.map(bot => `<button class="cast-choice" data-bot="${bot.id}" aria-pressed="${bot.id === selection}" aria-label="选择${bot.name}"><canvas data-cast="${bot.id}" width="220" height="220" role="img" aria-label="${bot.name}动画"></canvas><span><strong>${bot.name}</strong><small>${bot.subtitle}</small></span><i class="selection-dot" aria-hidden="true"></i></button>`).join('');
 $('.timeline').innerHTML = STATES.map(s => `<button data-step="${s}" aria-label="查看${LABELS[s]}动作" aria-current="${s === state ? 'step' : 'false'}"><i aria-hidden="true"></i><span>${LABELS[s].replace('正在','')}</span></button>`).join('');
@@ -102,14 +109,24 @@ function selectBot(id) {
   syncState();
 }
 function syncOptions() {
+  const isReduced = reduced();
+  const systemReduced = motionPreference === 'system' && media.matches;
   $('#pause').setAttribute('aria-pressed', String(paused));
   $('#pause').textContent = paused ? '继续' : '暂停';
-  $('#access-note').textContent = reduced() ? '已减弱动态：保留状态姿态，停止位移、眨眼与连续演出。' : paused ? '已暂停：切换状态可查看对应静姿，点“继续”恢复动作。' : '动作只在身份标识内播放，正文保持稳定。';
-  $('#auto').disabled = reduced();
-  $('#pause').disabled = reduced();
-  $('#speed').disabled = reduced();
-  document.body.dataset.motion = reduced() ? 'reduced' : 'full';
-  if (reduced()) {
+  $('#access-note').textContent = isReduced
+    ? systemReduced ? '系统已开启减弱动态，本页正在显示静姿。可点“播放完整动画”或取消勾选，只为本页播放。' : '已减弱动态：保留状态姿态，停止连续演出。可点“播放完整动画”恢复。'
+    : paused ? '已暂停：切换状态可查看对应静姿，点“继续”恢复动作。'
+      : motionPreference === 'full' && media.matches ? '本页已选择完整动画；系统仍偏好减弱动态，可随时重新勾选停止。' : '动作只在身份标识内播放，正文保持稳定。';
+  $('#reduce').checked = isReduced;
+  $('#play-full').hidden = !isReduced;
+  $('#system-motion').hidden = motionPreference === 'system';
+  // 完整演出始终可点，明确的播放操作允许覆盖本页的系统减弱偏好。
+  $('#auto').disabled = false;
+  $('#pause').disabled = isReduced;
+  $('#speed').disabled = isReduced;
+  document.body.dataset.motion = isReduced ? 'reduced' : 'full';
+  document.body.dataset.motionPreference = motionPreference;
+  if (isReduced) {
     weights = Object.fromEntries(SEQUENCE.map(s => [s,s === state ? 1 : 0]));
     transitionStart = {...weights};
     transitionAge = 1;
@@ -193,15 +210,17 @@ $('.timeline').addEventListener('click', event => {
   const button = event.target.closest('[data-step]');
   if (button) setState(button.dataset.step);
 });
-$('#auto').addEventListener('click', () => { auto = true; paused = false; setState('connecting', true); syncOptions(); });
-$('#pause').addEventListener('click', () => { paused = !paused; syncOptions(); });
-$('#replay').addEventListener('click', () => { paused = false; setState(auto ? 'connecting' : state, auto); syncOptions(); });
+$('#auto').addEventListener('click', () => { playFullMotion(); auto = true; setState('connecting', true); syncOptions(); });
+$('#pause').addEventListener('click', () => { releaseTestClock(); paused = !paused; syncOptions(); });
+$('#replay').addEventListener('click', () => { playFullMotion(); setState(auto ? 'connecting' : state, auto); syncOptions(); });
 $('#speed').addEventListener('change', event => { speed = Number(event.target.value); });
 $('#cancel').addEventListener('click', () => { setState('idle'); });
 $('#mode').addEventListener('click', () => { dark = !dark; document.body.dataset.mode = dark ? 'dark' : 'light'; $('#mode').textContent = dark ? '浅色' : '深色'; $('#mode').setAttribute('aria-pressed', String(dark)); invalidate(); });
 $('#background').addEventListener('change', event => { background = event.target.value; document.body.dataset.background = background; invalidate(); });
 $('#mono').addEventListener('change', event => { mono = event.target.checked; invalidate(); });
-$('#reduce').addEventListener('change', event => { manualReduce = event.target.checked; syncOptions(); });
+$('#reduce').addEventListener('change', event => { motionPreference = event.target.checked ? 'reduced' : 'full'; releaseTestClock(); syncOptions(); });
+$('#play-full').addEventListener('click', () => { playFullMotion(); syncOptions(); });
+$('#system-motion').addEventListener('click', () => { motionPreference = 'system'; releaseTestClock(); syncOptions(); });
 media.addEventListener('change', syncOptions);
 $('#stage-touch').addEventListener('pointermove', event => {
   const rect = event.currentTarget.getBoundingClientRect();
@@ -223,7 +242,7 @@ window.botStudio = Object.freeze({
   catalog:BOT_CATALOG,
   select:selectBot,
   setState,
-  snapshot:() => ({ selection,state,age,time,completionAge,weights:{...weights},auto,paused,reduced:reduced(),mono,dark:effectiveDark(),pointer:{...pointer} }),
+  snapshot:() => ({ selection,state,age,time,completionAge,weights:{...weights},auto,paused,reduced:reduced(),motionPreference,mono,dark:effectiveDark(),pointer:{...pointer} }),
   seek:(nextTime, nextState = state, nextAge = nextTime) => {
     testClock = nextTime; time = nextTime; age = nextAge; state = nextState;
     completionAge = state === 'completed' ? nextAge : 3;

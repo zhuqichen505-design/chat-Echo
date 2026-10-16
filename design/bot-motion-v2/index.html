@@ -26,7 +26,8 @@
         <div class="state-picker" role="group" aria-label="选择动作状态"><button data-state="connecting" aria-pressed="true"><span>连接</span><small>听听信号在哪</small></button><button data-state="thinking" aria-pressed="false"><span>思考</span><small>让念头转一会儿</small></button><button data-state="replying" aria-pressed="false"><span>输出</span><small>边说，边比划</small></button><button data-state="completed" aria-pressed="false"><span>完成</span><small>好啦，交给你了</small></button></div>
         <p class="character-note" id="character-note"></p>
         <div class="display-options"><label class="check"><input type="checkbox" id="mono"><span>只看单色线条</span></label><label class="check"><input type="checkbox" id="reduce"><span>减弱动态</span></label><label class="background-control" for="background"><span>背景</span><select id="background"><option value="theme">随明暗模式</option><option value="white">纯白</option><option value="black">纯黑</option></select></label></div>
-        <p class="access-note" id="access-note">动作只在身份标识内播放，正文保持稳定。</p>
+        <p class="access-note" id="access-note" role="status">动作只在身份标识内播放，正文保持稳定。</p>
+        <div><button class="quiet-button" id="play-full" hidden>播放完整动画</button><button class="quiet-button" id="system-motion" hidden>使用系统动效偏好</button></div>
       </aside>
     </section>
     <section class="in-context" aria-labelledby="context-title">

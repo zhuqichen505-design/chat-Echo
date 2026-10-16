@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Echo · 方与圆 Bot 动作预览</title>
+<link rel="icon" href="data:,">
+<style>
+:root{font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#21242a;background:#f6f7f8;font-synthesis:none;--ink:#21242a;--muted:#60656f;--surface:#fff;--line:#dce0e5;--soft:#ebedf0;--bot-color:#24272d;--eye-color:#fff;--tempo:1}
+*{box-sizing:border-box}body{margin:0}button,select{font:inherit;color:inherit}button,select,a{-webkit-tap-highlight-color:transparent}button,select{border:1px solid var(--line);border-radius:9px;background:var(--surface);min-height:40px}button{cursor:pointer;padding:8px 13px}button:hover{background:var(--soft)}button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #3273dc;outline-offset:3px}button:disabled{cursor:default;opacity:.6}a{color:inherit;text-underline-offset:4px}h1,h2,p{margin:0}button[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.page{max-width:1000px;margin:auto;padding:26px 34px 36px}.top{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:21px;border-bottom:1px solid var(--line)}.brand{font-size:21px;font-weight:750;letter-spacing:-.03em}.brand span{font-size:13px;font-weight:400;letter-spacing:0;color:var(--muted);margin-left:12px}.top-right{display:flex;align-items:center;gap:14px}.candidate{font-size:12px;color:var(--muted)}.intro{padding:29px 0 20px;display:flex;align-items:end;justify-content:space-between;gap:20px}h1{font-size:clamp(26px,4vw,34px);font-weight:650;letter-spacing:-.03em}.intro p{font-size:14px;color:var(--muted);line-height:1.7;margin-top:9px}.play-health{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;white-space:nowrap}.play-health i{width:7px;height:7px;border-radius:50%;background:#21804d}.play-health[data-playing=false] i{background:#8a641e}
+.duet{display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:19px;overflow:hidden}.character{min-width:0;padding:22px 24px 18px;text-align:center}.character+.character{border-left:1px solid var(--line)}.character-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;text-align:left}.character h2{font-size:18px;font-weight:650}.character-header span{font-size:12px;color:var(--muted)}.stage{display:block;width:100%;height:260px;padding:0;border:0;background:transparent;border-radius:0;overflow:visible;touch-action:manipulation}.stage:hover{background:transparent}.stage svg{display:block;width:230px;height:230px;max-width:100%;margin:auto;overflow:visible}.character-caption{min-height:42px;font-size:13px;line-height:1.6;color:var(--muted)}.stage-label{font-size:11px;color:var(--muted);margin-top:6px}
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:16px 0 12px}.transport .spacer{flex:1}.transport label{font-size:12px;color:var(--muted)}.speed-group{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0}select{padding:7px 28px 7px 10px;max-width:100%}.states{display:flex;gap:5px;padding:5px;border-radius:12px;background:var(--soft)}.states button{flex:1;min-width:0;border:0;background:transparent;font-size:14px;white-space:nowrap}.states button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px #00000012}.motion-note{font-size:12px;line-height:1.7;color:var(--muted);margin-top:10px;min-height:21px}.notice{margin-top:10px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:13px;line-height:1.6;background:var(--surface)}.notice button{margin:8px 8px 0 0}.notice[hidden]{display:none}
+.options{display:flex;flex-wrap:wrap;gap:15px 22px;align-items:center;padding:19px 0;margin-top:14px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.option{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}.swatches{display:flex;gap:7px}.swatch{min-height:28px;width:28px;padding:0;border:3px solid var(--surface);border-radius:50%;box-shadow:0 0 0 1px var(--line);background:var(--swatch)}.swatch:hover{background:var(--swatch)}.swatch[aria-pressed=true]{background:var(--swatch);border-color:var(--surface);outline:2px solid var(--ink);outline-offset:2px}.samples{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:25px}.sample{font-size:14px;line-height:1.8}.identity{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}.identity .status{color:var(--muted);font-size:11px;font-weight:400}.identity .mascot{display:block;flex:none;width:32px;height:32px}.identity svg{width:32px;height:32px;display:block;overflow:visible}.sample-text{padding:6px 0 0 40px;max-width:36em;color:var(--ink)}.small-sizes{display:flex;gap:14px;align-items:center;justify-content:flex-start;padding-left:40px;margin-top:12px}.small-sizes .mascot{display:inline-block;line-height:0}.small-sizes svg{display:block}.size-note{font-size:11px;color:var(--muted)}.footer{margin-top:24px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;line-height:1.8;color:var(--muted)}details{margin-top:14px}summary{cursor:pointer;width:fit-content}details p{margin-top:8px;max-width:72ch}noscript{display:block;font-size:13px;padding:15px;border:1px solid var(--line)}
+body[data-theme=dark]{--ink:#f1f2f5;--muted:#b2b7c1;--surface:#202227;--line:#3c414c;--soft:#2b2e35;--bot-color:#f1f2f5;--eye-color:#24272d;color:var(--ink);background:#16181c}body[data-background=white]{--ink:#21242a;--muted:#60656f;--surface:#fff;--line:#dce0e5;--soft:#ebedf0;--eye-color:#fff;color:var(--ink);background:#fff}body[data-background=black]{--ink:#f1f2f5;--muted:#b2b7c1;--surface:#000;--line:#3c414c;--soft:#202227;--eye-color:#24272d;color:var(--ink);background:#000}body[data-color=ink]{--bot-color:#24272d;--eye-color:#fff}body[data-color=ink][data-theme=dark]:not([data-background=white]),body[data-color=ink][data-background=black]{--bot-color:#f1f2f5;--eye-color:#24272d}body[data-color=blue]{--bot-color:#397de6;--eye-color:#fff}body[data-color=green]{--bot-color:#087c62;--eye-color:#fff}body[data-color=orange]{--bot-color:#d84e16;--eye-color:#fff}
+@media(max-width:650px){.page{padding:18px 17px 28px}.top{gap:8px}.brand span{display:block;margin:3px 0 0}.candidate{display:none}.intro{display:block;padding-top:24px}.play-health{margin-top:13px}.character{padding:17px 10px 14px}.character-header{display:block;text-align:center}.character-header span{display:block;margin-top:4px}.stage{height:190px}.stage svg{width:175px;height:175px}.character-caption{font-size:12px;min-height:58px}.samples{gap:16px;grid-template-columns:1fr}.transport .spacer{display:none}.transport{gap:7px}.transport button{padding:8px 10px;font-size:13px}.options{gap:16px 20px}.sample-text{max-width:none}.states button{font-size:13px;padding:9px 3px}.option{flex-wrap:wrap}.intro p br{display:none}}@media(max-width:350px){.page{padding:16px 12px}.stage{height:160px}.stage svg{width:145px;height:145px}.character{padding:15px 6px}.character-caption{font-size:11px}}
+/* MASCOT_CSS_START */
+/* Original two-eye character motion study. Pure SVG + CSS, no assets or runtime. */
+.mascot { --travel: 1; --squish: 1; }
+.mascot--small { --travel: .38; --squish: .65; }
+.bot { display: block; width: 100%; height: 100%; overflow: visible; }
+.bot .shell { fill: var(--bot-color, #273c36); stroke: none; }
+.bot--round .shell { rx: 38px; }
+.bot--square .shell { rx: 18px; }
+.bot .body { transform-box: view-box; transform-origin: 60px 68px; }
+.bot .face { transform-box: view-box; transform-origin: 60px 56px; }
+.bot .eye, .bot .eye rect { transform-box: fill-box; transform-origin: center; }
+.bot .eye rect { fill: var(--eye-color, #fff); stroke: none; }
+.bot .eye--left { animation: bm-blink calc(6.1s / var(--tempo, 1)) linear infinite; }
+.bot .eye--right { animation: bm-blink calc(6.1s / var(--tempo, 1)) linear calc(.035s / var(--tempo, 1)) infinite; }
+.bot--round .body { animation: bm-round-idle calc(5.8s / var(--tempo, 1)) ease-in-out infinite; }
+.bot--round .face { animation: bm-round-idle-gaze calc(8.6s / var(--tempo, 1)) ease-in-out infinite; }
+.bot--square .body { animation: bm-square-idle calc(6.4s / var(--tempo, 1)) ease-in-out infinite; }
+.bot--square .face { animation: bm-square-idle-gaze calc(9.2s / var(--tempo, 1)) ease-in-out infinite; }
+
+.mascot[data-state="connecting"] .bot--round .body { animation: bm-round-connect calc(3.8s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--round .face { animation: bm-round-connect-gaze calc(3.8s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--round .eye--left rect { animation: bm-round-connect-eye calc(3.8s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--round .eye--right rect { animation: bm-round-connect-eye-right calc(3.8s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--square .body { animation: bm-square-connect calc(4.6s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--square .face { animation: bm-square-connect-gaze calc(4.6s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--square .eye--left rect { animation: bm-square-connect-eye calc(4.6s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="connecting"] .bot--square .eye--right rect { animation: bm-square-connect-eye-right calc(4.6s / var(--tempo, 1)) ease-in-out infinite; }
+
+.mascot[data-state="thinking"] .bot--round .body { animation: bm-round-think calc(6.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--round .face { animation: bm-round-think-gaze calc(6.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--round .eye--left rect { animation: bm-round-think-eye calc(6.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--round .eye--right rect { animation: bm-round-think-eye-right calc(6.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--square .body { animation: bm-square-think calc(7s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--square .face { animation: bm-square-think-gaze calc(7s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--square .eye--left rect { animation: bm-square-think-eye calc(7s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="thinking"] .bot--square .eye--right rect { animation: bm-square-think-eye-right calc(7s / var(--tempo, 1)) ease-in-out infinite; }
+
+.mascot[data-state="replying"] .bot--round .body { animation: bm-round-reply calc(2.9s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--round .face { animation: bm-round-reply-gaze calc(2.9s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--round .eye--left rect { animation: bm-round-reply-eye calc(2.9s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--round .eye--right rect { animation: bm-round-reply-eye calc(2.9s / var(--tempo, 1)) ease-in-out calc(.095s / var(--tempo, 1)) infinite; }
+.mascot[data-state="replying"] .bot--square .body { animation: bm-square-reply calc(3.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--square .face { animation: bm-square-reply-gaze calc(3.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--square .eye--left rect { animation: bm-square-reply-eye calc(3.2s / var(--tempo, 1)) ease-in-out infinite; }
+.mascot[data-state="replying"] .bot--square .eye--right rect { animation: bm-square-reply-eye calc(3.2s / var(--tempo, 1)) ease-in-out calc(.13s / var(--tempo, 1)) infinite; }
+
+/* Celebrate once; delayed idle channels take over at an identical neutral pose. */
+.mascot[data-state="completed"] .bot--round .body {
+  animation: bm-round-complete calc(1.5s / var(--tempo, 1)) ease-in-out 1,
+    bm-round-idle calc(5.8s / var(--tempo, 1)) ease-in-out calc(1.5s / var(--tempo, 1)) infinite;
+}
+.mascot[data-state="completed"] .bot--square .body {
+  animation: bm-square-complete calc(1.6s / var(--tempo, 1)) ease-in-out 1,
+    bm-square-idle calc(6.4s / var(--tempo, 1)) ease-in-out calc(1.6s / var(--tempo, 1)) infinite;
+}
+.mascot[data-state="completed"] .bot .face { animation: bm-complete-gaze calc(1.6s / var(--tempo, 1)) ease-in-out 1; }
+.mascot[data-state="completed"] .bot .eye rect { animation: bm-complete-eyes calc(1.6s / var(--tempo, 1)) ease-in-out 1; }
+.mascot[data-state="completed"] .bot .eye--right rect { animation-delay: calc(.025s / var(--tempo, 1)); }
+
+@keyframes bm-blink {
+  0%, 64%, 66.4%, 100% { transform: scaleY(1); }
+  65.1% { transform: scaleY(.075); }
+  65.7% { transform: scaleY(.075); }
+  92%, 94.4% { transform: scaleY(1); }
+  93% { transform: scaleY(.12); }
+}
+@keyframes bm-round-idle { 0%, 100% { transform: none; } }
+@keyframes bm-square-idle { 0%, 100% { transform: none; } }
+@keyframes bm-round-idle-gaze {
+  0%, 30%, 68%, 100% { transform: none; }
+  37%, 45% { transform: translate(calc(-1.7px * var(--travel)), calc(-1px * var(--travel))); }
+  54%, 59% { transform: translate(calc(.7px * var(--travel)), 0); }
+}
+@keyframes bm-square-idle-gaze {
+  0%, 44%, 85%, 100% { transform: none; }
+  49%, 57% { transform: translate(calc(1.8px * var(--travel)), calc(-1.1px * var(--travel))); }
+  64%, 69% { transform: translate(calc(-.5px * var(--travel)), 0); }
+}
+
+@keyframes bm-round-connect {
+  0%, 5%, 92%, 100% { transform: none; }
+  12% { transform: translateY(calc(1.5px * var(--travel))) scale(calc(1 + .045 * var(--squish)), calc(1 - .045 * var(--squish))); }
+  22%, 29% { transform: translate(calc(-2.6px * var(--travel)), calc(-.9px * var(--travel))) rotate(calc(-5.5deg * var(--travel))) scale(calc(1 - .018 * var(--squish)), calc(1 + .025 * var(--squish))); }
+  40% { transform: none; }
+  58%, 67% { transform: translate(calc(2.5px * var(--travel)), calc(-.7px * var(--travel))) rotate(calc(5deg * var(--travel))); }
+  79% { transform: rotate(calc(-1.2deg * var(--travel))); }
+}
+@keyframes bm-round-connect-gaze {
+  0%, 4%, 87%, 100% { transform: none; }
+  11%, 29% { transform: translate(calc(-5px * var(--travel)), calc(-1.2px * var(--travel))); }
+  39%, 43% { transform: none; }
+  50%, 71% { transform: translate(calc(5px * var(--travel)), calc(-1.5px * var(--travel))); }
+}
+@keyframes bm-round-connect-eye {
+  0%, 6%, 36%, 44%, 82%, 100% { transform: none; }
+  14%, 27% { transform: scale(.72, .98); }
+  55%, 68% { transform: scale(.98, 1.02); }
+}
+@keyframes bm-square-connect {
+  0%, 8%, 91%, 100% { transform: none; }
+  18%, 30% { transform: translateX(calc(-2px * var(--travel))) rotate(calc(-4deg * var(--travel))); }
+  36% { transform: translateY(calc(1px * var(--travel))) scaleY(calc(1 - .025 * var(--squish))); }
+  45% { transform: none; }
+  59%, 73% { transform: translateX(calc(2px * var(--travel))) rotate(calc(4deg * var(--travel))); }
+  82% { transform: rotate(calc(-.8deg * var(--travel))); }
+}
+@keyframes bm-square-connect-gaze {
+  0%, 4%, 88%, 100% { transform: none; }
+  10%, 30% { transform: translate(calc(-5.5px * var(--travel)), calc(-.5px * var(--travel))); }
+  36%, 46% { transform: none; }
+  51%, 74% { transform: translate(calc(5.5px * var(--travel)), calc(-.5px * var(--travel))); }
+}
+@keyframes bm-square-connect-eye {
+  0%, 5%, 36%, 46%, 82%, 100% { transform: none; }
+  13%, 29% { transform: scale(.78, .98); }
+  56%, 73% { transform: scale(.98, 1.015); }
+}
+
+@keyframes bm-round-think {
+  0%, 4%, 91%, 100% { transform: none; }
+  17%, 30% { transform: translateX(calc(1.6px * var(--travel))) rotate(calc(5deg * var(--travel))) scale(calc(1 - .02 * var(--squish)), calc(1 + .025 * var(--squish))); }
+  37% { transform: rotate(calc(1.5deg * var(--travel))); }
+  53%, 72% { transform: translateX(calc(-1.5px * var(--travel))) rotate(calc(-4deg * var(--travel))); }
+  80% { transform: rotate(calc(.8deg * var(--travel))); }
+}
+@keyframes bm-round-think-gaze {
+  0%, 2%, 90%, 100% { transform: none; }
+  9%, 30% { transform: translate(calc(3.7px * var(--travel)), calc(-4.5px * var(--travel))); }
+  38%, 42% { transform: translate(0, calc(-2px * var(--travel))); }
+  47%, 74% { transform: translate(calc(-3.5px * var(--travel)), calc(-3.5px * var(--travel))); }
+}
+@keyframes bm-round-think-eye {
+  0%, 4%, 39%, 86%, 100% { transform: none; }
+  12%, 29% { transform: scale(.98, 1.02); }
+  50%, 72% { transform: scale(.72, .98); }
+}
+@keyframes bm-square-think {
+  0%, 4%, 91%, 100% { transform: none; }
+  16%, 34% { transform: rotate(calc(-3.3deg * var(--travel))) scaleY(calc(1 - .012 * var(--squish))); }
+  43% { transform: rotate(calc(-1deg * var(--travel))); }
+  57%, 70% { transform: rotate(calc(3.2deg * var(--travel))); }
+  76% { transform: rotate(calc(1.1deg * var(--travel))) scaleY(calc(1 - .015 * var(--squish))); }
+  83% { transform: rotate(calc(-.7deg * var(--travel))); }
+}
+@keyframes bm-square-think-gaze {
+  0%, 2%, 91%, 100% { transform: none; }
+  8%, 34% { transform: translate(calc(-3px * var(--travel)), calc(-4.5px * var(--travel))); }
+  43%, 47% { transform: translate(0, calc(-3px * var(--travel))); }
+  52%, 74% { transform: translate(calc(3px * var(--travel)), calc(-2.5px * var(--travel))); }
+}
+@keyframes bm-square-think-eye {
+  0%, 3%, 42%, 88%, 100% { transform: none; }
+  11%, 34% { transform: scale(.7, .98); }
+  56%, 75% { transform: scale(.98, 1.015); }
+}
+
+@keyframes bm-round-reply {
+  0%, 4%, 79%, 100% { transform: none; }
+  10% { transform: rotate(calc(-2.2deg * var(--travel))) scale(calc(1 + .025 * var(--squish)), calc(1 - .03 * var(--squish))); }
+  17% { transform: translateY(calc(-1.7px * var(--travel))) rotate(calc(1.2deg * var(--travel))) scale(calc(1 - .025 * var(--squish)), calc(1 + .03 * var(--squish))); }
+  25%, 30% { transform: none; }
+  38% { transform: rotate(calc(3deg * var(--travel))) scale(calc(1 + .04 * var(--squish)), calc(1 - .045 * var(--squish))); }
+  47% { transform: translateY(calc(-2.1px * var(--travel))) rotate(calc(-1.3deg * var(--travel))) scale(calc(1 - .03 * var(--squish)), calc(1 + .035 * var(--squish))); }
+  56% { transform: none; }
+  65% { transform: rotate(calc(-1.7deg * var(--travel))) scaleY(calc(1 - .018 * var(--squish))); }
+  71% { transform: rotate(calc(.8deg * var(--travel))); }
+}
+@keyframes bm-round-reply-gaze {
+  0%, 5%, 29%, 80%, 100% { transform: none; }
+  12%, 18% { transform: translate(calc(-1.4px * var(--travel)), calc(-1.8px * var(--travel))); }
+  37%, 49% { transform: translate(calc(2px * var(--travel)), calc(-2.3px * var(--travel))); }
+  62%, 69% { transform: translate(calc(-1px * var(--travel)), calc(-.6px * var(--travel))); }
+}
+@keyframes bm-round-reply-eye {
+  0%, 7%, 28%, 80%, 100% { transform: none; }
+  14%, 18% { transform: scale(.92, 1.1); }
+  38%, 42% { transform: scale(1.08, .84); }
+  49% { transform: scale(.94, 1.08); }
+  64%, 68% { transform: scale(1.02, .92); }
+}
+@keyframes bm-square-reply {
+  0%, 5%, 81%, 100% { transform: none; }
+  12% { transform: rotate(calc(-2.6deg * var(--travel))) scaleY(calc(1 - .025 * var(--squish))); }
+  21% { transform: rotate(calc(-1.2deg * var(--travel))) scaleY(calc(1 + .02 * var(--squish))); }
+  29% { transform: none; }
+  39% { transform: rotate(calc(3.3deg * var(--travel))) scale(calc(1 + .025 * var(--squish)), calc(1 - .03 * var(--squish))); }
+  47% { transform: rotate(calc(1.4deg * var(--travel))) scaleY(calc(1 + .025 * var(--squish))); }
+  57%, 60% { transform: none; }
+  68% { transform: rotate(calc(-1.5deg * var(--travel))) scaleY(calc(1 - .018 * var(--squish))); }
+  73% { transform: rotate(calc(.6deg * var(--travel))); }
+}
+@keyframes bm-square-reply-gaze {
+  0%, 3%, 30%, 80%, 100% { transform: none; }
+  8%, 21% { transform: translate(calc(-1.8px * var(--travel)), calc(-1px * var(--travel))); }
+  35%, 49% { transform: translate(calc(2.3px * var(--travel)), calc(-1.6px * var(--travel))); }
+  63%, 70% { transform: translate(calc(-1px * var(--travel)), 0); }
+}
+@keyframes bm-square-reply-eye {
+  0%, 4%, 27%, 81%, 100% { transform: none; }
+  10%, 19% { transform: scale(1.08, .84); }
+  36%, 45% { transform: scale(.94, 1.07); }
+  65%, 70% { transform: scale(1.03, .92); }
+}
+
+@keyframes bm-round-complete {
+  0%, 100% { transform: none; }
+  13% { transform: translateY(calc(1px * var(--travel))) scale(calc(1 + .04 * var(--squish)), calc(1 - .045 * var(--squish))); }
+  28% { transform: translateY(calc(-2px * var(--travel))) rotate(calc(-3deg * var(--travel))) scale(calc(1 - .025 * var(--squish)), calc(1 + .03 * var(--squish))); }
+  42% { transform: translateY(calc(-2.5px * var(--travel))) rotate(calc(3deg * var(--travel))); }
+  58% { transform: translateY(calc(.8px * var(--travel))) scale(calc(1 + .035 * var(--squish)), calc(1 - .04 * var(--squish))); }
+  73% { transform: rotate(calc(-1.5deg * var(--travel))) scale(calc(1 - .02 * var(--squish)), calc(1 + .025 * var(--squish))); }
+  86% { transform: rotate(calc(.6deg * var(--travel))); }
+}
+@keyframes bm-square-complete {
+  0%, 100% { transform: none; }
+  14% { transform: translateY(calc(1.7px * var(--travel))) rotate(calc(-1.2deg * var(--travel))) scale(calc(1 + .055 * var(--squish)), calc(1 - .065 * var(--squish))); }
+  30% { transform: translateY(calc(-2px * var(--travel))) rotate(calc(-4deg * var(--travel))) scaleY(calc(1 + .035 * var(--squish))); }
+  44% { transform: translateY(calc(-1px * var(--travel))) rotate(calc(3deg * var(--travel))); }
+  58% { transform: translateY(calc(1.5px * var(--travel))) rotate(calc(1.5deg * var(--travel))) scale(calc(1 + .05 * var(--squish)), calc(1 - .055 * var(--squish))); }
+  73% { transform: rotate(calc(-2deg * var(--travel))) scaleY(calc(1 + .018 * var(--squish))); }
+  87% { transform: rotate(calc(.6deg * var(--travel))); }
+}
+@keyframes bm-complete-gaze {
+  0%, 100% { transform: none; }
+  13% { transform: translateY(calc(1px * var(--travel))); }
+  28%, 43% { transform: translateY(calc(-3px * var(--travel))); }
+  60% { transform: translateY(calc(.8px * var(--travel))); }
+  77% { transform: translateY(calc(-.5px * var(--travel))); }
+}
+@keyframes bm-complete-eyes {
+  0%, 12%, 100% { transform: none; }
+  28%, 48% { transform: scale(1.14, .33); }
+  64% { transform: scale(.97, 1.04); }
+  79% { transform: scale(1.03, .91); }
+}
+
+.motion-paused .bot *, .mascot.motion-paused .bot * { animation-play-state: paused !important; }
+.motion-reduced .bot *, .mascot.motion-reduced .bot * { animation: none !important; transform: none !important; }
+.motion-reduced .mascot[data-state="thinking"] .face,
+.mascot.motion-reduced[data-state="thinking"] .face { transform: translateY(-2px) !important; }
+.motion-reduced .mascot[data-state="completed"] .eye rect,
+.mascot.motion-reduced[data-state="completed"] .eye rect { transform: scale(1.08, .6) !important; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-motion="system"] .bot * { animation: none !important; transform: none !important; }
+  body[data-motion="system"] .mascot[data-state="thinking"] .face { transform: translateY(-2px) !important; }
+  body[data-motion="system"] .mascot[data-state="completed"] .eye rect { transform: scale(1.08, .6) !important; }
+}
+
+/* Foreshortening is directional: the eye toward the silhouette narrows first. */
+@keyframes bm-round-connect-eye-right {
+  0%, 6%, 36%, 44%, 82%, 100% { transform: none; }
+  14%, 27% { transform: scale(.98, 1.02); }
+  55%, 68% { transform: scale(.72, .98); }
+}
+@keyframes bm-square-connect-eye-right {
+  0%, 5%, 36%, 46%, 82%, 100% { transform: none; }
+  13%, 29% { transform: scale(.98, 1.015); }
+  56%, 73% { transform: scale(.78, .98); }
+}
+@keyframes bm-round-think-eye-right {
+  0%, 4%, 39%, 86%, 100% { transform: none; }
+  12%, 29% { transform: scale(.72, .98); }
+  50%, 72% { transform: scale(.98, 1.02); }
+}
+@keyframes bm-square-think-eye-right {
+  0%, 3%, 42%, 88%, 100% { transform: none; }
+  11%, 34% { transform: scale(.98, 1.015); }
+  56%, 75% { transform: scale(.7, .98); }
+}
+
+/* A deliberate tap receives a short glance and a gentle nod, once. */
+.mascot.greeting[data-state] .bot--round .body { animation: bm-round-hello calc(.9s / var(--tempo, 1)) ease-in-out 1; }
+.mascot.greeting[data-state] .bot--square .body { animation: bm-square-hello calc(.9s / var(--tempo, 1)) ease-in-out 1; }
+.mascot.greeting[data-state] .bot .face { animation: bm-hello-gaze calc(.9s / var(--tempo, 1)) ease-in-out 1; }
+.mascot.greeting[data-state] .bot .eye rect { animation: bm-hello-eyes calc(.9s / var(--tempo, 1)) ease-in-out 1; }
+@keyframes bm-round-hello {
+  0%, 100% { transform: none; }
+  20% { transform: rotate(calc(-3deg * var(--travel))) scaleY(calc(1 + .02 * var(--squish))); }
+  43% { transform: rotate(calc(2deg * var(--travel))) scale(calc(1 + .035 * var(--squish)), calc(1 - .035 * var(--squish))); }
+  69% { transform: rotate(calc(-.6deg * var(--travel))); }
+}
+@keyframes bm-square-hello {
+  0%, 100% { transform: none; }
+  22% { transform: rotate(calc(3deg * var(--travel))); }
+  47% { transform: scale(calc(1 + .025 * var(--squish)), calc(1 - .035 * var(--squish))); }
+  70% { transform: rotate(calc(-.7deg * var(--travel))); }
+}
+@keyframes bm-hello-gaze {
+  0%, 100% { transform: none; }
+  14%, 26% { transform: translateY(calc(-2px * var(--travel))); }
+  43% { transform: translateY(calc(.7px * var(--travel))); }
+}
+@keyframes bm-hello-eyes {
+  0%, 10%, 100% { transform: none; }
+  22%, 30% { transform: scale(1.08, .18); }
+  49% { transform: scale(.98, 1.02); }
+  65% { transform: none; }
+}
+
+/* MASCOT_CSS_END */
+</style>
+</head>
+<body data-theme="light" data-background="theme" data-color="ink" data-motion="system">
+<main class="page">
+<header class="top"><div class="brand">Echo<span>Bot 动作预览</span></div><div class="top-right"><span class="candidate">设计候选 · 尚未应用</span><button id="theme" aria-pressed="false">深色</button></div></header>
+<section class="intro"><div><h1>简单一点，灵动一点。</h1><p>一个圆，一个方。只有身体与眼睛，<br>用连贯的小动作回应你。</p></div><div class="play-health" id="health" data-playing="true" role="status"><i aria-hidden="true"></i><span>正在播放 · 连接</span></div></section>
+<section class="duet" aria-label="圆形和方形 Bot 同屏动画">
+<article class="character"><div class="character-header"><h2>圆圆</h2><span>柔软 · 好奇</span></div><button class="stage mascot" data-shape="round" data-state="connecting" aria-label="点击圆圆，打个招呼"><svg class="bot bot--round" viewBox="0 0 120 120" aria-hidden="true"><g class="body"><rect class="shell" x="22" y="22" width="76" height="76" rx="38"/><g class="face"><g class="eye eye--left"><rect x="46" y="44" width="9" height="25" rx="4.5"/></g><g class="eye eye--right"><rect x="65" y="44" width="9" height="25" rx="4.5"/></g></g></g></svg></button><p class="character-caption" id="round-caption">眼睛先看过去，圆圆的身体再轻轻跟上。</p><p class="stage-label">点一下，和它打招呼</p></article>
+<article class="character"><div class="character-header"><h2>方方</h2><span>利落 · 俏皮</span></div><button class="stage mascot" data-shape="square" data-state="connecting" aria-label="点击方方，打个招呼"><svg class="bot bot--square" viewBox="0 0 120 120" aria-hidden="true"><g class="body"><rect class="shell" x="22" y="22" width="76" height="76" rx="18"/><g class="face"><g class="eye eye--left"><rect x="46" y="44" width="9" height="25" rx="4.5"/></g><g class="eye eye--right"><rect x="65" y="44" width="9" height="25" rx="4.5"/></g></g></g></svg></button><p class="character-caption" id="square-caption">一边试探，一边左右倾身，找到你再站稳。</p><p class="stage-label">点一下，和它打招呼</p></article>
+</section>
+<div class="transport"><button id="auto" aria-pressed="true">连续演示</button><button id="pause" aria-pressed="false">暂停</button><button id="replay">重播当前动作</button><span class="spacer"></span><label class="speed-group" for="speed"><span>速度</span><select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select></label></div>
+<div class="states" role="group" aria-label="单独查看动画状态"><button data-pick="connecting" aria-pressed="true">连接</button><button data-pick="thinking" aria-pressed="false">思考</button><button data-pick="replying" aria-pressed="false">输出</button><button data-pick="completed" aria-pressed="false">完成</button><button data-pick="idle" aria-pressed="false">待机</button></div>
+<p class="motion-note" id="motion-note">连续演示会依次播放连接、思考、输出、完成与待机。每个状态内部都有连续动作。</p>
+<div class="notice" id="motion-notice" hidden><p>检测到系统开启了“减弱动态”，目前显示静止姿态。可以只在这份预览中播放完整动画。</p><button id="force-play">播放完整动画</button></div>
+<div class="notice" id="error-notice" hidden role="alert">页面交互未正常加载；两个 Bot 仍可播放基础 SVG 动画。请重新打开本文件，也可查看下方同屏动图。</div>
+<noscript>浏览器未启用 JavaScript。两个 Bot 的连接动作仍由 CSS 自动播放；切换状态需要启用 JavaScript。也可以查看<a href="motion-reel.gif">同屏动图</a>。</noscript>
+<section class="options" aria-label="预览显示选项"><div class="option"><span>颜色</span><div class="swatches" role="group" aria-label="Bot 颜色"><button class="swatch" style="--swatch:#24272d" data-color="ink" aria-label="墨色" aria-pressed="true"></button><button class="swatch" style="--swatch:#397de6" data-color="blue" aria-label="蓝色" aria-pressed="false"></button><button class="swatch" style="--swatch:#087c62" data-color="green" aria-label="绿色" aria-pressed="false"></button><button class="swatch" style="--swatch:#d84e16" data-color="orange" aria-label="橙色" aria-pressed="false"></button></div></div><label class="option" for="motion">动画<select id="motion"><option value="system">跟随系统</option><option value="full">完整播放</option><option value="reduced">减弱动态</option></select></label><label class="option" for="background">背景<select id="background"><option value="theme">随明暗模式</option><option value="white">纯白</option><option value="black">纯黑</option></select></label></section>
+<section class="samples" aria-label="对话中真实尺寸预览"><article class="sample"><div class="identity"><span class="mascot mascot--small" data-shape="round" data-state="connecting"></span><span>Echo · 圆圆</span><span class="status">正在连接</span></div><p class="sample-text">窗外的雨停了。我们从这一刻，继续往下写。</p><div class="small-sizes" data-shape="round"><span class="size-note">实际尺寸</span><span class="mascot mascot--small" data-shape="round" data-state="connecting" style="width:26px;height:26px"></span><span class="size-note">26px</span><span class="mascot mascot--small" data-shape="round" data-state="connecting" style="width:48px;height:48px"></span><span class="size-note">48px</span></div></article><article class="sample"><div class="identity"><span class="mascot mascot--small" data-shape="square" data-state="connecting"></span><span>Echo · 方方</span><span class="status">正在连接</span></div><p class="sample-text">窗外的雨停了。我们从这一刻，继续往下写。</p><div class="small-sizes" data-shape="square"><span class="size-note">实际尺寸</span><span class="mascot mascot--small" data-shape="square" data-state="connecting" style="width:26px;height:26px"></span><span class="size-note">26px</span><span class="mascot mascot--small" data-shape="square" data-state="connecting" style="width:48px;height:48px"></span><span class="size-note">48px</span></div></article></section>
+<footer class="footer"><p>参考 Grok Bot 的简洁几何造型与眼神变化，重新绘制方圆两款及动作。当前仅为候选，尚未接入应用。本批主题继续保持预览。</p><p><a href="motion-reel.gif">直接查看连续动图 ↗</a>　<a href="../bot-motion-v2/index.html">上一版候选</a></p><details><summary>参考与播放说明</summary><p><a href="https://60fps.design/shots/grok-bot-splash-mascot-expression-animation" target="_blank" rel="noreferrer">Grok Bot 实际动效参考</a>：纯色几何形状、胶囊眼、错开的眨眼与视线变化。此处是重新绘制的候选，不包含 Grok 的品牌图标或图片。</p><p>本页 HTML 自带所有 SVG、CSS 和脚本，无外部字体、依赖、模型请求或远程资源。默认打开即播放；系统减弱动态会明确提示，可在“动画”中选择完整播放。暂停会停止身体和眼睛；完成动作只演一次，然后安静待机。</p></details></footer>
+</main>
+<script>
+'use strict';
+(() => {
+  const $ = id => document.getElementById(id);
+  window.addEventListener('error',()=>{const notice=$('error-notice');if(notice)notice.hidden=false;});
+  const names = {connecting:'连接',thinking:'思考',replying:'输出',completed:'完成',idle:'待机'};
+  const captions = {
+    connecting:['眼神先探向一侧，柔软的身体随后转过去，停一停再回望。','试探地左右倾身，一只眼先看过去，另一只稍后跟上。'],
+    thinking:['往上想一想，眼睛一长一短，轻轻歪过去，再眨眨眼。','向一侧压低，抬眼、停顿，再换个方向想一想。'],
+    replying:['眼睛随着说话的节奏舒展，身体轻轻挤压，带着停顿。','左右错拍地倾身，眼形跟着节奏变化，偶尔轻快地点头。'],
+    completed:['先小小蓄力，再舒展点头，眯起眼睛，慢慢回到安静。','压低、轻抬、落定，俏皮地歪一下，再安稳陪着你。'],
+    idle:['偶尔看看你，慢慢眨眼，留在这里。','站稳，侧看一眼，再慢慢看回来。']
+  };
+  const sequence = Object.keys(names);
+  const durations = {connecting:4.8,thinking:7.2,replying:5.8,completed:2.6,idle:3.4};
+  const media = matchMedia('(prefers-reduced-motion: reduce)');
+  let state='connecting', age=0, auto=true, paused=false, speed=1, last=performance.now(), tick=null;
+  const root=document.body;
+  const reduced=()=>root.dataset.motion==='reduced'||(root.dataset.motion==='system'&&media.matches);
+  document.querySelectorAll('.mascot--small').forEach(el=>{
+    const shape=el.dataset.shape;
+    el.innerHTML=document.querySelector(`.stage[data-shape="${shape}"]`).innerHTML;
+    el.querySelector('svg').style.width='100%';el.querySelector('svg').style.height='100%';
+  });
+  function sync(){
+    root.classList.toggle('motion-paused',paused||document.hidden);
+    root.classList.toggle('motion-reduced',reduced());
+    $('motion-notice').hidden=!(root.dataset.motion==='system'&&media.matches);
+    $('pause').textContent=reduced()?'播放动画':paused?'继续':'暂停';$('pause').setAttribute('aria-pressed',String(paused));
+    $('auto').setAttribute('aria-pressed',String(auto));
+    const playing=!paused&&!reduced()&&!document.hidden;
+    $('health').dataset.playing=String(playing);
+    $('health').querySelector('span').textContent=`${reduced()?'已减弱动态':paused?'已暂停':'正在播放'} · ${names[state]}`;
+    document.querySelectorAll('[data-pick]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.pick===state)));
+    document.querySelectorAll('.identity .status').forEach(el=>el.textContent=state==='completed'?'回复完成':state==='idle'?'陪你待一会儿':`正在${names[state]}`);
+    $('round-caption').textContent=captions[state][0];$('square-caption').textContent=captions[state][1];
+    $('motion-note').textContent=reduced()?'当前显示静止姿态。“动画 → 完整播放”可开启连续动作。':paused?'已暂停身体与眼睛。点“继续”恢复，或切换状态后重播。':auto?'连续演示：连接 → 思考 → 输出 → 完成 → 待机。每个状态内部都有连续动作。':state==='completed'?'完成动作只播放一次；停稳后保留自然待机。点“重播当前动作”可重新观看。':'正在循环播放当前动作。可慢放观察眼神、形变和身体之间的配合。';
+    last=performance.now();schedule();
+  }
+  function setState(next,restart=false){
+    if(!sequence.includes(next))return;
+    state=next;age=0;
+    document.querySelectorAll('.mascot').forEach(el=>{
+      el.classList.remove('greeting');
+      if(restart&&el.dataset.state===next){el.dataset.state='reset';void el.getBoundingClientRect();}
+      el.dataset.state=next;
+    });
+    sync();
+  }
+  function schedule(){
+    if(tick!==null){clearTimeout(tick);tick=null;}
+    if(!paused&&!reduced()&&!document.hidden)tick=setTimeout(advance,100);
+  }
+  function advance(){
+    tick=null;const now=performance.now();age+=Math.min((now-last)/1000,.25)*speed;last=now;
+    if(auto&&age>=durations[state])setState(sequence[(sequence.indexOf(state)+1)%sequence.length]);
+    else schedule();
+  }
+  function forcePlay(){root.dataset.motion='full';$('motion').value='full';paused=false;sync();}
+  $('auto').addEventListener('click',()=>{auto=true;if(reduced())forcePlay();paused=false;setState('connecting',true);});
+  $('pause').addEventListener('click',()=>{if(reduced()){forcePlay();return;}paused=!paused;sync();});
+  $('replay').addEventListener('click',()=>{if(reduced())forcePlay();paused=false;setState(state,true);});
+  $('force-play').addEventListener('click',forcePlay);
+  document.querySelectorAll('[data-pick]').forEach(el=>el.addEventListener('click',()=>{auto=false;paused=false;setState(el.dataset.pick,true);}));
+  $('speed').addEventListener('change',e=>{speed=Number(e.target.value);root.style.setProperty('--tempo',speed);last=performance.now();});
+  $('motion').addEventListener('change',e=>{root.dataset.motion=e.target.value;sync();});
+  media.addEventListener('change',sync);
+  $('background').addEventListener('change',e=>{root.dataset.background=e.target.value;});
+  $('theme').addEventListener('click',()=>{const dark=root.dataset.theme!=='dark';root.dataset.theme=dark?'dark':'light';$('theme').textContent=dark?'浅色':'深色';$('theme').setAttribute('aria-pressed',String(dark));});
+  document.querySelectorAll('.swatch').forEach(el=>el.addEventListener('click',()=>{root.dataset.color=el.dataset.color;document.querySelectorAll('.swatch').forEach(btn=>btn.setAttribute('aria-pressed',String(btn===el)));}));
+  document.querySelectorAll('.stage').forEach(el=>el.addEventListener('click',()=>{if(reduced()||paused)return;el.classList.remove('greeting');void el.getBoundingClientRect();el.classList.add('greeting');}));
+  document.querySelectorAll('.stage').forEach(el=>el.addEventListener('animationend',event=>{if(event.target.classList.contains('body')&&event.animationName.includes('hello'))el.classList.remove('greeting');}));
+  document.addEventListener('visibilitychange',sync);
+  window.botPreview=Object.freeze({setState:(next)=>{auto=false;setState(next,true);},snapshot:()=>({state,age,auto,paused,reduced:reduced(),motion:root.dataset.motion,speed,hidden:document.hidden}),replay:()=>setState(state,true)});
+  sync();
+})();
+</script>
+</body>
+</html>

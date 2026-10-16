@@ -15,7 +15,9 @@ Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上�
 
 ## 最新源码改动（尚未打包）
 
-本轮新增[四款连续动作Bot候选](design/bot-motion-v2/index.html)：团团、方啵、啾啾、折豆，提供完整演出、状态动作、视线/点击互动与26/32/48px实际尺寸；[同屏动图](design/bot-motion-v2/motion-reel.gif)。目前仅为设计预览，尚未替换应用标识；本批主题也继续保持仅预览。
+本轮新增[方圆两款极简Bot候选](design/bot-motion-v3/index.html)：参考Grok Bot的纯色几何身体与胶囊双眼，重新绘制圆圆和方方，按连接、思考、输出、完成和待机编排连续动作。单文件HTML自带SVG/CSS/脚本，基础动作不依赖JavaScript；可选择跟随系统、完整播放或减弱动态，支持暂停、重播、慢放、点击招呼、四色和纯白/纯黑背景。[20.4秒同屏动图](design/bot-motion-v3/motion-reel.gif)可直接比较。尚未接入Android，本批主题继续仅预览。
+
+[上一版四款Bot](design/bot-motion-v2/index.html)保留作比较，并修复系统减弱动态与勾选状态不一致、固定导出时钟无法用重播解除的播放问题。
 
 已删除被否决的讯号/浮岛候选，保留装帧；[五套新主题预览](design/theme-candidates-v3/index.html)提供瓷光、字场、映夜、织页和游园，各自具有独立页面结构与细节，尚未应用Android。
 
