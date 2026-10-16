@@ -27,7 +27,7 @@ const local = new Map(devices.map(device => [device, { scene: 'home', avatar: fa
 const status = '<div class="status-bar"><span>09:41</span><span aria-hidden="true">▮▮▮ &nbsp; ▰</span></div>';
 function nav(theme, selected) {
   const labels = [['home', 'chat', '会话'], ['creative', 'book', '创作'], ['stats', 'chart', '统计'], ['settings', 'settings', '设置']];
-  return `<nav class="app-nav ${theme}-nav" aria-label="${theme === 'binding' ? '装帧' : theme === 'signal' ? '讯号' : '浮岛'}导航">${labels.map(([scene, symbol, label], i) => `<button data-open="${scene}" class="${selected === scene ? 'active' : ''}">${theme === 'signal' ? `<small>0${i + 1}</small>` : ''}${icon(symbol)}<span>${label}</span></button>`).join('')}</nav>`;
+  return `<nav class="app-nav ${theme}-nav" aria-label="${'装帧'}导航">${labels.map(([scene, symbol, label], i) => `<button data-open="${scene}" class="${selected === scene ? 'active' : ''}">${icon(symbol)}<span>${label}</span></button>`).join('')}</nav>`;
 }
 function pageHeader(title, theme, caption = '') { return `<header class="page-top"><button class="icon-button" data-open="home" aria-label="返回首页">${icon('back')}</button><div><strong>${title}</strong>${caption ? `<small>${caption}</small>` : ''}</div><button class="icon-button" data-open="settings" aria-label="对话设置">${icon('settings')}</button></header>`; }
 function search(placeholder) { return `<label class="search-box">${icon('search')}<input type="search" placeholder="${placeholder}" aria-label="搜索样例会话"></label>`; }
@@ -47,23 +47,12 @@ const templates = {
     settings: s => `${pageHeader('对话设置', 'binding', '雾中来信')}<main class="scroll-area binding-settings"><div class="binding-setting-title"><h2>让故事，<br>按你的方式继续。</h2><span>本会话专属设置</span></div><h3 class="section-title">生成方式</h3>${directionSettings(s)}<h3 class="section-title">故事的来处</h3>${settingDetails()}<h3 class="section-title">阅读与展示</h3>${commonSettings(s)}<div class="setting-footnote">此页只调整样稿，App 设置不会改变。</div></main>${nav('binding', 'settings')}`,
     stats: () => `${pageHeader('用量统计', 'binding', '合成数据 · 最近七日')}<main class="scroll-area binding-statistics"><h2>写过的，<br>都算数。</h2><dl class="binding-ledger"><div><dt>会话</dt><dd>12 <small>则</small></dd></div><div><dt>消息</dt><dd>86 <small>条</small></dd></div><div><dt>输入用量</dt><dd>18,420 <small>Token</small></dd></div><div><dt>输出用量</dt><dd>24,680 <small>Token</small></dd></div></dl>${barChart('binding')}<p class="data-boundary">演示数字，不读取真实用量。</p></main>${nav('binding', 'stats')}`,
   },
-  signal: {
-    home: () => `<div class="app-body home-body"><main class="signal-home scroll-area"><header class="signal-mast"><strong>ECHO<span>·</span></strong><span class="signal-status"><i></i> 本地会话</span></header><div class="signal-heading"><div><span>工作区</span><h2>会话控制台</h2></div><button class="signal-add" data-open="new" aria-label="新建会话">${icon('plus')}</button></div><div class="signal-toolbar">${search('查找会话')}<button data-open="creative" aria-label="打开创作样稿">${icon('book')}</button></div><div class="signal-table"><div class="table-head"><span>类型 / 会话</span><span>最近更新</span></div>${sessions.map((s, i) => `<button class="session-row" data-title="${s.title}" data-open="${s.book ? 'creative' : 'chat'}"><span class="signal-type">${s.book ? '创' : '聊'}</span><span class="session-copy"><strong>${s.title}</strong><span>${s.detail}</span></span><time>${s.time}</time><span class="signal-row-arrow">↗</span></button>`).join('')}</div><div class="signal-info"><span>会话 04</span><span>置顶 01</span><span>状态就绪 <i></i></span></div><button class="signal-create" data-open="creative"><span>${icon('book')}角色与创作</span><span>打开工作区 ↗</span></button><div class="signal-mini-note">上下文、时间线与世界书<br>在每个会话中独立管理。</div></main>${nav('signal', 'home')}</div>`,
-    chat: (s, creative) => `${pageHeader('雾中来信', 'signal', creative ? '创作工作区 / 第二章' : '会话 / 阅读视图')}<div class="signal-context"><span><i></i> 上下文已就绪</span><button data-open="settings">设定 / 时间线 ${icon('next')}</button></div><main class="scroll-area signal-reading"><div class="user-prompt"><small>输入</small><p>我拆开那封信，仔细查看纸上的印记。</p></div>${model(s)}<div class="thinking" ${s.thinking ? '' : 'hidden'}><span class="scan-line"></span>正在梳理人物与上一轮线索…</div><div class="response">${paragraphs}</div>${tools()}<div class="sent-messages" aria-live="polite"></div></main>${composer('signal')}`,
-    settings: s => `${pageHeader('对话设置', 'signal', '作用范围 / 当前会话')}<main class="scroll-area signal-settings"><div class="signal-setting-head"><h2>生成与上下文</h2><span>雾中来信</span></div><section class="signal-config-block"><h3>生成控制</h3>${directionSettings(s)}</section><section class="signal-config-block"><h3>上下文管理</h3>${settingDetails()}</section><section class="signal-config-block"><h3>消息呈现</h3>${commonSettings(s)}</section><div class="setting-footnote">设置只作用于本地预览。</div></main>${nav('signal', 'settings')}`,
-    stats: () => `${pageHeader('用量统计', 'signal', '合成数据 / 最近七日')}<main class="scroll-area signal-statistics"><div class="signal-stats-header"><span>统计概览</span><span class="signal-status"><i></i> 样稿</span></div><dl class="signal-numbers"><div><dt>会话 / 消息</dt><dd>12 <span>/</span> 86</dd></div><div><dt>输入 Token</dt><dd>18,420</dd></div><div><dt>输出 Token</dt><dd>24,680</dd></div></dl><div class="signal-chart-title">每日请求分布</div>${barChart('signal')}<p class="data-boundary">演示数字，不读取真实用量。</p></main>${nav('signal', 'stats')}`,
-  },
-  island: {
-    home: () => `<div class="app-body home-body"><main class="island-home scroll-area"><header class="island-mast"><span>Echo<span class="island-dot"></span></span><span class="island-avatar" aria-label="合成用户头像">我</span></header><div class="island-heading"><h2>让想法<br><em>靠岸。</em></h2><span class="island-ornament" aria-hidden="true"><i></i><i></i><i></i></span></div>${search('寻找一段对话')}<div class="island-actions"><button data-open="new">${icon('plus')}聊点新的</button><button data-open="creative">${icon('book')}进入创作</button></div><section class="island-pinned"><div><span>接着上次的故事</span><span>刚刚</span></div><button class="session-row" data-title="雾中来信" data-open="creative"><span class="island-book-glyph" aria-hidden="true">${icon('book')}</span><span class="session-copy"><strong>雾中来信</strong><span>她认出了信封上熟悉的字迹。</span></span>${icon('next')}</button></section><div class="island-list-label">最近的对话 <span>3</span></div><div class="island-list">${sessions.slice(1).map(s => `<button class="session-row" data-title="${s.title}" data-open="${s.book ? 'creative' : 'chat'}"><span class="session-copy"><strong>${s.title}</strong><span>${s.detail}</span></span><time>${s.time}</time></button>`).join('')}</div></main>${nav('island', 'home')}</div>`,
-    chat: (s, creative) => `${pageHeader('雾中来信', 'island', creative ? '创作 · 把故事慢慢展开' : '会话 · 沉浸阅读')}<main class="scroll-area island-reading"><div class="island-chat-date"><span>今天的故事</span><span></span></div><div class="user-prompt"><p>我拆开那封信，仔细查看纸上的印记。</p><small>你 · 刚刚</small></div><section class="island-response">${model(s)}<div class="thinking" ${s.thinking ? '' : 'hidden'}>正在梳理人物与上一轮线索…</div><div class="response">${paragraphs}</div>${tools()}</section><div class="sent-messages" aria-live="polite"></div></main>${composer('island')}`,
-    settings: s => `${pageHeader('对话设置', 'island', '雾中来信')}<main class="scroll-area island-settings"><div class="island-setting-heading"><span class="island-setting-icon">${icon('settings')}</span><h2>调成<br>你的节奏。</h2></div><section class="island-setting-group"><h3>让回复有选择</h3>${directionSettings(s)}</section><section class="island-setting-group"><h3>记住故事里的事</h3>${settingDetails()}</section><section class="island-setting-group"><h3>让阅读更合心意</h3>${commonSettings(s)}</section><div class="setting-footnote">这些开关只影响眼前的样稿。</div></main>${nav('island', 'settings')}`,
-    stats: () => `${pageHeader('用量统计', 'island', '合成数据 · 最近七日')}<main class="scroll-area island-statistics"><h2>每一点想法，<br>都有回声。</h2><div class="island-stats-top"><div><span>12</span><small>段会话</small></div><div><span>86</span><small>条消息</small></div></div><section class="island-usage"><h3>这一周的用量</h3>${barChart('island')}<dl><div><dt>输入 Token</dt><dd>18,420</dd></div><div><dt>输出 Token</dt><dd>24,680</dd></div></dl></section><p class="data-boundary">演示数字，不读取真实用量。</p></main>${nav('island', 'stats')}`,
-  },
+
 };
 function barChart(theme) { return `<div class="bar-chart ${theme}-chart" role="img" aria-label="七日合成请求分布：周一8次、周二12次、周三6次、周四16次、周五10次、周六20次、周日14次">${[8, 12, 6, 16, 10, 20, 14].map((n, i) => `<div><span style="--value:${n * 5}%"></span><small>${'一二三四五六日'[i]}</small></div>`).join('')}</div>`; }
 
 function render(device) {
-  const theme = ['binding', 'signal', 'island'].find(name => device.classList.contains(name));
+  const theme = 'binding';
   const s = local.get(device), scene = s.scene;
   const page = scene === 'creative' || scene === 'new' ? 'chat' : scene;
   device.dataset.scene = page;
@@ -78,7 +67,6 @@ function updateGlobal() {
   devices.forEach(device => { device.dataset.mode = state.mode; device.dataset.layout = state.layout; device.dataset.background = state.background; });
   document.querySelectorAll('[data-mode]').forEach(button => { if (button.tagName === 'BUTTON') button.setAttribute('aria-pressed', String(button.dataset.mode === state.mode)); });
   document.querySelectorAll('.preview-controls [data-scene]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scene === state.scene)));
-  document.querySelectorAll('.mobile-themes button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.theme === state.theme)));
   document.querySelector('.studies').dataset.visible = state.theme;
   document.querySelector('#layout').value = state.layout;
   document.querySelector('#background').value = state.background;
@@ -90,7 +78,6 @@ document.querySelector('.preview-controls').addEventListener('click', e => {
   if (button.dataset.mode) state.mode = button.dataset.mode;
   updateGlobal();
 });
-document.querySelector('.mobile-themes').addEventListener('click', e => { const button = e.target.closest('button'); if (button) { state.theme = button.dataset.theme; updateGlobal(); } });
 document.querySelector('#layout').addEventListener('change', e => { state.layout = e.target.value; updateGlobal(); });
 document.querySelector('#background').addEventListener('change', e => { state.background = e.target.value; updateGlobal(); });
 document.querySelector('.studies').addEventListener('input', e => {
@@ -134,6 +121,6 @@ document.querySelector('.studies').addEventListener('submit', e => {
 let toastTimer;
 function toast(message) { const box = document.querySelector('.toast'); box.textContent = message; box.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => box.classList.remove('visible'), 3000); }
 const params = new URLSearchParams(location.hash.slice(1));
-for (const [key, allowed, hashKey] of [['scene', ['home', 'chat', 'settings', 'stats'], 'scene'], ['mode', ['light', 'dark'], 'mode'], ['layout', ['bottom', 'rail'], 'layout'], ['background', ['theme', 'white', 'black'], 'bg'], ['theme', ['binding', 'signal', 'island'], 'theme']]) { if (allowed.includes(params.get(hashKey))) state[key] = params.get(hashKey); }
+for (const [key, allowed, hashKey] of [['scene', ['home', 'chat', 'settings', 'stats'], 'scene'], ['mode', ['light', 'dark'], 'mode'], ['layout', ['bottom', 'rail'], 'layout'], ['background', ['theme', 'white', 'black'], 'bg'], ['theme', ['binding'], 'theme']]) { if (allowed.includes(params.get(hashKey))) state[key] = params.get(hashKey); }
 devices.forEach(device => { local.get(device).scene = state.scene; render(device); });
 updateGlobal();

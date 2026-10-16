@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Echo · 小小回应者</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="bots.css">
+</head>
+<body data-mode="light" data-background="theme" data-motion="system">
+  <header class="site-header"><a href="../theme-candidates-v3/index.html" class="brand">Echo<span>设计室</span></a><span class="header-note">模型身份 / 原生矢量配套样稿</span><button id="mode" aria-pressed="false">切换深色</button></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">一张小脸，四种回应。</p><h1>小小回应者</h1><p class="intro-text">放在模型名字前面的线条 Bot。<br>圆一点，方一点，都有自己的表情。</p></div><div class="intro-note"><span class="outline-face" aria-hidden="true">◡</span><p>不抢正文的注意力。<br>用眼神、口型和小幅动作，<br>告诉你回复进行到哪里。</p></div></section>
+    <section class="workbench" aria-label="Bot 动画交互预览">
+      <div class="controls">
+        <h2>选一个小伙伴</h2>
+        <div class="shape-picker" role="group" aria-label="Bot 造型"></div>
+        <div class="control-section"><h3>它现在的状态</h3><div class="state-picker" role="group" aria-label="生成状态"><button data-state="connecting" aria-pressed="true">连接</button><button data-state="thinking" aria-pressed="false">思考</button><button data-state="streaming" aria-pressed="false">输出</button><button data-state="completed" aria-pressed="false">完成</button></div><p id="state-detail" class="detail"></p></div>
+        <div class="control-section preferences"><label>画布背景<select id="background"><option value="theme">随明暗模式</option><option value="white">纯白</option><option value="black">纯黑</option></select></label><label class="check"><input type="checkbox" id="reduce">静态预览 / 减弱动态</label></div>
+        <div class="play-actions"><button class="primary" id="play">演示完整过程 <span aria-hidden="true">↗</span></button><button id="replay">重播当前动作</button></div>
+        <p class="quiet">原头像仍默认开启。这些样式用于关闭模型头像后的身份位置，不会替换你的头像。</p>
+      </div>
+      <div class="conversation" aria-label="实际尺寸对话样例">
+        <header class="conversation-top"><div><span class="tiny-label">对话样例</span><h2>今晚的散步计划</h2></div><span class="local-badge">本地演示</span></header>
+        <div class="conversation-body"><div class="user-line">帮我写一小段雨后散步的开场。</div><div class="assistant-block"><div class="model-line"><span id="live-bot" class="live-bot"></span><strong>Echo</strong><span id="live-state" class="state-label" role="status" aria-live="polite"></span></div><div id="sample-text" class="sample-text"></div><div class="message-meta">线条宽约 1.45dp · 身份标识 26dp</div></div><div class="large-study"><div id="large-bot"></div><span>放大看细节</span></div></div>
+        <div class="composer"><span>发送消息…</span><span class="send-symbol" aria-hidden="true">↑</span></div>
+      </div>
+    </section>
+    <section class="comparison" aria-label="四款 Bot 与四种状态对照"><div class="section-heading"><div><p class="eyebrow">同一张脸，清楚的状态。</p><h2>动作对照</h2></div><label class="check"><input type="checkbox" id="actual-size">按 26px 实际尺寸查看</label></div><div class="state-matrix"></div></section>
+    <section class="motion-notes"><div><h3>连接 · 等你接通</h3><p>眼睛交替亮起，天线保持轻微节奏。没有大幅旋转或跳动。</p></div><div><h3>思考 · 抬眼想一想</h3><p>视线略向上，脑袋轻轻偏转；静态模式仍保留抬眼表情。</p></div><div><h3>输出 · 小声说话</h3><p>嘴型随节奏开合，短耳线微动；正文与列表不会被动画推动。</p></div><div><h3>完成 · 笑一下就好</h3><p>只点头一次，随后微笑停住。失败、停止或等待选择保持中性，不显示成功表情。</p></div></section>
+    <footer><p>四款造型以相同的 26 × 26 坐标绘制，配套原生 Canvas 实现；浏览器与 Android 分别渲染，最终设备效果仍需验收。样稿仅用合成内容，不发送请求、不保存输入。</p><a href="../theme-candidates-v3/index.html">查看新主题候选 ↗</a></footer>
+  </main>
+  <script src="bots.js"></script>
+</body>
+</html>

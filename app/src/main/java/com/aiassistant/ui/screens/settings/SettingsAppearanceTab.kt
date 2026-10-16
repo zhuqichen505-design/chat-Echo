@@ -77,6 +77,7 @@ import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
+import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.echoSwitchColors
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
@@ -161,6 +162,8 @@ fun AppearanceTab(
     }
 
     var settings by remember { mutableStateOf(manager.getSettings()) }
+    var modelMarkPreviewState by remember { mutableStateOf(EchoModelMarkState.Thinking) }
+    var modelMarkPreviewCompletionEvent by remember { mutableLongStateOf(0L) }
     var chatFontSize by remember(settings) { mutableIntStateOf(settings.chatFontSize) }
     var fontSizeScale by remember(settings) { mutableFloatStateOf(settings.fontSizeScale) }
     var savedMessage by remember { mutableStateOf<String?>(null) }
@@ -587,35 +590,56 @@ fun AppearanceTab(
         item {
             SettingsGlassCard(hazeState = hazeState) {
                 Text("模型标识", style = MaterialTheme.typography.titleMedium)
-                HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后显示几何标识，不影响用户头像或思考气泡。", settings.showModelAvatar) { enabled ->
+                HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后可选线条机器人或几何标识，不影响用户头像或思考气泡。", settings.showModelAvatar) { enabled ->
                     saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }
                 }
                 if (!settings.showModelAvatar) {
-                    Text("思考与回复时动画，结束后静止；以下为动态预览。遵循系统移除动画设置。",
+                    Text("连接、思考与回复有不同表情，正常完成只点头一次后静止。遵循系统移除动画设置。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("预览状态", style = MaterialTheme.typography.labelLarge)
                     FlowRow(
-                        modifier = Modifier.selectableGroup(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         listOf(
-                            EchoModelMarkStyle.CONCENTRIC to "同心圆",
-                            EchoModelMarkStyle.ORBIT to "轨道",
-                            EchoModelMarkStyle.PRISM to "棱镜",
-                            EchoModelMarkStyle.WAVEFORM to "声纹"
+                            EchoModelMarkState.Connecting to "连接",
+                            EchoModelMarkState.Thinking to "思考",
+                            EchoModelMarkState.Replying to "回复",
+                            EchoModelMarkState.Completed to "完成"
                         ).forEach { (value, label) ->
-                            FilterChip(
-                                selected = settings.modelMarkStyle == value,
-                                onClick = { saveVisualPreference("模型标识已切换为$label") { it.copy(modelMarkStyle = value) } },
-                                label = { Text(label) },
-                                leadingIcon = {
-                                    EchoModelMark(color = if (settings.modelMarkStyle == value) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.primary,
-                                        style = value, animated = true, modifier = Modifier.size(24.dp))
-                                },
+                            FilterChip(selected = modelMarkPreviewState == value,
+                                onClick = {
+                                    modelMarkPreviewState = value
+                                    if (value == EchoModelMarkState.Completed) modelMarkPreviewCompletionEvent++
+                                }, label = { Text(label, softWrap = false) },
                                 colors = echoFilterChipColors(),
-                                border = echoFilterChipBorder(settings.modelMarkStyle == value)
+                                border = echoFilterChipBorder(modelMarkPreviewState == value)
                             )
+                        }
+                    }
+                    Text("点击“完成”可重播一次点头；预览状态不会改变模型请求。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    listOf(
+                        "线条机器人" to listOf(EchoModelMarkStyle.BOT_ROUND to "圆豆", EchoModelMarkStyle.BOT_SQUARE to "方糖",
+                            EchoModelMarkStyle.BOT_CAPSULE to "团子", EchoModelMarkStyle.BOT_PIXEL to "小方"),
+                        "几何标识" to listOf(EchoModelMarkStyle.CONCENTRIC to "同心圆", EchoModelMarkStyle.ORBIT to "轨道",
+                            EchoModelMarkStyle.PRISM to "棱镜", EchoModelMarkStyle.WAVEFORM to "声纹")
+                    ).forEach { (group, options) ->
+                        Text(group, style = MaterialTheme.typography.labelLarge)
+                        FlowRow(modifier = Modifier.selectableGroup(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            options.forEach { (value, label) ->
+                                FilterChip(selected = settings.modelMarkStyle == value,
+                                    onClick = { saveVisualPreference("模型标识已切换为$label") { it.copy(modelMarkStyle = value) } },
+                                    label = { Text(label, softWrap = false) },
+                                    leadingIcon = {
+                                        EchoModelMark(color = if (settings.modelMarkStyle == value) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.primary,
+                                            style = value, state = modelMarkPreviewState,
+                                            completionEvent = modelMarkPreviewCompletionEvent, modifier = Modifier.size(26.dp))
+                                    }, colors = echoFilterChipColors(), border = echoFilterChipBorder(settings.modelMarkStyle == value))
+                            }
                         }
                     }
                 }

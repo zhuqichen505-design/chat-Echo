@@ -4,6 +4,8 @@ import com.aiassistant.ui.components.MarkdownSegmentation
 import com.aiassistant.ui.components.MarkdownSegmentationCache
 import com.aiassistant.ui.components.computeStableSegments
 import com.aiassistant.ui.components.modelMarkColorFor
+import com.aiassistant.ui.components.EchoModelMarkState
+import com.aiassistant.ui.components.ModelMarkCompletionMotion
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.aiassistant.ui.screens.chat.GenerationUiState
@@ -19,6 +21,78 @@ import org.junit.Test
  * - P0-4：GenerationUiState 状态机派生行为等价
  */
 class MotionRoundTests {
+
+    @Test fun botCompletionPlaysOnceForObservedGenerationAndNeverForHistoricalMountOrCancelledOutput() {
+        val motion = ModelMarkCompletionMotion()
+        var previous: GenerationUiState? = null
+        fun advance(generating: Boolean, content: String, thinking: Boolean = false, retry: String? = null,
+                    error: Boolean = false): Pair<EchoModelMarkState, Boolean> {
+            val next = GenerationUiStateRules.derive(generating, content, thinking, retry, error)
+            val completed = GenerationUiStateRules.modelMarkCompletionObserved(previous, next, content)
+            val mark = GenerationUiStateRules.modelMarkState(next, completed)
+            previous = next
+            return mark to motion.update(mark)
+        }
+        assertEquals(EchoModelMarkState.Connecting to false, advance(true, ""))
+        assertEquals(EchoModelMarkState.Thinking to false, advance(true, "", thinking = true))
+        assertEquals(EchoModelMarkState.Replying to false, advance(true, "合成正文", thinking = true))
+        assertEquals(EchoModelMarkState.Completed to true, advance(false, "合成正文", thinking = true))
+        assertFalse(motion.update(EchoModelMarkState.Completed))
+        assertFalse(ModelMarkCompletionMotion().update(EchoModelMarkState.Completed))
+
+        // 下轮连接与恢复输出会重新建立一次完成机会。
+        advance(true, "")
+        advance(true, "合成重试正文")
+        assertEquals(EchoModelMarkState.Completed to true, advance(false, "合成重试正文"))
+        advance(true, "合成部分正文")
+        assertEquals(EchoModelMarkState.Neutral to false,
+            advance(false, "合成部分正文\n\n*(回复已被暂停)*"))
+        advance(true, "", thinking = true)
+        assertEquals(EchoModelMarkState.Neutral to false, advance(false, "*(思考已停止，回复已暂停)*", thinking = true))
+        assertEquals(EchoModelMarkState.Neutral to false, advance(true, "", retry = "等待选择回复方向"))
+        assertEquals(EchoModelMarkState.Neutral to false, advance(false, "请求失败\n\n合成错误", error = true))
+
+        val preview = ModelMarkCompletionMotion()
+        assertTrue(preview.update(EchoModelMarkState.Completed, completionEvent = 1L))
+        assertFalse(preview.update(EchoModelMarkState.Completed, completionEvent = 1L))
+        assertTrue(preview.update(EchoModelMarkState.Completed, completionEvent = 2L))
+        // 即使减弱动态期间已消费事件，恢复动画后也不应补播旧完成。
+        assertFalse(preview.update(EchoModelMarkState.Completed, completionEvent = 2L))
+    }
+
+    @Test fun botSettlingSelectsOnlyChangedSuccessfulMessageFromCurrentRoundIncludingRegeneratedId() {
+        fun message(id: Long, content: String, group: String = "synthetic-turn") =
+            com.aiassistant.domain.model.Message(id = id, conversationId = 1L, role = "assistant",
+                content = content, variantGroupId = group)
+        val original = message(1L, "合成旧回复")
+        val before = mapOf(original.id to original.content)
+        fun selected(vararg messages: com.aiassistant.domain.model.Message) =
+            com.aiassistant.ui.screens.chat.settledModelMarkMessageId(before, messages.toList(), "synthetic-turn")
+        assertEquals(0L, selected(original))
+        assertEquals(0L, selected(original, message(2L, "合成部分正文\n\n*(回复已被暂停)*")))
+        assertEquals(0L, selected(original, message(2L, "回复已停止 (用户已暂停)")))
+        assertEquals(0L, selected(original, message(2L, "合成部分正文\n\n*(输出已被中断: 合成网络错误)*")))
+        assertEquals(0L, selected(original, message(2L, "*(思考已输出，回复已被中断: 合成网络错误)*")))
+        assertEquals(0L, selected(original, message(2L, "请求失败\n\n合成错误")))
+        assertEquals(0L, selected(original, message(2L, "合成其他轮次", "synthetic-other")))
+        assertEquals(2L, selected(original, message(2L, "合成正常回复")))
+        assertEquals(0L, selected(original, message(2L, "合成前一段"),
+            message(3L, "合成后段\n\n*(回复已被暂停)*")))
+        assertEquals(1L, selected(original.copy(content = "合成原位重生成回复")))
+        assertTrue(GenerationUiStateRules.modelMarkHasSuccessfulBody("她问：“回复已被暂停是什么意思？”"))
+        assertTrue(GenerationUiStateRules.modelMarkHasSuccessfulBody("设定中写着 *(回复已被暂停)*，但故事继续。"))
+        assertFalse(GenerationUiStateRules.modelMarkCompletionObserved(null, GenerationUiState.Idle, "合成历史回复"))
+        assertFalse(GenerationUiStateRules.modelMarkCompletionObserved(GenerationUiState.Connecting,
+            GenerationUiState.Idle, "合成历史回复"))
+        assertFalse(GenerationUiStateRules.modelMarkCompletionObserved(GenerationUiState.Reconnecting,
+            GenerationUiState.Idle, "合成历史回复"))
+        assertFalse(GenerationUiStateRules.modelMarkCompletionObserved(GenerationUiState.Thinking,
+            GenerationUiState.Idle, ""))
+        assertTrue(GenerationUiStateRules.modelMarkCompletionObserved(GenerationUiState.Thinking,
+            GenerationUiState.Idle, "合成稍后到达正文"))
+        assertTrue(GenerationUiStateRules.modelMarkCompletionObserved(null, GenerationUiState.Idle,
+            "合成新落库回复", completionSignal = true))
+    }
 
     @Test fun modelMarkMovesDuringThinkingAndStreamingButNotAfterCompletionOrUserChoice() {
         val activeStates = setOf(GenerationUiState.Connecting, GenerationUiState.Reconnecting,

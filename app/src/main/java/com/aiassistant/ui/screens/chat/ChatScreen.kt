@@ -473,12 +473,21 @@ fun ChatScreen(
     // 1.6s 后撤销信号（防滚动回看重播）
     var settledMessageId by remember { mutableStateOf(0L) }
     val wasGeneratingForSettle = remember { mutableStateOf(isGenerating) }
+    var settleBaseline by remember(conversationId) { mutableStateOf(emptyMap<Long, String>()) }
+    var settleVariantGroupId by remember(conversationId) { mutableStateOf<String?>(null) }
+    val latestMessagesForSettle by rememberUpdatedState(messages)
     LaunchedEffect(isGenerating) {
-        if (!isGenerating && wasGeneratingForSettle.value) {
+        if (isGenerating) {
+            settledMessageId = 0L
+            settleBaseline = messages.filter { it.role == "assistant" && it.id > 0L }
+                .associate { it.id to it.content }
+            settleVariantGroupId = activeStreamingBranchGroupId(conversationId) ?: streamingBranchGroupId
+        } else if (wasGeneratingForSettle.value) {
+            wasGeneratingForSettle.value = false
             kotlinx.coroutines.delay(150) // 等待落库消息经 Room 流回 UI
-            val lastAssistant = messages.lastOrNull { it.role == "assistant" && it.id > 0 }
-            if (lastAssistant != null) {
-                settledMessageId = lastAssistant.id
+            val completedId = settledModelMarkMessageId(settleBaseline, latestMessagesForSettle, settleVariantGroupId)
+            if (completedId > 0L) {
+                settledMessageId = completedId
                 kotlinx.coroutines.delay(1600)
                 settledMessageId = 0L
             }

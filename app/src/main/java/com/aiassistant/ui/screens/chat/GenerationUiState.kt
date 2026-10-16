@@ -2,6 +2,8 @@ package com.aiassistant.ui.screens.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import com.aiassistant.domain.model.Message
+import com.aiassistant.ui.components.EchoModelMarkState
 
 /**
  * 生成状态机总线（方案 P0-4）
@@ -25,6 +27,35 @@ enum class GenerationUiState {
 }
 
 object GenerationUiStateRules {
+
+    /** 只识别生成器写入的独立终止尾标，不因正文提到“暂停”就误判。 */
+    fun modelMarkHasSuccessfulBody(content: String): Boolean {
+        val body = content.trim()
+        if (body.isEmpty() || isErrorMessage(body)) return false
+        if (body == "回复已停止 (用户已暂停)" || body.startsWith("回复已停止 (用户已暂停)\n\n")) return false
+        val finalBlock = body.substringAfterLast("\n\n")
+        if (finalBlock in setOf("*(回复已被暂停)*", "*(思考已停止，回复已暂停)*")) return false
+        return !(body.endsWith(")*") &&
+            (body.startsWith("*(思考已输出，回复已被中断: ") || body.contains("\n\n*(输出已被中断: ")))
+    }
+
+    fun modelMarkState(state: GenerationUiState, completed: Boolean): EchoModelMarkState = when (state) {
+        GenerationUiState.Connecting, GenerationUiState.Reconnecting -> EchoModelMarkState.Connecting
+        GenerationUiState.Thinking -> EchoModelMarkState.Thinking
+        GenerationUiState.Streaming -> EchoModelMarkState.Replying
+        GenerationUiState.Idle, GenerationUiState.Settling ->
+            if (completed) EchoModelMarkState.Completed else EchoModelMarkState.Neutral
+        else -> EchoModelMarkState.Neutral
+    }
+
+    fun modelMarkCompletionObserved(
+        previous: GenerationUiState?,
+        current: GenerationUiState,
+        content: String,
+        completionSignal: Boolean = false
+    ): Boolean = (current == GenerationUiState.Idle || current == GenerationUiState.Settling) &&
+        (completionSignal || previous == GenerationUiState.Thinking || previous == GenerationUiState.Streaming) &&
+        modelMarkHasSuccessfulBody(content)
 
     /** 模型标识只在正在生成时运动；等待用户决策、失败和结束均保持静态。 */
     fun animateModelMark(state: GenerationUiState): Boolean = when (state) {
@@ -89,6 +120,20 @@ object GenerationUiStateRules {
         else -> GenerationUiState.Idle
     }
 }
+
+/**
+ * 生成结束只能落定本轮新增或真正更新的助手消息。重生成可能更新原 id，故比较正文；
+ * 取消且没有新消息时不得拿上一轮回复补一个“完成”动画。
+ */
+internal fun settledModelMarkMessageId(
+    before: Map<Long, String>,
+    after: List<Message>,
+    activeVariantGroupId: String?
+): Long = after.lastOrNull { message ->
+    message.role == "assistant" && message.id > 0L &&
+        (activeVariantGroupId == null || message.variantGroupId == activeVariantGroupId) &&
+        (!before.containsKey(message.id) || before[message.id] != message.content)
+}?.takeIf { GenerationUiStateRules.modelMarkHasSuccessfulBody(it.content) }?.id ?: 0L
 
 /**
  * 组合期派生：从原始信号得到 GenerationUiState。

@@ -54,6 +54,7 @@ import com.aiassistant.utils.TimelineReconcileResult
 import com.aiassistant.utils.TimelineEventItem
 import com.aiassistant.utils.TimelineCategory
 import com.aiassistant.utils.AtemporalSettingItem
+import com.aiassistant.utils.EchoModelMarkStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -501,6 +502,23 @@ internal fun MessageBubble(
     // currentResponse），落库后的持久化气泡以 settleSignal=true 入场，播放同一段收尾序列
     val reducedMotion = com.aiassistant.ui.theme.rememberReducedMotion()
     val settleEligible = settleSignal && generationState != GenerationUiState.Failed
+    var modelMarkCompleted by remember(message.id) { mutableStateOf(false) }
+    var previousModelMarkGenerationState by remember(message.id) { mutableStateOf<GenerationUiState?>(null) }
+    val modelMarkCompletionNow = remember(previousModelMarkGenerationState, generationState, message.content, settleEligible) {
+        GenerationUiStateRules.modelMarkCompletionObserved(
+            previousModelMarkGenerationState, generationState, message.content, settleEligible)
+    }
+    LaunchedEffect(generationState, settleEligible, message.id, message.content) {
+        if (GenerationUiStateRules.animateModelMark(generationState)) modelMarkCompleted = false
+        else if (modelMarkCompletionNow) modelMarkCompleted = true
+        // Idle 可先于正文落库到达；保留已经观察到的输出前态，等正文到达后再判断一次。
+        if (generationState != GenerationUiState.Idle || message.content.isNotBlank()) {
+            previousModelMarkGenerationState = generationState
+        }
+    }
+    val modelMarkState = GenerationUiStateRules.modelMarkState(generationState,
+        completed = (modelMarkCompleted || modelMarkCompletionNow) &&
+            remember(message.content) { GenerationUiStateRules.modelMarkHasSuccessfulBody(message.content) })
     var cursorAlive by remember { mutableStateOf(isGenerating || settleEligible) }
     val wasGenerating = remember { mutableStateOf(isGenerating || settleEligible) }
     // P0-3② 落定脉冲：scale 1.0→0.995→1.0（200ms，graphicsLayer 绘制层，一次性）
@@ -929,6 +947,8 @@ internal fun MessageBubble(
                                 color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
                                 style = personalizationSettings.modelMarkStyle,
                                 animated = GenerationUiStateRules.animateModelMark(generationState),
+                                state = modelMarkState,
+                                completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                 modifier = Modifier.padding(top = 3.dp).size(28.dp),
                                 reducedMotion = reducedMotion,
                                 description = "模型标识"
@@ -1127,7 +1147,9 @@ internal fun MessageBubble(
                                     color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
                                     style = personalizationSettings.modelMarkStyle,
                                     animated = GenerationUiStateRules.animateModelMark(generationState),
-                                    modifier = Modifier.size(22.dp),
+                                    state = modelMarkState,
+                                    completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
+                                    modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 26.dp else 22.dp),
                                     reducedMotion = reducedMotion
                                 )
                             }

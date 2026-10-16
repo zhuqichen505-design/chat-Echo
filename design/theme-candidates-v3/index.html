@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Echo · 新主题设计集</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <header class="site-header"><a class="echo-brand" href="../theme-directions-v2/index.html"><span aria-hidden="true">◎</span>Echo</a><span class="header-label">主题设计集 · 第三辑</span><nav aria-label="相关预览"><a href="../theme-directions-v2/index.html">保留的装帧 ↗</a><a href="../bot-companions/index.html">看看小伙伴 ↗</a></nav></header>
+  <main class="catalogue">
+    <section class="catalogue-intro"><div><h1>挑一种，让你想停留的风格。</h1><p>五个新方向，从页面结构到阅读细节分别设计。先比较，再决定。</p></div><span class="preview-stamp">交互样稿<br>尚未应用到 App</span></section>
+    <section class="control-desk" aria-label="预览控制">
+      <div class="scene-control" role="group" aria-label="预览页面"><button data-scene="home" aria-pressed="true">首页</button><button data-scene="chat" aria-pressed="false">对话</button><button data-scene="settings" aria-pressed="false">对话设置</button><button data-scene="stats" aria-pressed="false">统计</button></div>
+      <div class="control"><span>显示</span><div class="mode-control" role="group" aria-label="显示模式"><button data-mode="auto" aria-pressed="true">推荐</button><button data-mode="light" aria-pressed="false">浅色</button><button data-mode="dark" aria-pressed="false">深色</button></div></div>
+      <label class="control" for="layout"><span>导航</span><select id="layout"><option value="bottom">底栏</option><option value="rail">侧栏</option></select></label>
+      <label class="control" for="background"><span>底色</span><select id="background"><option value="theme">随主题</option><option value="white">纯白</option><option value="black">纯黑</option></select></label>
+      <button class="compare-toggle" id="compare" aria-pressed="false">单独放大</button>
+    </section>
+    <div class="theme-picker" role="group" aria-label="选择主题"><button data-theme="porcelain" aria-pressed="true"><i></i>瓷光</button><button data-theme="typefield" aria-pressed="false"><i></i>字场</button><button data-theme="cinema" aria-pressed="false"><i></i>映夜</button><button data-theme="notebook" aria-pressed="false"><i></i>织页</button><button data-theme="garden" aria-pressed="false"><i></i>游园</button></div>
+    <section class="gallery" data-focus="porcelain" aria-label="五套主题设计">
+      <article class="study" data-theme="porcelain"><header class="study-header"><div><h2>瓷光</h2><span>PORCELAIN</span></div><button data-focus="porcelain" aria-label="单独放大瓷光">放大 ↗</button></header><p class="study-description">轻釉般的清透表面。细投影托起内容，蓝色只出现在值得注意的地方。</p><div class="device porcelain" data-theme="porcelain" aria-label="瓷光主题样稿"></div><div class="study-notes"><strong>精确、安静、有触感。</strong><span>弧面按钮 / 浅釉分区 / 浮起一毫米的选中态</span></div></article>
+      <article class="study" data-theme="typefield"><header class="study-header"><div><h2>字场</h2><span>TYPEFIELD</span></div><button data-focus="typefield" aria-label="单独放大字场">放大 ↗</button></header><p class="study-description">文字自己构成界面。日期目录、鲜明字级和横线节奏，朱红是一枚标点。</p><div class="device typefield" data-theme="typefield" aria-label="字场主题样稿"></div><div class="study-notes"><strong>像一份每天翻开的好刊物。</strong><span>编辑网格 / 通栏日期目录 / 文字即导航</span></div></article>
+      <article class="study" data-theme="cinema"><header class="study-header"><div><h2>映夜</h2><span>AFTERIMAGE</span></div><button data-focus="cinema" aria-label="单独放大映夜">放大 ↗</button></header><p class="study-description">故事有自己的银幕。宽幅场景、字幕式阅读与微弱边光，把长对话留给夜晚。</p><div class="device cinema" data-theme="cinema" aria-label="映夜主题样稿"></div><div class="study-notes"><strong>沉浸，从第一眼开始。</strong><span>自绘电影场景 / 宽幅继续入口 / 字幕式消息</span></div></article>
+      <article class="study" data-theme="notebook"><header class="study-header"><div><h2>织页</h2><span>COMMONPLACE</span></div><button data-focus="notebook" aria-label="单独放大织页">放大 ↗</button></header><p class="study-description">随手记，也认真写。可翻动的标签、细密页线和一处压印，让每段想法有归处。</p><div class="device notebook" data-theme="notebook" aria-label="织页主题样稿"></div><div class="study-notes"><strong>文具的亲近感，工具的清楚。</strong><span>页边标签 / 横格节奏 / 纸夹与压印细节</span></div></article>
+      <article class="study" data-theme="garden"><header class="study-header"><div><h2>游园</h2><span>BOTANICA</span></div><button data-focus="garden" aria-label="单独放大游园">放大 ↗</button></header><p class="study-description">一条留给想法的小径。植物线描、拱形构图和清晰列表，在秩序里留一点生机。</p><div class="device garden" data-theme="garden" aria-label="游园主题样稿"></div><div class="study-notes"><strong>自然，不等于随意。</strong><span>原创枝叶线描 / 拱形叙事入口 / 深绿与一点酸橙</span></div></article>
+    </section>
+    <footer class="site-footer"><p>所有会话、统计与人物均为合成内容。搜索、筛选、导航、折叠、开关、输入、动画状态都可操作。输入只展示在本地，不保存、不发送。插图均由 SVG 自绘。</p><p>推荐模式：映夜使用深色，其他使用浅色；可统一切换浅深和纯白/纯黑。网页字体来自本机；Android 上的实际字体、触控与尺寸需要单独适配验收。</p></footer>
+  </main>
+  <div class="toast" role="status" aria-live="polite"></div>
+  <script src="preview.js"></script>
+</body>
+</html>

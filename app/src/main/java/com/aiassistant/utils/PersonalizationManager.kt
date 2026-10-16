@@ -65,8 +65,14 @@ object EchoModelMarkStyle {
     const val ORBIT = "orbit"
     const val PRISM = "prism"
     const val WAVEFORM = "waveform"
+    const val BOT_ROUND = "bot_round"
+    const val BOT_SQUARE = "bot_square"
+    const val BOT_CAPSULE = "bot_capsule"
+    const val BOT_PIXEL = "bot_pixel"
 
-    val values = listOf(CONCENTRIC, ORBIT, PRISM, WAVEFORM)
+    val geometricStyles = listOf(CONCENTRIC, ORBIT, PRISM, WAVEFORM)
+    val botStyles = listOf(BOT_ROUND, BOT_SQUARE, BOT_CAPSULE, BOT_PIXEL)
+    val values = geometricStyles + botStyles
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: CONCENTRIC
 }
