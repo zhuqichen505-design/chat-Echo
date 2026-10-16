@@ -30,7 +30,7 @@ internal fun expressiveBotRestPose(style: String): ExpressiveBotPose = when (sty
     EchoModelMarkStyle.BOT_TILE -> ExpressiveBotPose(74f, 72f, 17f,
         left = ExpressiveBotEyePose(40.7f, 50.6f, width = 8.8f, height = 24.3f),
         right = ExpressiveBotEyePose(59.3f, 50.6f, width = 8.8f, height = 24.3f))
-    EchoModelMarkStyle.BOT_WIDE -> ExpressiveBotPose(88f, 53f, 17f,
+    EchoModelMarkStyle.BOT_WIDE -> ExpressiveBotPose(86f, 64f, 17f,
         left = ExpressiveBotEyePose(38f, 53f, width = 8.5f, height = 22f),
         right = ExpressiveBotEyePose(62f, 53f, width = 8.5f, height = 22f))
     else -> ExpressiveBotPose(72f, 72f, 36f,
