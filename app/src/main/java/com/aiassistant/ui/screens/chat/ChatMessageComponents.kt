@@ -430,7 +430,8 @@ internal fun MessageBubble(
     onToggleExclude: ((Message) -> Unit)? = null,
     thinkingEffort: String? = null,
     /** P0-3 落定信号：生成结束落库后的持久化气泡置 true，首次组合播放一次光标淡出+落定脉冲 */
-    settleSignal: Boolean = false
+    settleSignal: Boolean = false,
+    latestAssistantIdentity: Boolean = false
 ) {
     val isUser = message.role == "user"
     val personalizationSettings = rememberChatPersonalizationSettings()
@@ -522,6 +523,8 @@ internal fun MessageBubble(
     val modelMarkState = GenerationUiStateRules.modelMarkState(generationState,
         completed = (modelMarkCompleted || modelMarkCompletionNow) &&
             remember(message.content) { GenerationUiStateRules.modelMarkHasSuccessfulBody(message.content) })
+    val modelMarkIdleEffects = GenerationUiStateRules.modelMarkAllowsIdle(
+        generationState, !isUser && latestAssistantIdentity, message.content)
     LaunchedEffect(modelMarkState, modelMarkCompleted, modelMarkCompletionNow, personalizationSettings.showModelAvatar) {
         if (personalizationSettings.showModelAvatar) {
             // Keep hidden identities up to date, so restoring a mark never celebrates an unseen old completion.
@@ -960,6 +963,7 @@ internal fun MessageBubble(
                                 state = modelMarkState,
                                 completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                 completionOwner = modelMarkCompletionOwner,
+                                idleEffects = modelMarkIdleEffects,
                                 modifier = Modifier.padding(top = 3.dp).size(28.dp),
                                 reducedMotion = reducedMotion,
                                 description = "模型标识"
@@ -1161,6 +1165,7 @@ internal fun MessageBubble(
                                     state = modelMarkState,
                                     completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                     completionOwner = modelMarkCompletionOwner,
+                                    idleEffects = modelMarkIdleEffects,
                                     modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 26.dp else 22.dp),
                                     reducedMotion = reducedMotion
                                 )

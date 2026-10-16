@@ -75,7 +75,7 @@ class RetryPreferencesTest {
     fun expressiveBotsRenderRealDistinctUnclippedFramesAtMessageAndPreviewSizes() {
         val styles = EchoModelMarkStyle.expressiveBotStyles
         val states = listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
-            EchoModelMarkState.Replying, EchoModelMarkState.Completed)
+            EchoModelMarkState.Replying, EchoModelMarkState.Completed, EchoModelMarkState.Neutral)
         val outputDirectory = File("build/reports/visual-tests/model-bots")
         assertTrue(outputDirectory.isDirectory || outputDirectory.mkdirs())
         for ((theme, backdrop) in listOf("light" to Color.White, "dark" to Color.Black)) {
@@ -87,9 +87,11 @@ class RetryPreferencesTest {
             for ((styleIndex, style) in styles.withIndex()) {
                 for ((stateIndex, state) in states.withIndex()) {
                     for (size in listOf(26, 128)) {
+                        val symbolFrames = mutableListOf<Pair<Int, Float>>()
                         val snapshots = (0 until 8).map { frame ->
                             val pose = sampleExpressiveBotPose(style, state,
-                                expressiveBotDurationMillis(style, state) * frame / 8f)
+                                (if (state == EchoModelMarkState.Neutral) 3600f else expressiveBotDurationMillis(style, state)) * frame / 8f,
+                                idleEffects = state == EchoModelMarkState.Neutral)
                             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
                             CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr,
                                 Canvas(bitmap.asImageBitmap()), Size(size.toFloat(), size.toFloat())) {
@@ -97,6 +99,11 @@ class RetryPreferencesTest {
                             }
                             val pixels = IntArray(size * size)
                             bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+                            // The symbol layer occupies the clear space above every transformed body.
+                            // Alpha coverage detects subpixel strokes without requiring a pure color.
+                            val symbolPixels = pixels.copyOfRange(0, size * (size * .16f).toInt())
+                            symbolFrames += symbolPixels.contentHashCode() to
+                                symbolPixels.sumOf { (it ushr 24).toDouble() }.toFloat() / 255f
                             // Thin capsule edges and brief blinks are antialiased and need not contain
                             // exact eyeColor pixels. Measure their real contribution on the opaque body.
                             val (leftEye, rightEye) = projectedEyeVisibility(pixels, size, bodyColor.toArgb(), eyeColor)
@@ -124,6 +131,10 @@ class RetryPreferencesTest {
                         }
                         assertTrue("$style $state $size dp 必须是真实多帧运动，不能只更换表情标签",
                             snapshots.toSet().size >= 5)
+                        assertTrue("$style $state $size dp 外部符号本身必须实际绘制出不同像素帧",
+                            symbolFrames.map { it.first }.toSet().size >= 4)
+                        assertTrue("$style $state $size dp 外部符号应在多个关键帧中可见",
+                            symbolFrames.count { it.second > size * size / (26f * 26f) * .15f } >= 3)
                     }
                 }
             }

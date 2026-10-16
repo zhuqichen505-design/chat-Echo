@@ -94,7 +94,8 @@ internal fun EchoModelMark(
     description: String? = null,
     state: EchoModelMarkState = if (animated) EchoModelMarkState.Replying else EchoModelMarkState.Neutral,
     completionEvent: Long = 0L,
-    completionOwner: ModelMarkCompletionMotion? = null
+    completionOwner: ModelMarkCompletionMotion? = null,
+    idleEffects: Boolean = false
 ) {
     val resolvedStyle = EchoModelMarkStyle.sanitize(style)
     val isBot = resolvedStyle in EchoModelMarkStyle.botStyles
@@ -116,9 +117,10 @@ internal fun EchoModelMark(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(state, completionEvent, reducedMotion, resolvedStyle, lifecycleStarted, expressiveMotion) {
+    LaunchedEffect(state, completionEvent, reducedMotion, resolvedStyle, lifecycleStarted, expressiveMotion, idleEffects) {
         // Consume exactly once; native and legacy drawing share this result, including across remounts.
-        val playCompletion = expressiveMotion.update(state, completionEvent, reducedMotion, resolvedStyle, enabled = isExpressiveBot)
+        val playCompletion = expressiveMotion.update(state, completionEvent, reducedMotion, resolvedStyle,
+            enabled = isExpressiveBot, idleEffects = idleEffects)
         expressiveFrame.value = expressiveMotion.pose
         completionProgress.snapTo(1f)
         if (!lifecycleStarted) return@LaunchedEffect
@@ -209,23 +211,70 @@ internal fun EchoModelMark(
     }
 }
 
-/** Original two-eye identity, drawn natively at any size; all limbs and decorative props are omitted. */
+/** Natural two-eye identity, with an independent state-symbol layer above the unchanged body. */
 internal fun DrawScope.drawExpressiveBot(color: Color, pose: ExpressiveBotPose) {
     val factor = size.minDimension / 100f
     val eyeColor = readableTextColorFor(color)
     withTransform({
         translate((size.width - size.minDimension) * .5f, (size.height - size.minDimension) * .5f)
         scale(factor, factor, Offset.Zero)
-        translate(pose.bodyX, pose.bodyY)
-        rotate(pose.rotation, Offset(50f, 54f))
-        scale(pose.scaleX, pose.scaleY, Offset(50f, 54f))
     }) {
-        drawRoundRect(color, Offset(50f - pose.bodyWidth * .5f, 54f - pose.bodyHeight * .5f),
-            Size(pose.bodyWidth, pose.bodyHeight), CornerRadius(pose.cornerRadius, pose.cornerRadius))
-        listOf(pose.left, pose.right).forEach { eye ->
-            drawRoundRect(eyeColor,
-                Offset(pose.faceX + eye.x - eye.width * .5f, pose.faceY + eye.y - eye.height * .5f),
-                Size(eye.width, eye.height), CornerRadius(minOf(eye.width, eye.height) * .5f))
+        pose.effects.forEach { drawExpressiveBotEffect(color, it) }
+        withTransform({
+            translate(pose.bodyX, pose.bodyY)
+            rotate(pose.rotation, Offset(50f, 54f))
+            scale(pose.scaleX, pose.scaleY, Offset(50f, 54f))
+        }) {
+            drawRoundRect(color, Offset(50f - pose.bodyWidth * .5f, 54f - pose.bodyHeight * .5f),
+                Size(pose.bodyWidth, pose.bodyHeight), CornerRadius(pose.cornerRadius, pose.cornerRadius))
+            listOf(pose.left, pose.right).forEach { eye ->
+                drawRoundRect(eyeColor,
+                    Offset(pose.faceX + eye.x - eye.width * .5f, pose.faceY + eye.y - eye.height * .5f),
+                    Size(eye.width, eye.height), CornerRadius(minOf(eye.width, eye.height) * .5f))
+            }
+        }
+    }
+}
+
+/** A separate layer leaves eyes and body silhouette untouched at 26dp. */
+private fun DrawScope.drawExpressiveBotEffect(color: Color, effect: ExpressiveBotEffectPose) {
+    if (effect.alpha <= 0f) return
+    val tint = color.copy(alpha = color.alpha * effect.alpha)
+    val radius = effect.size * .5f
+    val center = Offset(effect.x, effect.y)
+    val stroke = Stroke(2.2f, cap = StrokeCap.Round)
+    when (effect.kind) {
+        ExpressiveBotEffectKind.Signal -> {
+            val arc = Path().apply {
+                moveTo(center.x - radius, center.y)
+                cubicTo(center.x - radius, center.y - radius * .5523f,
+                    center.x - radius * .5523f, center.y - radius, center.x, center.y - radius)
+                cubicTo(center.x + radius * .5523f, center.y - radius,
+                    center.x + radius, center.y - radius * .5523f, center.x + radius, center.y)
+            }
+            drawPath(arc, tint, style = stroke)
+        }
+        ExpressiveBotEffectKind.Bubble -> drawCircle(tint, radius, center, style = stroke)
+        ExpressiveBotEffectKind.Beat -> drawLine(tint, center - Offset(radius * .35f, radius * .7f),
+            center + Offset(radius * .35f, radius * .7f), 2.2f, StrokeCap.Round)
+        ExpressiveBotEffectKind.Spark -> {
+            val spark = Path().apply {
+                moveTo(center.x, center.y - radius)
+                quadraticBezierTo(center.x + radius * .18f, center.y - radius * .18f, center.x + radius, center.y)
+                quadraticBezierTo(center.x + radius * .18f, center.y + radius * .18f, center.x, center.y + radius)
+                quadraticBezierTo(center.x - radius * .18f, center.y + radius * .18f, center.x - radius, center.y)
+                quadraticBezierTo(center.x - radius * .18f, center.y - radius * .18f, center.x, center.y - radius)
+            }
+            drawPath(spark, tint, style = stroke)
+        }
+        ExpressiveBotEffectKind.Z -> {
+            val z = Path().apply {
+                moveTo(center.x - radius * .72f, center.y - radius)
+                lineTo(center.x + radius * .72f, center.y - radius)
+                lineTo(center.x - radius * .72f, center.y + radius)
+                lineTo(center.x + radius * .72f, center.y + radius)
+            }
+            drawPath(z, tint, style = stroke)
         }
     }
 }

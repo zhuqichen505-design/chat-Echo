@@ -595,7 +595,7 @@ fun AppearanceTab(
                     saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }
                 }
                 if (!settings.showModelAvatar) {
-                    Text("自然双眼随视线移动；连接探看、思考侧倾停顿、回复轻点、完成点头收势。遵循系统移除动画设置。",
+                    Text("连接发出信号弧、思考浮起泡泡、待机冒出 Z；回复轻点，完成闪星收势。遵循系统移除动画设置。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -607,12 +607,13 @@ fun AppearanceTab(
                             style = settings.modelMarkStyle,
                             state = modelMarkPreviewState,
                             completionEvent = modelMarkPreviewCompletionEvent,
+                            idleEffects = true,
                             modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)),
                             description = "当前模型标识预览"
                         )
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("实时预览", style = MaterialTheme.typography.titleSmall)
-                            Text("选择下方状态查看动作；再次点击完成可重播。",
+                            Text("选择下方状态查看动作；完成收势后回到待机，再次点击完成可重播。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -623,7 +624,7 @@ fun AppearanceTab(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         listOf(
-                            EchoModelMarkState.Neutral to "静止",
+                            EchoModelMarkState.Neutral to "待机",
                             EchoModelMarkState.Connecting to "连接",
                             EchoModelMarkState.Thinking to "思考",
                             EchoModelMarkState.Replying to "回复",

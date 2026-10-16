@@ -48,6 +48,11 @@ object GenerationUiStateRules {
         else -> EchoModelMarkState.Neutral
     }
 
+    /** Only the latest successful assistant may idle; historical, failed and decision rows never run a ticker. */
+    fun modelMarkAllowsIdle(state: GenerationUiState, isLatestAssistant: Boolean, content: String): Boolean =
+        isLatestAssistant && (state == GenerationUiState.Idle || state == GenerationUiState.Settling) &&
+            modelMarkHasSuccessfulBody(content)
+
     fun modelMarkCompletionObserved(
         previous: GenerationUiState?,
         current: GenerationUiState,

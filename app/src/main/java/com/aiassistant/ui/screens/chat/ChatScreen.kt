@@ -1451,7 +1451,8 @@ fun ChatScreen(
                                     customAvatarUri = uiState.roleplayCharacter?.avatarUri ?: uiState.modelAvatarUri,
                                     onTogglePin = { msg -> viewModel.togglePinMessage(msg) },
                                     onToggleExclude = { msg -> viewModel.toggleExcludeMessage(msg) },
-                                    settleSignal = message.role == "assistant" && message.id == settledMessageId
+                                    settleSignal = message.role == "assistant" && message.id == settledMessageId,
+                                    latestAssistantIdentity = isLastAssistantTurn
                                 )
                             }
 
