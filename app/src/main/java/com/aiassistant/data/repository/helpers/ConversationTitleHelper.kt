@@ -38,15 +38,19 @@ object ConversationTitleHelper {
      * 滚动摘要生成文本清洗与尾部断句防腰斩安全闭合保护：
      * 1. 彻底剔除思考模型遗留的 <think>...</think> 过程；
      * 2. 循环检测并清除尾部因模型生成中断或截断遗留的孤立空章节标题与半句残词；
-     * 3. 若尾行缺失合法标点，安全修剪至上一处合法完整句子或安全闭合，彻底杜绝半截文字或孤立空标题入库。
+     * 3. 未知完成状态时沿用旧的断句保护；调用方已校验传输完整结束时，保留无句号的清单、路径与标识，另做结构完整性校验。
      */
-    fun sanitizeSummaryCompletion(rawText: String?): String? {
+    fun sanitizeSummaryCompletion(rawText: String?, preserveCompleteText: Boolean = false): String? {
         if (rawText.isNullOrBlank()) return null
         var text = rawText.trim()
         if (text.contains("<think>")) {
             text = text.substringAfterLast("</think>", text.substringBefore("<think>")).trim()
         }
         if (text.isBlank()) return null
+
+        // A successful transport completion is stronger evidence than punctuation. Lists,
+        // filenames and identifiers often have no full stop; never erase them from a summary.
+        if (preserveCompleteText) return text
 
         val lines = text.lines().map { it.trimEnd() }.toMutableList()
         val validEndPunctuation = setOf('。', '！', '？', '；', '”', '’', '"', '\'', '…', '.', '!', '?', ')')

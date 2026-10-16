@@ -4,14 +4,22 @@ Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上�
 
 ## 版本与安装包
 
-- 当前版本：**2.8.8**（194），包名 `com.aiassistant`。
+- 当前版本：**2.8.9**（195），包名 `com.aiassistant`。
 - Android 8.0（API 26）及以上，当前安装包仅支持 `arm64-v8a`。
 - 最新版下载：[GitHub Releases](../../releases/latest)。发布完成前此链接可能尚不可用。
-- 本版安装包名称：`Echo-v2.8.8.apk`。只手动上传最新版 APK，不上传源码压缩包、历史 APK、日志或用户数据。
+- 本版安装包名称：`Echo-v2.8.9.apk`。只手动上传最新版 APK，不上传源码压缩包、历史 APK、日志或用户数据。
 - 最新版元数据与验收边界见 [release-notes/latest.md](release-notes/latest.md)；该目录仅保存公开脱敏说明。
 - GitHub 自动提供的 Source code zip/tar.gz 链接无法关闭；它们不是本项目手动上传的附件。
 - 当前安装包使用 Android Debug 证书，**非正式生产签名**。未完成真机安装、启动与真实接口验收；升级前请备份数据。
-- v2.8.8 的实际构建与发布结果以已核验的 Release 附件及最新发布说明为准；本版纳入下述七款 Bot，旧版安装包不含这些新增选择。
+- v2.8.9 的实际构建与发布结果以已核验的 Release 附件及最新发布说明为准。
+
+## v2.8.9：上下文压缩修复
+
+预览、手动压缩与发送共用预算，读取会话或所选模型的上下文窗口；摘要按实际对话顺序记录覆盖边界，重新生成的高编号回复不再误吞后续低编号消息或重复整理。保留最近完整用户轮次及完整置顶轮次，L2 按设置保留，L3 保留最近 4 轮、L4 保留最近 1 轮；这些是预算内目标，预算不足时继续压缩较早轮次，最新完整轮和置顶内容不会静默丢弃，L4 也保留历史摘要。
+
+长历史逐段合并旧摘要，分块预算计入完整模板、记忆约束和输出空间；模型返回完整但超预算摘要时最多再做一次语义缩短，失败、取消或原文变化时保留原始消息及上次摘要。正常完成的无句号待办、文件名不会被清洗删除。上下文面板提供“取消整理”，“立即压缩”会在保存档位后实际整理历史，刷新状态不会提前清除忙态。
+
+实现参考固定版本的 [Aider](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/history.py)、[LangMem](https://github.com/langchain-ai/langmem/blob/48e3c11f5bb527282c7d5339c6a87a0b35abccfc/src/langmem/short_term/summarization.py) 与 [OpenCode](https://github.com/anomalyco/opencode/blob/bc5ebf00a4c169ece10f276e6ce02eaf18c326e6/packages/core/src/session/compaction.ts) 的轮次切分、预算和覆盖记录思路，没有增加依赖或复制源文件。摘要仍可能遗漏细节；可审阅、编辑或清除摘要，原始聊天记录始终保留。Room v35（20 实体）不变。
 
 ## v2.8.8：七款 Bot 与状态动效
 

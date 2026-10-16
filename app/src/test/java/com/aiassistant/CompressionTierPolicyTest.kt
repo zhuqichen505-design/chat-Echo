@@ -142,18 +142,23 @@ class CompressionTierPolicyTest {
         }
 
         // L4 极限压缩档位测试：
-        // 应该保留：isPinned (id=5) + 最近 8 轮 (最后 16 条，id 25..40)
+        // 已确认摘要承接到 id=38，保留置顶完整轮次 + 最近 1 轮。
         val l4Result = ChatContextAssemblyHelper.assembleTieredContextMessages(
             tier = CompressionTier.L4,
             usableMessages = messages,
-            recentBudget = 100_000
+            recentBudget = 100_000,
+            existingRollingSummary = "已确认的早期历史摘要",
+            coveredThroughId = 38L
         )
         val l4Ids = l4Result.activeMessages.map { it.id }.toSet()
         assertTrue("L4 极限压缩必须无条件保留 isPinned 消息", l4Ids.contains(5L))
         assertTrue("L4 极限压缩必须保留最近 1 轮消息 (id=40)", l4Ids.contains(40L))
         assertTrue("L4 极限压缩必须保留最近 1 轮消息 (id=39)", l4Ids.contains(39L))
-        assertTrue("L4 极限压缩必须保留最近 8 轮窗口内的消息 (id=25)", l4Ids.contains(25L))
+        assertTrue("置顶消息所在轮次的回复也必须保留", l4Ids.contains(6L))
+        assertFalse("L4 较早原文由已确认摘要承接", l4Ids.contains(25L))
         assertFalse("L4 极限压缩应安全退休未置顶的较早消息 (id=10)", l4Ids.contains(10L))
+        assertEquals("L4 保留完整置顶轮次与最近一轮", setOf(5L, 6L, 39L, 40L), l4Ids)
+        assertEquals("极限压缩仍必须注入历史摘要", "已确认的早期历史摘要", l4Result.injectedSummary)
 
         // L2 滚动摘要档位测试 (保留 8 轮，16条)
         val l2Result = ChatContextAssemblyHelper.assembleTieredContextMessages(
@@ -161,24 +166,32 @@ class CompressionTierPolicyTest {
             usableMessages = messages,
             recentBudget = 100_000,
             l2RecentRounds = 8,
-            existingRollingSummary = "之前关于项目技术选型的讨论摘要"
+            existingRollingSummary = "之前关于项目技术选型的讨论摘要",
+            coveredThroughId = 24L
         )
         assertEquals("之前关于项目技术选型的讨论摘要", l2Result.injectedSummary)
         val l2Ids = l2Result.activeMessages.map { it.id }.toSet()
         assertTrue("L2 档位必须强制保留 isPinned 消息", l2Ids.contains(5L))
         assertTrue("L2 档位必须保留最近 1 轮", l2Ids.contains(40L))
 
-        // L3 深度压缩档位测试 (保留 16 轮，32条)
+        // L3 深度压缩档位测试（保留最近 4 轮）。
         val l3Result = ChatContextAssemblyHelper.assembleTieredContextMessages(
             tier = CompressionTier.L3,
             usableMessages = messages,
             recentBudget = 100_000,
-            structuredSummary = "【核心背景与用户固定约束】：\n- 重要约束"
+            structuredSummary = "【核心背景与用户固定约束】：\n- 重要约束",
+            coveredThroughId = 32L
         )
         assertEquals("【核心背景与用户固定约束】：\n- 重要约束", l3Result.injectedSummary)
         val l3Ids = l3Result.activeMessages.map { it.id }.toSet()
-        assertTrue("L3 必须保留最近 16 轮内的消息 (id=15)", l3Ids.contains(15L))
+        assertTrue("L3 必须保留最近 4 轮的起点 (id=33)", l3Ids.contains(33L))
+        assertFalse("L3 已被摘要覆盖的较早原文应退休", l3Ids.contains(15L))
         assertTrue("L3 必须强制保留 isPinned 消息", l3Ids.contains(5L))
+        assertTrue("L3 必须保留完整置顶轮次", l3Ids.contains(6L))
+        assertTrue("升至L3必须比默认L2减少原文", l3Result.activeMessages.size < l2Result.activeMessages.size)
+        assertTrue("升至L4必须比L3减少原文", l4Result.activeMessages.size < l3Result.activeMessages.size)
+        assertEquals("保留最近 4 轮原文", CompressionTierPolicy.getRetainedRoundsDesc(CompressionTier.L3))
+        assertEquals("保留最近 1 轮原文", CompressionTierPolicy.getRetainedRoundsDesc(CompressionTier.L4))
     }
 
     @Test
@@ -230,7 +243,8 @@ class CompressionTierPolicyTest {
             usableMessages = messages,
             recentBudget = 100_000,
             existingRollingSummary = "较早历史的滚动摘要",
-            customRetainPercent = 30
+            customRetainPercent = 30,
+            coveredThroughId = 28L
         )
         assertEquals("LC 档必须注入滚动/结构化摘要", "较早历史的滚动摘要", result.injectedSummary)
         val ids = result.activeMessages.map { it.id }.toSet()
@@ -239,7 +253,24 @@ class CompressionTierPolicyTest {
         assertTrue("LC 窗口应覆盖 30% 起点 (id=29)", ids.contains(29L))
         assertTrue("LC 必须无条件保留 isPinned 消息 (id=5)", ids.contains(5L))
         assertFalse("LC 窗口外未置顶消息应退休 (id=10)", ids.contains(10L))
-        assertEquals("LC 激活消息数应为窗口 12 条 + 置顶 1 条", 13, result.activeMessages.size)
+        assertEquals("LC 激活消息数应为窗口 12 条 + 置顶完整轮次 2 条", 14, result.activeMessages.size)
+    }
+
+    @Test
+    fun contextWithoutCheckedSummaryDoesNotDropUncoveredOriginalMessages() {
+        val messages = (1..40).map { index ->
+            Message(id = index.toLong(), conversationId = 1L,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成消息 $index")
+        }
+        for (tier in listOf(CompressionTier.L2, CompressionTier.L3, CompressionTier.L4, CompressionTier.LC)) {
+            for (unconfirmedSummary in listOf(null, "尚未确认覆盖范围的摘要")) {
+                val result = ChatContextAssemblyHelper.assembleTieredContextMessages(
+                    tier, messages, recentBudget = 100_000, existingRollingSummary = unconfirmedSummary
+                )
+                assertEquals("$tier 未确认摘要覆盖时必须保留全部原文", messages, result.activeMessages)
+                assertTrue("$tier 必须标明仍需生成并确认摘要", result.canCompress)
+            }
+        }
     }
 
     @Test
@@ -257,16 +288,18 @@ class CompressionTierPolicyTest {
             )
         }
 
-        // 预算紧张时：LC 窗口内消息允许被裁剪，但置顶与最近 1 轮必须保留（绝不硬性溢出）
+        // 预算紧张时：已确认摘要承接较早原文，仍须保留完整置顶轮次和最近一轮。
         val result = ChatContextAssemblyHelper.assembleTieredContextMessages(
             tier = CompressionTier.LC,
             usableMessages = messages,
             recentBudget = 120,
-            existingRollingSummary = null,
-            customRetainPercent = 90
+            existingRollingSummary = "早期历史已确认摘要",
+            customRetainPercent = 90,
+            coveredThroughId = 38L
         )
         val ids = result.activeMessages.map { it.id }.toSet()
         assertTrue("预算紧张时 isPinned 仍必须保留", ids.contains(5L))
+        assertTrue("预算紧张时置顶消息的完整轮次仍必须保留", ids.contains(6L))
         assertTrue("预算紧张时最近 1 轮仍必须保留 (id=40)", ids.contains(40L))
         assertTrue("预算紧张时激活消息数必须小于窗口理论值", result.activeMessages.size < 38)
     }

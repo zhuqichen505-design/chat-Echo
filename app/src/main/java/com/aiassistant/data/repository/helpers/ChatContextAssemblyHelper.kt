@@ -201,6 +201,7 @@ object ChatContextAssemblyHelper {
         )
     }
 
+    /** Compatibility entry point; only a real coverage boundary permits retiring original history. */
     fun assembleTieredContextMessages(
         tier: com.aiassistant.domain.model.CompressionTier,
         usableMessages: List<Message>,
@@ -208,118 +209,41 @@ object ChatContextAssemblyHelper {
         l2RecentRounds: Int = com.aiassistant.domain.model.CompressionTierPolicy.DEFAULT_L2_RECENT_ROUNDS,
         existingRollingSummary: String? = null,
         structuredSummary: String? = null,
-        customRetainPercent: Int = com.aiassistant.domain.model.CompressionTierPolicy.DEFAULT_CUSTOM_RETAIN_PERCENT
+        customRetainPercent: Int = com.aiassistant.domain.model.CompressionTierPolicy.DEFAULT_CUSTOM_RETAIN_PERCENT,
+        coveredThroughId: Long? = null
     ): TieredContextResult {
-        if (usableMessages.isEmpty()) {
-            return TieredContextResult(emptyList(), null, 0, 0, false)
+        if (usableMessages.isEmpty()) return TieredContextResult(emptyList(), null, 0, 0, false)
+        val injectedSummary = if (tier == com.aiassistant.domain.model.CompressionTier.L3) {
+            structuredSummary?.takeIf { it.isNotBlank() } ?: existingRollingSummary?.takeIf { it.isNotBlank() }
+        } else {
+            existingRollingSummary?.takeIf { it.isNotBlank() } ?: structuredSummary?.takeIf { it.isNotBlank() }
         }
-
-        // 确定不同档位的最近消息窗口保留数量（以轮数 * 2 计；LC 按消息总数百分比取整）
-        val recentWindowCount = when (tier) {
-            com.aiassistant.domain.model.CompressionTier.L0 -> UNCOMPRESSED_RECENT_MESSAGE_COUNT
-            com.aiassistant.domain.model.CompressionTier.L1 -> UNCOMPRESSED_RECENT_MESSAGE_COUNT
-            com.aiassistant.domain.model.CompressionTier.L2 -> (l2RecentRounds.coerceIn(
-                com.aiassistant.domain.model.CompressionTierPolicy.MIN_L2_RECENT_ROUNDS,
-                com.aiassistant.domain.model.CompressionTierPolicy.MAX_L2_RECENT_ROUNDS
-            ) * 2)
-            com.aiassistant.domain.model.CompressionTier.L3 -> 32 // 16 轮
-            com.aiassistant.domain.model.CompressionTier.L4 -> 16 // 8 轮
-            com.aiassistant.domain.model.CompressionTier.LC -> {
-                val percent = customRetainPercent.coerceIn(
-                    com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT,
-                    com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT
-                )
-                val window = ((usableMessages.size.toLong() * percent + 50) / 100L).toInt()
-                // v2.6.6 修复：旧实现 coerceIn(2, usableMessages.size) 在消息数 < 2 时
-                //（新建对话首发消息后统计预览即触发）构成空区间，抛 IllegalArgumentException
-                // 直接闪退；改用 minOf/maxOf 组合，任意 size >= 1 均安全
-                minOf(usableMessages.size, maxOf(2, window))
-            }
-        }
-
-        val recentWindow = usableMessages.takeLast(recentWindowCount)
-        val recentWindowIds = recentWindow.map { it.id }.toSet()
-        val olderMessages = usableMessages.dropLast(recentWindow.size)
-
-        // 确定注入的摘要内容
-        val injectedSummary: String? = when (tier) {
-            com.aiassistant.domain.model.CompressionTier.L0 -> null
-            com.aiassistant.domain.model.CompressionTier.L1 -> null
-            com.aiassistant.domain.model.CompressionTier.L2,
-            com.aiassistant.domain.model.CompressionTier.LC -> {
-                existingRollingSummary?.takeIf { it.isNotBlank() }
-                    ?: structuredSummary?.takeIf { it.isNotBlank() }
-            }
-            com.aiassistant.domain.model.CompressionTier.L3 -> {
-                structuredSummary?.takeIf { it.isNotBlank() }
-                    ?: existingRollingSummary?.takeIf { it.isNotBlank() }
-            }
-            com.aiassistant.domain.model.CompressionTier.L4 -> null
-        }
-
-        // 候选消息筛选与修剪：
-        // 硬性安全边界：
-        // 1. isPinned 消息无条件保留；
-        // 2. 最近 1 轮（最后 2 条）无条件保留；
-        // 3. L2/L3/L4/LC 档位中，较早未置顶消息交由摘要承载；
-        // 4. L0/L1 档位中，较早消息在 recentBudget 预算内尽量保留。
-        val lastRoundIds = usableMessages.takeLast(2).map { it.id }.toSet()
-
-        val candidateMessages = usableMessages.filter { msg ->
-            when (tier) {
-                com.aiassistant.domain.model.CompressionTier.L0,
-                com.aiassistant.domain.model.CompressionTier.L1 -> {
-                    msg.isPinned || recentWindowIds.contains(msg.id) || olderMessages.any { it.id == msg.id }
-                }
-                com.aiassistant.domain.model.CompressionTier.L2,
-                com.aiassistant.domain.model.CompressionTier.L3,
-                com.aiassistant.domain.model.CompressionTier.L4,
-                com.aiassistant.domain.model.CompressionTier.LC -> {
-                    msg.isPinned || lastRoundIds.contains(msg.id) || recentWindowIds.contains(msg.id)
-                }
-            }
-        }
-
-        var usedTokens = 0
-        val activeReversed = mutableListOf<Message>()
-
-        for (message in candidateMessages.asReversed()) {
-            val contentToUse = if (tier == com.aiassistant.domain.model.CompressionTier.L1 && !lastRoundIds.contains(message.id)) {
-                ContentPruningHelper.pruneMessageContent(message.content)
-            } else {
-                message.content
-            }
-            val compact = TokenEstimationHelper.compactMessageForHistory(contentToUse)
-            val cost = TokenEstimationHelper.estimateTokenCount(compact) + 24
-
-            // LC 档窗口内消息仅“尽量保留”（受预算裁剪），窗口仍容纳不下时由摘要兜底，绝不硬性溢出
-            val isMandatory = message.isPinned || lastRoundIds.contains(message.id) ||
-                (recentWindowIds.contains(message.id) && tier != com.aiassistant.domain.model.CompressionTier.LC)
-            if (!isMandatory && (usedTokens + cost > recentBudget)) {
-                continue
-            }
-
-            val finalMessage = if (contentToUse != message.content) {
-                message.copy(content = contentToUse)
-            } else {
-                message
-            }
-
-            activeReversed.add(finalMessage)
-            usedTokens += cost
-        }
-
-        val activeMessages = activeReversed.asReversed()
+        val plan = ContextCompressionPlanner.plan(
+            messages = usableMessages,
+            tier = tier,
+            historyBudget = recentBudget,
+            summary = injectedSummary,
+            coveredThroughId = coveredThroughId,
+            recentRounds = l2RecentRounds,
+            retainPercent = customRetainPercent
+        )
+        // This synchronous adapter cannot generate a checked replacement summary. Its
+        // caller must first summarize the uncovered range; until then keep the source.
+        val activeMessages = if (plan.needsSummary) usableMessages else plan.retainedMessages
+        val coveredIndex = if (injectedSummary != null && coveredThroughId != null) {
+            usableMessages.indexOfFirst { it.id == coveredThroughId }
+        } else -1
+        val pendingCount = (plan.summarySource.size - coveredIndex - 1).coerceAtLeast(0)
         val summaryTokens = injectedSummary?.let { TokenEstimationHelper.estimateTokenCount(it) + 32 } ?: 0
-
         return TieredContextResult(
             activeMessages = activeMessages,
             injectedSummary = injectedSummary,
-            recentTokens = usedTokens + summaryTokens,
-            uncompressedOlderCount = olderMessages.size,
-            canCompress = olderMessages.isNotEmpty()
+            recentTokens = activeMessages.sumOf(ContextCompressionPlanner::messageTokens) + summaryTokens,
+            uncompressedOlderCount = pendingCount,
+            canCompress = plan.needsSummary
         )
     }
+
 }
 
 /**

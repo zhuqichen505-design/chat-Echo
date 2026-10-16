@@ -1034,13 +1034,9 @@ class AiRepository(
             val messages = getMessagesList(conversationId).collapseVariantsForHistory().filter {
                 it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
             }
-            val budget = estimatePromptBudgetTokens(model, maxOutputTokens, contextWindowOverrideTokens ?: conversation.contextWindowTokens)
-            val plan = ContextCompressionPlanner.plan(messages, CompressionTier.fromLevel(conversation.compressionTier),
-                (budget * 0.65f).toInt(), conversation.rollingSummary, conversation.summaryUpdatedMessageId,
-                conversation.compressionRecentRounds, conversation.compressionCustomPercent, forceCompression = true)
-            if (plan.summarySource.isNotEmpty()) {
-                ensureRollingSummary(conversation.copy(contextWindowTokens = contextWindowOverrideTokens ?: conversation.contextWindowTokens), config, model, plan.summarySource, (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
-            }
+            buildContextBundle(conversation, config, messages, model, maxOutputTokens,
+                contextWindowOverrideTokens, currentUserMessage = "", options = savedContextOptions(conversation),
+                forceCompression = true)
             getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
         }.onFailure { if (it is CancellationException) throw it }
     }
@@ -1060,8 +1056,10 @@ class AiRepository(
                 it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
             }
             require(messages.isNotEmpty()) { "尚无可整理的对话" }
-            val budget = estimatePromptBudgetTokens(model, maxOutputTokens, contextWindowOverrideTokens ?: conversation.contextWindowTokens)
-            ensureRollingSummary(conversation.copy(contextWindowTokens = contextWindowOverrideTokens ?: conversation.contextWindowTokens), config, model, messages, (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
+            val window = resolveContextWindow(conversation, model, contextWindowOverrideTokens)
+            val budget = estimatePromptBudgetTokens(model, maxOutputTokens ?: conversation.maxTokens ?: config.maxTokens, window)
+            ensureRollingSummary(conversation.copy(contextWindowTokens = window), config, model, messages,
+                (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
             getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
         }.onFailure { if (it is CancellationException) throw it }
     }
@@ -2547,6 +2545,46 @@ class AiRepository(
                 .firstOrNull { it.modelName.equals(modelName, ignoreCase = true) }?.contextWindowTokens
         } ?: estimateModelContextWindowTokens(modelName)
 
+    private fun savedContextOptions(conversation: Conversation) = ChatRequestOptions(
+        enableSessionMemory = conversation.enableSessionMemory,
+        enableExternalMemory = conversation.enableExternalMemory,
+        enableWorldBook = conversation.enableWorldBook,
+        activeWorldBookIds = conversation.activeWorldBookIds
+    )
+
+    private data class ContextBudget(
+        val window: Int,
+        val prompt: Int,
+        val summary: Int,
+        val fixed: Int,
+        val memory: String?,
+        val memoryTokens: Int
+    ) {
+        val history: Int get() = (prompt - fixed - summary).coerceAtLeast(0)
+    }
+
+    /** The preview, manual compression and send path reserve the same prompt components. */
+    private suspend fun contextBudget(
+        conversation: Conversation?, messages: List<Message>, modelName: String, maxOutputTokens: Int?,
+        contextWindowOverrideTokens: Int?, currentUserMessage: String, options: ChatRequestOptions
+    ): ContextBudget {
+        val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens).coerceIn(4000, 2000000)
+        val prompt = estimatePromptBudgetTokens(modelName, maxOutputTokens, window)
+        val retrievalText = currentUserMessage.ifBlank { messages.lastOrNull { it.role == "user" }?.content.orEmpty() }
+        val memory = conversation?.let { buildRelevantMemoryBlock(it, retrievalText,
+            (prompt * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400), options) }
+        val custom = resolveSystemPromptWithPriority(conversation, options)
+        val lore = if (options.enableWorldBook == true) {
+            val ids = options.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
+            matchWorldBookEntries(WorldBookActivation.scanText(currentUserMessage, messages), ids)
+                .takeIf { it.isNotEmpty() }?.let { "<world_book_lore>\n${formatWorldBookPrompt(it)}\n</world_book_lore>" }
+        } else null
+        val fixed = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, memory, options,
+            custom.second, isRoleplayConversation(conversation), lore).orEmpty()) + estimateTokenCount(currentUserMessage) + 128
+        return ContextBudget(window, prompt, (prompt * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400),
+            fixed, memory, memory?.let(::estimateTokenCount) ?: 0)
+    }
+
     private suspend fun buildContextUsageSnapshot(
         conversation: Conversation,
         messages: List<Message>,
@@ -2556,19 +2594,11 @@ class AiRepository(
     ): ConversationContextUsage {
         val usable = messages.filter { it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
             !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
-        val contextWindow = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens).coerceIn(4000, 2000000)
-        val promptBudget = estimatePromptBudgetTokens(modelName, maxOutputTokens, contextWindow)
-        val memory = buildRelevantMemoryBlock(conversation, usable.lastOrNull { it.role == "user" }?.content.orEmpty(),
-            (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400))
-        val memoryTokens = memory?.let(::estimateTokenCount) ?: 0
-        val options = ChatRequestOptions(enableSessionMemory = conversation.enableSessionMemory)
-        val custom = resolveSystemPromptWithPriority(conversation, options)
-        val systemTokens = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, null, options,
-            custom.second, isRoleplayConversation(conversation)).orEmpty()) + 64
-        val summaryBudget = (promptBudget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400)
-        val historyBudget = (promptBudget - memoryTokens - systemTokens - summaryBudget).coerceAtLeast(0)
-        val baseline = systemTokens + memoryTokens + usable.sumOf(ContextCompressionPlanner::messageTokens)
-        fun plan(tier: CompressionTier) = ContextCompressionPlanner.plan(usable, tier, historyBudget,
+        val outputTokens = maxOutputTokens ?: conversation.maxTokens ?: getApiConfigById(conversation.apiConfigId)?.maxTokens
+        val budget = contextBudget(conversation, usable, modelName, outputTokens, contextWindowOverrideTokens,
+            currentUserMessage = "", options = savedContextOptions(conversation))
+        val baseline = budget.fixed + usable.sumOf(ContextCompressionPlanner::messageTokens)
+        fun plan(tier: CompressionTier) = ContextCompressionPlanner.plan(usable, tier, budget.history,
             conversation.rollingSummary, conversation.summaryUpdatedMessageId,
             conversation.compressionRecentRounds, conversation.compressionCustomPercent)
         val tier = CompressionTier.fromLevel(conversation.compressionTier)
@@ -2576,26 +2606,29 @@ class AiRepository(
         val summaryTokens = conversation.rollingSummary?.let(::estimateTokenCount) ?: 0
         // Until a checked summary exists, the current usage must still count the uncovered original text.
         val actualHistory = if (active.needsSummary) usable else active.retainedMessages
-        val currentTokens = systemTokens + memoryTokens + actualHistory.sumOf(ContextCompressionPlanner::messageTokens) + summaryTokens
+        val currentTokens = budget.fixed + actualHistory.sumOf(ContextCompressionPlanner::messageTokens) + summaryTokens
         val previews = CompressionTier.entries.map { candidate ->
             val projected = plan(candidate)
-            val cost = systemTokens + memoryTokens + projected.estimatedHistoryTokens +
-                if (projected.summarySource.isNotEmpty()) maxOf(summaryTokens, summaryBudget) else 0
+            val cost = budget.fixed + projected.estimatedHistoryTokens +
+                if (projected.needsSummary) budget.summary else summaryTokens
             TierCompressionPreview(candidate, cost, baseline, (baseline - cost).coerceAtLeast(0),
                 if (baseline > 0) ((baseline - cost).coerceAtLeast(0).toFloat() / baseline) else 0f,
                 CompressionTierPolicy.getRetainedRoundsDesc(candidate, conversation.compressionRecentRounds, conversation.compressionCustomPercent),
                 candidate.detailLossNote)
         }
-        val manualPlan = ContextCompressionPlanner.plan(usable, tier, historyBudget, conversation.rollingSummary,
+        val manualPlan = ContextCompressionPlanner.plan(usable, tier, budget.history, conversation.rollingSummary,
             conversation.summaryUpdatedMessageId, conversation.compressionRecentRounds, conversation.compressionCustomPercent, true)
-        return ConversationContextUsage(contextWindowTokens = contextWindow, modelDefaultContextTokens = estimateModelContextWindowTokens(modelName),
-            promptBudgetTokens = promptBudget, estimatedInputTokens = currentTokens,
-            usagePercent = (currentTokens.toFloat() / promptBudget).coerceIn(0f, 1f), recentMessageCount = actualHistory.size,
-            olderMessageCount = manualPlan.summarySource.count { it.id > (conversation.summaryUpdatedMessageId ?: 0) },
+        val coveredIndex = if (conversation.rollingSummary.isNullOrBlank()) -1
+            else usable.indexOfFirst { it.id == conversation.summaryUpdatedMessageId }
+        return ConversationContextUsage(contextWindowTokens = budget.window, modelDefaultContextTokens = estimateModelContextWindowTokens(modelName),
+            promptBudgetTokens = budget.prompt, estimatedInputTokens = currentTokens,
+            usagePercent = (currentTokens.toFloat() / budget.prompt).coerceIn(0f, 1f), recentMessageCount = actualHistory.size,
+            olderMessageCount = (manualPlan.summarySource.size - coveredIndex - 1).coerceAtLeast(0),
             recentTokens = actualHistory.sumOf(ContextCompressionPlanner::messageTokens), summaryTokens = summaryTokens,
-            memoryTokens = memoryTokens, memoryItemCount = memoryDao.getCandidateMemories(conversation.id).count { it.isEnabled },
+            memoryTokens = budget.memoryTokens, memoryItemCount = memoryDao.getCandidateMemories(conversation.id).count { it.isEnabled },
             hasRollingSummary = !conversation.rollingSummary.isNullOrBlank(), summaryUpdatedAt = conversation.summaryUpdatedAt,
-            compressedThroughMessageId = conversation.summaryUpdatedMessageId, canCompress = manualPlan.needsSummary,
+            compressedThroughMessageId = conversation.summaryUpdatedMessageId, canCompress = manualPlan.needsSummary ||
+                (manualPlan.summarySource.isNotEmpty() && summaryTokens > budget.summary),
             compressionTier = tier, compressionRecentRounds = conversation.compressionRecentRounds,
             compressionCustomPercent = conversation.compressionCustomPercent, tierPreviews = previews)
     }
@@ -2608,42 +2641,32 @@ class AiRepository(
         maxOutputTokens: Int?,
         contextWindowOverrideTokens: Int? = null,
         currentUserMessage: String,
-        options: ChatRequestOptions? = null
+        options: ChatRequestOptions? = null,
+        forceCompression: Boolean = false
     ): ContextBundle {
         val usable = messages.filter { it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
             !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
-        val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens)
-        val promptBudget = estimatePromptBudgetTokens(modelName, maxOutputTokens, window)
-        val memory = conversation?.let { buildRelevantMemoryBlock(it, currentUserMessage,
-            (promptBudget * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400), options) }
         val effectiveOptions = options ?: ChatRequestOptions()
-        val custom = resolveSystemPromptWithPriority(conversation, effectiveOptions)
-        val lore = if (effectiveOptions.enableWorldBook == true) {
-            val ids = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            matchWorldBookEntries(WorldBookActivation.scanText(currentUserMessage, usable), ids).let(::formatWorldBookPrompt)
-        } else ""
-        val fixedCost = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, memory, effectiveOptions,
-            custom.second, isRoleplayConversation(conversation), lore).orEmpty()) + estimateTokenCount(currentUserMessage) + 128
-        val summaryBudget = (promptBudget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400)
-        val historyBudget = (promptBudget - fixedCost - summaryBudget).coerceAtLeast(0)
+        val budget = contextBudget(conversation, usable, modelName, maxOutputTokens ?: conversation?.maxTokens ?: config.maxTokens, contextWindowOverrideTokens,
+            currentUserMessage, effectiveOptions)
         val tier = CompressionTier.fromLevel(conversation?.compressionTier)
-        val plan = ContextCompressionPlanner.plan(usable, tier, historyBudget, conversation?.rollingSummary,
-            conversation?.summaryUpdatedMessageId, conversation?.compressionRecentRounds ?: 8, conversation?.compressionCustomPercent ?: 30)
-        check(fixedCost + plan.estimatedHistoryTokens + (if (plan.needsSummary) summaryBudget else estimateTokenCount(conversation?.rollingSummary.orEmpty())) <= promptBudget) {
+        val plan = ContextCompressionPlanner.plan(usable, tier, budget.history, conversation?.rollingSummary,
+            conversation?.summaryUpdatedMessageId, conversation?.compressionRecentRounds ?: 8, conversation?.compressionCustomPercent ?: 30,
+            forceCompression)
+        val needsSummary = plan.needsSummary || (plan.summarySource.isNotEmpty() &&
+            estimateTokenCount(conversation?.rollingSummary.orEmpty()) > budget.summary)
+        check(budget.fixed + plan.estimatedHistoryTokens + (if (needsSummary) budget.summary else estimateTokenCount(conversation?.rollingSummary.orEmpty())) <= budget.prompt) {
             "当前输入、置顶内容或设定超过上下文预算。请缩短内容或提高上下文上限后继续；尚未发起额外摘要请求。"
         }
-        val summary = if (plan.needsSummary) {
-            ensureRollingSummary(conversation?.copy(contextWindowTokens = window), config, modelName, plan.summarySource, summaryBudget)
+        val summary = if (needsSummary) {
+            ensureRollingSummary(conversation?.copy(contextWindowTokens = budget.window), config, modelName, plan.summarySource, budget.summary)
         } else conversation?.rollingSummary
-        check(!plan.needsSummary || !summary.isNullOrBlank()) { "上下文需要压缩但摘要未生成，请重试压缩后继续" }
-        val retained = if (tier == CompressionTier.L1) plan.retainedMessages.mapIndexed { index, message ->
-            if (index < plan.retainedMessages.size - 2 && !message.isPinned)
-                message.copy(content = ContentPruningHelper.pruneMessageContent(message.content)) else message
-        } else plan.retainedMessages
-        check(fixedCost + retained.sumOf(ContextCompressionPlanner::messageTokens) + estimateTokenCount(summary.orEmpty()) <= promptBudget) {
+        check(!needsSummary || !summary.isNullOrBlank()) { "上下文需要压缩但摘要未生成，请重试压缩后继续" }
+        val retained = plan.retainedMessages
+        check(budget.fixed + retained.sumOf(ContextCompressionPlanner::messageTokens) + estimateTokenCount(summary.orEmpty()) <= budget.prompt) {
             "当前消息、置顶内容或提示设定超过上下文预算。已保留完整原文，请缩短本轮内容、减少置顶或提高上下文上限后继续。"
         }
-        return ContextBundle(summary, memory, retained)
+        return ContextBundle(summary, budget.memory, retained)
     }
 
     private fun estimatePromptBudgetTokens(
@@ -2776,22 +2799,49 @@ class AiRepository(
         if (conversation == null || olderMessages.isEmpty()) return conversation?.rollingSummary
         return summaryLocks.getOrPut(conversation.id) { Mutex() }.withLock {
             val latest = getConversationById(conversation.id) ?: error("对话已删除")
-            val coveredId = latest.summaryUpdatedMessageId?.takeIf { id ->
-                !latest.rollingSummary.isNullOrBlank() && olderMessages.any { it.id == id }
-            } ?: 0L
-            val pending = olderMessages.filter { it.id > coveredId }
+            val summaryBudget = tokenBudget.coerceIn(300, 2400)
+            val selectedHistory = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
+                it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+            }
+            check(selectedHistory.take(olderMessages.size).map { Triple(it.id, it.role, it.content) } ==
+                olderMessages.map { Triple(it.id, it.role, it.content) }) { "等待压缩期间原文或回复选择已变化，请重新整理" }
+            val latestCoveredIndex = if (latest.rollingSummary.isNullOrBlank()) -1
+                else selectedHistory.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
+            // Another operation may have advanced farther while this request waited for
+            // the lock. Reuse that checkpoint; never overwrite it with an older prefix.
+            if (latestCoveredIndex >= olderMessages.lastIndex &&
+                estimateTokenCount(latest.rollingSummary.orEmpty()) <= summaryBudget) return@withLock latest.rollingSummary
+            val sourceMessages = if (latestCoveredIndex >= olderMessages.size) selectedHistory.take(latestCoveredIndex + 1)
+                else olderMessages
+            val coveredIndex = if (latest.rollingSummary.isNullOrBlank() ||
+                estimateTokenCount(latest.rollingSummary.orEmpty()) > summaryBudget) -1
+                else sourceMessages.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
+            val pending = sourceMessages.drop(coveredIndex + 1)
             if (pending.isEmpty() && !latest.rollingSummary.isNullOrBlank()) return@withLock latest.rollingSummary
             val epoch = ChatGenerationManager.mutationEpoch(conversation.id)
             val contextWindow = conversation.contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
-            val summaryBudget = tokenBudget.coerceIn(300, 2400)
-            val chunkBudget = (contextWindow - summaryBudget * 2 - 1024 - 2400).coerceIn(256, 12000)
-            var summary = latest.rollingSummary.takeIf { coveredId > 0 }
+            val anchor = resolveLatestTimelineAnchor(conversation.id)
+            val constraints = resolveExistingPreferencesAndConstraints(conversation.id)
+            var summary = latest.rollingSummary.takeIf { coveredIndex >= 0 }
+            // Reserve the actual template, optional memories, the largest merged summary and
+            // completion space together. A fixed 2400-token allowance fails on small windows.
+            val emptyPrompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(null, "", summaryBudget, anchor, constraints)
+            val chunkBudget = minOf(12000, contextWindow - estimateTokenCount(emptyPrompt) -
+                maxOf(summaryBudget, estimateTokenCount(summary.orEmpty())) - summaryCompletionReserve(contextWindow, summaryBudget) - 576)
+            require(chunkBudget >= 256) { "摘要模板与已有设定占满模型窗口，请减少设定或提高上下文上限；原文与上次摘要已保留" }
             for (chunk in ContextCompressionPlanner.chunks(pending, chunkBudget)) {
                 currentCoroutineContext().ensureActive()
                 summary = generateRollingSummary(config, modelName, summary, chunk, summaryBudget,
-                    latestTimelineAnchor = resolveLatestTimelineAnchor(conversation.id),
-                    existingPreferencesAndConstraints = resolveExistingPreferencesAndConstraints(conversation.id), contextWindowTokens = contextWindow)
+                    latestTimelineAnchor = anchor, existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow)
                     ?: error("摘要生成失败，已保留原文与上次摘要；请检查模型后重试或增大上下文窗口")
+                if (estimateTokenCount(summary) > summaryBudget) {
+                    // One bounded semantic rewrite; never cut sentences or drop a source slice.
+                    summary = generateRollingSummary(config, modelName, summary, emptyList(),
+                        (summaryBudget * 0.75f).toInt().coerceAtLeast(300), latestTimelineAnchor = anchor,
+                        existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow,
+                        conversationId = conversation.id)
+                        ?: error("摘要缩短失败，已保留原文与上次摘要，请重试压缩")
+                }
                 check(estimateTokenCount(summary) <= summaryBudget) { "摘要超过预算，已保留原文与上次摘要，请重试压缩" }
             }
             currentCoroutineContext().ensureActive()
@@ -2803,15 +2853,20 @@ class AiRepository(
                     currentConversation.summaryUpdatedAt == latest.summaryUpdatedAt) {
                     "压缩期间摘要已被修改，请重新整理；已保留您的修改"
                 }
-                val current = getMessagesList(conversation.id).collapseVariantsForHistory().associateBy { it.id }
-                check(olderMessages.all { original -> current[original.id]?.let {
-                    it.content == original.content && it.isExcluded == original.isExcluded
-                } == true }) { "压缩期间原文已编辑，请重新整理" }
-                conversationDao.updateRollingSummary(conversation.id, summary, olderMessages.last().id, System.currentTimeMillis())
+                val current = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
+                    it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+                }.take(sourceMessages.size)
+                check(current.size == sourceMessages.size && current.zip(sourceMessages).all { (now, original) ->
+                    now.id == original.id && now.role == original.role && now.content == original.content
+                }) { "压缩期间原文或回复选择已变化，请重新整理" }
+                conversationDao.updateRollingSummary(conversation.id, summary, sourceMessages.last().id, System.currentTimeMillis())
             }
             summary
         }
     }
+
+    private fun summaryCompletionReserve(window: Int, summaryBudget: Int): Int =
+        minOf((summaryBudget + 2048).coerceIn(1536, 8192), window / 3)
 
     private suspend fun generateRollingSummary(
         config: ApiConfig,
@@ -2821,9 +2876,11 @@ class AiRepository(
         tokenBudget: Int,
         latestTimelineAnchor: String? = null,
         existingPreferencesAndConstraints: List<String>? = null,
-        contextWindowTokens: Int? = null
+        contextWindowTokens: Int? = null,
+        conversationId: Long = pendingMessages.firstOrNull()?.conversationId ?: 0L
     ): String? {
-        val transcript = buildSummaryTranscript(pendingMessages, maxMessages = SUMMARY_TRANSCRIPT_MESSAGE_LIMIT)
+        val transcript = if (pendingMessages.isEmpty()) "没有新增原文。请仅缩短既有摘要，合并重复表述并保留事实、约束、未决事项和关键标识。"
+            else buildSummaryTranscript(pendingMessages, maxMessages = SUMMARY_TRANSCRIPT_MESSAGE_LIMIT)
         val prompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(
             existingSummary = existingSummary,
             transcript = transcript,
@@ -2834,7 +2891,7 @@ class AiRepository(
         val summaryWindow = contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
         val headroom = summaryWindow - estimateTokenCount(prompt) - 512
         require(headroom >= tokenBudget) { "摘要提示与输出预算超过模型窗口，请减少设定或提高上下文上限" }
-        val completionTokens = minOf((tokenBudget + 1024).coerceIn(512, 4096), headroom)
+        val completionTokens = minOf(summaryCompletionReserve(summaryWindow, tokenBudget), headroom)
 
         val normalizedUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType)
         val allKeys = parseApiKeys(config.apiKey).ifEmpty { listOf(config.apiKey) }.let {
@@ -2863,14 +2920,14 @@ class AiRepository(
                             temperature = null
                         )
                         val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
-                            .anthropicMessages(apiKey = cleanKey, request = request), pendingMessages.firstOrNull()?.conversationId ?: 0L, config.copy(modelName = modelName), "summary", prompt)
+                            .anthropicMessages(apiKey = cleanKey, request = request), conversationId, config.copy(modelName = modelName), "summary", prompt)
                         if (!response.isSuccessful) {
                             val errBody = response.errorBody()?.string()?.take(300).orEmpty()
                             throw Exception("HTTP ${response.code()}: $errBody")
                         }
                         check(response.body()?.stop_reason !in setOf("max_tokens", "refusal", "pause_turn")) { "摘要未完整结束，保留原文与上次摘要" }
                         val text = response.body()?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }
-                        val sanitized = sanitizeSummaryCompletion(text)
+                        val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(text, preserveCompleteText = true)
                         if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
                     } else {
                         // 优先尝试标准非流式请求
@@ -2883,7 +2940,7 @@ class AiRepository(
                             stream = false
                         )
                         val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
-                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), pendingMessages.firstOrNull()?.conversationId ?: 0L, config.copy(modelName = modelName), "summary", prompt)
+                            .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), conversationId, config.copy(modelName = modelName), "summary", prompt)
                         if (response.isSuccessful) {
                             val body = response.body()
                             if (body?.error != null) {
@@ -2892,7 +2949,7 @@ class AiRepository(
                             val choice = body?.choices?.firstOrNull()
                             check(choice?.finish_reason !in setOf("length", "content_filter", "tool_calls", "function_call")) { "摘要未完整结束，保留原文与上次摘要" }
                             val text = choice?.message?.content?.ifBlank { null }
-                            val sanitized = sanitizeSummaryCompletion(text)
+                            val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(text, preserveCompleteText = true)
                             if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
                         } else {
                             val errBody = response.errorBody()?.string()?.take(300).orEmpty()
@@ -2907,7 +2964,7 @@ class AiRepository(
                             prompt = prompt,
                             maxTokens = completionTokens, kind = "summary"
                         )
-                        val sanitized = sanitizeSummaryCompletion(streamResult)
+                        val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(streamResult, preserveCompleteText = true)
                         if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) {
                             return sanitized
                         }
@@ -2928,6 +2985,7 @@ class AiRepository(
         }
         if (lastException != null) {
             Log.w(tag, "generateRollingSummary 所有Key均尝试失败: ${lastException.message}")
+            throw IllegalStateException("摘要请求失败：${lastException.message ?: "未获得完整摘要"}；原文与上次摘要已保留", lastException)
         }
         return null
     }
@@ -2935,7 +2993,7 @@ class AiRepository(
     private fun buildSummaryTranscript(messages: List<Message>, maxMessages: Int): String {
         return messages.joinToString("\n") { message ->
             val role = if (message.role == "user") "用户" else "助手"
-            "[$role · 原文ID ${message.id}] ${message.content.trim()}"
+            "[$role · 原文ID ${message.id}] ${message.content}"
         }
     }
 

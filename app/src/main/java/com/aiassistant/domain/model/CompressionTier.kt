@@ -31,14 +31,14 @@ enum class CompressionTier(
     L3(
         level = 3,
         displayName = "深度压缩",
-        shortDesc = "全部历史合并为结构化摘要，保留最近 16 轮原文",
-        detailLossNote = "过往历史提炼为决策推进与待办要点三段式摘要，仅保留最近 16 轮逐字原文。"
+        shortDesc = "较早历史合并为结构化摘要，保留最近 4 轮原文",
+        detailLossNote = "过往历史提炼为关键事实、决策与待办摘要，保留最近 4 轮完整原文及置顶轮次；预算不足时继续缩短近期窗口。"
     ),
     L4(
         level = 4,
         displayName = "极限压缩",
-        shortDesc = "保留系统提示 + 记忆/固定事实 + 最近 8 轮原文",
-        detailLossNote = "仅保留系统提示词、会话记忆与固定事实，并仅保留最近 8 轮原文。"
+        shortDesc = "保留历史摘要、系统设定和最近 1 轮原文",
+        detailLossNote = "较早历史由摘要承接，保留系统提示词、记忆、最近 1 轮完整原文及置顶轮次；超长本轮输入或置顶内容仍需手动调整。"
     ),
     LC(
         level = 5,
@@ -150,8 +150,8 @@ object CompressionTierPolicy {
             CompressionTier.L0 -> "全部轮次完整保留"
             CompressionTier.L1 -> "全部轮次保留（轻量修剪）"
             CompressionTier.L2 -> "保留最近 $l2Rounds 轮原文"
-            CompressionTier.L3 -> "保留最近 16 轮原文"
-            CompressionTier.L4 -> "保留最近 8 轮原文"
+            CompressionTier.L3 -> "保留最近 4 轮原文"
+            CompressionTier.L4 -> "保留最近 1 轮原文"
             CompressionTier.LC -> "保留最近 $customRetainPercent% 消息原文（预算内尽量保留）"
         }
     }

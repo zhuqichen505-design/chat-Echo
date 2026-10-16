@@ -2400,6 +2400,7 @@ fun ChatScreen(
             onDismiss = { showContextUsageDialog = false },
             onRefresh = { viewModel.refreshContextUsage() },
             onCompress = { viewModel.compressContextNow() },
+            onCancelOperation = { viewModel.cancelContextOperation() },
             onGenerateRollingSummary = { viewModel.generateRollingSummaryNow() },
             onEditRollingSummary = { showRollingSummaryDialog = true },
             onSelectCompressionTier = { tier, rounds, percent ->

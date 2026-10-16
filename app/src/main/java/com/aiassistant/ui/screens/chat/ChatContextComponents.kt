@@ -357,6 +357,7 @@ internal fun ContextUsageDialog(
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
     onCompress: () -> Unit,
+    onCancelOperation: () -> Unit = {},
     onGenerateRollingSummary: () -> Unit = {},
     onEditRollingSummary: (() -> Unit)? = null,
     onSelectCompressionTier: ((com.aiassistant.domain.model.CompressionTier, Int, Int) -> Unit)? = null,
@@ -463,18 +464,25 @@ internal fun ContextUsageDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onRefresh,
-                    enabled = !state.isCompressing && !state.isGeneratingSummary
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("刷新状态")
+                if (state.isCompressing || state.isGeneratingSummary) {
+                    TextButton(onClick = onCancelOperation) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("取消整理")
+                    }
+                } else {
+                    TextButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("刷新状态")
+                    }
                 }
                 Button(onClick = {
                     // 直接点"完成"：若有待确认的压缩档位/参数变更，视同已确认并生效
-                    pendingTierApply?.invoke()
-                    pendingTierApply = null
+                    if (!state.isCompressing && !state.isGeneratingSummary) {
+                        pendingTierApply?.invoke()
+                        pendingTierApply = null
+                    }
                     onDismiss()
                 }) {
                     Text("完成")

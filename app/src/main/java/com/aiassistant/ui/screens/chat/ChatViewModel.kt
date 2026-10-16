@@ -19,6 +19,7 @@ import com.aiassistant.data.repository.AutoTimelineUpdateResult
 import com.google.gson.Gson
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -91,6 +92,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     private val _contextUsage = MutableStateFlow(ContextUsageUiState())
     val contextUsage: StateFlow<ContextUsageUiState> = _contextUsage.asStateFlow()
+    private var contextOperationJob: Job? = null
+    private var contextUsageRefreshJob: Job? = null
 
     private val _messageModelMap = MutableStateFlow<Map<Long, String>>(emptyMap())
     val messageModelMap: StateFlow<Map<Long, String>> = _messageModelMap.asStateFlow()
@@ -675,85 +678,41 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         refreshContextUsage()
     }
 
-    fun refreshContextUsage() {
-        viewModelScope.launch {
-            val latestConv = repository.getConversationById(conversationId)
-            if (latestConv != null) {
-                conversation = latestConv
-                val dbTokens = latestConv.contextWindowTokens
-                if (dbTokens != null && _tempSettings.value.contextWindowTokens != dbTokens) {
-                    _tempSettings.update { it.copy(contextWindowTokens = dbTokens) }
+    fun refreshContextUsage(evaluateAuto: Boolean = false) {
+        contextUsageRefreshJob?.cancel()
+        contextUsageRefreshJob = viewModelScope.launch {
+            try {
+                val latestConv = repository.getConversationById(conversationId)
+                if (latestConv != null) {
+                    conversation = latestConv
+                    val dbTokens = latestConv.contextWindowTokens
+                    if (dbTokens != null && _tempSettings.value.contextWindowTokens != dbTokens) {
+                        _tempSettings.update { it.copy(contextWindowTokens = dbTokens) }
+                    }
                 }
-            }
-            val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
-            val usage = repository.getConversationContextUsage(
-                conversationId = conversationId,
-                modelNameOverride = modelName,
-                maxOutputTokens = maxTokens,
-                contextWindowOverrideTokens = contextOverride
-            )
-            _contextUsage.update {
-                it.copy(
-                    usage = usage,
-                    isCompressing = false,
-                    statusMessage = null
+                val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
+                val usage = repository.getConversationContextUsage(
+                    conversationId = conversationId,
+                    modelNameOverride = modelName,
+                    maxOutputTokens = maxTokens,
+                    contextWindowOverrideTokens = contextOverride
                 )
+                // Refreshing a snapshot must not finish a separate operation or erase its result.
+                _contextUsage.update { it.copy(usage = usage) }
+                if (evaluateAuto) evaluateAutoCompression()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _contextUsage.update { state ->
+                    if (state.isCompressing || state.isGeneratingSummary) state
+                    else state.copy(statusMessage = error.message ?: "无法刷新上下文用量")
+                }
             }
         }
     }
 
     fun compressContextNow(isAuto: Boolean = false) {
-        if (_contextUsage.value.isCompressing || _contextUsage.value.isGeneratingSummary || _isGenerating.value) return
-        viewModelScope.launch {
-            val shouldCompress = _contextUsage.value.usage?.canCompress == true
-            val initialPercent = (_contextUsage.value.usage?.usagePercent ?: 0f) * 100
-            val startMsg = if (isAuto) "🔄 正在自动压缩历史上下文，精简早期对话..." else "🔄 正在压缩上下文，精简历史消息..."
-            _contextUsage.update { it.copy(isCompressing = true, statusMessage = startMsg) }
-            val modelName = _currentModel.value ?: conversation?.modelName ?: _uiState.value.modelName
-            val maxTokens = (_useTempSettings.value)
-                .takeIf { it }
-                ?.let { _tempSettings.value.maxTokens }
-                ?: conversation?.maxTokens
-                ?: apiConfig?.maxTokens
-            val contextOverride = (_useTempSettings.value)
-                .takeIf { it }
-                ?.let { _tempSettings.value.contextWindowTokens }
-                ?: conversation?.contextWindowTokens
-            repository.compressConversationContext(
-                conversationId = conversationId,
-                modelNameOverride = modelName,
-                maxOutputTokens = maxTokens,
-                contextWindowOverrideTokens = contextOverride
-            ).fold(
-                onSuccess = { usage ->
-                    conversation = repository.getConversationById(conversationId) ?: conversation
-                    val newPercent = usage.usagePercent * 100
-                    val freed = (initialPercent - newPercent).coerceAtLeast(0f)
-                    val finishMsg = if (freed > 1f) {
-                        "较早原文已总结并保存，预计释放 ${freed.toInt()}% 输入预算；原始聊天记录完整保留"
-                    } else if (shouldCompress || usage.compressedThroughMessageId != null) {
-                        "摘要与覆盖范围已更新，可审阅摘要确认关键事实"
-                    } else {
-                        "暂无新的可压缩历史"
-                    }
-                    _contextUsage.update {
-                        it.copy(
-                            usage = usage,
-                            isCompressing = false,
-                            statusMessage = finishMsg
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _contextUsage.update {
-                        it.copy(
-                            isCompressing = false,
-                            statusMessage = error.message ?: "压缩失败"
-                        )
-                    }
-                }
-            )
-        }
+        startContextOperation(updateSummaryOnly = false, isAuto = isAuto)
     }
 
     fun clearContextStatusMessage() {
@@ -761,50 +720,82 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun generateRollingSummaryNow() {
-        if (_contextUsage.value.isGeneratingSummary || _contextUsage.value.isCompressing || _isGenerating.value) return
-        viewModelScope.launch {
-            _contextUsage.update { it.copy(isGeneratingSummary = true, statusMessage = "正在连续整理历史摘要，完成前保持原有上下文…") }
-            val modelName = _currentModel.value ?: conversation?.modelName ?: _uiState.value.modelName
-            val maxTokens = (_useTempSettings.value)
-                .takeIf { it }
-                ?.let { _tempSettings.value.maxTokens }
-                ?: conversation?.maxTokens
-                ?: apiConfig?.maxTokens
-            val contextOverride = (_useTempSettings.value)
-                .takeIf { it }
-                ?.let { _tempSettings.value.contextWindowTokens }
-                ?: conversation?.contextWindowTokens
-            repository.generateRollingSummaryNow(
-                conversationId = conversationId,
-                modelNameOverride = modelName,
-                maxOutputTokens = maxTokens,
-                contextWindowOverrideTokens = contextOverride
-            ).fold(
-                onSuccess = { usage ->
-                    conversation = repository.getConversationById(conversationId) ?: conversation
-                    val msg = "历史摘要已保存，请审阅其中的事实与时间"
-                    _contextUsage.update {
-                        it.copy(
-                            usage = usage,
-                            isGeneratingSummary = false,
-                            statusMessage = msg
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _contextUsage.update {
-                        it.copy(
-                            isGeneratingSummary = false,
-                            statusMessage = error.message ?: "摘要生成失败，原文与上次摘要已保留"
-                        )
-                    }
+        startContextOperation(updateSummaryOnly = true)
+    }
+
+    private fun startContextOperation(
+        updateSummaryOnly: Boolean,
+        isAuto: Boolean = false,
+        targetTier: CompressionTier? = null
+    ) {
+        if (contextOperationJob != null || _isGenerating.value) return
+        contextUsageRefreshJob?.cancel()
+        val initialUsage = _contextUsage.value.usage
+        // Set the busy state before scheduling work so fast repeated taps cannot start two calls.
+        _contextUsage.update {
+            it.copy(
+                isCompressing = !updateSummaryOnly,
+                isGeneratingSummary = updateSummaryOnly,
+                pendingAutoTier = null,
+                statusMessage = when {
+                    updateSummaryOnly -> "正在连续整理历史摘要，完成前保持原有上下文…"
+                    isAuto -> "正在应用压缩档位并整理较早对话…"
+                    else -> "正在压缩上下文，保留最近完整对话轮次…"
                 }
             )
+        }
+        contextOperationJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                if (targetTier != null) {
+                    repository.updateConversationCompressionTier(
+                        conversationId, targetTier,
+                        initialUsage?.compressionRecentRounds ?: 8,
+                        initialUsage?.compressionCustomPercent ?: CompressionTierPolicy.DEFAULT_CUSTOM_RETAIN_PERCENT
+                    )
+                    conversation = repository.getConversationById(conversationId) ?: conversation
+                }
+                val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
+                val result = if (updateSummaryOnly) {
+                    repository.generateRollingSummaryNow(conversationId, modelName, maxTokens, contextOverride)
+                } else {
+                    repository.compressConversationContext(conversationId, modelName, maxTokens, contextOverride)
+                }
+                val usage = result.getOrThrow()
+                conversation = repository.getConversationById(conversationId) ?: conversation
+                contextUsageRefreshJob?.cancel()
+                val freed = (((initialUsage?.usagePercent ?: 0f) - usage.usagePercent) * 100).coerceAtLeast(0f)
+                val message = when {
+                    updateSummaryOnly -> "历史摘要已保存，请审阅其中的事实与时间"
+                    freed > 1f -> "较早原文已总结并保存，预计释放 ${freed.toInt()}% 输入预算；原始聊天记录完整保留"
+                    initialUsage?.canCompress == true -> "摘要与覆盖范围已更新，可审阅摘要确认关键事实"
+                    else -> "暂无新的可压缩历史"
+                }
+                _contextUsage.update { it.copy(usage = usage, statusMessage = message) }
+            } catch (cancelled: CancellationException) {
+                _contextUsage.update { it.copy(statusMessage = "已取消整理；原始聊天记录和已保存摘要完整保留") }
+                throw cancelled
+            } catch (error: Exception) {
+                _contextUsage.update { it.copy(statusMessage = error.message ?: "整理失败，原文与上次摘要已保留") }
+            } finally {
+                _contextUsage.update { it.copy(isCompressing = false, isGeneratingSummary = false) }
+                contextOperationJob = null
+            }
+        }
+        contextOperationJob?.start()
+    }
+
+    fun cancelContextOperation() {
+        contextOperationJob?.takeIf { it.isActive }?.let {
+            _contextUsage.update { state -> state.copy(statusMessage = "正在取消整理…") }
+            it.cancel(CancellationException("用户取消上下文整理"))
         }
     }
 
     fun updateRollingSummary(newSummary: String) {
+        val pendingOperation = contextOperationJob
+        cancelContextOperation()
         viewModelScope.launch {
+            pendingOperation?.join()
             repository.updateRollingSummary(conversationId, newSummary)
             conversation = repository.getConversationById(conversationId) ?: conversation
             refreshContextUsage()
@@ -813,7 +804,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun clearRollingSummary() {
+        val pendingOperation = contextOperationJob
+        cancelContextOperation()
         viewModelScope.launch {
+            pendingOperation?.join()
             repository.clearRollingSummary(conversationId)
             conversation = repository.getConversationById(conversationId) ?: conversation
             refreshContextUsage()
@@ -828,7 +822,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         recentRounds: Int = 8,
         customPercent: Int? = null
     ) {
+        val pendingOperation = contextOperationJob
+        cancelContextOperation()
         viewModelScope.launch {
+            pendingOperation?.join()
             val safeRounds = recentRounds.coerceIn(
                 com.aiassistant.domain.model.CompressionTierPolicy.MIN_L2_RECENT_ROUNDS,
                 com.aiassistant.domain.model.CompressionTierPolicy.MAX_L2_RECENT_ROUNDS
@@ -863,7 +860,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
      * 滑杆调整未保存时的实时预览：用覆盖值即时重算压缩快照（含各档位预估 Token），不落库
      */
     fun previewCompressionSettings(recentRounds: Int, customPercent: Int) {
-        viewModelScope.launch {
+        if (contextOperationJob != null) return
+        contextUsageRefreshJob?.cancel()
+        contextUsageRefreshJob = viewModelScope.launch {
             val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
             val usage = repository.getConversationContextUsage(
                 conversationId = conversationId,
@@ -893,8 +892,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     fun applyPendingAutoCompression() {
         val target = _contextUsage.value.pendingAutoTier ?: return
-        val currentRounds = _contextUsage.value.usage?.compressionRecentRounds ?: 8
-        setCompressionTier(target, currentRounds)
+        startContextOperation(updateSummaryOnly = false, isAuto = true, targetTier = target)
     }
 
     fun dismissPendingAutoCompression() {
@@ -903,34 +901,34 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
     }
 
-    private fun evaluateAutoCompression() {
-        viewModelScope.launch {
-            try {
-                val personalization = personalizationManager.getSettings()
-                if (!personalization.autoCompressionTierEnabled) return@launch
+    private suspend fun evaluateAutoCompression() {
+        try {
+            val personalization = personalizationManager.getSettings()
+            if (!personalization.autoCompressionTierEnabled) return
 
-                val usage = _contextUsage.value.usage ?: return@launch
-                val percent = usage.usagePercent
-                if (_contextUsage.value.isCompressing) return@launch
+            val usage = _contextUsage.value.usage ?: return
+            val percent = usage.usagePercent
+            if (contextOperationJob != null || _isGenerating.value) return
 
-                val suggested = com.aiassistant.domain.model.CompressionTierPolicy.evaluateAutoUpgrade(
-                    currentTier = usage.compressionTier,
-                    usagePercent = percent,
-                    autoEnabled = true,
-                    thresholdL2 = personalization.autoCompressionThresholdL2,
-                    thresholdL3 = personalization.autoCompressionThresholdL3,
-                    thresholdL4 = personalization.autoCompressionThresholdL4
-                ) ?: return@launch
+            val suggested = com.aiassistant.domain.model.CompressionTierPolicy.evaluateAutoUpgrade(
+                currentTier = usage.compressionTier,
+                usagePercent = percent,
+                autoEnabled = true,
+                thresholdL2 = personalization.autoCompressionThresholdL2,
+                thresholdL3 = personalization.autoCompressionThresholdL3,
+                thresholdL4 = personalization.autoCompressionThresholdL4
+            ) ?: return
 
-                val banner = "⚠️ 上下文占用已达 ${(percent * 100).toInt()}%，建议升至「${suggested.displayName}」档（${suggested.shortDesc}）"
-                _contextUsage.update {
-                    it.copy(
-                        pendingAutoTier = suggested,
-                        statusMessage = banner
-                    )
-                }
-            } catch (_: Exception) {}
-        }
+            val banner = "⚠️ 上下文占用已达 ${(percent * 100).toInt()}%，建议升至「${suggested.displayName}」档（${suggested.shortDesc}）"
+            _contextUsage.update {
+                it.copy(
+                    pendingAutoTier = suggested,
+                    statusMessage = banner
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {}
     }
 
     fun updateConversationModelAvatar(avatarUri: String?) {
@@ -1152,6 +1150,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             return
         }
 
+        val pendingContextOperation = contextOperationJob
+        cancelContextOperation()
+
         // 保存用户消息
         val attachmentsJson = if (attachments.isNotEmpty()) {
             gson.toJson(attachments)
@@ -1181,6 +1182,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
 
         generationJob = AiAssistantApp.instance.applicationScope.launch {
+            pendingContextOperation?.join()
             session.generationJob = coroutineContext[Job]
             // 重新生成/重发必须是一次全新的连接尝试：启动前取消上一轮可能仍阻塞在
             // HTTP 读取中的残留调用（startSession 只取消了旧 Job，阻塞中的 call 不受影响），
@@ -1401,8 +1403,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                                 _reconnectStatus.value = null
                                 autoNameIfNeeded()
                                 // 重新同步会话状态与上下文使用情况（后台降级自动同步）
-                                refreshContextUsage()
-                                evaluateAutoCompression()
+                                refreshContextUsage(evaluateAuto = true)
                                 evaluateAutoTimelineUpdate(content, savedReply, selectedOption,
                                     settings?.enableSessionMemory ?: conversation?.enableSessionMemory)
                                 checkAndDispatchQueue()
@@ -2479,6 +2480,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     override fun onCleared() {
+        contextOperationJob?.cancel()
         super.onCleared()
         if (isPrivateConversation) {
             destroyPrivateConversation()
@@ -2489,6 +2491,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun leaveConversation(onComplete: () -> Unit) {
+        cancelContextOperation()
         if (isPrivateConversation) {
             destroyPrivateConversation()
         } else {

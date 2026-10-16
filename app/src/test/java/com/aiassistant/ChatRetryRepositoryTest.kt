@@ -26,6 +26,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -168,6 +169,158 @@ class ChatRetryRepositoryTest {
             runBlocking { app.applicationScope.coroutineContext[Job]?.cancelAndJoin() }
             db.close()
             instance.set(null, previous)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun contextRefreshCannotClearBusyStateAndCancellationKeepsOriginalHistory() = runBlocking {
+        newSingleThreadContext("context-operation-main").use { main ->
+            Dispatchers.setMain(main)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            try {
+                Endpoint { socket, _ ->
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                    socket.response("200 OK", "{}")
+                }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    repeat(40) { index ->
+                        f.db.messageDao().insertMessage(Message(conversationId = id,
+                            role = if (index % 2 == 0) "user" else "assistant",
+                            content = "合成上下文消息 $index。", createdAt = index.toLong(),
+                            // Include normal saved-reply metadata so ViewModel's legacy backfill
+                            // is independent of this complete-row cancellation comparison.
+                            modelName = if (index % 2 == 1) config.modelName else null))
+                    }
+                    val original = f.db.messageDao().getMessagesList(id)
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.compressContextNow() }
+                        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                        val runningStatus = vm.contextUsage.value.statusMessage
+                        f.db.conversationDao().updateContextWindowTokens(id, 32768, System.currentTimeMillis())
+                        withContext(Dispatchers.Main) { vm.refreshContextUsage() }
+                        withTimeout(5000) { while (vm.contextUsage.value.usage?.contextWindowTokens != 32768) delay(10) }
+                        assertTrue("刷新不能提前结束仍在请求的压缩任务", vm.contextUsage.value.isCompressing)
+                        assertEquals(runningStatus, vm.contextUsage.value.statusMessage)
+                        withContext(Dispatchers.Main) {
+                            vm.compressContextNow()
+                            vm.generateRollingSummaryNow()
+                        }
+                        assertEquals("忙时重复点击不得创建额外请求", 1, endpoint.payloads.size)
+                        withContext(Dispatchers.Main) { vm.cancelContextOperation() }
+                        withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        assertFalse(vm.contextUsage.value.isGeneratingSummary)
+                        assertTrue(vm.contextUsage.value.statusMessage!!.contains("已取消"))
+                        assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                        assertEquals(original, f.db.messageDao().getMessagesList(id))
+                        f.db.conversationDao().updateContextWindowTokens(id, 65536, System.currentTimeMillis())
+                        withContext(Dispatchers.Main) { vm.refreshContextUsage() }
+                        withTimeout(5000) { while (vm.contextUsage.value.usage?.contextWindowTokens != 65536) delay(10) }
+                        assertTrue("刷新应保留取消结果", vm.contextUsage.value.statusMessage!!.contains("已取消"))
+                    } finally {
+                        release.countDown()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
+                } }
+            } finally {
+                release.countDown()
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun manualSummaryEditCancelsPendingCompressionBeforeSavingUserText() = runBlocking {
+        newSingleThreadContext("context-summary-edit-main").use { main ->
+            Dispatchers.setMain(main)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            try {
+                Endpoint { socket, _ ->
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                    socket.response("200 OK", "{}")
+                }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    repeat(40) { index ->
+                        f.db.messageDao().insertMessage(Message(conversationId = id,
+                            role = if (index % 2 == 0) "user" else "assistant",
+                            content = "用于取消测试的合成内容 $index。", createdAt = index.toLong()))
+                    }
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.compressContextNow() }
+                        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                        val manualSummary = "用户已审阅并修订的合成摘要。"
+                        withContext(Dispatchers.Main) { vm.updateRollingSummary(manualSummary) }
+                        withTimeout(5000) {
+                            while (f.db.conversationDao().getConversationById(id)?.rollingSummary != manualSummary) delay(10)
+                        }
+                        assertFalse(vm.contextUsage.value.isCompressing)
+                        assertEquals(1, endpoint.payloads.size)
+                        assertEquals(40, f.db.messageDao().getMessagesList(id).size)
+                        assertEquals(manualSummary, f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                    } finally {
+                        release.countDown()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
+                } }
+            } finally {
+                release.countDown()
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun acceptingAutoCompressionPersistsTargetTierThenActuallyCallsSummaryModel() = runBlocking {
+        newSingleThreadContext("context-auto-compression-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                val summary = "【核心背景与用户固定约束】\n仅记录合成对话已确认的要求，保留否定条件与名称。\n" +
+                    "【历史关键里程碑与决策推进】\n合成讨论已完成早期方案比较，尚无新的执行结果。\n" +
+                    "【时空演变与关键时间节点（极重要，严禁遗漏）】\n原文未提供明确时间，不能推断日期。\n" +
+                    "【当前未决议题与待办上下文】\n等待下一步确认，尚未选择的建议不能写为已完成。"
+                val response = com.google.gson.Gson().toJson(mapOf("choices" to listOf(mapOf(
+                    "finish_reason" to "stop", "message" to mapOf("role" to "assistant", "content" to summary)))))
+                Endpoint { socket, _ -> socket.response("200 OK", response) }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    f.settings.saveSettings(f.settings.getSettings().copy(autoCompressionTierEnabled = true,
+                        autoCompressionThresholdL2 = 0f, autoCompressionThresholdL3 = 0f, autoCompressionThresholdL4 = 0f))
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    repeat(40) { index ->
+                        f.db.messageDao().insertMessage(Message(conversationId = id,
+                            role = if (index % 2 == 0) "user" else "assistant",
+                            content = "已确认的合成历史 $index。", createdAt = index.toLong()))
+                    }
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.refreshContextUsage(evaluateAuto = true) }
+                        withTimeout(5000) { while (vm.contextUsage.value.pendingAutoTier == null) delay(10) }
+                        assertEquals(CompressionTier.L4, vm.contextUsage.value.pendingAutoTier)
+                        assertTrue(endpoint.payloads.isEmpty())
+                        withContext(Dispatchers.Main) { vm.applyPendingAutoCompression() }
+                        withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        val conversation = f.db.conversationDao().getConversationById(id)!!
+                        assertTrue("确认后必须实际请求摘要模型", endpoint.payloads.isNotEmpty())
+                        assertEquals(CompressionTier.L4.level, conversation.compressionTier)
+                        assertFalse("应保存模型生成的摘要", conversation.rollingSummary.isNullOrBlank())
+                        assertEquals(38L, conversation.summaryUpdatedMessageId)
+                        assertTrue("更早原文由摘要承接", vm.contextUsage.value.usage!!.recentMessageCount < 40)
+                        assertEquals("原始聊天记录必须完整保存", 40, f.db.messageDao().getMessagesList(id).size)
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                } }
+            } finally { Dispatchers.resetMain() }
         }
     }
 

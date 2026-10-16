@@ -32,40 +32,66 @@ object ContextCompressionPlanner {
             if (message.role == "user" || turns.isEmpty()) turns += mutableListOf<Message>()
             turns.last() += message
         }
-        val validCoverage = coveredThroughId?.takeIf { id ->
-            !summary.isNullOrBlank() && messages.any { it.id == id }
-        } ?: 0L
-        val desiredMessages = when (tier) {
-            CompressionTier.L0, CompressionTier.L1 -> if (forceCompression) 16 else messages.size
-            CompressionTier.L2 -> recentRounds.coerceIn(4, 32) * 2
-            CompressionTier.L3 -> 32
-            CompressionTier.L4 -> 16
-            CompressionTier.LC -> maxOf(2, (messages.size * retainPercent.coerceIn(10, 90) + 50) / 100)
+        // A regenerated reply has a newer ID but occupies its original turn. Coverage
+        // therefore follows the selected history order, never numeric ID comparisons.
+        val coveredIndex = if (!summary.isNullOrBlank() && coveredThroughId != null) {
+            messages.indexOfFirst { it.id == coveredThroughId }
+        } else -1
+        var coveredMessageCount = 0
+        val coveredTurnCount = turns.takeWhile { turn ->
+            val completelyCovered = coveredMessageCount + turn.size <= coveredIndex + 1
+            if (completelyCovered) coveredMessageCount += turn.size
+            completelyCovered
+        }.size.coerceAtMost(turns.lastIndex)
+        var cut = when (tier) {
+            CompressionTier.L0, CompressionTier.L1 -> if (forceCompression) (turns.size - 8).coerceAtLeast(0) else 0
+            CompressionTier.L2 -> (turns.size - recentRounds.coerceIn(4, 32)).coerceAtLeast(0)
+            CompressionTier.L3 -> (turns.size - 4).coerceAtLeast(0)
+            CompressionTier.L4 -> turns.lastIndex
+            CompressionTier.LC -> {
+                val desiredMessages = maxOf(2, (messages.size * retainPercent.coerceIn(10, 90) + 50) / 100)
+                var candidate = 0
+                var retainedCount = messages.size
+                while (candidate < turns.lastIndex && retainedCount - turns[candidate].size >= desiredMessages) {
+                    retainedCount -= turns[candidate].size
+                    candidate++
+                }
+                candidate
+            }
         }
-        var cut = 0
-        var retainedCount = messages.size
-        while (cut < turns.lastIndex && retainedCount - turns[cut].size >= desiredMessages) {
-            retainedCount -= turns[cut].size
-            cut++
-        }
-        val coveredTurnCount = turns.takeWhile { turn -> turn.all { it.id <= validCoverage } }.size.coerceAtMost(turns.lastIndex)
-        if (!forceCompression && validCoverage > 0L) {
+        if (!forceCompression && coveredIndex >= 0) {
             // L0 grows its recent buffer until pressure returns. Other tiers merge in batches,
             // avoiding an additional billable summarization call after every short reply.
             cut = if (tier == CompressionTier.L0 || tier == CompressionTier.L1) coveredTurnCount
-                else if (turns.take(cut).flatten().count { it.id > validCoverage } < 8) minOf(cut, coveredTurnCount)
+                else if (cut - coveredTurnCount < 4) coveredTurnCount
                 else cut
         }
+        // Existing coverage is reusable even after switching tiers. Do not move its
+        // boundary backwards or replace the summary with a shorter historical range.
+        cut = maxOf(cut, coveredTurnCount).coerceAtMost(turns.lastIndex)
+        val requestTurns = turns.mapIndexed { index, turn ->
+            if (tier == CompressionTier.L1 && index < turns.lastIndex && turn.none { it.isPinned }) {
+                turn.map { it.copy(content = ContentPruningHelper.pruneMessageContent(it.content)) }
+            } else turn
+        }
+        val turnCosts = requestTurns.map { turn -> turn.sumOf(::messageTokens) }
+        val suffixCosts = IntArray(turns.size + 1)
+        val pinnedPrefixCosts = IntArray(turns.size + 1)
+        for (index in turns.indices.reversed()) suffixCosts[index] = suffixCosts[index + 1] + turnCosts[index]
+        for (index in turns.indices) {
+            pinnedPrefixCosts[index + 1] = pinnedPrefixCosts[index] + if (turns[index].any { it.isPinned }) turnCosts[index] else 0
+        }
         // A pinned message protects its complete turn; never inject an orphan reply.
-        fun retainedAt(index: Int) = turns.flatMapIndexed { turnIndex, turn ->
+        fun retainedAt(index: Int) = requestTurns.flatMapIndexed { turnIndex, turn ->
             if (turnIndex >= index || turn.any { it.isPinned }) turn else emptyList()
         }
-        while (cut < turns.lastIndex && retainedAt(cut).sumOf(::messageTokens) > historyBudget) cut++
+        fun retainedCost(index: Int) = suffixCosts[index] + pinnedPrefixCosts[index]
+        while (cut < turns.lastIndex && retainedCost(cut) > historyBudget) cut++
         val source = turns.take(cut).flatten()
         val through = source.lastOrNull()?.id ?: 0L
-        val needsSummary = through > 0 && (validCoverage == 0L || source.any { it.id > validCoverage })
+        val needsSummary = source.isNotEmpty() && source.size > coveredIndex + 1
         val planned = retainedAt(cut)
-        return Plan(planned, source, through, planned.sumOf(::messageTokens), needsSummary)
+        return Plan(planned, source, through, retainedCost(cut), needsSummary)
     }
 
     /** Sequential bounded chunks; a large message is split without dropping the middle. */

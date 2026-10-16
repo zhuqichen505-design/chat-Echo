@@ -1,6 +1,9 @@
 package com.aiassistant
 
 import com.aiassistant.data.repository.AiRepository
+import com.aiassistant.data.repository.helpers.ContentPruningHelper
+import com.aiassistant.data.repository.helpers.ContextCompressionPlanner
+import com.aiassistant.domain.model.CompressionTier
 import com.aiassistant.domain.model.Message
 import org.junit.Assert.*
 import org.junit.Test
@@ -285,6 +288,143 @@ class ContextCompressionAndBudgetTest {
             assertFalse("$tier 不应每条短回复都额外付费", plan.needsSummary)
             assertEquals((25L..42L).toList(), plan.retainedMessages.map { it.id })
         }
+    }
+
+    @Test fun rollingTierKeepsActualUserTurnsIncludingMultipleAssistantMessages() {
+        val messages = (1L..10L).flatMap { turn ->
+            listOf(
+                Message(id = turn * 3 - 2, conversationId = 1, role = "user", content = "合成问题$turn"),
+                Message(id = turn * 3 - 1, conversationId = 1, role = "assistant", content = "合成补充$turn"),
+                Message(id = turn * 3, conversationId = 1, role = "assistant", content = "合成答复$turn")
+            )
+        }
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.L2, 10000, null, null, recentRounds = 4)
+        assertEquals(messages.takeLast(12), plan.retainedMessages)
+        assertEquals(messages.take(18), plan.summarySource)
+        assertTrue(plan.needsSummary)
+        val manual = ContextCompressionPlanner.plan(messages, CompressionTier.L0, 10000, null, null, forceCompression = true)
+        assertEquals("手动完整档仍保留最近八个完整轮次", messages.takeLast(24), manual.retainedMessages)
+    }
+
+    @Test fun consecutiveUserMessagesCountAsSeparateTurns() {
+        val messages = (1L..12L).map { Message(id = it, conversationId = 1, role = "user", content = "合成追问$it") }
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.L2, 10000, null, null, recentRounds = 4)
+        assertEquals(messages.takeLast(4), plan.retainedMessages)
+        assertEquals(messages.take(8), plan.summarySource)
+    }
+
+    @Test fun lastTurnRemainsWholeEvenWhenItContainsSeveralRepliesAndExceedsBudget() {
+        val messages = listOf(
+            Message(id = 1, conversationId = 1, role = "user", content = "较早的合成问题。"),
+            Message(id = 2, conversationId = 1, role = "assistant", content = "较早的合成答复。"),
+            Message(id = 3, conversationId = 1, role = "user", content = "当前合成问题。".repeat(100)),
+            Message(id = 4, conversationId = 1, role = "assistant", content = "当前合成分析。".repeat(100)),
+            Message(id = 5, conversationId = 1, role = "assistant", content = "当前合成补充。".repeat(100))
+        )
+        for (tier in CompressionTier.entries) {
+            val plan = ContextCompressionPlanner.plan(messages, tier, 1, null, null)
+            assertEquals("$tier 不能留下孤立回复或裁掉当前轮内容", messages.takeLast(3), plan.retainedMessages)
+            assertEquals(messages.take(2), plan.summarySource)
+            assertTrue("调用方必须报告无法容纳完整最新轮次", plan.estimatedHistoryTokens > 1)
+            assertTrue(plan.needsSummary)
+        }
+    }
+
+    @Test fun deeperCompressionKeepsProgressivelyFewerWholeRecentTurns() {
+        val messages = (1L..32L).map { Message(id = it, conversationId = 1,
+            role = if (it % 2 == 1L) "user" else "assistant", content = "合成事实$it") }
+        val plans = listOf(CompressionTier.L2, CompressionTier.L3, CompressionTier.L4).map { tier ->
+            ContextCompressionPlanner.plan(messages, tier, 10000, null, null)
+        }
+        assertEquals(listOf(16, 8, 2), plans.map { it.retainedMessages.size })
+        assertEquals(listOf(16, 24, 30), plans.map { it.summarySource.size })
+        assertTrue(plans.zipWithNext().all { (lighter, deeper) -> lighter.estimatedHistoryTokens > deeper.estimatedHistoryTokens })
+        assertTrue(plans.all { it.retainedMessages.last() == messages.last() && it.retainedMessages.first().role == "user" })
+    }
+
+    @Test fun lightPruningFitsToolHeavyHistoryBeforeRequestingPaidSummary() {
+        val toolText = "【实时联网参考信息】\n" + "合成检索资料。".repeat(2500) + "\n【用户输入的问题/指令】\n请回答合成问题。"
+        val messages = listOf(
+            Message(id = 1, conversationId = 1, role = "user", content = toolText),
+            Message(id = 2, conversationId = 1, role = "assistant", content = "已归纳合成资料。"),
+            Message(id = 3, conversationId = 1, role = "user", content = "请继续讨论。"),
+            Message(id = 4, conversationId = 1, role = "assistant", content = "合成讨论仍在继续。"),
+            Message(id = 5, conversationId = 1, role = "user", content = toolText),
+            Message(id = 6, conversationId = 1, role = "assistant", content = "最新完整答复。")
+        )
+        val expected = messages.mapIndexed { index, message ->
+            if (index < 4) message.copy(content = ContentPruningHelper.pruneMessageContent(message.content)) else message
+        }
+        val budget = expected.sumOf(ContextCompressionPlanner::messageTokens)
+        val light = ContextCompressionPlanner.plan(messages, CompressionTier.L1, budget, null, null)
+        val full = ContextCompressionPlanner.plan(messages, CompressionTier.L0, budget, null, null)
+        assertFalse("可修剪工具块腾出预算时不应发起摘要", light.needsSummary)
+        assertTrue(light.summarySource.isEmpty())
+        assertEquals(expected, light.retainedMessages)
+        assertEquals(budget, light.estimatedHistoryTokens)
+        assertTrue(full.needsSummary)
+        assertEquals("最新完整轮次保留工具证据原文", toolText, light.retainedMessages[4].content)
+        assertEquals("请求层修剪不得修改源消息", toolText, messages.first().content)
+    }
+
+    @Test fun lightPruningKeepsOriginalSummarySourceAndWholePinnedTurn() {
+        val toolText = "【实时联网参考信息】\n" + "合成网页资料。".repeat(400) + "\n【用户输入的问题/指令】\n请处理。"
+        val messages = (1L..24L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant",
+            content = if (id == 1L || id == 3L || id == 23L) toolText else "合成答复$id。", isPinned = id == 4L) }
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.L1, 100000, null, null, forceCompression = true)
+        assertEquals(messages.take(8), plan.summarySource)
+        assertEquals("置顶消息保护同轮用户原文", messages[2], plan.retainedMessages.first())
+        assertEquals(messages[3], plan.retainedMessages[1])
+        assertEquals(messages.takeLast(2), plan.retainedMessages.takeLast(2))
+        assertEquals(plan.retainedMessages.sumOf(ContextCompressionPlanner::messageTokens), plan.estimatedHistoryTokens)
+        assertTrue(plan.needsSummary)
+    }
+
+    @Test fun coverageUsesHistoryPositionWhenAnEarlyReplyVariantHasANewerId() {
+        val messages = (1L..24L).map { id -> Message(id = if (id == 2L) 99L else id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成事实$id。") }
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.L2, 10000, "已整理前八轮合成事实。", 16L, recentRounds = 4)
+        assertFalse("旧轮次内的新变体ID不能触发重复付费摘要", plan.needsSummary)
+        assertEquals(messages.take(16), plan.summarySource)
+        assertEquals(messages.takeLast(8), plan.retainedMessages)
+    }
+
+    @Test fun coverageDoesNotTreatLaterLowerIdsAsAlreadySummarized() {
+        val messages = (1L..32L).map { id -> Message(id = if (id == 16L) 99L else id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成事实$id。") }
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.L4, 10000, "合成摘要只涵盖前八轮。", 99L)
+        assertTrue("水线之后的低ID原文仍须先生成摘要才能退休", plan.needsSummary)
+        assertEquals(messages.take(30), plan.summarySource)
+        assertEquals(30L, plan.summaryThroughId)
+        assertEquals(messages.takeLast(2), plan.retainedMessages)
+    }
+
+    @Test fun tierChangesReuseExistingCoverageWithoutMovingBoundaryBackwards() {
+        val messages = (1L..32L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成事实$id。") }
+        for (tier in CompressionTier.entries) {
+            val plan = ContextCompressionPlanner.plan(messages, tier, 10000, "已经整理至第十五轮。", 30L, forceCompression = true)
+            assertFalse("切换到${tier}不能重新付费整理已覆盖原文", plan.needsSummary)
+            assertEquals(30L, plan.summaryThroughId)
+            assertEquals(messages.takeLast(2), plan.retainedMessages)
+        }
+    }
+
+    @Test fun rollingSummaryBatchesByWholeTurnsWhileBudgetPressureCanAdvanceImmediately() {
+        val messages = (1L..40L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成事实$id。") }
+        val smallBatch = ContextCompressionPlanner.plan(messages.take(30), CompressionTier.L2, 10000, "已整理前八轮。", 16L, recentRounds = 4)
+        assertFalse(smallBatch.needsSummary)
+        assertEquals(16L, smallBatch.summaryThroughId)
+        val fullBatch = ContextCompressionPlanner.plan(messages.take(32), CompressionTier.L2, 10000, "已整理前八轮。", 16L, recentRounds = 4)
+        assertTrue(fullBatch.needsSummary)
+        assertEquals(24L, fullBatch.summaryThroughId)
+        val lastTurnBudget = messages.take(30).takeLast(2).sumOf(ContextCompressionPlanner::messageTokens)
+        val pressured = ContextCompressionPlanner.plan(messages.take(30), CompressionTier.L2, lastTurnBudget, "已整理前八轮。", 16L, recentRounds = 4)
+        assertTrue(pressured.needsSummary)
+        assertEquals(messages.take(30).takeLast(2), pressured.retainedMessages)
+        assertTrue(pressured.estimatedHistoryTokens <= lastTurnBudget)
     }
 
 }
