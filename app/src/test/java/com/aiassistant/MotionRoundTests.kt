@@ -36,15 +36,35 @@ class MotionRoundTests {
 
     @Test fun expressiveExternalSymbolsMoveThroughConnectionThinkingReplyingAndExplicitIdle() {
         val states = mapOf(EchoModelMarkState.Connecting to ExpressiveBotEffectKind.Signal,
-            EchoModelMarkState.Thinking to ExpressiveBotEffectKind.Bubble,
-            EchoModelMarkState.Replying to ExpressiveBotEffectKind.Beat,
+            EchoModelMarkState.Thinking to ExpressiveBotEffectKind.Thought,
+            EchoModelMarkState.Replying to ExpressiveBotEffectKind.Speech,
             EchoModelMarkState.Neutral to ExpressiveBotEffectKind.Z)
         for (style in EchoModelMarkStyle.expressiveBotStyles) {
             for ((state, kind) in states) {
-                val frames = (0..60).map { sampleExpressiveBotPose(style, state, it * 75f, idleEffects = true) }
+                val frames = (0..100).map { sampleExpressiveBotPose(style, state, it * 80f, idleEffects = true) }
                 val effects = frames.flatMap { it.effects }.filter { it.alpha > .05f }
-                assertTrue("$style $state 必须呈现对应状态的符号", effects.isNotEmpty() && effects.all { it.kind == kind })
-                assertTrue("$style $state 符号位置或尺寸应实际连续变化", effects.map { listOf(it.x, it.y, it.size) }.toSet().size >= 15)
+                assertTrue("$style $state 必须呈现对应状态的符号", effects.any { it.kind == kind } && effects.all {
+                    it.kind == kind || state == EchoModelMarkState.Connecting && it.kind == ExpressiveBotEffectKind.SignalDot
+                })
+                if (kind == ExpressiveBotEffectKind.Thought || kind == ExpressiveBotEffectKind.Z) {
+                    assertTrue("$style $state 符号位置或尺寸应实际连续变化", effects.map { listOf(it.x, it.y, it.size) }.toSet().size >= 15)
+                    val horizontalTravel = effects.maxOf { it.x } - effects.minOf { it.x }
+                    val verticalTravel = effects.maxOf { it.y } - effects.minOf { it.y }
+                    val travel = sqrt(horizontalTravel * horizontalTravel + verticalTravel * verticalTravel)
+                    val growth = effects.maxOf { it.size } - effects.minOf { it.size }
+                    val minimumTravel = if (kind == ExpressiveBotEffectKind.Thought) 2.5f else 5f
+                    val minimumGrowth = if (kind == ExpressiveBotEffectKind.Thought) 2.5f else 3.5f
+                    assertTrue("$style $state 位移应可感知，不能只做亚单位浮动: $travel", travel >= minimumTravel)
+                    assertTrue("$style $state 放大应可感知，不能只依赖整组透明度: $growth", growth >= minimumGrowth)
+                } else {
+                    assertTrue("连接扇弧与说话泡保持稳定轮廓，通过透明度缓慢交替", effects.groupBy { it.id }.values.all { track ->
+                        track.map { listOf(it.x, it.y, it.size) }.distinct().size == 1
+                    })
+                }
+                if (kind == ExpressiveBotEffectKind.Speech) {
+                    assertTrue("输出泡内三点的进度应持续变化，不能仅让整个静态图案淡入淡出",
+                        effects.map { it.progress }.distinct().size >= 15)
+                }
                 assertTrue("$style $state 符号应渐显渐隐", effects.map { it.alpha }.toSet().size >= 15)
                 assertTrue("同帧符号不能使用冲突id", frames.all { frame -> frame.effects.map { it.id }.distinct().size == frame.effects.size })
             }
@@ -55,6 +75,54 @@ class MotionRoundTests {
         }
     }
 
+    @Test fun expressiveSymbolsUseClearUpperRightSemanticsAndUnhurriedHolds() {
+        for (state in listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
+            EchoModelMarkState.Replying, EchoModelMarkState.Neutral)) {
+            val frames = (0..160).map { sampleExpressiveBotPose(EchoModelMarkStyle.BOT_TILE, state, it * 100f, idleEffects = true).effects }
+            for (frame in frames) {
+                val visible = frame.filter { it.alpha > .1f }
+                for (effect in visible) {
+                    val minimumSize = when (effect.kind) {
+                        ExpressiveBotEffectKind.Signal -> 7f
+                        ExpressiveBotEffectKind.SignalDot -> 2f
+                        ExpressiveBotEffectKind.Thought -> 11f
+                        ExpressiveBotEffectKind.Speech -> 16f
+                        ExpressiveBotEffectKind.Z -> 8f
+                        else -> 10f
+                    }
+                    assertTrue("$state 符号不能退回小而难辨的尺寸", effect.size >= minimumSize)
+                    val bounds = expressiveEffectBounds(effect)
+                    assertTrue("$state 所有状态符号统一锚定右上角", bounds[0] > 65f && bounds[3] < 18f)
+                }
+                if (state == EchoModelMarkState.Connecting) {
+                    val dot = frame.single { it.kind == ExpressiveBotEffectKind.SignalDot }
+                    val arcs = frame.filter { it.kind == ExpressiveBotEffectKind.Signal }.sortedBy { it.size }
+                    assertEquals("信号图案由基点和三个等级扇弧组成", 3, arcs.size)
+                    for (arc in arcs) {
+                        assertEquals("信号扇弧围绕基点展开", dot.x, arc.x, 0f)
+                        assertEquals(dot.y, arc.y, 0f)
+                    }
+                    arcs.zipWithNext().forEach { (inner, outer) ->
+                        assertTrue("扇弧描边之间需有清晰间隙", (outer.size - inner.size) / 2f - 2.2f >= 1f)
+                    }
+                } else {
+                    assertEquals("思考泡、说话泡或Z使用单个完整语义组，不能堆叠多个图案", 1, frame.size)
+                }
+            }
+            val firstId = frames.first().first { it.kind != ExpressiveBotEffectKind.SignalDot }.id
+            val alphas = frames.map { frame -> frame.first { it.id == firstId }.alpha }
+            val pulses = alphas.zipWithNext().count { (before, after) -> before <= .45f && after > .45f }
+            assertTrue("$state 在16秒内应缓慢重复，避免高频闪动: $pulses", pulses in 2..4)
+            var hold = 0
+            var longestHold = 0
+            alphas.zipWithNext().forEach { (before, after) ->
+                hold = if (before > .65f && abs(after - before) < .0001f) hold + 1 else 0
+                longestHold = maxOf(longestHold, hold)
+            }
+            assertTrue("$state 符号须有可供阅读的停留，不能持续快速进出", longestHold >= 7)
+        }
+    }
+
     @Test fun expressiveSymbolsStayFiniteInsideCanvasAndSeparateFromTheTransformedBody() {
         for (style in EchoModelMarkStyle.expressiveBotStyles) {
             for (state in EchoModelMarkState.entries) {
@@ -62,15 +130,15 @@ class MotionRoundTests {
                     for (time in (0..100).map { it * 80f } + listOf(-10f, Float.NaN, Float.POSITIVE_INFINITY)) {
                         val pose = sampleExpressiveBotPose(style, state, time, reducedMotion = reduced, idleEffects = true)
                         for (effect in pose.effects) {
-                            assertTrue("符号参数必须为有限数", listOf(effect.x, effect.y, effect.size, effect.alpha).all { it.isFinite() })
-                            assertTrue(effect.size > 0f && effect.alpha in 0f..1f)
+                            assertTrue("符号参数必须为有限数", listOf(effect.x, effect.y, effect.size, effect.alpha, effect.progress).all { it.isFinite() })
+                            assertTrue(effect.size > 0f && effect.alpha in 0f..1f && effect.progress in 0f..1f)
                             val bounds = expressiveEffectBounds(effect)
                             assertTrue("$style $state 符号完整描边应在100×100画板内", bounds[0] > 0f && bounds[1] > 0f && bounds[2] < 100f && bounds[3] < 100f)
                             if (effect.alpha > 0f) for (column in 0..4) for (row in 0..4) {
                                 val x = bounds[0] + (bounds[2] - bounds[0]) * column / 4f
                                 val y = bounds[1] + (bounds[3] - bounds[1]) * row / 4f
                                 assertTrue("$style $state 外部符号不能遮住旋转后的身体",
-                                    outsideExpressiveBody(x, y, pose))
+                                    expressiveBodyClearance(x, y, pose) > .25f)
                             }
                         }
                     }
@@ -92,9 +160,9 @@ class MotionRoundTests {
             assertTrue("旧连接弧在过渡中应逐渐淡出", fadingSignals.any { fading ->
                 before.effects.any { it.id == fading.id && fading.alpha < it.alpha && fading.alpha > 0f }
             })
-            assertTrue("新思考泡在过渡中应渐入", controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Bubble && it.alpha > 0f })
+            assertTrue("新思考泡在过渡中应渐入", controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Thought && it.alpha > 0f })
             advanceExpressiveBot(controller, 300f)
-            assertTrue(controller.pose.effects.all { it.kind == ExpressiveBotEffectKind.Bubble })
+            assertTrue(controller.pose.effects.all { it.kind == ExpressiveBotEffectKind.Thought })
             controller.update(EchoModelMarkState.Completed, completionEvent = 211L)
             advanceExpressiveBot(controller, 400f)
             assertTrue("完成时有有限确认符号", controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Spark && it.alpha > 0f })
@@ -117,6 +185,26 @@ class MotionRoundTests {
 
     @Test fun expressiveIdleRequiresExplicitEligibilityAndHonorsReducedMotionAndFrameTime() {
         for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val rest = expressiveBotRestPose(style)
+            val loweringGaze = listOf(0f, 300f, 600f, 1200f).map { time ->
+                sampleExpressiveBotPose(style, EchoModelMarkState.Neutral, time, idleEffects = true)
+            }
+            assertEquals("待机视线从原位缓缓下移", 0f, loweringGaze.first().faceY, 0f)
+            assertTrue("待机下看应逐步出现，不能瞬间换表情", loweringGaze.zipWithNext().all { (before, after) ->
+                after.faceY > before.faceY
+            })
+            assertTrue("待机下看的最终位移应可见", loweringGaze.last().faceY >= 4f)
+            for (pose in loweringGaze) {
+                assertEquals("待机只移动视线，身体与另一状态的运动轨迹不能混入",
+                    rest.copy(faceY = pose.faceY, left = pose.left, right = pose.right, effects = pose.effects), pose)
+                assertEquals("待机双眼保持同步同形", pose.left.copy(x = pose.right.x), pose.right)
+                assertEquals(rest.left.width, pose.left.width, 0f)
+                assertEquals(rest.right.width, pose.right.width, 0f)
+                assertTrue("待机下看不能令双眼越出身体", listOf(pose.left, pose.right).all { eye ->
+                    eye.height > 0f && eye.height <= rest.left.height &&
+                        abs(eye.y + pose.faceY - 54f) + eye.height / 2f < pose.bodyHeight / 2f
+                })
+            }
             for (state in listOf(EchoModelMarkState.Neutral, EchoModelMarkState.Completed)) {
                 val historical = ExpressiveBotMotionController(style)
                 historical.update(state)
@@ -126,12 +214,16 @@ class MotionRoundTests {
             val controller = ExpressiveBotMotionController(style)
             controller.update(EchoModelMarkState.Replying)
             controller.update(EchoModelMarkState.Completed, completionEvent = 212L, idleEffects = true)
-            advanceExpressiveBot(controller, 2500f)
+            advanceExpressiveBot(controller, 3500f)
             assertTrue("显式最新回复完成后可进入待机", controller.needsFrames)
             assertTrue(controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Z && it.alpha > 0f })
             assertTrue(controller.pose.effects.none { it.kind == ExpressiveBotEffectKind.Spark })
+            assertTrue("完成确认动作结束后也应缓缓下看", controller.pose.faceY >= 4f)
             for (state in EchoModelMarkState.entries) {
                 val expected = sampleExpressiveBotPose(style, state, 0f, reducedMotion = true, idleEffects = true)
+                if (state == EchoModelMarkState.Neutral || state == EchoModelMarkState.Completed) {
+                    assertTrue("减弱动态直接使用静态下看姿态", expected.faceY >= 4f)
+                }
                 assertEquals("减弱动态的外部符号不应随时钟变化", expected,
                     sampleExpressiveBotPose(style, state, 90_000f, reducedMotion = true, idleEffects = true))
                 controller.update(state, reducedMotion = true, idleEffects = true)
@@ -174,17 +266,29 @@ class MotionRoundTests {
 
     private fun expressiveEffectBounds(effect: ExpressiveBotEffectPose): FloatArray {
         val radius = effect.size / 2f
-        val halfWidth = radius * when (effect.kind) {
-            ExpressiveBotEffectKind.Z -> .72f
-            ExpressiveBotEffectKind.Beat -> .35f
-            else -> 1f
+        return when (effect.kind) {
+            ExpressiveBotEffectKind.Signal -> {
+                floatArrayOf(effect.x - 1.1f, effect.y - radius - 1.1f,
+                    effect.x + radius + 1.1f, effect.y + 1.1f)
+            }
+            ExpressiveBotEffectKind.SignalDot -> floatArrayOf(effect.x - radius, effect.y - radius,
+                effect.x + radius, effect.y + radius)
+            ExpressiveBotEffectKind.Thought -> floatArrayOf(effect.x - effect.size * 12.85f / 14f,
+                effect.y - effect.size * 9f / 28f - 1.1f, effect.x + radius + 1.1f,
+                effect.y + effect.size * 8.95f / 14f)
+            ExpressiveBotEffectKind.Speech -> {
+                val stroke = 1.1f * effect.size / 18f
+                floatArrayOf(effect.x - radius - stroke, effect.y - effect.size * .3f - stroke,
+                    effect.x + radius + stroke, effect.y + effect.size * 6.7f / 18f + stroke)
+            }
+            ExpressiveBotEffectKind.Z -> floatArrayOf(effect.x - radius * .72f - 1.1f,
+                effect.y - radius - 1.1f, effect.x + radius * .72f + 1.1f, effect.y + radius + 1.1f)
+            ExpressiveBotEffectKind.Spark -> floatArrayOf(effect.x - radius - 1.1f,
+                effect.y - radius - 1.1f, effect.x + radius + 1.1f, effect.y + radius + 1.1f)
         }
-        val halfHeight = if (effect.kind == ExpressiveBotEffectKind.Beat) radius * .7f else radius
-        return floatArrayOf(effect.x - halfWidth - 1.1f, effect.y - halfHeight - 1.1f,
-            effect.x + halfWidth + 1.1f, effect.y + (if (effect.kind == ExpressiveBotEffectKind.Signal) 0f else halfHeight) + 1.1f)
     }
 
-    private fun outsideExpressiveBody(x: Float, y: Float, pose: ExpressiveBotPose): Boolean {
+    private fun expressiveBodyClearance(x: Float, y: Float, pose: ExpressiveBotPose): Float {
         val angle = Math.toRadians(pose.rotation.toDouble()).toFloat()
         val dx = x - pose.bodyX - 50f
         val dy = y - pose.bodyY - 54f
@@ -194,7 +298,7 @@ class MotionRoundTests {
         val qy = abs(localY) - (pose.bodyHeight / 2f - pose.cornerRadius)
         val distance = sqrt(maxOf(qx, 0f) * maxOf(qx, 0f) + maxOf(qy, 0f) * maxOf(qy, 0f)) +
             minOf(maxOf(qx, qy), 0f) - pose.cornerRadius
-        return distance > 0f
+        return distance
     }
 
     @Test fun expressiveBotsAnimateCommonGazeAndBodyRhythmThroughoutEveryGenerationState() {

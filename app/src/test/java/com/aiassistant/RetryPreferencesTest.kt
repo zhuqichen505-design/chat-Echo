@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import com.aiassistant.domain.model.*
 import com.aiassistant.ui.components.EchoModelMarkState
+import com.aiassistant.ui.components.ExpressiveBotEffectKind
 import com.aiassistant.ui.components.drawExpressiveBot
 import com.aiassistant.ui.components.expressiveBotDurationMillis
 import com.aiassistant.ui.components.modelMarkColorFor
@@ -88,9 +89,18 @@ class RetryPreferencesTest {
                 for ((stateIndex, state) in states.withIndex()) {
                     for (size in listOf(26, 128)) {
                         val symbolFrames = mutableListOf<Pair<Int, Float>>()
+                        val speechInteriorFrames = mutableListOf<Pair<Int, List<Int>>>()
                         val snapshots = (0 until 8).map { frame ->
+                            // Cover the independent symbol cycle, including its readable hold and gap.
+                            val windowMillis = when (state) {
+                                EchoModelMarkState.Connecting -> 6000f
+                                EchoModelMarkState.Thinking -> 6400f
+                                EchoModelMarkState.Replying -> 5600f
+                                EchoModelMarkState.Neutral -> 7000f
+                                EchoModelMarkState.Completed -> expressiveBotDurationMillis(style, state)
+                            }
                             val pose = sampleExpressiveBotPose(style, state,
-                                (if (state == EchoModelMarkState.Neutral) 3600f else expressiveBotDurationMillis(style, state)) * frame / 8f,
+                                windowMillis * frame / 8f,
                                 idleEffects = state == EchoModelMarkState.Neutral)
                             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
                             CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr,
@@ -102,8 +112,42 @@ class RetryPreferencesTest {
                             // The symbol layer occupies the clear space above every transformed body.
                             // Alpha coverage detects subpixel strokes without requiring a pure color.
                             val symbolPixels = pixels.copyOfRange(0, size * (size * .16f).toInt())
+                            assertTrue("$style $state $size dp 外部符号实际墨迹必须位于右上角",
+                                symbolPixels.withIndex().all { (index, pixel) ->
+                                    pixel ushr 24 == 0 || index % size > size * .65f
+                                })
+                            if (state == EchoModelMarkState.Connecting && size == 128) {
+                                val base = pose.effects.single { it.kind == ExpressiveBotEffectKind.SignalDot }
+                                val leftOfBase = (base.x - base.size / 2f) * size / 100f
+                                assertTrue("Wi-Fi墨迹须从基点向右上展开，不能沿用朝正上的对称扇形",
+                                    symbolPixels.withIndex().all { (index, pixel) ->
+                                        pixel ushr 24 == 0 || index % size + 1 >= leftOfBase
+                                    })
+                            }
                             symbolFrames += symbolPixels.contentHashCode() to
                                 symbolPixels.sumOf { (it ushr 24).toDouble() }.toFloat() / 255f
+                            if (state == EchoModelMarkState.Replying && size == 128) {
+                                val speech = pose.effects.single()
+                                // Compare the interior only while the group's opacity is held steady.
+                                // A static bubble fading as a whole must not count as talking motion.
+                                if (speech.alpha >= .89f) {
+                                    val left = ((speech.x - speech.size / 3f) * size / 100f).toInt()
+                                    val right = ((speech.x + speech.size / 3f) * size / 100f).toInt() + 1
+                                    val top = ((speech.y - speech.size / 8f) * size / 100f).toInt()
+                                    val bottom = ((speech.y + speech.size / 8f) * size / 100f).toInt() + 1
+                                    val interior = (top until bottom).flatMap { y ->
+                                        (left until right).map { x -> pixels[y * size + x] }
+                                    }.toIntArray()
+                                    val width = right - left
+                                    val bandPeaks = (0 until 3).map { band ->
+                                        (top until bottom).maxOf { y ->
+                                            (left + width * band / 3 until left + width * (band + 1) / 3)
+                                                .maxOf { x -> pixels[y * size + x] ushr 24 }
+                                        }
+                                    }
+                                    speechInteriorFrames += interior.contentHashCode() to bandPeaks
+                                }
+                            }
                             // Thin capsule edges and brief blinks are antialiased and need not contain
                             // exact eyeColor pixels. Measure their real contribution on the opaque body.
                             val (leftEye, rightEye) = projectedEyeVisibility(pixels, size, bodyColor.toArgb(), eyeColor)
@@ -135,6 +179,12 @@ class RetryPreferencesTest {
                             symbolFrames.map { it.first }.toSet().size >= 4)
                         assertTrue("$style $state $size dp 外部符号应在多个关键帧中可见",
                             symbolFrames.count { it.second > size * size / (26f * 26f) * .15f } >= 3)
+                        if (state == EchoModelMarkState.Replying && size == 128) {
+                            assertTrue("说话泡内部必须有独立的多帧点亮，整组淡入淡出不足以通过",
+                                speechInteriorFrames.map { it.first }.toSet().size >= 3)
+                            assertTrue("说话泡完整点亮时，内部三个位置必须各有实际像素",
+                                speechInteriorFrames.last().second.all { it >= 166 })
+                        }
                     }
                 }
             }

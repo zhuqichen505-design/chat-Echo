@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
@@ -242,21 +243,52 @@ private fun DrawScope.drawExpressiveBotEffect(color: Color, effect: ExpressiveBo
     val tint = color.copy(alpha = color.alpha * effect.alpha)
     val radius = effect.size * .5f
     val center = Offset(effect.x, effect.y)
-    val stroke = Stroke(2.2f, cap = StrokeCap.Round)
+    val stroke = Stroke(2.2f, cap = StrokeCap.Round, join = StrokeJoin.Round)
     when (effect.kind) {
         ExpressiveBotEffectKind.Signal -> {
-            val arc = Path().apply {
-                moveTo(center.x - radius, center.y)
-                cubicTo(center.x - radius, center.y - radius * .5523f,
-                    center.x - radius * .5523f, center.y - radius, center.x, center.y - radius)
-                cubicTo(center.x + radius * .5523f, center.y - radius,
-                    center.x + radius, center.y - radius * .5523f, center.x + radius, center.y)
-            }
-            drawPath(arc, tint, style = stroke)
+            drawArc(tint, -90f, 90f, false,
+                center - Offset(radius, radius), Size(effect.size, effect.size), style = stroke)
         }
-        ExpressiveBotEffectKind.Bubble -> drawCircle(tint, radius, center, style = stroke)
-        ExpressiveBotEffectKind.Beat -> drawLine(tint, center - Offset(radius * .35f, radius * .7f),
-            center + Offset(radius * .35f, radius * .7f), 2.2f, StrokeCap.Round)
+        ExpressiveBotEffectKind.SignalDot -> drawCircle(tint, radius, center)
+        ExpressiveBotEffectKind.Thought -> {
+            fun emergingColor(start: Float, duration: Float): Color {
+                val amount = ((effect.progress - start) / duration).coerceIn(0f, 1f)
+                return tint.copy(alpha = tint.alpha * amount * amount * (3f - 2f * amount))
+            }
+            drawOval(emergingColor(.10f, .14f), center - Offset(radius, effect.size * 9f / 28f),
+                Size(effect.size, effect.size * 9f / 14f), style = stroke)
+            drawCircle(emergingColor(.045f, .12f), effect.size * .1f,
+                center + Offset(-effect.size * .5f, effect.size * 5.5f / 14f))
+            drawCircle(emergingColor(0f, .10f), effect.size * .85f / 14f,
+                center + Offset(-effect.size * 12f / 14f, effect.size * 8.1f / 14f))
+        }
+        ExpressiveBotEffectKind.Speech -> withTransform({
+            translate(center.x, center.y)
+            scale(effect.size / 18f, effect.size / 18f, Offset.Zero)
+        }) {
+            val bubble = Path().apply {
+                moveTo(-6.4f, -5.4f)
+                lineTo(6.4f, -5.4f)
+                quadraticBezierTo(9f, -5.4f, 9f, -2.8f)
+                lineTo(9f, 2.8f)
+                quadraticBezierTo(9f, 5.4f, 6.4f, 5.4f)
+                lineTo(-2f, 5.4f)
+                lineTo(-5f, 6.7f)
+                lineTo(-4f, 5.4f)
+                lineTo(-6.4f, 5.4f)
+                quadraticBezierTo(-9f, 5.4f, -9f, 2.8f)
+                lineTo(-9f, -2.8f)
+                quadraticBezierTo(-9f, -5.4f, -6.4f, -5.4f)
+                close()
+            }
+            drawPath(bubble, tint, style = stroke)
+            repeat(3) { index ->
+                val onset = .1f + index * .15f
+                val fade = ((effect.progress - onset) / .1f).coerceIn(0f, 1f)
+                val light = .28f + .72f * fade * fade * (3f - 2f * fade)
+                drawCircle(tint.copy(alpha = tint.alpha * light), .85f, Offset((index - 1) * 3.5f, -.25f))
+            }
+        }
         ExpressiveBotEffectKind.Spark -> {
             val spark = Path().apply {
                 moveTo(center.x, center.y - radius)

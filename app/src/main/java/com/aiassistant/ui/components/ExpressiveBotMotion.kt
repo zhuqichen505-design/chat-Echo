@@ -11,7 +11,7 @@ internal data class ExpressiveBotEyePose(
     val height: Float = 24f
 )
 
-internal enum class ExpressiveBotEffectKind { Signal, Bubble, Beat, Spark, Z }
+internal enum class ExpressiveBotEffectKind { Signal, SignalDot, Thought, Speech, Spark, Z }
 
 /** 100×100 画板上的独立符号层；size 为全宽（圆为直径），不继承身体旋转和压缩。 */
 internal data class ExpressiveBotEffectPose(
@@ -20,7 +20,8 @@ internal data class ExpressiveBotEffectPose(
     val x: Float,
     val y: Float,
     val size: Float,
-    val alpha: Float
+    val alpha: Float,
+    val progress: Float = 0f
 )
 
 internal data class ExpressiveBotPose(
@@ -66,7 +67,7 @@ internal fun expressiveBotDurationMillis(style: String, state: EchoModelMarkStat
     }
 }
 
-/** 非等拍的“看见—跟随—停顿”轨迹；三个体型各有动作重心。Neutral 不使用时钟。 */
+/** 非等拍的“看见—跟随—停顿”轨迹；只有显式待机身份会缓缓下看并播放 Z。 */
 internal fun sampleExpressiveBotPose(
     style: String,
     state: EchoModelMarkState,
@@ -75,13 +76,16 @@ internal fun sampleExpressiveBotPose(
     idleEffects: Boolean = false
 ): ExpressiveBotPose {
     val rest = expressiveBotRestPose(style)
+    val finiteElapsed = if (elapsedMillis.isFinite()) elapsedMillis.coerceAtLeast(0f) else 0f
+    fun idlePose(elapsed: Float): ExpressiveBotPose = rest.copy(
+        // Keep both natural eyes together; only the latest successful identity may become drowsy.
+        faceY = if (!idleEffects) 0f else if (reducedMotion) 4.2f else 4.2f * smooth(elapsed / 1200f),
+        effects = sampleExpressiveBotEffects(EchoModelMarkState.Neutral, elapsed, reducedMotion, idleEffects))
     if (state == EchoModelMarkState.Neutral || (reducedMotion && state == EchoModelMarkState.Completed)) {
-        return rest.copy(effects = sampleExpressiveBotEffects(EchoModelMarkState.Neutral, elapsedMillis, reducedMotion, idleEffects))
+        return idlePose(finiteElapsed)
     }
     val duration = expressiveBotDurationMillis(style, state)
-    val finiteElapsed = if (elapsedMillis.isFinite()) elapsedMillis.coerceAtLeast(0f) else 0f
-    if (state == EchoModelMarkState.Completed && finiteElapsed >= duration) return rest.copy(
-        effects = sampleExpressiveBotEffects(EchoModelMarkState.Neutral, finiteElapsed - duration, reducedMotion, idleEffects))
+    if (state == EchoModelMarkState.Completed && finiteElapsed >= duration) return idlePose(finiteElapsed - duration)
     val position = if (reducedMotion) when (state) {
         EchoModelMarkState.Connecting -> 0.23f
         EchoModelMarkState.Thinking -> 0.24f
@@ -161,44 +165,56 @@ internal fun sampleExpressiveBotEffects(
 ): List<ExpressiveBotEffectPose> {
     if (state == EchoModelMarkState.Neutral && !idleEffects) return emptyList()
     val time = if (elapsedMillis.isFinite()) elapsedMillis.coerceAtLeast(0f) else 0f
-    fun effect(id: Int, kind: ExpressiveBotEffectKind, x: Float, y: Float, size: Float, alpha: Float) =
-        ExpressiveBotEffectPose(id, kind, x, y, size, alpha.coerceIn(0f, 1f))
+    fun effect(id: Int, kind: ExpressiveBotEffectKind, x: Float, y: Float, size: Float, alpha: Float,
+               progress: Float = 0f) =
+        ExpressiveBotEffectPose(id, kind, x, y, size, alpha.coerceIn(0f, 1f), progress)
     if (reducedMotion) return when (state) {
-        EchoModelMarkState.Connecting -> listOf(effect(0, ExpressiveBotEffectKind.Signal, 67f, 15f, 10f, .85f))
-        EchoModelMarkState.Thinking -> listOf(effect(10, ExpressiveBotEffectKind.Bubble, 68f, 12f, 4f, .85f),
-            effect(11, ExpressiveBotEffectKind.Bubble, 74f, 7f, 5f, .72f))
-        EchoModelMarkState.Replying -> listOf(effect(20, ExpressiveBotEffectKind.Beat, 66f, 10f, 7f, .85f))
-        EchoModelMarkState.Neutral -> listOf(effect(40, ExpressiveBotEffectKind.Z, 70f, 10f, 6f, .85f))
+        EchoModelMarkState.Connecting -> listOf(
+            effect(3, ExpressiveBotEffectKind.SignalDot, 84f, 16f, 2.6f, .88f)) + List(3) { index ->
+            effect(index, ExpressiveBotEffectKind.Signal, 84f, 16f, 8f + index * 8f, .88f)
+        }
+        EchoModelMarkState.Thinking -> listOf(effect(10, ExpressiveBotEffectKind.Thought, 86f, 6.6f, 14f, .9f, .4f))
+        EchoModelMarkState.Replying -> listOf(effect(20, ExpressiveBotEffectKind.Speech, 84f, 8.5f, 18f, .9f, .4f))
+        EchoModelMarkState.Neutral -> listOf(effect(40, ExpressiveBotEffectKind.Z, 87f, 8.5f, 12f, .9f))
         EchoModelMarkState.Completed -> emptyList()
     }
-    fun phase(cycle: Float, index: Int): Float = (time / cycle + index * .31f) % 1f
-    fun opacity(position: Float): Float = smooth(position / .14f) * (1f - smooth((position - .68f) / .32f))
+    // A long readable hold separates the entrance and exit; the rest of each cycle stays quiet.
+    fun opacity(position: Float): Float = smooth(position / .14f) *
+        (1f - smooth((position - .58f) / .2f))
     return when (state) {
-        EchoModelMarkState.Connecting -> List(3) { index ->
-            val position = phase(2400f, index)
-            effect(index, ExpressiveBotEffectKind.Signal, 67f, 14f - 3f * position,
-                5f + 8f * position, opacity(position))
+        EchoModelMarkState.Connecting -> {
+            val position = time % 6000f / 6000f
+            listOf(effect(3, ExpressiveBotEffectKind.SignalDot, 84f, 16f, 2.6f, .78f)) + List(3) { index ->
+                val start = .05f + index * .13f
+                val alpha = smooth((position - start) / .12f) *
+                    (1f - smooth((position - .70f) / .16f))
+                effect(index, ExpressiveBotEffectKind.Signal, 84f, 16f, 8f + index * 8f, alpha * .9f)
+            }
         }
-        EchoModelMarkState.Thinking -> List(3) { index ->
-            val position = phase(2800f, index)
-            effect(10 + index, ExpressiveBotEffectKind.Bubble, 65f + 6f * position + index * 2f,
-                14f - 8f * position, 1.8f + 4f * position, opacity(position))
+        EchoModelMarkState.Thinking -> {
+            val position = time % 6400f / 6400f
+            val rise = smooth((position - .08f) / .5f)
+            // The tail appears first, then the thought grows and travels visibly into the upper-right space.
+            listOf(effect(10, ExpressiveBotEffectKind.Thought, 84f + 2f * rise, 8.7f - 2.1f * rise,
+                11f + 3f * rise, opacity(position) * .9f, position))
         }
-        EchoModelMarkState.Replying -> List(2) { index ->
-            val position = phase(1700f, index)
-            effect(20 + index, ExpressiveBotEffectKind.Beat, 64f + index * 9f,
-                11f - 2f * position, 4f + 3f * position, opacity(position) * .78f)
+        EchoModelMarkState.Replying -> {
+            val position = time % 5600f / 5600f
+            listOf(effect(20, ExpressiveBotEffectKind.Speech, 84f, 8.5f, 18f,
+                opacity(position) * .9f, position))
         }
         EchoModelMarkState.Completed -> {
-            val position = (time / 950f).coerceIn(0f, 1f)
-            listOf(effect(30, ExpressiveBotEffectKind.Spark, 71f, 9f,
-                4f + 4f * smooth(position / .4f), opacity(position)))
+            val position = (time / 1300f).coerceIn(0f, 1f)
+            listOf(effect(30, ExpressiveBotEffectKind.Spark, 85f, 9f,
+                10f + 2f * smooth(position / .25f), opacity(position) * .9f))
         }
-        EchoModelMarkState.Neutral -> List(3) { index ->
-            val position = phase(3600f, index)
-            effect(40 + index, ExpressiveBotEffectKind.Z, 66f + 7f * position + index * 1.4f,
-                13.5f - 7f * position, 4f + 2.8f * position,
-                opacity(position) * .84f * smooth(time / ExpressiveBotMotionController.TRANSITION_MILLIS))
+        EchoModelMarkState.Neutral -> {
+            val position = time % 7000f / 7000f
+            val rise = smooth((position - .08f) / .5f)
+            // A single Z drifts diagonally and grows; a sub-unit bob vanishes at the actual chat size.
+            listOf(effect(40, ExpressiveBotEffectKind.Z, 82f + 5f * rise, 11f - 2.5f * rise,
+                8f + 4f * rise,
+                opacity(position) * .9f * smooth(time / ExpressiveBotMotionController.TRANSITION_MILLIS)))
         }
     }
 }
@@ -246,7 +262,7 @@ internal fun blendExpressiveBotPose(first: ExpressiveBotPose, second: Expressive
             val a = before ?: requireNotNull(after).copy(alpha = 0f)
             val b = after ?: requireNotNull(before).copy(alpha = 0f)
             ExpressiveBotEffectPose(id, b.kind, mix(a.x, b.x, weight), mix(a.y, b.y, weight),
-                mix(a.size, b.size, weight), mix(a.alpha, b.alpha, weight))
+                mix(a.size, b.size, weight), mix(a.alpha, b.alpha, weight), mix(a.progress, b.progress, weight))
         })
 }
 
