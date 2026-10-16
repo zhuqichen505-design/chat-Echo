@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Echo · 小伙伴动作室</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="studio.css">
+</head>
+<body data-mode="light">
+  <header class="site-header"><a class="brand" href="index.html">Echo<span>小伙伴动作室</span></a><div class="header-actions"><span class="preview-note">动画候选 · 尚未应用</span><button id="mode" aria-pressed="false">深色</button></div></header>
+  <main>
+    <section class="intro"><div><h1>会等你，<br>也会回应你。</h1><p>四个小伙伴，四种动作性格。<br>播放一段完整对话，看看你更喜欢谁。</p></div><div class="intro-aside"><span class="live-dot" aria-hidden="true"></span><p>眼神、身体和小动作，<br>一起回应每个时刻。</p></div></section>
+    <section class="cast" aria-label="选择一个小伙伴"></section>
+    <section class="studio" aria-labelledby="selected-name">
+      <div class="stage-panel">
+        <div class="stage-heading"><div><span class="stage-kicker">现在陪你的是</span><h2 id="selected-name">团团</h2></div><span class="state-badge" id="stage-status" role="status" aria-live="polite">正在连接</span></div>
+        <button class="stage-touch" id="stage-touch" aria-label="和小伙伴打招呼"><canvas id="hero-canvas" width="600" height="600" role="img" aria-label="小伙伴动画"></canvas><span class="touch-note">移近看看它 · 点一下打招呼</span></button>
+        <p id="motion-caption" class="motion-caption"></p>
+        <div class="timeline" aria-label="完整对话的动作过程"></div>
+        <div class="playback"><button class="play-primary" id="auto" aria-pressed="true"><span class="play-symbol" aria-hidden="true">▶</span><span>完整演出</span></button><button id="pause" aria-pressed="false">暂停</button><button id="replay">从头再看</button><label class="speed-control"><span>速度</span><select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select></label></div>
+      </div>
+      <aside class="director" aria-label="动作和显示设置">
+        <h3>停在喜欢的动作里</h3><p class="director-copy">单独看一个状态，留意它的小习惯。</p>
+        <div class="state-picker" role="group" aria-label="选择动作状态"><button data-state="connecting" aria-pressed="true"><span>连接</span><small>听听信号在哪</small></button><button data-state="thinking" aria-pressed="false"><span>思考</span><small>让念头转一会儿</small></button><button data-state="replying" aria-pressed="false"><span>输出</span><small>边说，边比划</small></button><button data-state="completed" aria-pressed="false"><span>完成</span><small>好啦，交给你了</small></button></div>
+        <p class="character-note" id="character-note"></p>
+        <div class="display-options"><label class="check"><input type="checkbox" id="mono"><span>只看单色线条</span></label><label class="check"><input type="checkbox" id="reduce"><span>减弱动态</span></label><label class="background-control" for="background"><span>背景</span><select id="background"><option value="theme">随明暗模式</option><option value="white">纯白</option><option value="black">纯黑</option></select></label></div>
+        <p class="access-note" id="access-note">动作只在身份标识内播放，正文保持稳定。</p>
+      </aside>
+    </section>
+    <section class="in-context" aria-labelledby="context-title">
+      <div class="context-heading"><h2 id="context-title">放回一句对话里</h2><p>大图看动作，小图看陪伴感。</p></div>
+      <div class="context-layout"><article class="conversation" aria-label="对话中的模型身份演示"><div class="user-message">帮我写一段雨后散步的开场。</div><div class="model-identity"><canvas class="identity-canvas" data-size="32" width="64" height="64" role="img" aria-label="32像素模型身份动画"></canvas><strong>Echo</strong><span id="chat-state">正在连接</span></div><div class="message-area"><p id="sample-message"></p><span class="typing-caret" aria-hidden="true"></span></div><div class="message-footer">合成对话 · 本地播放</div></article><div class="size-study"><h3>在你真正看到的尺寸</h3><div class="size-row"><div><canvas class="identity-canvas" data-size="26" width="52" height="52" role="img" aria-label="26像素动画"></canvas><span>26px</span></div><div><canvas class="identity-canvas" data-size="32" width="64" height="64" role="img" aria-label="32像素动画"></canvas><span>32px</span></div><div><canvas class="identity-canvas" data-size="48" width="96" height="96" role="img" aria-label="48像素动画"></canvas><span>48px</span></div></div><p>同样的眼神、附肢和身体动作。小尺寸减少装饰，让轮廓先被看见。</p><button class="quiet-button" id="cancel">模拟中止，看看它如何安静下来</button></div></div>
+    </section>
+    <details class="research"><summary>这次参考了什么</summary><div class="research-content"><p>参考公开 Agent 吉祥物中“有性格的轮廓”和“多个部件连续协作”的做法。以下只借鉴动作机制，四款造型和绘制代码均为本次原创。</p><ul><li><a href="https://github.com/cline/cline/blob/main/apps/cli/src/tui/components/robot-animation.tsx" target="_blank" rel="noreferrer">Cline 的机器人动画</a>：鼠标方向驱动机器人朝向，逐步追赶目标，避免瞬间转头。</li><li><a href="https://github.com/aaif-goose/goose/blob/main/ui/desktop/src/components/FlyingBird.tsx" target="_blank" rel="noreferrer">Goose 的飞行动画</a>：连续的飞行动作与不同等待状态，角色在一段时间里保持活动。</li><li><a href="https://github.com/openclaw/openclaw/blob/main/apps/shared/OpenClawKit/Sources/OpenClawChatUI/OpenClawMascotAnimator.swift" target="_blank" rel="noreferrer">OpenClaw 的角色动画器</a>：基础循环、微动作和一次性手势分层，部件采用不同节奏与延迟。</li></ul><p>这一页可以暂停、慢放、逐状态查看，也遵循系统减弱动态。完成动作只演一次再安定；中止不会播放成功动作。</p></div></details>
+    <footer><p>本轮仅为 Bot 动画设计候选，尚未替换应用中的模型标识。主题预览继续保留，不接入应用。所有文字为合成样例，不调用模型、不保存输入。</p><a href="../theme-candidates-v3/index.html">查看主题预览 ↗</a></footer>
+  </main>
+  <script defer src="rigs.js"></script>
+  <script defer src="studio.js"></script>
+</body>
+</html>
