@@ -8,8 +8,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
@@ -26,6 +32,8 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.aiassistant.ui.theme.EchoMotion
 import com.aiassistant.ui.theme.rememberReducedMotion
 import com.aiassistant.utils.EchoModelMarkStyle
@@ -77,7 +85,7 @@ fun modelMarkColorFor(accent: Color, backdrop: Color): Color {
  * 相位只在 Canvas 绘制时读取，不使流式正文重新组合或测量；结束后卸载动画。
  */
 @Composable
-fun EchoModelMark(
+internal fun EchoModelMark(
     color: Color,
     style: String = EchoModelMarkStyle.CONCENTRIC,
     animated: Boolean = false,
@@ -85,21 +93,50 @@ fun EchoModelMark(
     reducedMotion: Boolean = rememberReducedMotion(),
     description: String? = null,
     state: EchoModelMarkState = if (animated) EchoModelMarkState.Replying else EchoModelMarkState.Neutral,
-    completionEvent: Long = 0L
+    completionEvent: Long = 0L,
+    completionOwner: ModelMarkCompletionMotion? = null
 ) {
     val resolvedStyle = EchoModelMarkStyle.sanitize(style)
     val isBot = resolvedStyle in EchoModelMarkStyle.botStyles
-    val completionMotion = remember { ModelMarkCompletionMotion() }
+    val isExpressiveBot = resolvedStyle in EchoModelMarkStyle.expressiveBotStyles
+    // Retain the controller across style choices so changing a completed identity cannot replay its event.
+    val expressiveMotion = remember(completionOwner) {
+        ExpressiveBotMotionController(resolvedStyle, completionOwner ?: ModelMarkCompletionMotion())
+    }
+    val expressiveFrame = remember { mutableStateOf(expressiveMotion.pose) }
     val completionProgress = remember { Animatable(1f) }
-    LaunchedEffect(state, completionEvent, reducedMotion) {
-        val playCompletion = completionMotion.update(state, completionEvent)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var lifecycleStarted by remember(lifecycle) {
+        mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleStarted = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state, completionEvent, reducedMotion, resolvedStyle, lifecycleStarted, expressiveMotion) {
+        // Consume exactly once; native and legacy drawing share this result, including across remounts.
+        val playCompletion = expressiveMotion.update(state, completionEvent, reducedMotion, resolvedStyle, enabled = isExpressiveBot)
+        expressiveFrame.value = expressiveMotion.pose
         completionProgress.snapTo(1f)
-        if (isBot && playCompletion && !reducedMotion) {
+        if (!lifecycleStarted) return@LaunchedEffect
+        if (isBot && !isExpressiveBot && playCompletion && !reducedMotion) {
             completionProgress.snapTo(0f)
             completionProgress.animateTo(1f, EchoMotion.tweenSpec(EchoMotion.Duration.slow))
         }
+        var lastFrame = 0L
+        while (expressiveMotion.needsFrames) {
+            withFrameNanos { now ->
+                if (lastFrame != 0L) expressiveMotion.advance((now - lastFrame) / 1_000_000f)
+                lastFrame = now
+                // Only the Canvas observes this value: the streamed message never recomposes per frame.
+                expressiveFrame.value = expressiveMotion.pose
+            }
+        }
     }
-    val phase: State<Float>? = if (state.isActive && !reducedMotion) {
+    val phase: State<Float>? = if (state.isActive && !reducedMotion && !isExpressiveBot) {
         rememberInfiniteTransition(label = "modelMark").animateFloat(
             initialValue = 0f,
             targetValue = 1f,
@@ -110,6 +147,10 @@ fun EchoModelMark(
     Canvas(modifier.size(26.dp).semantics {
         description?.let { contentDescription = it }
     }) {
+        if (isExpressiveBot) {
+            drawExpressiveBot(color, expressiveFrame.value)
+            return@Canvas
+        }
         val progress = phase?.value ?: 0f
         val pulse = if (phase == null) 0f else sin((progress * 2f * PI).toFloat())
         if (isBot) {
@@ -164,6 +205,27 @@ fun EchoModelMark(
                 drawCircle(color.copy(alpha = color.alpha * (0.86f + 0.10f * pulse)),
                     radius * (0.60f - 0.045f * pulse), style = Stroke(stroke))
             }
+        }
+    }
+}
+
+/** Original two-eye identity, drawn natively at any size; all limbs and decorative props are omitted. */
+internal fun DrawScope.drawExpressiveBot(color: Color, pose: ExpressiveBotPose) {
+    val factor = size.minDimension / 100f
+    val eyeColor = readableTextColorFor(color)
+    withTransform({
+        translate((size.width - size.minDimension) * .5f, (size.height - size.minDimension) * .5f)
+        scale(factor, factor, Offset.Zero)
+        translate(pose.bodyX, pose.bodyY)
+        rotate(pose.rotation, Offset(50f, 54f))
+        scale(pose.scaleX, pose.scaleY, Offset(50f, 54f))
+    }) {
+        drawRoundRect(color, Offset(50f - pose.bodyWidth * .5f, 54f - pose.bodyHeight * .5f),
+            Size(pose.bodyWidth, pose.bodyHeight), CornerRadius(pose.cornerRadius, pose.cornerRadius))
+        listOf(pose.left, pose.right).forEach { eye ->
+            drawRoundRect(eyeColor,
+                Offset(pose.faceX + eye.x - eye.width * .5f, pose.faceY + eye.y - eye.height * .5f),
+                Size(eye.width, eye.height), CornerRadius(minOf(eye.width, eye.height) * .5f))
         }
     }
 }

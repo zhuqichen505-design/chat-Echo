@@ -1,7 +1,22 @@
 package com.aiassistant
 
 import android.app.Application
+import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import com.aiassistant.domain.model.*
+import com.aiassistant.ui.components.EchoModelMarkState
+import com.aiassistant.ui.components.drawExpressiveBot
+import com.aiassistant.ui.components.expressiveBotDurationMillis
+import com.aiassistant.ui.components.modelMarkColorFor
+import com.aiassistant.ui.components.readableTextColorFor
+import com.aiassistant.ui.components.sampleExpressiveBotPose
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.EchoAppearancePreset
 import com.aiassistant.utils.EchoHomeLayoutStyle
@@ -14,10 +29,141 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun rawStoredModelIdentityKeysRemainCompatibleWhenNewBotsAreAdded() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        val storedKeys = mapOf(
+            "concentric" to EchoModelMarkStyle.CONCENTRIC,
+            "orbit" to EchoModelMarkStyle.ORBIT,
+            "prism" to EchoModelMarkStyle.PRISM,
+            "waveform" to EchoModelMarkStyle.WAVEFORM,
+            "bot_round" to EchoModelMarkStyle.BOT_ROUND,
+            "bot_square" to EchoModelMarkStyle.BOT_SQUARE,
+            "bot_capsule" to EchoModelMarkStyle.BOT_CAPSULE,
+            "bot_pixel" to EchoModelMarkStyle.BOT_PIXEL,
+            "bot_orb" to EchoModelMarkStyle.BOT_ORB,
+            "bot_tile" to EchoModelMarkStyle.BOT_TILE,
+            "bot_wide" to EchoModelMarkStyle.BOT_WIDE
+        )
+        for ((rawKey, expectedStyle) in storedKeys) {
+            // 写入旧安装或备份中的真实键，而不是通过当前 sanitizer 构造输入。
+            assertTrue(prefs.edit().clear().putString("model_mark_style", rawKey)
+                .putBoolean("show_model_avatar", false).putBoolean("show_thinking_bubbles", false)
+                .putString("about_user", "合成阅读偏好").commit())
+            val restored = PersonalizationManager(context)
+            assertEquals(expectedStyle, restored.getSettings().modelMarkStyle)
+            assertFalse(restored.getSettings().showModelAvatar)
+            assertFalse(restored.getSettings().showThinkingBubbles)
+            val prompt = restored.buildPrompt()
+            assertTrue(restored.saveSettings(restored.getSettings().copy(appearancePreset = EchoAppearancePreset.INDEX)))
+            val afterUnrelatedSave = PersonalizationManager(context)
+            assertEquals("主题切换不应重置已有Bot选择", expectedStyle, afterUnrelatedSave.getSettings().modelMarkStyle)
+            assertEquals(rawKey, prefs.getString("model_mark_style", null))
+            assertEquals(prompt, afterUnrelatedSave.buildPrompt())
+            assertFalse(afterUnrelatedSave.getSettings().showModelAvatar)
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun expressiveBotsRenderRealDistinctUnclippedFramesAtMessageAndPreviewSizes() {
+        val styles = EchoModelMarkStyle.expressiveBotStyles
+        val states = listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
+            EchoModelMarkState.Replying, EchoModelMarkState.Completed)
+        val outputDirectory = File("build/reports/visual-tests/model-bots")
+        assertTrue(outputDirectory.isDirectory || outputDirectory.mkdirs())
+        for ((theme, backdrop) in listOf("light" to Color.White, "dark" to Color.Black)) {
+            val bodyColor = modelMarkColorFor(Color(0xFF397DE6), backdrop)
+            val eyeColor = readableTextColorFor(bodyColor).toArgb()
+            val gallery = Bitmap.createBitmap(8 * 128, styles.size * states.size * 128, Bitmap.Config.ARGB_8888)
+            gallery.eraseColor(backdrop.toArgb())
+            val galleryCanvas = android.graphics.Canvas(gallery)
+            for ((styleIndex, style) in styles.withIndex()) {
+                for ((stateIndex, state) in states.withIndex()) {
+                    for (size in listOf(26, 128)) {
+                        val snapshots = (0 until 8).map { frame ->
+                            val pose = sampleExpressiveBotPose(style, state,
+                                expressiveBotDurationMillis(style, state) * frame / 8f)
+                            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                            CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr,
+                                Canvas(bitmap.asImageBitmap()), Size(size.toFloat(), size.toFloat())) {
+                                drawExpressiveBot(bodyColor, pose)
+                            }
+                            val pixels = IntArray(size * size)
+                            bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+                            // Thin capsule edges and brief blinks are antialiased and need not contain
+                            // exact eyeColor pixels. Measure their real contribution on the opaque body.
+                            val (leftEye, rightEye) = projectedEyeVisibility(pixels, size, bodyColor.toArgb(), eyeColor)
+                            val minimumArea = size * size / (26f * 26f)
+                            fun visible(eye: EyeVisibility) = eye.effectivePixels >= 2 &&
+                                eye.coverageArea >= minimumArea && eye.peakCoverage >= .45f
+                            if (!visible(leftEye) || !visible(rightEye)) {
+                                File(outputDirectory, "failure-$theme-$style-${state.name}-$size-$frame.png")
+                                    .outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            }
+                            assertTrue("$style $state $size dp 必须实际绘出身体", pixels.any { it == bodyColor.toArgb() })
+                            assertTrue("$style $state $size dp 左眼应有独立可见像素、面积与对比贡献: $leftEye", visible(leftEye))
+                            assertTrue("$style $state $size dp 右眼应有独立可见像素、面积与对比贡献: $rightEye", visible(rightEye))
+                            if (size == 128) {
+                                val edges = (0 until size).flatMap { index ->
+                                    listOf(pixels[index], pixels[(size - 1) * size + index],
+                                        pixels[index * size], pixels[index * size + size - 1])
+                                }
+                                assertTrue("$style $state 动作不应裁切到画布边缘", edges.all { it ushr 24 == 0 })
+                                galleryCanvas.drawBitmap(bitmap, frame * 128f,
+                                    (styleIndex * states.size + stateIndex) * 128f, null)
+                            }
+                            bitmap.recycle()
+                            pixels.contentHashCode()
+                        }
+                        assertTrue("$style $state $size dp 必须是真实多帧运动，不能只更换表情标签",
+                            snapshots.toSet().size >= 5)
+                    }
+                }
+            }
+            File(outputDirectory, "expressive-bots-$theme.png").outputStream().use {
+                assertTrue(gallery.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+            gallery.recycle()
+        }
+    }
+
+    private data class EyeVisibility(val effectivePixels: Int, val coverageArea: Float, val peakCoverage: Float)
+
+    private fun projectedEyeVisibility(pixels: IntArray, size: Int, body: Int, eye: Int): Pair<EyeVisibility, EyeVisibility> {
+        fun channel(color: Int, shift: Int) = ((color ushr shift) and 0xff).toFloat()
+        val bodyRed = channel(body, 16)
+        val bodyGreen = channel(body, 8)
+        val bodyBlue = channel(body, 0)
+        val redDifference = channel(eye, 16) - bodyRed
+        val greenDifference = channel(eye, 8) - bodyGreen
+        val blueDifference = channel(eye, 0) - bodyBlue
+        val squaredDistance = redDifference * redDifference + greenDifference * greenDifference + blueDifference * blueDifference
+        assertTrue("眼睛必须与身体有不同颜色", squaredDistance > 0f)
+        val areas = FloatArray(2)
+        val peaks = FloatArray(2)
+        val counts = IntArray(2)
+        pixels.forEachIndexed { index, pixel ->
+            // Transparent antialiasing along the outer silhouette cannot count as an eye.
+            if (pixel ushr 24 == 255) {
+                val contribution = (channel(pixel, 16) - bodyRed) * redDifference +
+                    (channel(pixel, 8) - bodyGreen) * greenDifference + (channel(pixel, 0) - bodyBlue) * blueDifference
+                val coverage = (contribution / squaredDistance).coerceIn(0f, 1f)
+                val side = if (index % size < size / 2) 0 else 1
+                areas[side] += coverage
+                peaks[side] = maxOf(peaks[side], coverage)
+                if (coverage >= .15f) counts[side]++
+            }
+        }
+        return EyeVisibility(counts[0], areas[0], peaks[0]) to EyeVisibility(counts[1], areas[1], peaks[1])
+    }
+
     @Test fun modelIdentityChoicesPersistIndependentlyFromThinkingAndPromptPreferences() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()

@@ -84,6 +84,7 @@ import com.aiassistant.ui.components.EchoPulseRing
 import com.aiassistant.ui.components.EchoTextToolbar
 import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
+import com.aiassistant.ui.components.ModelMarkCompletionMotion
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.StreamingAnimationStyle
 import com.aiassistant.ui.components.EchoTextToolbarHost
@@ -503,6 +504,8 @@ internal fun MessageBubble(
     val reducedMotion = com.aiassistant.ui.theme.rememberReducedMotion()
     val settleEligible = settleSignal && generationState != GenerationUiState.Failed
     var modelMarkCompleted by remember(message.id) { mutableStateOf(false) }
+    // The message owns consumption: changing the avatar/thinking layout cannot replay a completed identity.
+    val modelMarkCompletionOwner = remember(message.id) { ModelMarkCompletionMotion() }
     var previousModelMarkGenerationState by remember(message.id) { mutableStateOf<GenerationUiState?>(null) }
     val modelMarkCompletionNow = remember(previousModelMarkGenerationState, generationState, message.content, settleEligible) {
         GenerationUiStateRules.modelMarkCompletionObserved(
@@ -519,6 +522,13 @@ internal fun MessageBubble(
     val modelMarkState = GenerationUiStateRules.modelMarkState(generationState,
         completed = (modelMarkCompleted || modelMarkCompletionNow) &&
             remember(message.content) { GenerationUiStateRules.modelMarkHasSuccessfulBody(message.content) })
+    LaunchedEffect(modelMarkState, modelMarkCompleted, modelMarkCompletionNow, personalizationSettings.showModelAvatar) {
+        if (personalizationSettings.showModelAvatar) {
+            // Keep hidden identities up to date, so restoring a mark never celebrates an unseen old completion.
+            modelMarkCompletionOwner.update(modelMarkState,
+                if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L)
+        }
+    }
     var cursorAlive by remember { mutableStateOf(isGenerating || settleEligible) }
     val wasGenerating = remember { mutableStateOf(isGenerating || settleEligible) }
     // P0-3② 落定脉冲：scale 1.0→0.995→1.0（200ms，graphicsLayer 绘制层，一次性）
@@ -949,6 +959,7 @@ internal fun MessageBubble(
                                 animated = GenerationUiStateRules.animateModelMark(generationState),
                                 state = modelMarkState,
                                 completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
+                                completionOwner = modelMarkCompletionOwner,
                                 modifier = Modifier.padding(top = 3.dp).size(28.dp),
                                 reducedMotion = reducedMotion,
                                 description = "模型标识"
@@ -1149,6 +1160,7 @@ internal fun MessageBubble(
                                     animated = GenerationUiStateRules.animateModelMark(generationState),
                                     state = modelMarkState,
                                     completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
+                                    completionOwner = modelMarkCompletionOwner,
                                     modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 26.dp else 22.dp),
                                     reducedMotion = reducedMotion
                                 )

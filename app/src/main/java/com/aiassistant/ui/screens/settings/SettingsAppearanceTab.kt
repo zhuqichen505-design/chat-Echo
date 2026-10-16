@@ -78,6 +78,7 @@ import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.EchoModelMarkState
+import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.echoSwitchColors
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
@@ -590,18 +591,39 @@ fun AppearanceTab(
         item {
             SettingsGlassCard(hazeState = hazeState) {
                 Text("模型标识", style = MaterialTheme.typography.titleMedium)
-                HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后可选线条机器人或几何标识，不影响用户头像或思考气泡。", settings.showModelAvatar) { enabled ->
+                HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后可选极简 Bot、线条机器人或几何标识。", settings.showModelAvatar) { enabled ->
                     saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }
                 }
                 if (!settings.showModelAvatar) {
-                    Text("连接、思考与回复有不同表情，正常完成只点头一次后静止。遵循系统移除动画设置。",
+                    Text("自然双眼随视线移动；连接探看、思考侧倾停顿、回复轻点、完成点头收势。遵循系统移除动画设置。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        EchoModelMark(
+                            color = modelMarkColorFor(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surface),
+                            style = settings.modelMarkStyle,
+                            state = modelMarkPreviewState,
+                            completionEvent = modelMarkPreviewCompletionEvent,
+                            modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)),
+                            description = "当前模型标识预览"
+                        )
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("实时预览", style = MaterialTheme.typography.titleSmall)
+                            Text("选择下方状态查看动作；再次点击完成可重播。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     Text("预览状态", style = MaterialTheme.typography.labelLarge)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         listOf(
+                            EchoModelMarkState.Neutral to "静止",
                             EchoModelMarkState.Connecting to "连接",
                             EchoModelMarkState.Thinking to "思考",
                             EchoModelMarkState.Replying to "回复",
@@ -617,9 +639,9 @@ fun AppearanceTab(
                             )
                         }
                     }
-                    Text("点击“完成”可重播一次点头；预览状态不会改变模型请求。",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     listOf(
+                        "极简 Bot" to listOf(EchoModelMarkStyle.BOT_ORB to "圆圆", EchoModelMarkStyle.BOT_TILE to "方方",
+                            EchoModelMarkStyle.BOT_WIDE to "扁扁"),
                         "线条机器人" to listOf(EchoModelMarkStyle.BOT_ROUND to "圆豆", EchoModelMarkStyle.BOT_SQUARE to "方糖",
                             EchoModelMarkStyle.BOT_CAPSULE to "团子", EchoModelMarkStyle.BOT_PIXEL to "小方"),
                         "几何标识" to listOf(EchoModelMarkStyle.CONCENTRIC to "同心圆", EchoModelMarkStyle.ORBIT to "轨道",
@@ -636,8 +658,8 @@ fun AppearanceTab(
                                     leadingIcon = {
                                         EchoModelMark(color = if (settings.modelMarkStyle == value) MaterialTheme.colorScheme.onPrimaryContainer
                                             else MaterialTheme.colorScheme.primary,
-                                            style = value, state = modelMarkPreviewState,
-                                            completionEvent = modelMarkPreviewCompletionEvent, modifier = Modifier.size(26.dp))
+                                            style = value, state = EchoModelMarkState.Neutral,
+                                            modifier = Modifier.size(if (value in EchoModelMarkStyle.expressiveBotStyles) 32.dp else 26.dp))
                                     }, colors = echoFilterChipColors(), border = echoFilterChipBorder(settings.modelMarkStyle == value))
                             }
                         }

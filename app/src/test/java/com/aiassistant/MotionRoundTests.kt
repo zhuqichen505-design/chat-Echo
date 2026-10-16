@@ -6,10 +6,17 @@ import com.aiassistant.ui.components.computeStableSegments
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.ModelMarkCompletionMotion
+import com.aiassistant.ui.components.ExpressiveBotMotionController
+import com.aiassistant.ui.components.ExpressiveBotPose
+import com.aiassistant.ui.components.expressiveBotDurationMillis
+import com.aiassistant.ui.components.expressiveBotRestPose
+import com.aiassistant.ui.components.sampleExpressiveBotPose
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.aiassistant.ui.screens.chat.GenerationUiState
 import com.aiassistant.ui.screens.chat.GenerationUiStateRules
+import com.aiassistant.utils.EchoModelMarkStyle
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,6 +28,231 @@ import org.junit.Test
  * - P0-4：GenerationUiState 状态机派生行为等价
  */
 class MotionRoundTests {
+
+    @Test fun expressiveBotsAnimateCommonGazeAndBodyRhythmThroughoutEveryGenerationState() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            for (state in EchoModelMarkState.entries.filter { it.isActive }) {
+                val duration = expressiveBotDurationMillis(style, state)
+                val frames = (0 until 40).map { sampleExpressiveBotPose(style, state, duration * it / 40f) }
+                val bodies = frames.map { listOf(it.bodyX, it.bodyY, it.rotation, it.scaleX, it.scaleY) }.toSet()
+                assertTrue("$style $state 身体必须持续运动", bodies.size >= 12)
+                assertTrue("$style $state 双眼视线必须共同连续移动", frames.map { it.faceX to it.faceY }.toSet().size >= 12)
+                val eyeHeights = (0..400).map { sampleExpressiveBotPose(style, state, it * 20f).left.height }
+                val openHeight = expressiveBotRestPose(style).left.height
+                assertTrue("$style $state 需有短暂同步眨眼", eyeHeights.any { it < openHeight * .2f })
+                assertTrue("$style $state 眨眼间应恢复自然胶囊眼", eyeHeights.count { it == openHeight } > 300)
+            }
+            val connecting = expressiveFrames(style, EchoModelMarkState.Connecting)
+            assertTrue("连接时视线应向两侧寻找", connecting.any { it.faceX < -3f } && connecting.any { it.faceX > 3f })
+            val thinking = expressiveFrames(style, EchoModelMarkState.Thinking)
+            assertTrue("思考应有克制而可辨识的歪头", thinking.any { abs(it.rotation) > 2f })
+            assertTrue("思考应保持向上的共同视线", thinking.any { it.faceY < -2f })
+            val replying = expressiveFrames(style, EchoModelMarkState.Replying)
+            assertTrue("输出应包含轻微点头及回弹", replying.any { it.bodyY < -.1f } && replying.any { it.bodyY > .5f })
+            assertTrue("自然动作不应剧烈摆动", (connecting + thinking + replying).all {
+                abs(it.rotation) < 8f && abs(it.bodyY) < 3f
+            })
+            val bodySequences = listOf(connecting, thinking, replying).map { sequence ->
+                sequence.map { listOf(it.bodyX, it.bodyY, it.rotation, it.scaleX, it.scaleY) }
+            }
+            assertEquals("三种状态须通过体态与节奏区分", 3, bodySequences.toSet().size)
+        }
+    }
+
+    @Test fun expressiveBotEyesRemainFiniteAndInsideTheirBodyAcrossMotionAndReducedPoses() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val rest = expressiveBotRestPose(style)
+            for (state in EchoModelMarkState.entries) {
+                val duration = expressiveBotDurationMillis(style, state).coerceAtLeast(1f)
+                for (reduced in listOf(false, true)) {
+                    val times = (0..100).map { duration * it / 100f } +
+                        listOf(-100f, Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)
+                    for (time in times) {
+                        val pose = sampleExpressiveBotPose(style, state, time, reduced)
+                        assertTrue("$style $state 身体几何应为有限数", listOf(pose.bodyWidth, pose.bodyHeight,
+                            pose.cornerRadius, pose.bodyX, pose.bodyY, pose.rotation, pose.scaleX,
+                            pose.scaleY, pose.faceX, pose.faceY).all { it.isFinite() })
+                        assertTrue(pose.bodyWidth > 0f && pose.bodyHeight > 0f && pose.cornerRadius > 0f)
+                        assertTrue(pose.scaleX in .8f..1.2f && pose.scaleY in .8f..1.2f)
+                        assertEquals("双眼必须同步眨眼，不能一长一短", pose.left.height, pose.right.height, 0f)
+                        assertEquals("双眼保持相同的固定宽度", pose.left.width, pose.right.width, 0f)
+                        assertEquals("视线移动不能使两眼高低错位", pose.left.y, pose.right.y, 0f)
+                        assertEquals(rest.left.x, pose.left.x, 0f)
+                        assertEquals(rest.right.x, pose.right.x, 0f)
+                        assertEquals(rest.left.y, pose.left.y, 0f)
+                        assertEquals(rest.right.y, pose.right.y, 0f)
+                        assertEquals(rest.left.width, pose.left.width, 0f)
+                        assertEquals(rest.right.width, pose.right.width, 0f)
+                        for (eye in listOf(pose.left, pose.right)) {
+                            assertTrue(listOf(eye.x, eye.y, eye.width, eye.height).all { it.isFinite() })
+                            assertTrue(eye.width > 0f && eye.height > 0f)
+                            // Production draws a filled roundRect: its full width/height are the bounds.
+                            assertTrue("$style $state 眼睛不应越出身体左右边缘",
+                                abs(eye.x + pose.faceX - 50f) + eye.width / 2f < pose.bodyWidth / 2f)
+                            assertTrue("$style $state 眼睛不应越出身体上下边缘",
+                                abs(eye.y + pose.faceY - 54f) + eye.height / 2f < pose.bodyHeight / 2f)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun expressiveBotTransitionsContinueFromInterruptedPoseAndStopAfterNeutralSettles() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val controller = ExpressiveBotMotionController(style)
+            for (state in listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
+                EchoModelMarkState.Replying, EchoModelMarkState.Thinking)) {
+                val before = controller.pose
+                controller.update(state)
+                assertEquals("状态切换的第一帧不能跳到另一张姿态", before, controller.pose)
+                advanceExpressiveBot(controller, 96f)
+                assertTrue("过渡必须从原姿态开始移动", before != controller.pose)
+            }
+            val interrupted = controller.pose
+            controller.update(EchoModelMarkState.Neutral)
+            assertEquals(interrupted, controller.pose)
+            assertTrue(controller.needsFrames)
+            advanceExpressiveBot(controller, ExpressiveBotMotionController.TRANSITION_MILLIS)
+            assertEquals(expressiveBotRestPose(style), controller.pose)
+            assertFalse("取消、失败与待选方向转中性后应停止帧循环", controller.needsFrames)
+            val resting = controller.pose
+            controller.advance(5000f)
+            assertEquals(resting, controller.pose)
+        }
+    }
+
+    @Test fun expressiveBotCompletionIsFiniteDeduplicatedAndNeverStartsOnHistoricalMount() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val controller = ExpressiveBotMotionController(style)
+            controller.update(EchoModelMarkState.Completed)
+            assertEquals(expressiveBotRestPose(style), controller.pose)
+            assertFalse("首次挂载的历史完成消息应静止", controller.needsFrames)
+            controller.update(EchoModelMarkState.Replying)
+            advanceExpressiveBot(controller, 410f)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 41L)
+            advanceExpressiveBot(controller, 400f)
+            val celebration = controller.pose
+            assertTrue(celebration != expressiveBotRestPose(style))
+            controller.update(EchoModelMarkState.Completed, completionEvent = 41L)
+            assertEquals("同一完成事件的重组不能重置动作", celebration, controller.pose)
+            advanceExpressiveBot(controller, 2000f)
+            assertEquals(expressiveBotRestPose(style), controller.pose)
+            assertFalse(controller.needsFrames)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 41L)
+            assertFalse("已完成的事件不能重播", controller.needsFrames)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 42L)
+            assertTrue("设置中的明确新预览事件可以重播", controller.needsFrames)
+            advanceExpressiveBot(controller, 2000f)
+            controller.update(EchoModelMarkState.Connecting)
+            controller.update(EchoModelMarkState.Replying)
+            controller.update(EchoModelMarkState.Completed)
+            assertTrue("下一次真实生成仍可播放完成动作", controller.needsFrames)
+        }
+    }
+
+    @Test fun expressiveBotsRespectReducedMotionAndDoNotReplayEventsAfterRestoringAnimation() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            for (state in EchoModelMarkState.entries) {
+                val rest = sampleExpressiveBotPose(style, state, 0f, reducedMotion = true)
+                for (time in listOf(75f, 4000f, 90_000f, Float.NaN)) {
+                    assertEquals("减弱动态的姿态不应随时间变化", rest,
+                        sampleExpressiveBotPose(style, state, time, reducedMotion = true))
+                }
+            }
+            val controller = ExpressiveBotMotionController(style)
+            controller.update(EchoModelMarkState.Thinking, reducedMotion = true)
+            val thinking = controller.pose
+            assertFalse(controller.needsFrames)
+            advanceExpressiveBot(controller, 300f)
+            assertEquals(thinking, controller.pose)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 73L, reducedMotion = true)
+            assertEquals(expressiveBotRestPose(style), controller.pose)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 73L)
+            assertFalse("恢复动画不应补播减弱期间已消费的完成", controller.needsFrames)
+            controller.update(EchoModelMarkState.Replying, enabled = false)
+            assertFalse(controller.needsFrames)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 74L, enabled = false)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 74L, enabled = true)
+            assertFalse("头像/其他标识期间的完成不能在重新显示Bot后补播", controller.needsFrames)
+        }
+    }
+
+    @Test fun expressiveBotControllerRejectsInvalidDeltasAndAvoidsBackgroundTimeCatchUp() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val controller = ExpressiveBotMotionController(style)
+            val normalFrame = ExpressiveBotMotionController(style)
+            controller.update(EchoModelMarkState.Thinking)
+            normalFrame.update(EchoModelMarkState.Thinking)
+            advanceExpressiveBot(controller, 400f)
+            advanceExpressiveBot(normalFrame, 400f)
+            val before = controller.pose
+            for (invalid in listOf(-100f, Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+                controller.advance(invalid)
+                assertEquals("异常帧时间不能改变可见姿态", before, controller.pose)
+            }
+            controller.advance(60_000f)
+            normalFrame.advance(ExpressiveBotMotionController.MAX_FRAME_MILLIS)
+            assertEquals("后台一分钟不能把运动快进一分钟", normalFrame.pose, controller.pose)
+        }
+    }
+
+    @Test fun changingExpressiveBotStyleDuringCompletionSettlesWithoutReplayingCelebration() {
+        val styles = EchoModelMarkStyle.expressiveBotStyles.toList()
+        for (index in styles.indices) {
+            val controller = ExpressiveBotMotionController(styles[index])
+            controller.update(EchoModelMarkState.Replying)
+            advanceExpressiveBot(controller, 400f)
+            controller.update(EchoModelMarkState.Completed, completionEvent = 91L)
+            advanceExpressiveBot(controller, 350f)
+            val before = controller.pose
+            val replacement = styles[(index + 1) % styles.size]
+            controller.update(EchoModelMarkState.Completed, completionEvent = 91L, style = replacement)
+            assertEquals("切换体型时保留当前可见姿态", before, controller.pose)
+            advanceExpressiveBot(controller, 300f)
+            assertEquals(expressiveBotRestPose(replacement), controller.pose)
+            assertFalse("切换体型后不能留下完成动画或空转帧循环", controller.needsFrames)
+        }
+    }
+
+    @Test fun sharedMessageCompletionOwnerSurvivesIdentityRemountAndAllowsSameIdRegeneration() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val owner = ModelMarkCompletionMotion()
+            val firstIdentity = ExpressiveBotMotionController(style, owner)
+            firstIdentity.update(EchoModelMarkState.Replying)
+            advanceExpressiveBot(firstIdentity, 400f)
+            firstIdentity.update(EchoModelMarkState.Completed, completionEvent = 103L)
+            assertTrue(firstIdentity.needsFrames)
+
+            // 气泡父级仍在，但头像开关或思考气泡开关使身份子组件重挂载。
+            val remountedIdentity = ExpressiveBotMotionController(style, owner)
+            remountedIdentity.update(EchoModelMarkState.Completed, completionEvent = 103L)
+            assertEquals(expressiveBotRestPose(style), remountedIdentity.pose)
+            assertFalse("同一消息的子组件重挂载不能重播完成", remountedIdentity.needsFrames)
+
+            // 原消息 id 保持不变的重新生成仍是新一轮，不能被事件去重吞掉。
+            remountedIdentity.update(EchoModelMarkState.Connecting)
+            remountedIdentity.update(EchoModelMarkState.Replying)
+            remountedIdentity.update(EchoModelMarkState.Completed, completionEvent = 103L)
+            assertTrue("原id重新生成成功后仍应播放一次完成", remountedIdentity.needsFrames)
+            advanceExpressiveBot(remountedIdentity, 2000f)
+            assertFalse(remountedIdentity.needsFrames)
+            remountedIdentity.update(EchoModelMarkState.Completed, completionEvent = 103L)
+            assertFalse(remountedIdentity.needsFrames)
+        }
+    }
+
+    private fun expressiveFrames(style: String, state: EchoModelMarkState): List<ExpressiveBotPose> =
+        (0..80).map { sampleExpressiveBotPose(style, state, expressiveBotDurationMillis(style, state) * it / 80f) }
+
+    private fun advanceExpressiveBot(controller: ExpressiveBotMotionController, durationMillis: Float) {
+        var remaining = durationMillis
+        while (remaining > 0f) {
+            val step = minOf(16f, remaining)
+            controller.advance(step)
+            remaining -= step
+        }
+    }
 
     @Test fun botCompletionPlaysOnceForObservedGenerationAndNeverForHistoricalMountOrCancelledOutput() {
         val motion = ModelMarkCompletionMotion()
