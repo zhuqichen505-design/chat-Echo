@@ -364,8 +364,21 @@ internal fun ContextUsageDialog(
     onPreviewCompressionSettings: ((Int, Int) -> Unit)? = null
 ) {
     val usage = state.usage
-    // 压缩档位卡片有待确认变更时注册的"确认并生效"动作；右下角"完成"键视同确认
-    var pendingTierApply by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val busy = state.isCompressing || state.isGeneratingSummary
+    // Keep edits in the dialog: LazyColumn may dispose the selector while the user
+    // scrolls to the compression button. A disposed row must not lose its draft.
+    var draft by remember { mutableStateOf<ContextCompressionSelection?>(null) }
+    val saved = usage?.let { ContextCompressionSelection.from(it) }
+    val selection = draft ?: saved
+    val hasPendingChange = selection != null && saved != null && !selection.matches(saved)
+    LaunchedEffect(saved) {
+        if (draft?.matches(saved) == true) draft = null
+    }
+    fun applySelection() {
+        if (!busy && hasPendingChange && selection != null) {
+            onSelectCompressionTier?.invoke(selection.tier, selection.recentRounds, selection.customPercent)
+        }
+    }
 
     EchoGlassDialog(
         hazeState = hazeState,
@@ -417,9 +430,11 @@ internal fun ContextUsageDialog(
                     item {
                         ContextCompressionTierSelectorCard(
                             usage = usage,
-                            onApplyTier = onSelectCompressionTier,
+                            selection = selection ?: ContextCompressionSelection.from(usage),
+                            busy = busy,
+                            onSelectionChanged = { draft = it },
+                            onApplyTier = { _, _, _ -> applySelection() },
                             onPreviewSettingsChanged = onPreviewCompressionSettings,
-                            onRegisterApplyPending = { action -> pendingTierApply = action }
                         )
                     }
                     if (onUpdateContextLimit != null) {
@@ -439,7 +454,9 @@ internal fun ContextUsageDialog(
                             state = state,
                             onGenerateRollingSummary = onGenerateRollingSummary,
                             onEditRollingSummary = onEditRollingSummary,
-                            onCompress = onCompress
+                            onCompress = { if (hasPendingChange) applySelection() else onCompress() },
+                            selectedTier = selection?.tier ?: usage.compressionTier,
+                            hasPendingChange = hasPendingChange
                         )
                     }
                     item {
@@ -459,6 +476,11 @@ internal fun ContextUsageDialog(
             }
         },
         buttons = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.statusMessage?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -477,16 +499,13 @@ internal fun ContextUsageDialog(
                         Text("刷新状态")
                     }
                 }
-                Button(onClick = {
-                    // 直接点"完成"：若有待确认的压缩档位/参数变更，视同已确认并生效
-                    if (!state.isCompressing && !state.isGeneratingSummary) {
-                        pendingTierApply?.invoke()
-                        pendingTierApply = null
-                    }
+                Button(enabled = !busy, onClick = {
+                    applySelection()
                     onDismiss()
                 }) {
                     Text("完成")
                 }
+            }
             }
         }
     )
@@ -498,7 +517,9 @@ internal fun ContextOptimizationActions(
     state: ContextUsageUiState,
     onGenerateRollingSummary: () -> Unit,
     onEditRollingSummary: (() -> Unit)?,
-    onCompress: () -> Unit
+    onCompress: () -> Unit,
+    selectedTier: com.aiassistant.domain.model.CompressionTier = usage.compressionTier,
+    hasPendingChange: Boolean = false
 ) {
     val busy = state.isCompressing || state.isGeneratingSummary
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -521,12 +542,22 @@ internal fun ContextOptimizationActions(
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("释放上下文空间", style = MaterialTheme.typography.titleSmall)
-                Text("连续总结较早原文，保留最近完整对话轮次和置顶内容。摘要成功且原文未变化后才更新覆盖范围；失败时保留原文和原摘要。",
+                val appliesRollingTier = selectedTier == com.aiassistant.domain.model.CompressionTier.L0 ||
+                    selectedTier == com.aiassistant.domain.model.CompressionTier.L1
+                Text(if (appliesRollingTier && !hasPendingChange)
+                    "将应用滚动摘要档，保留最近 8 轮完整原文和置顶轮次，连续总结更早内容。摘要成功且原文未变化后才更新覆盖范围。"
+                    else "按所选档位连续总结较早原文，保留对应的完整对话轮次和置顶内容。摘要成功且原文未变化后才更新覆盖范围；失败时保留原文和原摘要。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onCompress, enabled = !busy && usage.canCompress, modifier = Modifier.align(Alignment.End)) {
-                    Text(if (state.isCompressing) "正在压缩…" else if (usage.canCompress) "压缩较早对话" else "暂无待压缩历史")
+                Button(onClick = onCompress, enabled = !busy && (usage.canCompress || hasPendingChange), modifier = Modifier.align(Alignment.End)) {
+                    Text(when {
+                        state.isCompressing -> "正在应用…"
+                        hasPendingChange -> "应用所选策略"
+                        !usage.canCompress -> "暂无待压缩历史"
+                        appliesRollingTier -> "应用滚动摘要并压缩"
+                        else -> "压缩较早对话"
+                    })
                 }
             }
         }
@@ -1051,50 +1082,42 @@ internal fun RollingSummaryEditDialog(
     )
 }
 
+internal data class ContextCompressionSelection(
+    val tier: com.aiassistant.domain.model.CompressionTier,
+    val recentRounds: Int,
+    val customPercent: Int
+) {
+    fun matches(other: ContextCompressionSelection?): Boolean = other != null && tier == other.tier && when (tier) {
+        com.aiassistant.domain.model.CompressionTier.L2 -> recentRounds == other.recentRounds
+        com.aiassistant.domain.model.CompressionTier.LC -> customPercent == other.customPercent
+        else -> true
+    }
+
+    companion object {
+        fun from(usage: ConversationContextUsage) = ContextCompressionSelection(
+            usage.compressionTier, usage.compressionRecentRounds, usage.compressionCustomPercent)
+    }
+}
+
 @Composable
 internal fun ContextCompressionTierSelectorCard(
     usage: com.aiassistant.domain.model.ConversationContextUsage,
+    selection: ContextCompressionSelection,
+    busy: Boolean,
+    onSelectionChanged: (ContextCompressionSelection) -> Unit,
     onApplyTier: ((com.aiassistant.domain.model.CompressionTier, Int, Int) -> Unit)?,
-    onPreviewSettingsChanged: ((Int, Int) -> Unit)? = null,
-    onRegisterApplyPending: ((() -> Unit)?) -> Unit = {}
+    onPreviewSettingsChanged: ((Int, Int) -> Unit)? = null
 ) {
-    // 注意：轮数/百分比及其 confirmed 基线不得以 usage 字段作 remember key——
-    // 滑动条松手后 ViewModel 异步重算 usage 回流会改写这些字段，若作为 key 会把
-    // confirmed 基线重置成新值，hasPendingChange 瞬间变 false，导致"前后对比预览"
-    // 刚弹出即缩回（重算快时根本来不及显示）。仅在首次组合取初值。
-    var selectedTier by remember(usage.compressionTier) { mutableStateOf(usage.compressionTier) }
-    var l2Rounds by remember { mutableIntStateOf(usage.compressionRecentRounds) }
-    var customPercent by remember {
-        mutableIntStateOf(
-            usage.compressionCustomPercent.coerceIn(
-                com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT,
-                com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT
-            )
-        )
-    }
-    var confirmedTier by remember(usage.compressionTier) { mutableStateOf(usage.compressionTier) }
-    var confirmedRounds by remember { mutableIntStateOf(usage.compressionRecentRounds) }
-    var confirmedPercent by remember { mutableIntStateOf(usage.compressionCustomPercent) }
-
-    val hasPendingChange = selectedTier != confirmedTier ||
-        (selectedTier == com.aiassistant.domain.model.CompressionTier.L2 && l2Rounds != confirmedRounds) ||
-        (selectedTier == com.aiassistant.domain.model.CompressionTier.LC && customPercent != confirmedPercent)
+    val selectedTier = selection.tier
+    val l2Rounds = selection.recentRounds
+    val customPercent = selection.customPercent
+    val hasPendingChange = !selection.matches(ContextCompressionSelection.from(usage))
     val currentPreview = usage.tierPreviews.firstOrNull { it.tier == selectedTier }
 
     // 应用当前待确认的档位/参数变更（胶囊内"确认应用并生效"与宿主对话框"完成"键共用）
     fun applyPendingChange() {
-        val pending = selectedTier != confirmedTier ||
-            (selectedTier == com.aiassistant.domain.model.CompressionTier.L2 && l2Rounds != confirmedRounds) ||
-            (selectedTier == com.aiassistant.domain.model.CompressionTier.LC && customPercent != confirmedPercent)
-        if (!pending) return
+        if (busy || !hasPendingChange) return
         onApplyTier?.invoke(selectedTier, l2Rounds, customPercent)
-        confirmedTier = selectedTier
-        confirmedRounds = l2Rounds
-        confirmedPercent = customPercent
-    }
-    // 有待确认变更时向宿主注册"完成=确认并生效"动作；变更被确认或还原后注销
-    LaunchedEffect(hasPendingChange) {
-        onRegisterApplyPending(if (hasPendingChange) { { applyPendingChange() } } else null)
     }
 
     Surface(
@@ -1167,8 +1190,8 @@ internal fun ContextCompressionTierSelectorCard(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                selectedTier = tier
+                            .clickable(enabled = !busy) {
+                                onSelectionChanged(selection.copy(tier = tier))
                             }
                     ) {
                         Column(
@@ -1186,7 +1209,8 @@ internal fun ContextCompressionTierSelectorCard(
                                 ) {
                                     RadioButton(
                                         selected = isSelected,
-                                        onClick = { selectedTier = tier },
+                                        onClick = { onSelectionChanged(selection.copy(tier = tier)) },
+                                        enabled = !busy,
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Text(
@@ -1269,7 +1293,8 @@ internal fun ContextCompressionTierSelectorCard(
                                     }
                                     Slider(
                                         value = l2Rounds.toFloat(),
-                                        onValueChange = { l2Rounds = it.toInt() },
+                                        onValueChange = { onSelectionChanged(selection.copy(recentRounds = it.toInt())) },
+                                        enabled = !busy,
                                         onValueChangeFinished = {
                                             onPreviewSettingsChanged?.invoke(l2Rounds, customPercent)
                                         },
@@ -1307,13 +1332,15 @@ internal fun ContextCompressionTierSelectorCard(
                                     Slider(
                                         value = customPercent.toFloat(),
                                         onValueChange = { value ->
-                                            customPercent = (Math.round(value / com.aiassistant.domain.model.CompressionTierPolicy.STEP_CUSTOM_RETAIN_PERCENT) *
+                                            val percent = (Math.round(value / com.aiassistant.domain.model.CompressionTierPolicy.STEP_CUSTOM_RETAIN_PERCENT) *
                                                 com.aiassistant.domain.model.CompressionTierPolicy.STEP_CUSTOM_RETAIN_PERCENT)
                                                 .coerceIn(
                                                     com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT,
                                                     com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT
                                                 )
+                                            onSelectionChanged(selection.copy(customPercent = percent))
                                         },
+                                        enabled = !busy,
                                         onValueChangeFinished = {
                                             onPreviewSettingsChanged?.invoke(l2Rounds, customPercent)
                                         },
@@ -1408,6 +1435,7 @@ internal fun ContextCompressionTierSelectorCard(
                         ) {
                             Button(
                                 onClick = { applyPendingChange() },
+                                enabled = !busy,
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                             ) {

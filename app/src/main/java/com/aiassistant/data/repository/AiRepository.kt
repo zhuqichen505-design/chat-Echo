@@ -1061,7 +1061,8 @@ class AiRepository(
         maxOutputTokens: Int? = null,
         contextWindowOverrideTokens: Int? = null,
         l2RoundsOverride: Int? = null,
-        customPercentOverride: Int? = null
+        customPercentOverride: Int? = null,
+        apiConfigIdOverride: Long? = null
     ): ConversationContextUsage = withContext(Dispatchers.IO) {
         val conversation = getConversationById(conversationId) ?: return@withContext ConversationContextUsage()
         val messages = getMessagesList(conversationId).collapseVariantsForHistory()
@@ -1070,14 +1071,11 @@ class AiRepository(
             ?: conversation.modelName
 
         // 预览覆盖：滑杆调整未保存时，用覆盖值即时重算快照（不落库）
-        val effectiveConversation = if (l2RoundsOverride != null || customPercentOverride != null) {
-            conversation.copy(
-                compressionRecentRounds = l2RoundsOverride ?: conversation.compressionRecentRounds,
-                compressionCustomPercent = customPercentOverride ?: conversation.compressionCustomPercent
-            )
-        } else {
-            conversation
-        }
+        val effectiveConversation = conversation.copy(
+            apiConfigId = apiConfigIdOverride ?: conversation.apiConfigId,
+            compressionRecentRounds = l2RoundsOverride ?: conversation.compressionRecentRounds,
+            compressionCustomPercent = customPercentOverride ?: conversation.compressionCustomPercent
+        )
 
         buildContextUsageSnapshot(
             conversation = effectiveConversation,
@@ -1092,19 +1090,41 @@ class AiRepository(
         conversationId: Long,
         modelNameOverride: String? = null,
         maxOutputTokens: Int? = null,
-        contextWindowOverrideTokens: Int? = null
+        contextWindowOverrideTokens: Int? = null,
+        apiConfigIdOverride: Long? = null
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
         runCatching {
-            val conversation = getConversationById(conversationId) ?: error("对话不存在")
+            var conversation = getConversationById(conversationId)?.let {
+                it.copy(apiConfigId = apiConfigIdOverride ?: it.apiConfigId)
+            } ?: error("对话不存在")
             val config = getDecryptedConfig(conversation.apiConfigId) ?: error("API 配置不存在")
+            check(config.isEnabled) { "当前 API 配置已关闭，请在设置中开启后重试" }
             val model = modelNameOverride?.takeIf { it.isNotBlank() } ?: conversation.modelName
             val messages = getMessagesList(conversationId).collapseVariantsForHistory().filter {
                 it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
             }
+            if (CompressionTier.fromLevel(conversation.compressionTier) in setOf(CompressionTier.L0, CompressionTier.L1)) {
+                // The explicit compression button means retiring early raw turns. L0/L1 now
+                // restore raw history, so persist the rolling-summary policy as well.
+                val budget = contextBudget(conversation, messages, model,
+                    maxOutputTokens ?: conversation.maxTokens ?: config.maxTokens, contextWindowOverrideTokens,
+                    currentUserMessage = "", options = savedContextOptions(conversation))
+                val manualPlan = ContextCompressionPlanner.plan(messages, CompressionTier.L2, budget.history,
+                    conversation.rollingSummary, conversation.summaryUpdatedMessageId, 8,
+                    conversation.compressionCustomPercent, forceCompression = true)
+                val retainedIds = manualPlan.retainedMessages.mapTo(mutableSetOf()) { it.id }
+                if (manualPlan.summarySource.none { it.id !in retainedIds }) {
+                    return@runCatching getConversationContextUsage(conversationId, model, maxOutputTokens,
+                        contextWindowOverrideTokens, apiConfigIdOverride = apiConfigIdOverride)
+                }
+                updateConversationCompressionTier(conversationId, CompressionTier.L2, 8, conversation.compressionCustomPercent)
+                conversation = conversation.copy(compressionTier = CompressionTier.L2.level, compressionRecentRounds = 8)
+            }
             buildContextBundle(conversation, config, messages, model, maxOutputTokens,
                 contextWindowOverrideTokens, currentUserMessage = "", options = savedContextOptions(conversation),
                 forceCompression = true)
-            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
+            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens,
+                apiConfigIdOverride = apiConfigIdOverride)
         }.onFailure { if (it is CancellationException) throw it }
     }
 
@@ -1113,11 +1133,15 @@ class AiRepository(
         conversationId: Long,
         modelNameOverride: String? = null,
         maxOutputTokens: Int? = null,
-        contextWindowOverrideTokens: Int? = null
+        contextWindowOverrideTokens: Int? = null,
+        apiConfigIdOverride: Long? = null
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
         runCatching {
-            val conversation = getConversationById(conversationId) ?: error("对话不存在")
+            val conversation = getConversationById(conversationId)?.let {
+                it.copy(apiConfigId = apiConfigIdOverride ?: it.apiConfigId)
+            } ?: error("对话不存在")
             val config = getDecryptedConfig(conversation.apiConfigId) ?: error("API 配置不存在")
+            check(config.isEnabled) { "当前 API 配置已关闭，请在设置中开启后重试" }
             val model = modelNameOverride?.takeIf { it.isNotBlank() } ?: conversation.modelName
             val messages = getMessagesList(conversationId).collapseVariantsForHistory().filter {
                 it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
@@ -1127,7 +1151,8 @@ class AiRepository(
             val budget = estimatePromptBudgetTokens(model, maxOutputTokens ?: conversation.maxTokens ?: config.maxTokens, window)
             ensureRollingSummary(conversation.copy(contextWindowTokens = window), config, model, messages,
                 (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
-            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens)
+            getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens,
+                apiConfigIdOverride = apiConfigIdOverride)
         }.onFailure { if (it is CancellationException) throw it }
     }
 
@@ -1572,10 +1597,13 @@ class AiRepository(
         onComplete: (String, String?, Any?) -> Unit,
         originalError: Exception
     ): Boolean {
-        val retryWindow = extractContextWindowFromError(originalError.message.orEmpty())
-            ?: CONTEXT_OVERFLOW_RETRY_WINDOW_TOKENS
         val effectiveOptions = resolveChatRequestOptions(config, options)
         val requestModel = resolveRequestModel(config, effectiveOptions)
+        val currentWindow = resolveContextWindow(getConversationById(conversationId), requestModel,
+            effectiveOptions.contextWindowOverrideTokens, config.id).coerceIn(4_000, 2_000_000)
+        val reportedWindow = extractContextWindowFromError(originalError.message.orEmpty())
+        val retryWindow = minOf(currentWindow, reportedWindow ?: minOf(CONTEXT_OVERFLOW_RETRY_WINDOW_TOKENS,
+            (currentWindow / 2).coerceAtLeast(4_000)))
 
         // 核心改造：降级仅对当前对话生效，绝对不写入全局缓存与 SelectedModel，杜绝污染全局及其他会话
         runCatching {
@@ -1589,9 +1617,11 @@ class AiRepository(
                 conversationId = conversationId,
                 modelNameOverride = requestModel,
                 maxOutputTokens = safeRetryOutput,
-                contextWindowOverrideTokens = retryWindow
-            )
+                contextWindowOverrideTokens = retryWindow,
+                apiConfigIdOverride = config.id
+            ).getOrThrow()
         }.onFailure {
+            if (isRequestCancellation(it)) throw CancellationException("请求已取消", it)
             Log.w(tag, "上下文超限后自动压缩失败，仍尝试缩小窗口重试", it)
         }
 
@@ -1616,6 +1646,7 @@ class AiRepository(
                 onComplete = onComplete
             )
         }.onFailure {
+            if (isRequestCancellation(it)) throw CancellationException("请求已取消", it)
             Log.e(tag, "上下文压缩重试仍失败", it)
         }.isSuccess
     }
@@ -1734,7 +1765,7 @@ class AiRepository(
         }
 
         val wireInputTokens = normalizedChatMessages.sumOf { estimateContentTokenCount(it.content) + 24 }
-        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens)
+        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens, config.id)
         val outputHeadroom = wireContextWindow - wireInputTokens - 512
         require(outputHeadroom >= 256) { "当前提示词、附件和消息已超过模型上下文上限，请缩短内容后再发送" }
         val safeMaxTokens = minOf(requestedMaxTokens, outputHeadroom)
@@ -2161,7 +2192,7 @@ class AiRepository(
         val configuredMaxTokens = if (rawConfiguredMaxTokens == 50000) 4096 else rawConfiguredMaxTokens
         // Anthropic 协议要求 max_tokens 必须大于 budget_tokens，且保留充裕正文额度
         val wireInputTokens = estimateTokenCount(systemPrompt.orEmpty()) + anthropicMessages.sumOf { estimateContentTokenCount(it.content) + 24 }
-        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens)
+        val wireContextWindow = resolveContextWindow(conversation, requestModel, effectiveOptions.contextWindowOverrideTokens, config.id)
         val outputHeadroom = wireContextWindow - wireInputTokens - 512
         require(outputHeadroom >= if (thinkingBudget != null) 2048 else 256) { "当前提示词、附件和消息已超过上下文预算，请缩短内容或关闭思考后再发送" }
         val safeRequestMaxTokens = minOf(maxOf(configuredMaxTokens, (thinkingBudget ?: 0) + 4096).coerceIn(256, 64000), outputHeadroom)
@@ -2606,9 +2637,11 @@ class AiRepository(
         val recentMessages: List<Message>
     )
 
-    private suspend fun resolveContextWindow(conversation: Conversation?, modelName: String, override: Int?): Int =
-        override ?: conversation?.contextWindowTokens ?: conversation?.let { conv ->
-            selectedModelDao.getModelsByConfig(conv.apiConfigId).first()
+    private suspend fun resolveContextWindow(
+        conversation: Conversation?, modelName: String, override: Int?, apiConfigIdOverride: Long? = null
+    ): Int =
+        override ?: conversation?.contextWindowTokens ?: (apiConfigIdOverride ?: conversation?.apiConfigId)?.let { configId ->
+            selectedModelDao.getModelsByConfig(configId).first()
                 .firstOrNull { it.modelName.equals(modelName, ignoreCase = true) }?.contextWindowTokens
         } ?: estimateModelContextWindowTokens(modelName)
 
@@ -2633,9 +2666,10 @@ class AiRepository(
     /** The preview, manual compression and send path reserve the same prompt components. */
     private suspend fun contextBudget(
         conversation: Conversation?, messages: List<Message>, modelName: String, maxOutputTokens: Int?,
-        contextWindowOverrideTokens: Int?, currentUserMessage: String, options: ChatRequestOptions
+        contextWindowOverrideTokens: Int?, currentUserMessage: String, options: ChatRequestOptions,
+        apiConfigIdOverride: Long? = null
     ): ContextBudget {
-        val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens).coerceIn(4000, 2000000)
+        val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens, apiConfigIdOverride).coerceIn(4000, 2000000)
         val prompt = estimatePromptBudgetTokens(modelName, maxOutputTokens, window)
         val retrievalText = currentUserMessage.ifBlank { messages.lastOrNull { it.role == "user" }?.content.orEmpty() }
         val memory = conversation?.let { buildRelevantMemoryBlock(it, retrievalText,
@@ -2665,17 +2699,24 @@ class AiRepository(
         val budget = contextBudget(conversation, usable, modelName, outputTokens, contextWindowOverrideTokens,
             currentUserMessage = "", options = savedContextOptions(conversation))
         val baseline = budget.fixed + usable.sumOf(ContextCompressionPlanner::messageTokens)
-        fun plan(tier: CompressionTier) = ContextCompressionPlanner.plan(usable, tier, budget.history,
+        fun plan(tier: CompressionTier, forceCompression: Boolean = false) = ContextCompressionPlanner.plan(usable, tier, budget.history,
             conversation.rollingSummary, conversation.summaryUpdatedMessageId,
-            conversation.compressionRecentRounds, conversation.compressionCustomPercent)
+            conversation.compressionRecentRounds, conversation.compressionCustomPercent, forceCompression)
         val tier = CompressionTier.fromLevel(conversation.compressionTier)
         val active = plan(tier)
         val summaryTokens = conversation.rollingSummary?.let(::estimateTokenCount) ?: 0
-        // Until a checked summary exists, the current usage must still count the uncovered original text.
-        val actualHistory = if (active.needsSummary) usable else active.retainedMessages
+        // A pending summary extension does not invalidate thousands of already-covered
+        // turns. Count only uncovered source text together with retained/restored turns.
+        val coveredIndex = if (conversation.rollingSummary.isNullOrBlank()) -1
+            else usable.indexOfFirst { it.id == conversation.summaryUpdatedMessageId }
+        val pendingSourceIds = active.summarySource.drop(coveredIndex + 1).mapTo(mutableSetOf()) { it.id }
+        val retainedById = active.retainedMessages.associateBy { it.id }
+        val actualHistory = usable.mapNotNull { message ->
+            retainedById[message.id] ?: message.takeIf { it.id in pendingSourceIds }
+        }
         val currentTokens = budget.fixed + actualHistory.sumOf(ContextCompressionPlanner::messageTokens) + summaryTokens
         val previews = CompressionTier.entries.map { candidate ->
-            val projected = plan(candidate)
+            val projected = plan(candidate, forceCompression = true)
             val cost = budget.fixed + projected.estimatedHistoryTokens +
                 if (projected.needsSummary) budget.summary else summaryTokens
             TierCompressionPreview(candidate, cost, baseline, (baseline - cost).coerceAtLeast(0),
@@ -2683,19 +2724,22 @@ class AiRepository(
                 CompressionTierPolicy.getRetainedRoundsDesc(candidate, conversation.compressionRecentRounds, conversation.compressionCustomPercent),
                 candidate.detailLossNote)
         }
-        val manualPlan = ContextCompressionPlanner.plan(usable, tier, budget.history, conversation.rollingSummary,
-            conversation.summaryUpdatedMessageId, conversation.compressionRecentRounds, conversation.compressionCustomPercent, true)
-        val coveredIndex = if (conversation.rollingSummary.isNullOrBlank()) -1
-            else usable.indexOfFirst { it.id == conversation.summaryUpdatedMessageId }
+        val manualUsesRollingTier = tier in setOf(CompressionTier.L0, CompressionTier.L1)
+        val manualPlan = ContextCompressionPlanner.plan(usable, if (manualUsesRollingTier) CompressionTier.L2 else tier,
+            budget.history, conversation.rollingSummary, conversation.summaryUpdatedMessageId,
+            if (manualUsesRollingTier) 8 else conversation.compressionRecentRounds, conversation.compressionCustomPercent, true)
+        val manualRetainedIds = manualPlan.retainedMessages.mapTo(mutableSetOf()) { it.id }
+        val retireableMessageCount = actualHistory.count { it.id !in manualRetainedIds }
+        val canCompress = retireableMessageCount > 0 || (!manualUsesRollingTier &&
+            (manualPlan.needsSummary || (manualPlan.summarySource.isNotEmpty() && summaryTokens > budget.summary)))
         return ConversationContextUsage(contextWindowTokens = budget.window, modelDefaultContextTokens = estimateModelContextWindowTokens(modelName),
             promptBudgetTokens = budget.prompt, estimatedInputTokens = currentTokens,
             usagePercent = (currentTokens.toFloat() / budget.prompt).coerceIn(0f, 1f), recentMessageCount = actualHistory.size,
-            olderMessageCount = (manualPlan.summarySource.size - coveredIndex - 1).coerceAtLeast(0),
+            olderMessageCount = retireableMessageCount,
             recentTokens = actualHistory.sumOf(ContextCompressionPlanner::messageTokens), summaryTokens = summaryTokens,
             memoryTokens = budget.memoryTokens, memoryItemCount = memoryDao.getCandidateMemories(conversation.id).count { it.isEnabled },
             hasRollingSummary = !conversation.rollingSummary.isNullOrBlank(), summaryUpdatedAt = conversation.summaryUpdatedAt,
-            compressedThroughMessageId = conversation.summaryUpdatedMessageId, canCompress = manualPlan.needsSummary ||
-                (manualPlan.summarySource.isNotEmpty() && summaryTokens > budget.summary),
+            compressedThroughMessageId = conversation.summaryUpdatedMessageId, canCompress = canCompress,
             compressionTier = tier, compressionRecentRounds = conversation.compressionRecentRounds,
             compressionCustomPercent = conversation.compressionCustomPercent, tierPreviews = previews)
     }
@@ -2715,7 +2759,7 @@ class AiRepository(
             !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
         val effectiveOptions = options ?: ChatRequestOptions()
         val budget = contextBudget(conversation, usable, modelName, maxOutputTokens ?: conversation?.maxTokens ?: config.maxTokens, contextWindowOverrideTokens,
-            currentUserMessage, effectiveOptions)
+            currentUserMessage, effectiveOptions, config.id)
         val tier = CompressionTier.fromLevel(conversation?.compressionTier)
         val plan = ContextCompressionPlanner.plan(usable, tier, budget.history, conversation?.rollingSummary,
             conversation?.summaryUpdatedMessageId, conversation?.compressionRecentRounds ?: 8, conversation?.compressionCustomPercent ?: 30,
@@ -5565,6 +5609,7 @@ class AiRepository(
                 title = duplicateTitle,
                 isPinned = false,
                 tags = duplicatedTags,
+                summaryUpdatedMessageId = null,
                 createdAt = now,
                 updatedAt = now
             )
@@ -5579,7 +5624,25 @@ class AiRepository(
                         createdAt = baseTime + (index * 1000L)
                     )
                 }
-                messageDao.insertMessages(preparedMessages)
+                val copiedMessageIds = messageDao.insertMessages(preparedMessages)
+                val validCoveredId = originalConv.summaryUpdatedMessageId?.takeIf { coveredId ->
+                    !originalConv.rollingSummary.isNullOrBlank() && originalMessages.collapseVariantsForHistory().any {
+                        it.id == coveredId && it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
+                            !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+                    }
+                }
+                val copiedCoveredId = validCoveredId?.let { coveredId ->
+                    originalMessages.indexOfFirst { it.id == coveredId }.takeIf { it >= 0 }?.let(copiedMessageIds::get)
+                }?.takeIf { coveredId ->
+                    preparedMessages.mapIndexed { index, message -> message.copy(id = copiedMessageIds[index]) }
+                        .collapseVariantsForHistory().any {
+                            it.id == coveredId && it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
+                                !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+                        }
+                }
+                if (copiedCoveredId != null) {
+                    conversationDao.updateConversation(newConversation.copy(id = newId, summaryUpdatedMessageId = copiedCoveredId))
+                }
                 val totalTokens = preparedMessages.sumOf { it.tokenCount }
                 conversationDao.updateStats(newId, preparedMessages.size, totalTokens)
             }

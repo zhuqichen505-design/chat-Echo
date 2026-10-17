@@ -325,6 +325,268 @@ class ChatRetryRepositoryTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun selectingCompressionInTwoThousandRoundConversationActuallyReleasesTheInputBudget() = runBlocking {
+        newSingleThreadContext("large-context-selection-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Endpoint { socket, _ -> socket.response("200 OK", syntheticSummaryResponse()) }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    f.db.conversationDao().updateContextWindowTokens(id, 32768, System.currentTimeMillis())
+                    val original = (0 until 4000).map { index -> Message(conversationId = id,
+                        role = if (index % 2 == 0) "user" else "assistant", content = "已确认的合成事实 $index。",
+                        createdAt = index.toLong(), modelName = if (index % 2 == 1) config.modelName else null) }
+                    f.db.messageDao().insertMessages(original)
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(10000) { while (vm.contextUsage.value.usage == null || vm.currentModelOption.value == null) delay(10) }
+                        assertEquals("两千轮原文应超过此测试窗口", 1f, vm.contextUsage.value.usage!!.usagePercent, 0.0001f)
+                        withContext(Dispatchers.Main) {
+                            vm.setCompressionTier(CompressionTier.L4)
+                            vm.setCompressionTier(CompressionTier.L2, recentRounds = 16)
+                        }
+                        withTimeout(30000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        val saved = f.db.conversationDao().getConversationById(id)!!
+                        assertEquals("忙时快速重复确认不能覆盖正在应用的选择", CompressionTier.L4.level, saved.compressionTier)
+                        assertEquals(3998L, saved.summaryUpdatedMessageId)
+                        assertFalse(saved.rollingSummary.isNullOrBlank())
+                        assertTrue("确认档位必须真正调用模型整理历史", endpoint.payloads.isNotEmpty())
+                        assertEquals(2, vm.contextUsage.value.usage!!.recentMessageCount)
+                        assertTrue("成功保存摘要后圆环必须反映实际压缩上下文", vm.contextUsage.value.usage!!.usagePercent < 0.2f)
+                        assertEquals(4000, f.db.messageDao().getMessagesList(id).size)
+                        withContext(Dispatchers.Main) { vm.refreshContextUsage() }
+                        withTimeout(5000) { while (vm.contextUsage.value.usage?.compressedThroughMessageId != 3998L) delay(10) }
+                        assertTrue(vm.contextUsage.value.usage!!.usagePercent < 0.2f)
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                } }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    private fun syntheticSummaryResponse(protocol: String = "openai"): String {
+        val summary = "【核心背景与用户固定约束】\n合成角色遵守既有约定，事实名称和否定条件完整保留。\n" +
+            "【历史关键里程碑与决策推进】\n双方完成早期方案比较，确认的决定继续有效。\n" +
+            "【时空演变与关键时间节点（极重要，严禁遗漏）】\n原文未提供明确日期，事件保持原有先后顺序。\n" +
+            "【当前未决议题与待办上下文】\n等待后续行动，尚未执行的建议仍是待办。"
+        val response = if (protocol == "anthropic") mapOf("stop_reason" to "end_turn",
+            "content" to listOf(mapOf("type" to "text", "text" to summary)))
+        else mapOf("choices" to listOf(mapOf("finish_reason" to "stop",
+            "message" to mapOf("role" to "assistant", "content" to summary))))
+        return com.google.gson.Gson().toJson(response)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun sameTierParameterChangesApplyWhilePreviewAndCompleteTiersDoNotPretendToSaveOrCharge() = runBlocking {
+        newSingleThreadContext("context-policy-parameters-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Endpoint { socket, _ -> socket.response("200 OK", syntheticSummaryResponse()) }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.messageDao().insertMessages((0 until 40).map { index -> Message(conversationId = id,
+                        role = if (index % 2 == 0) "user" else "assistant", content = "合成事实 $index。".repeat(10),
+                        createdAt = index.toLong(), modelName = if (index % 2 == 1) config.modelName else null) })
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.previewCompressionSettings(4, 80) }
+                        withTimeout(5000) { while (vm.contextUsage.value.usage!!.tierPreviews.none {
+                            it.tier == CompressionTier.LC && it.retainedRoundsDesc.contains("80%") }) delay(10) }
+                        assertEquals("滑杆预览不得改写确认基线", 30, vm.contextUsage.value.usage!!.compressionCustomPercent)
+                        assertEquals(8, vm.contextUsage.value.usage!!.compressionRecentRounds)
+                        assertTrue(endpoint.payloads.isEmpty())
+                        for ((percent, retained) in listOf(80 to 32, 20 to 8)) {
+                            val before = endpoint.payloads.size
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.LC, customPercent = percent) }
+                            withTimeout(10000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertEquals(percent, f.db.conversationDao().getConversationById(id)!!.compressionCustomPercent)
+                            assertEquals(retained, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertTrue("同档比例变更也要立即整理", endpoint.payloads.size > before)
+                        }
+                        val requests = endpoint.payloads.size
+                        for (tier in listOf(CompressionTier.L0, CompressionTier.L1)) {
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(tier) }
+                            withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertEquals(tier, vm.contextUsage.value.usage!!.compressionTier)
+                            assertEquals("浅档应恢复可容纳的原文", 40, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertEquals("完整保留与轻修剪不应主动发起付费摘要", requests, endpoint.payloads.size)
+                        }
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                } }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun sendingInSameFrameWaitsForSelectedPolicySaveEvenWhenItCancelsTheOptionalSummary() = runBlocking {
+        newSingleThreadContext("context-policy-save-send-main").use { main ->
+            Dispatchers.setMain(main)
+            val saveGate = Job()
+            try {
+                lateinit var endpoint: Endpoint
+                endpoint = Endpoint { socket, index ->
+                    val stream = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject["stream"]?.asBoolean == true
+                    if (stream) socket.response("200 OK", "data: {\"choices\":[{\"delta\":{\"content\":\"已按新压缩策略继续合成剧情\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", "text/event-stream")
+                    else socket.response("200 OK", syntheticSummaryResponse())
+                }
+                endpoint.use { Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.messageDao().insertMessages((0 until 40).map { index -> Message(conversationId = id,
+                        role = if (index % 2 == 0) "user" else "assistant", content = "保存等待测试的合成事实 $index。",
+                        createdAt = index.toLong(), modelName = if (index % 2 == 1) config.modelName else null) })
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null || vm.currentModelOption.value == null) delay(10) }
+                        ChatViewModel::class.java.getDeclaredField("systemPromptSaveJob").apply { isAccessible = true }.set(vm, saveGate)
+                        withContext(Dispatchers.Main) {
+                            vm.setCompressionTier(CompressionTier.L4)
+                            vm.sendMessage("继续合成剧情")
+                        }
+                        delay(100)
+                        assertTrue("档位保存完成前不能发送旧配置的报文", endpoint.payloads.isEmpty())
+                        saveGate.complete()
+                        withTimeout(10000) { while (f.db.messageDao().getMessagesList(id).none { it.content == "已按新压缩策略继续合成剧情" } || vm.isGenerating.value) delay(10) }
+                        assertEquals(CompressionTier.L4.level, f.db.conversationDao().getConversationById(id)!!.compressionTier)
+                        assertFalse(vm.contextUsage.value.isCompressing)
+                        val chats = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }.filter { it["stream"]?.asBoolean == true }
+                        assertEquals(1, chats.size)
+                        assertTrue("发送必须使用保存后的压缩范围", chats.single().getAsJsonArray("messages").size() < 10)
+                    } finally {
+                        saveGate.complete()
+                        vm.stopGeneration()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
+                } }
+            } finally {
+                saveGate.complete()
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun failedTierApplicationRetainsOriginalHistoryAndCanRetryWithoutReportingSuccess() = runBlocking {
+        newSingleThreadContext("context-policy-failure-main").use { main ->
+            Dispatchers.setMain(main)
+            val failSummary = java.util.concurrent.atomic.AtomicBoolean(true)
+            try {
+                Endpoint { socket, _ ->
+                    if (failSummary.get()) socket.response("500 Internal Server Error", "{\"error\":{\"message\":\"synthetic summary failure\"}}")
+                    else socket.response("200 OK", syntheticSummaryResponse())
+                }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config(endpoint.url)
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    f.db.messageDao().insertMessages((0 until 40).map { index -> Message(conversationId = id,
+                        role = if (index % 2 == 0) "user" else "assistant", content = "失败重试测试的合成事实 $index。",
+                        createdAt = index.toLong(), modelName = if (index % 2 == 1) config.modelName else null) })
+                    val original = f.db.messageDao().getMessagesList(id)
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.L4) }
+                        withTimeout(20000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        assertTrue(endpoint.payloads.isNotEmpty())
+                        assertEquals(CompressionTier.L4.level, f.db.conversationDao().getConversationById(id)!!.compressionTier)
+                        assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                        assertEquals(original, f.db.messageDao().getMessagesList(id))
+                        val failure = vm.contextUsage.value.statusMessage.orEmpty()
+                        assertTrue("模型整理失败必须保留可见错误：$failure", failure.contains("失败") || failure.contains("500"))
+                        assertFalse(failure.contains("已切换") || failure.contains("已总结并保存"))
+                        failSummary.set(false)
+                        withContext(Dispatchers.Main) { vm.compressContextNow() }
+                        withTimeout(10000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        assertFalse(f.db.conversationDao().getConversationById(id)!!.rollingSummary.isNullOrBlank())
+                        assertEquals(2, vm.contextUsage.value.usage!!.recentMessageCount)
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                } }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun ordinaryPreferenceSavesCannotRestoreAnOlderSummaryOrCompressionPolicy() = runBlocking {
+        newSingleThreadContext("context-policy-settings-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config("https://example.invalid/v1", keys = "")
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                        // Simulate another operation finishing after the VM loaded its row.
+                        f.db.conversationDao().updateCompressionTier(id, CompressionTier.LC.level, 12, 25)
+                        f.db.conversationDao().updateRollingSummary(id, "稍后完成的合成摘要。", 38L)
+                        withContext(Dispatchers.Main) {
+                            vm.updateTempSettings(vm.tempSettings.value.copy(temperature = 0.45f))
+                        }
+                        withTimeout(5000) { while (f.db.conversationDao().getConversationById(id)?.temperature != 0.45f) delay(10) }
+                        var saved = f.db.conversationDao().getConversationById(id)!!
+                        assertEquals(CompressionTier.LC.level, saved.compressionTier)
+                        assertEquals(25, saved.compressionCustomPercent)
+                        assertEquals("稍后完成的合成摘要。", saved.rollingSummary)
+                        assertEquals(38L, saved.summaryUpdatedMessageId)
+                        f.db.conversationDao().updateRollingSummary(id, "更晚保存的合成摘要。", 40L)
+                        withContext(Dispatchers.Main) { vm.updateSystemPrompt("合成的新系统设定") }
+                        withTimeout(5000) { while (f.db.conversationDao().getConversationById(id)?.systemPrompt != "合成的新系统设定") delay(10) }
+                        saved = f.db.conversationDao().getConversationById(id)!!
+                        assertEquals("更晚保存的合成摘要。", saved.rollingSummary)
+                        assertEquals(40L, saved.summaryUpdatedMessageId)
+                        assertEquals(CompressionTier.LC.level, saved.compressionTier)
+                    } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun selectingPolicyDuringAReplySavesForTheNextRequestWithoutStartingAnotherModelCall() = runBlocking {
+        newSingleThreadContext("context-policy-during-reply-main").use { main ->
+            Dispatchers.setMain(main)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            try {
+                Endpoint { socket, _ ->
+                    socket.streamHeaders()
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                    socket.delta("data: {\"choices\":[{\"delta\":{\"content\":\"本轮合成回复正常完成\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+                }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config(endpoint.url)
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.contextUsage.value.usage == null || vm.currentModelOption.value == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.sendMessage("合成普通问题") }
+                        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                        assertTrue(vm.isGenerating.value)
+                        withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.L4) }
+                        withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                        assertEquals(1, endpoint.payloads.size)
+                        val saved = f.db.conversationDao().getConversationById(id)!!
+                        assertEquals(CompressionTier.L4.level, saved.compressionTier)
+                        assertNull(saved.rollingSummary)
+                        assertTrue(vm.contextUsage.value.statusMessage.orEmpty().contains("下一轮请求生效"))
+                        release.countDown()
+                        withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.content == "本轮合成回复正常完成" } || vm.isGenerating.value) delay(10) }
+                        assertEquals(1, endpoint.payloads.size)
+                    } finally {
+                        release.countDown()
+                        vm.stopGeneration()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
+                } }
+            } finally {
+                release.countDown()
+                Dispatchers.resetMain()
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
     @Test fun combinedStorySavePreservesCharactersScenarioAndEveryWorldBookScope() = runBlocking {
         newSingleThreadContext("story-settings-main").use { main ->
             Dispatchers.setMain(main)
@@ -667,6 +929,171 @@ class ChatRetryRepositoryTest {
             assertEquals(0, prompts)
             assertTrue(error!!.contains("empty response detected"))
         } }
+    }
+
+    private fun syntheticStreamResponse(protocol: String, text: String): String {
+        val content = com.google.gson.Gson().toJson(text)
+        return if (protocol == "openai")
+            "data: {\"choices\":[{\"delta\":{\"content\":$content},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+        else "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":$content}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+    }
+
+    @Test fun contextFallbackWithoutReportedLimitNeverEnlargesSmallWindowsAndSendsTheSavedSummaryInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (window in listOf(4000, 32768)) {
+            val chatCalls = java.util.concurrent.atomic.AtomicInteger()
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val request = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+                if (request["stream"]?.asBoolean == true) {
+                    if (chatCalls.incrementAndGet() == 1) socket.response("400 Bad Request", "{\"error\":{\"message\":\"context too long\"}}")
+                    else socket.response("200 OK", syntheticStreamResponse(protocol, "合成回退回复"), "text/event-stream")
+                } else socket.response("200 OK", syntheticSummaryResponse(protocol))
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setModelRetryEnabled(true)
+                f.settings.saveRetryRule(RetryErrorType.BAD_REQUEST, RetryRule(false, 0))
+                val (config, id) = f.config(endpoint.url, protocol)
+                f.db.conversationDao().updateContextWindowTokens(id, window, System.currentTimeMillis())
+                f.db.messageDao().insertMessages((0 until 20).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 0) "user" else "assistant", content = "合成回退事实 $index。", createdAt = index.toLong()) })
+                val original = f.db.messageDao().getMessagesList(id)
+                var prompts = 0
+                var completed: String? = null
+                var error: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "继续合成回退剧情",
+                    options = ChatRequestOptions(maxTokens = 512, contextWindowOverrideTokens = window,
+                        enableSessionMemory = false, enableExternalMemory = false),
+                    onToken = {}, onComplete = { text, _, _ -> completed = text }, onError = { error = it },
+                    onContextFallbackPrompt = { reason ->
+                        prompts++
+                        assertTrue(reason.contains("context too long"))
+                        assertNull("本例没有服务端声明的数字窗口", AiRepository.extractContextWindowFromError(reason))
+                        ContextFallbackChoice.FALLBACK
+                    })
+                assertNull(error)
+                assertEquals("合成回退回复", completed)
+                assertEquals(1, prompts)
+                assertEquals(2, chatCalls.get())
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                val expectedWindow = if (window == 4000) 4000 else 16384
+                assertEquals("无数字错误不得从 $window 放大窗口", expectedWindow, saved.contextWindowTokens)
+                assertEquals(CompressionTier.L2.level, saved.compressionTier)
+                assertEquals(4L, saved.summaryUpdatedMessageId)
+                assertFalse(saved.rollingSummary.isNullOrBlank())
+                val requests = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }
+                val chats = requests.filter { it["stream"]?.asBoolean == true }
+                assertTrue("回退必须真实生成摘要", requests.any { it["stream"]?.asBoolean != true })
+                assertTrue("重试报文应替换早期原文", chats.last().getAsJsonArray("messages").size() < chats.first().getAsJsonArray("messages").size())
+                val system = if (protocol == "openai") chats.last().getAsJsonArray("messages").first {
+                    it.asJsonObject["role"].asString == "system" }.asJsonObject["content"].asString
+                else chats.last()["system"].asString
+                assertTrue("重试报文应注入已保存摘要", system.contains("合成角色遵守既有约定"))
+                assertEquals(original, f.db.messageDao().getMessagesList(id).take(original.size))
+            } }
+        }
+    }
+
+    @Test fun contextFallbackSummaryFailureCannotCompleteOrResendUncompressedHistoryInEitherProtocol() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            val chatCalls = java.util.concurrent.atomic.AtomicInteger()
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val request = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+                if (request["stream"]?.asBoolean == true) {
+                    if (chatCalls.incrementAndGet() == 1) socket.response("400 Bad Request", "{\"error\":{\"message\":\"context too long\"}}")
+                    else socket.response("200 OK", syntheticStreamResponse(protocol, "不应到达的未压缩回复"), "text/event-stream")
+                } else socket.response("500 Internal Server Error", "{\"error\":{\"message\":\"synthetic summary failure\"}}")
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setModelRetryEnabled(true)
+                f.settings.saveRetryRule(RetryErrorType.BAD_REQUEST, RetryRule(false, 0))
+                f.settings.saveRetryRule(RetryErrorType.SERVER, RetryRule(false, 0))
+                val (config, id) = f.config(endpoint.url, protocol)
+                f.db.conversationDao().updateContextWindowTokens(id, 4000, System.currentTimeMillis())
+                f.db.messageDao().insertMessages((0 until 20).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 0) "user" else "assistant", content = "合成失败保护事实 $index。", createdAt = index.toLong()) })
+                val original = f.db.messageDao().getMessagesList(id)
+                val originalConversation = f.db.conversationDao().getConversationById(id)!!
+                var prompts = 0
+                var completed = 0
+                var errors = 0
+                val emitted = StringBuilder()
+                f.repository.sendChatMessageWithConfig(config, id, "继续合成失败保护剧情",
+                    options = ChatRequestOptions(maxTokens = 512, contextWindowOverrideTokens = 4000,
+                        enableSessionMemory = false, enableExternalMemory = false),
+                    onToken = { emitted.append(it) }, onComplete = { _, _, _ -> completed++ }, onError = { errors++ },
+                    onContextFallbackPrompt = { prompts++; ContextFallbackChoice.FALLBACK })
+                assertEquals(1, prompts)
+                assertEquals("摘要失败不能冒充正式回复成功", 0, completed)
+                assertEquals(1, errors)
+                assertTrue(emitted.isEmpty())
+                assertEquals("摘要失败后不得偷偷重发全历史", 1, chatCalls.get())
+                assertTrue("测试必须走到真实摘要HTTP", endpoint.payloads.any {
+                    com.google.gson.JsonParser.parseString(it).asJsonObject["stream"]?.asBoolean != true })
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals("摘要失败必须保留此前摘要", originalConversation.rollingSummary, saved.rollingSummary)
+                assertEquals("摘要失败不能推进覆盖水线", originalConversation.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                assertEquals("摘要失败不能伪造更新时间", originalConversation.summaryUpdatedAt, saved.summaryUpdatedAt)
+                assertEquals(original, f.db.messageDao().getMessagesList(id))
+            } }
+        }
+    }
+
+    @Test fun cancellingContextFallbackSummaryPropagatesCancellationWithoutRetryOrCallbacksInEitherProtocol() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val chatCalls = java.util.concurrent.atomic.AtomicInteger()
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val request = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+                if (request["stream"]?.asBoolean == true) {
+                    chatCalls.incrementAndGet()
+                    socket.response("400 Bad Request", "{\"error\":{\"message\":\"context too long\"}}")
+                } else {
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                    socket.response("200 OK", syntheticSummaryResponse(protocol))
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setModelRetryEnabled(true)
+                f.settings.saveRetryRule(RetryErrorType.BAD_REQUEST, RetryRule(false, 0))
+                val (config, id) = f.config(endpoint.url, protocol)
+                f.db.conversationDao().updateContextWindowTokens(id, 32768, System.currentTimeMillis())
+                f.db.messageDao().insertMessages((0 until 20).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 0) "user" else "assistant", content = "合成回退取消事实 $index。", createdAt = index.toLong()) })
+                val original = f.db.messageDao().getMessagesList(id)
+                var completed = 0
+                var errors = 0
+                val sending = async(Dispatchers.Default) {
+                    f.repository.sendChatMessageWithConfig(config, id, "继续合成取消测试",
+                        options = ChatRequestOptions(maxTokens = 512, contextWindowOverrideTokens = 32768,
+                            enableSessionMemory = false, enableExternalMemory = false),
+                        onToken = { fail("取消前未返回正式正文") }, onComplete = { _, _, _ -> completed++ }, onError = { errors++ },
+                        onContextFallbackPrompt = { ContextFallbackChoice.FALLBACK })
+                }
+                try {
+                    assertTrue("必须进入真实回退摘要请求后再取消", withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                    sending.cancel(CancellationException("synthetic context fallback cancellation"))
+                    try {
+                        withTimeout(5000) { sending.await() }
+                        fail("取消必须向调用方传播")
+                    } catch (cancelled: CancellationException) {
+                        assertFalse("取消必须及时完成，不能把等待超时当作取消通过", cancelled is TimeoutCancellationException)
+                    }
+                    assertTrue(sending.isCancelled)
+                    assertEquals(0, completed)
+                    assertEquals("取消不能转成普通错误回调", 0, errors)
+                    assertEquals("取消摘要不能再次重发聊天", 1, chatCalls.get())
+                    assertEquals(original, f.db.messageDao().getMessagesList(id))
+                    assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                } finally {
+                    release.countDown()
+                    sending.cancelAndJoin()
+                }
+            } }
+        }
     }
 
     @Test fun backupKeySwitchIsSeparateFromSameKeyRetryBudget() = runBlocking {

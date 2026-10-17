@@ -42,9 +42,9 @@ object ContextCompressionPlanner {
             val completelyCovered = coveredMessageCount + turn.size <= coveredIndex + 1
             if (completelyCovered) coveredMessageCount += turn.size
             completelyCovered
-        }.size.coerceAtMost(turns.lastIndex)
+        }.size
         var cut = when (tier) {
-            CompressionTier.L0, CompressionTier.L1 -> if (forceCompression) (turns.size - 8).coerceAtLeast(0) else 0
+            CompressionTier.L0, CompressionTier.L1 -> 0
             CompressionTier.L2 -> (turns.size - recentRounds.coerceIn(4, 32)).coerceAtLeast(0)
             CompressionTier.L3 -> (turns.size - 4).coerceAtLeast(0)
             CompressionTier.L4 -> turns.lastIndex
@@ -59,16 +59,11 @@ object ContextCompressionPlanner {
                 candidate
             }
         }
-        if (!forceCompression && coveredIndex >= 0) {
-            // L0 grows its recent buffer until pressure returns. Other tiers merge in batches,
-            // avoiding an additional billable summarization call after every short reply.
-            cut = if (tier == CompressionTier.L0 || tier == CompressionTier.L1) coveredTurnCount
-                else if (cut - coveredTurnCount < 4) coveredTurnCount
-                else cut
+        if (!forceCompression && coveredIndex >= 0 && cut > coveredTurnCount && cut - coveredTurnCount < 4) {
+            // Extend summaries in whole-turn batches during ordinary sends. A shallower
+            // tier can restore raw history immediately; existing coverage never limits it.
+            cut = coveredTurnCount
         }
-        // Existing coverage is reusable even after switching tiers. Do not move its
-        // boundary backwards or replace the summary with a shorter historical range.
-        cut = maxOf(cut, coveredTurnCount).coerceAtMost(turns.lastIndex)
         val requestTurns = turns.mapIndexed { index, turn ->
             if (tier == CompressionTier.L1 && index < turns.lastIndex && turn.none { it.isPinned }) {
                 turn.map { it.copy(content = ContentPruningHelper.pruneMessageContent(it.content)) }
@@ -87,7 +82,10 @@ object ContextCompressionPlanner {
         }
         fun retainedCost(index: Int) = suffixCosts[index] + pinnedPrefixCosts[index]
         while (cut < turns.lastIndex && retainedCost(cut) > historyBudget) cut++
-        val source = turns.take(cut).flatten()
+        // Raw retention and summary coverage are independent. Restoring a larger raw
+        // window may overlap a checked summary, whose factual range must not regress.
+        val retiredMessageCount = turns.take(cut).sumOf { it.size }
+        val source = messages.take(maxOf(retiredMessageCount, coveredIndex + 1))
         val through = source.lastOrNull()?.id ?: 0L
         val needsSummary = source.isNotEmpty() && source.size > coveredIndex + 1
         val planned = retainedAt(cut)
