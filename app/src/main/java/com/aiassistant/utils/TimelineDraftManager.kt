@@ -112,7 +112,11 @@ object TimelineDraftManager {
                 id = setting.id?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
                 category = setting.category?.takeIf { it.isNotBlank() } ?: "角色特质",
                 content = setting.content ?: "",
-                targetScope = setting.targetScope?.takeIf { it == "global" || it == "session" } ?: "session"
+                targetScope = setting.targetScope?.takeIf { it == "global" || it == "session" } ?: "session",
+                action = setting.action?.takeIf { it in setOf("ADD", "SUPPLEMENT", "REVISE", "NOOP") } ?: "ADD",
+                targetMemoryId = setting.targetMemoryId?.takeIf { it > 0L },
+                evidence = setting.evidence ?: "",
+                changeReason = setting.changeReason ?: ""
             )
         } ?: emptyList()
         return draft.copy(

@@ -264,7 +264,12 @@ data class PendingMemoryCandidate(
     val suggestedScope: String = "user", // "user" (长期记忆) 或 "conversation" (会话记忆)
     val conversationId: Long,
     val sourceMessageId: Long? = null,
-    val category: String = "PREFERENCE"   // "PREFERENCE", "FACT", "PROJECT"
+    val category: String = "PREFERENCE",   // "PREFERENCE", "FACT", "PROJECT"
+    val action: String = "ADD",
+    val targetMemoryId: Long? = null,
+    val previousContent: String? = null,
+    val evidence: String = "",
+    val changeReason: String = ""
 )
 
 // 时间线独立节点实体

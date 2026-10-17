@@ -333,7 +333,8 @@ object SmartMemoryExtractor {
     }
 
     fun isConversationScoped(lower: String): Boolean {
-        return listOf("这个项目", "当前项目", "本项目", "这个对话", "当前会话", "本会话", "此会话", "该会话", "这个会话", "当前对话", "此对话", "该对话", "this project", "this conversation")
+        return listOf("这个项目", "当前项目", "本项目", "这个对话", "当前会话", "本会话", "此会话", "该会话", "这个会话", "当前对话", "此对话", "该对话", "this project", "this conversation",
+            "角色设定", "世界观", "剧情设定", "人物设定", "人设", "主角", "扮演", "故事设定", "设定：", "设定:")
             .any { lower.contains(it) }
     }
 

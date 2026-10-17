@@ -164,7 +164,8 @@ fun TimelineReconcileDialog(
     hazeState: dev.chrisbanes.haze.HazeState,
     initialResult: TimelineReconcileResult,
     onDismiss: () -> Unit,
-    onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit
+    onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
+    isApplying: Boolean = false
 ) {
     var storyTime by remember(initialResult) { mutableStateOf(initialResult.currentStoryTime) }
     val events = remember(initialResult) {
@@ -207,7 +208,7 @@ fun TimelineReconcileDialog(
 
     EchoGlassDialog(
         hazeState = hazeState,
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isApplying) onDismiss() },
         modifier = Modifier
             .fillMaxWidth(0.98f)
             .widthIn(max = 620.dp),
@@ -232,7 +233,7 @@ fun TimelineReconcileDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "已提炼 ${events.size} 条时间节点 · ${atemporalSettings.size} 条全局设定",
+                            "已提炼 ${events.size} 条时间节点 · ${atemporalSettings.size} 条会话设定",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
@@ -418,7 +419,7 @@ fun TimelineReconcileDialog(
                                 ) {
                                     if (storyTime.isEmpty()) {
                                         Text(
-                                            text = "例如：第5天·上午",
+                                            text = "例如：两周后、数月后的重逢",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                         )
@@ -533,12 +534,12 @@ fun TimelineReconcileDialog(
                                             TextButton(
                                                 onClick = {
                                                     for (i in atemporalSettings.indices) {
-                                                        atemporalSettings[i] = atemporalSettings[i].copy(isSelected = true)
+                                                        atemporalSettings[i] = atemporalSettings[i].copy(isSelected = atemporalSettings[i].isSelected || atemporalSettings[i].action != "REVISE")
                                                     }
                                                 },
                                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
-                                                Text("全选", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                                                Text("选新增/补充", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                                             }
                                             TextButton(
                                                 onClick = {
@@ -587,6 +588,15 @@ fun TimelineReconcileDialog(
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
 
+                                                    Text(
+                                                        text = when (setting.action) {
+                                                            "SUPPLEMENT" -> "补充"
+                                                            "REVISE" -> "修订 · 请单独确认"
+                                                            else -> "新增"
+                                                        },
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (setting.action == "REVISE") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                                                    )
                                                     // 设定性质（类别切换胶囊）
                                                     Surface(
                                                         shape = RoundedCornerShape(6.dp),
@@ -653,6 +663,14 @@ fun TimelineReconcileDialog(
                                                 }
 
                                                 // 第二行：文字放在下一行
+                                                setting.previousContent?.let { previous ->
+                                                    Text("原设定：$previous", style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                                if (setting.evidence.isNotBlank()) Text("依据：${setting.evidence}",
+                                                    style = MaterialTheme.typography.labelSmall)
+                                                if (setting.changeReason.isNotBlank()) Text("变更说明：${setting.changeReason}",
+                                                    style = MaterialTheme.typography.labelSmall)
                                                 BasicTextField(
                                                     value = setting.content,
                                                     onValueChange = { newContent ->
@@ -694,7 +712,7 @@ fun TimelineReconcileDialog(
                                         }
                                     }
 
-                                    // 手动补充全局设定
+                                    // 手动补充会话设定
                                     OutlinedButton(
                                         onClick = {
                                             atemporalSettings.add(
@@ -712,7 +730,7 @@ fun TimelineReconcileDialog(
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("＋ 手动补充全局设定", style = MaterialTheme.typography.labelSmall)
+                                        Text("＋ 手动补充会话设定", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
@@ -875,7 +893,7 @@ fun TimelineReconcileDialog(
                                                     ) {
                                                         if (item.timeTag.isEmpty()) {
                                                             Text(
-                                                                text = "如：第1天·傍晚",
+                                                                text = "如：购物当天、两周后",
                                                                 style = MaterialTheme.typography.labelSmall,
                                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                                             )
@@ -972,7 +990,7 @@ fun TimelineReconcileDialog(
                                 onClick = {
                                     events.add(
                                         TimelineEventItem(
-                                            timeTag = if (selectedTimeFilter != "全部") selectedTimeFilter else (storyTime.ifBlank { "第 1 天" }),
+                                            timeTag = if (selectedTimeFilter != "全部") selectedTimeFilter else storyTime,
                                             content = "",
                                             category = if (selectedCategoryFilter != null && selectedCategoryFilter != TimelineCategory.ATEMPORAL_SETTING) selectedCategoryFilter!! else TimelineCategory.PLOT_EVENT
                                         )
@@ -1034,7 +1052,7 @@ fun TimelineReconcileDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                             )
                             Text(
-                                text = "全局设定 ${atemporalSettings.count { it.isSelected }}/${atemporalSettings.size} 条",
+                                text = "会话设定 ${atemporalSettings.count { it.isSelected }}/${atemporalSettings.size} 条",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.tertiary
@@ -1063,7 +1081,7 @@ fun TimelineReconcileDialog(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
                         modifier = Modifier
                             .height(44.dp)
-                            .clickable { onDismiss() }
+                            .clickable(enabled = !isApplying) { onDismiss() }
                     ) {
                         Box(
                             modifier = Modifier.padding(horizontal = 18.dp),
@@ -1086,7 +1104,7 @@ fun TimelineReconcileDialog(
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp)
-                            .clickable {
+                            .clickable(enabled = !isApplying) {
                                 val validEvents = events.filter { it.content.isNotBlank() }
                                 val confirmedSettings = atemporalSettings.filter { it.isSelected && it.content.isNotBlank() }
                                 onApply(storyTime, validEvents, confirmedSettings)
@@ -1118,7 +1136,7 @@ fun TimelineReconcileDialog(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "保存时间线与独立设定",
+                                    text = if (isApplying) "保存中…" else "保存时间线与独立设定",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White

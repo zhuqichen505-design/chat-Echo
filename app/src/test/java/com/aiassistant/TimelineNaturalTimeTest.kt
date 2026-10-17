@@ -5,10 +5,121 @@ import com.aiassistant.utils.AtemporalSettingItem
 import com.aiassistant.utils.TimelineCategory
 import com.aiassistant.utils.TimelineEventItem
 import com.aiassistant.utils.TimelineMemoryHelper
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.junit.Assert.*
 import org.junit.Test
 
 class TimelineNaturalTimeTest {
+
+    @Test fun naturalRangesAndFlashbacksKeepTheirAnchorsWithoutCalendarCoercion() {
+        val tags = listOf("第6天·上午", "购物返家后约一两周", "回忆·两年前的冬天", "返回主线·购物返家后一两个月", "同一日下午")
+        val events = tags.mapIndexed { index, tag -> TimelineEventItem(timeTag = tag, content = "合成事件$index") }
+        val normalized = TimelineMemoryHelper.normalizeMonotonicTimeline(events)
+        assertEquals(listOf("第 6 天·上午") + tags.drop(1), normalized.map { it.timeTag })
+        assertEquals(events.map { it.content }, normalized.map { it.content })
+        assertEquals("购物返家后约一两周", TimelineMemoryHelper.inferCurrentStoryTime(normalized.take(3)))
+        assertEquals("未确定", TimelineMemoryHelper.inferCurrentStoryTime(listOf(TimelineEventItem(content = "提到两年前的计划"))))
+        assertNull(TimelineMemoryHelper.calculateRelativeTime("两周后", "一两个月后"))
+        assertNull(TimelineMemoryHelper.calculateRelativeTime("第6天", "承接【第6天】·过了一两周"))
+        val anchored = TimelineMemoryHelper.buildTimelinePromptContext("承接【第6天】·过了一两周",
+            listOf("[第6天] 两人在旧车站立誓结盟"))
+        assertFalse(anchored.contains("相对于当前：今天"))
+    }
+
+    @Test fun localFallbackKeepsExplicitAmbiguousSpansAndIgnoresPlansAndDirectorRequests() {
+        assertEquals("承接【第6天·上午】·过了一两周", TimelineMemoryHelper.detectAutoStoryTimeAdvancement(
+            "第6天·上午", "继续", "过了一两周，两人再次在旧超市门前见面。"))
+        assertEquals("承接【购物当天】·一两个月过去了", TimelineMemoryHelper.detectAutoStoryTimeAdvancement(
+            "购物当天", "继续", "一两个月过去了，窗外迎来了初雪。"))
+        assertNull(TimelineMemoryHelper.detectAutoStoryTimeAdvancement("第6天·上午", "过两周再继续故事", "两人继续整理购物清单。"))
+        assertNull(TimelineMemoryHelper.detectAutoStoryTimeAdvancement("第6天·上午", "继续", "两周后再见吧，她在电话里约定。"))
+        assertNull(TimelineMemoryHelper.detectAutoStoryTimeAdvancement("未确定", "你好", "你好，今天有什么安排？"))
+    }
+
+    @Test fun sourceCoverageRejectsMissingMiddleMessagesAndUnsupportedEventsWithoutAffectingLegacyParsing() {
+        fun payload(coverage: String) = """{"timelineEvents":[{"timeTag":"购物当天","content":"两人解决预算分歧后结账"}],"atemporalSettings":[],"sourceCoverage":$coverage}"""
+        assertFalse(TimelineMemoryHelper.hasCompleteSourceCoverage(payload("""[{"messageId":3,"eventIndices":[0]}]"""), listOf(1, 2, 3).map { it.toLong() }))
+        assertFalse(TimelineMemoryHelper.hasCompleteSourceCoverage(payload("""[{"messageId":1,"eventIndices":[2]}]"""), listOf(1L)))
+        assertTrue(TimelineMemoryHelper.hasCompleteSourceCoverage(payload("""[{"messageId":1,"noFactReason":"导演指导"},{"messageId":2,"eventIndices":[0]},{"messageId":3,"noFactReason":"重复确认"}]"""), listOf(1L, 2L, 3L)))
+        val legacy = """{"currentStoryTime":"两周后","timelineEvents":[{"timeTag":"第1天","content":"两人在车站初次见面"}]}"""
+        assertEquals("两周后", TimelineMemoryHelper.parseModelOutput(legacy).currentStoryTime)
+        assertEquals("两人在车站初次见面", TimelineMemoryHelper.parseModelOutput(legacy).events.single().content)
+    }
+
+    @Test fun verifiedExtractionRejectsDamagedTypesAndLossyNumbersBeforeLegacyFallbackCanRun() {
+        val valid = JsonParser.parseString("""{"currentStoryTime":"购物后约两周","timelineEvents":[{"timeTag":"购物后约两周","category":"PLOT_EVENT","content":"两人在车站交换采购清单"}],"atemporalSettings":[{"action":"ADD","targetMemoryId":null,"content":"合成角色不能食用花生"}],"sourceCoverage":[{"messageId":7,"eventIndices":[0],"settingIndices":[0]}]}""").asJsonObject
+        fun rejected(label: String, damage: (JsonObject) -> Unit) {
+            val damaged = valid.deepCopy().also(damage)
+            assertNull(label, TimelineMemoryHelper.parseVerifiedModelOutput(damaged.toString(), listOf(7L), listOf(11L)))
+        }
+        fun JsonObject.event() = getAsJsonArray("timelineEvents")[0].asJsonObject
+        fun JsonObject.setting() = getAsJsonArray("atemporalSettings")[0].asJsonObject
+        fun JsonObject.coverage() = getAsJsonArray("sourceCoverage")[0].asJsonObject
+        rejected("null 时间不能触发旧文本兜底") { it.add("currentStoryTime", JsonNull.INSTANCE) }
+        rejected("时间必须为字符串") { it.addProperty("currentStoryTime", 6) }
+        rejected("null 正文不能被静默丢弃") { it.event().add("content", JsonNull.INSTANCE) }
+        rejected("数字正文不能被转成字符串") { it.event().addProperty("content", 42) }
+        rejected("空白正文不能推进水线") { it.event().addProperty("content", "  ") }
+        rejected("时间标签不能为对象") { it.event().add("timeTag", JsonObject()) }
+        rejected("分类不能为 null") { it.event().add("category", JsonNull.INSTANCE) }
+        rejected("设定正文必须为字符串") { it.setting().addProperty("content", true) }
+        rejected("NOOP 必须按协议省略") { it.setting().addProperty("action", "NOOP") }
+        rejected("ADD 不接受修改目标") { it.setting().addProperty("targetMemoryId", 11) }
+        rejected("补充不能指向不存在的设定") {
+            it.setting().addProperty("action", "SUPPLEMENT"); it.setting().addProperty("targetMemoryId", 12)
+        }
+        rejected("修订不能将字符串当 ID") {
+            it.setting().addProperty("action", "REVISE"); it.setting().addProperty("targetMemoryId", "11")
+        }
+        rejected("补充不能截掉 ID 小数") {
+            it.setting().addProperty("action", "SUPPLEMENT"); it.setting().addProperty("targetMemoryId", 11.5)
+        }
+        rejected("源 ID 不能从字符串强转") { it.coverage().addProperty("messageId", "7") }
+        rejected("源 ID 不能截掉小数") { it.coverage().addProperty("messageId", 7.5) }
+        rejected("源 ID 不能溢出 Long") { it.coverage().add("messageId", JsonParser.parseString("9223372036854775808")) }
+        for (indices in listOf("[0.5]", "[\"0\"]", "[-1]", "[2147483648]", "[0,0]")) {
+            rejected("事件索引必须是唯一有效整数：$indices") { it.coverage().add("eventIndices", JsonParser.parseString(indices)) }
+        }
+        rejected("无事实理由也必须符合字符串协议") { it.coverage().addProperty("noFactReason", false) }
+        rejected("设定数组不能为 null") { it.add("atemporalSettings", JsonNull.INSTANCE) }
+
+        val accepted = TimelineMemoryHelper.parseVerifiedModelOutput(valid.toString(), listOf(7L), listOf(11L))!!
+        assertEquals("两人在车站交换采购清单", accepted.events.single().content)
+        assertEquals("ADD", accepted.atemporalSettings.single().action)
+        assertNull(accepted.atemporalSettings.single().targetMemoryId)
+        for (action in listOf("SUPPLEMENT", "REVISE")) {
+            val update = valid.deepCopy().apply {
+                setting().addProperty("action", action); setting().addProperty("targetMemoryId", 11)
+            }
+            assertEquals(11L, TimelineMemoryHelper.parseVerifiedModelOutput(update.toString(), listOf(7L), listOf(11L))!!.atemporalSettings.single().targetMemoryId)
+        }
+        val noNewFact = """{"timelineEvents":[],"atemporalSettings":[],"sourceCoverage":[{"messageId":7,"noFactReason":"已有设定的再次确认，按 NOOP 省略"}]}"""
+        val unchanged = TimelineMemoryHelper.parseVerifiedModelOutput(noNewFact, listOf(7L), emptyList(), "购物后约两周")!!
+        assertTrue(unchanged.events.isEmpty())
+        assertTrue(unchanged.atemporalSettings.isEmpty())
+        assertEquals("购物后约两周", unchanged.currentStoryTime)
+        val legacy = """{"currentStoryTime":"两周后","timelineEvents":[{"content":"两人在车站初次见面"}]}"""
+        assertNull(TimelineMemoryHelper.parseVerifiedModelOutput(legacy, listOf(7L), emptyList()))
+        assertEquals("两人在车站初次见面", TimelineMemoryHelper.parseModelOutput(legacy).events.single().content)
+    }
+
+    @Test fun legacyContextNeverInfersCurrentPhaseFromPastEventsNestedReferencesOrBreakfastHabits() {
+        val memories = listOf("[第6天·上午] 两人在旧超市碰面", "【习惯偏好】合成角色总在早餐后练琴")
+        for (anchor in listOf("过了一两个月", "购物返家后约一两周", "承接【第6天·上午】·过了一两个月")) {
+            val context = TimelineMemoryHelper.buildTimelinePromptContext(anchor, memories)
+            assertTrue(context.contains("【故事当前时间节点】：$anchor"))
+            assertTrue(context.contains("两人在旧超市碰面"))
+            assertTrue(context.contains("总在早餐后练琴"))
+            assertTrue(context.contains("当前锚点没有明确日内时段"))
+            assertFalse("过去的上午或早餐习惯不能约束当前白天", context.contains("当前仍处于白天"))
+            assertFalse(context.contains("当前故事时段停留在"))
+        }
+        val explicit = TimelineMemoryHelper.buildTimelinePromptContext("购物返家后一两个月·傍晚", memories)
+        assertTrue("原文明确给出的当前傍晚应保留", explicit.contains("当前故事时段停留在【傍晚/黄昏】"))
+        assertFalse(explicit.contains("当前仍处于白天"))
+    }
 
     @Test
     fun testEstimateTimeSpanJumpDays() {
@@ -57,8 +168,8 @@ class TimelineNaturalTimeTest {
         assertEquals("第 2 天·黄昏", normalized[1].timeTag)
         assertEquals("两周过后", normalized[2].timeTag) // 保留自然时间跨度标签
         assertEquals("暑假开始", normalized[3].timeTag) // 保留阶段节点标签
-        // 遇到第1天时，因为此前两周过后（+14）等单调递增累进，天数合理向前演进
-        assertTrue(normalized[4].timeTag.contains("天") || normalized[4].timeTag.contains("第"))
+        // 新篇章的第1天可以是局部锚点，不得根据前文自然跨度擅自改成全局第17天。
+        assertEquals("第 1 天·清晨", normalized[4].timeTag)
     }
 
     @Test
@@ -87,8 +198,8 @@ class TimelineNaturalTimeTest {
         assertEquals("今天", TimelineMemoryHelper.calculateRelativeTime("第 3 天", "第 3 天"))
 
         // 自然语义
-        assertEquals("约两周前", TimelineMemoryHelper.calculateRelativeTime("第 1 天", "两周过后"))
-        assertEquals("放假前", TimelineMemoryHelper.calculateRelativeTime("学期末", "暑假开始"))
+        assertNull(TimelineMemoryHelper.calculateRelativeTime("第 1 天", "两周过后"))
+        assertNull(TimelineMemoryHelper.calculateRelativeTime("学期末", "暑假开始"))
     }
 
     @Test
@@ -205,7 +316,7 @@ class TimelineNaturalTimeTest {
         assertEquals("第 1 天·傍晚", duskWithPassage)
     }
 
-    // v2.7.1：注入 prompt 需携带时间记忆权威声明与默认守时/单步推进铁律
+    // 没有时间证据时守时；原文明示跨度不受日内时段上限限制。
     @Test
     fun testTimelinePromptContext_containsTimeMemoryAuthorityAndSingleStepRule() {
         val nodes = listOf(
@@ -225,6 +336,6 @@ class TimelineNaturalTimeTest {
             memoryContents = listOf("[第 1 天·清晨] 两人在车站相遇")
         )
         assertTrue(roleplayContext.contains("唯一权威的时间记忆"))
-        assertTrue(roleplayContext.contains("单轮至多一段"))
+        assertTrue(roleplayContext.contains("不受相邻时段限制"))
     }
 }

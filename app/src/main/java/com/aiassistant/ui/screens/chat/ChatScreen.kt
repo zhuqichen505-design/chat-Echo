@@ -176,6 +176,7 @@ fun ChatScreen(
         appearanceSettings.storyReadingStyle == com.aiassistant.utils.EchoStoryReadingStyle.SPLIT
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val isApplyingTimeline by viewModel.isApplyingTimeline.collectAsState()
     // 实时 Key 尝试报错明细：生成过程中无需手动暂停即可直接看到各次连接失败的具体原因
     val liveKeyErrors by viewModel.keyAttemptErrors.collectAsState()
     // 生成锚点（v2.6.5）：正在连接/输出的回复钉在触发本轮的用户消息之后，
@@ -240,8 +241,10 @@ fun ChatScreen(
     var inputText by remember(conversationId) { mutableStateOf(ChatViewModel.getDraft(conversationId)) }
     var activeQuotedText by remember { mutableStateOf<String?>(null) }
     var messagePendingDelete by remember { mutableStateOf<Message?>(null) }
-    var showRenameDialog by remember { mutableStateOf(false) }
-    var renameText by remember(uiState.conversationTitle) { mutableStateOf(uiState.conversationTitle) }
+    var showRenameDialog by remember(conversationId) { mutableStateOf(false) }
+    var renameText by remember(conversationId) { mutableStateOf("") }
+    var renameTargetId by remember(conversationId) { mutableStateOf(conversationId) }
+    var isRenaming by remember(conversationId) { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showConvertToRoleplayDialog by remember { mutableStateOf(false) }
     var showContextUsageDialog by remember { mutableStateOf(false) }
@@ -593,6 +596,8 @@ fun ChatScreen(
                                     }
                                 }
 
+                                SessionSettingChangeDetails(candidate.action, candidate.previousContent,
+                                    candidate.evidence, candidate.changeReason)
                                 if (isEditingMemory) {
                                     OutlinedTextField(
                                         value = editedMemoryContent,
@@ -972,6 +977,8 @@ fun ChatScreen(
                                     }
 
                                     editedSettings.forEachIndexed { index, setting ->
+                                        SessionSettingChangeDetails(setting.action, setting.previousContent,
+                                            setting.evidence, setting.changeReason)
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Checkbox(checked = setting.isSelected, onCheckedChange = { selected ->
                                                 editedSettings = editedSettings.mapIndexed { i, item ->
@@ -1700,6 +1707,7 @@ fun ChatScreen(
                                         .weight(1f)
                                         .fillMaxHeight(),
                                     onLongClick = {
+                                        renameTargetId = conversationId
                                         renameText = uiState.conversationTitle
                                         showRenameDialog = true
                                     }
@@ -2168,6 +2176,7 @@ fun ChatScreen(
         TimelineReconcileDialog(
             hazeState = hazeState,
             initialResult = timelineReconcileResult!!,
+            isApplying = isApplyingTimeline,
             onDismiss = { viewModel.dismissTimelineReconcileDialog() },
             onApply = { currentTime, events, confirmedSettings ->
                 viewModel.applyReconciledTimeline(currentTime, events, confirmedSettings)
@@ -2528,11 +2537,13 @@ fun ChatScreen(
     if (showStorySmartAnalyzeDialog) {
         SmartAppendStoryDialog(
             hazeState = hazeState,
+            preferredConfigId = currentModelOption?.apiConfigId,
+            preferredModel = currentModelOption?.modelName ?: currentModel,
             onDismiss = { showStorySmartAnalyzeDialog = false },
-            onAppendAndMerge = { chars, scenario, resMap ->
-                showStorySmartAnalyzeDialog = false
-                viewModel.appendAndMergeStoryBundle(chars, scenario, resMap) { msg ->
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            onAppendAndMerge = { chars, scenario, resMap, complete ->
+                viewModel.appendAndMergeStoryBundle(chars, scenario, resMap) { success, message ->
+                    complete(success, message)
+                    if (success) Toast.makeText(context, "已保存到本作品", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -2696,12 +2707,13 @@ fun ChatScreen(
 
     if (showRenameDialog) {
         EchoGlassDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text(if (uiState.isRoleplay) "重命名故事" else "重命名对话") },
+            onDismissRequest = { if (!isRenaming) showRenameDialog = false },
+            title = { Text(if (renameTargetId != conversationId) "重命名分支" else if (uiState.isRoleplay) "重命名故事" else "重命名对话") },
             text = {
                 OutlinedTextField(
                     value = renameText,
                     onValueChange = { renameText = it },
+                    enabled = !isRenaming,
                     label = { Text("名称") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -2710,23 +2722,33 @@ fun ChatScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.renameConversation(renameText)
-                        showRenameDialog = false
+                        val targetId = renameTargetId
+                        val title = renameText.trim()
+                        isRenaming = true
+                        viewModel.renameConversation(title, targetId) { saved ->
+                            isRenaming = false
+                            if (saved) {
+                                branchSuccessDialog = branchSuccessDialog?.let {
+                                    if (it.newConversationId == targetId) it.copy(branchTitle = title) else it
+                                }
+                                showRenameDialog = false
+                            }
+                        }
                     },
-                    enabled = renameText.isNotBlank()
+                    enabled = !isRenaming && renameText.isNotBlank()
                 ) {
-                    Text("确定")
+                    Text(if (isRenaming) "保存中…" else "保存")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) {
+                TextButton(enabled = !isRenaming, onClick = { showRenameDialog = false }) {
                     Text("取消")
                 }
             }
         )
     }
 
-    branchSuccessDialog?.let { dialogState ->
+    branchSuccessDialog?.takeUnless { showRenameDialog }?.let { dialogState ->
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { branchSuccessDialog = null },
@@ -2765,7 +2787,15 @@ fun ChatScreen(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                         border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().combinedClickable(
+                            onClick = {},
+                            onLongClickLabel = "重命名分支",
+                            onLongClick = {
+                                renameTargetId = dialogState.newConversationId
+                                renameText = dialogState.branchTitle
+                                showRenameDialog = true
+                            }
+                        )
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -2788,7 +2818,7 @@ fun ChatScreen(
                         }
                     }
                     Text(
-                        text = "您可以留在当前对话继续探索，或立即跳转到新分支对话。",
+                        text = "长按分支名称可重命名。您可以留在当前对话，或跳转到新分支。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

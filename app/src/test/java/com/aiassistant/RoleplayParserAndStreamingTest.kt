@@ -2,13 +2,18 @@ package com.aiassistant
 
 import android.app.Application
 import androidx.room.Room
+import androidx.room.withTransaction
 import com.aiassistant.data.local.AppDatabase
+import com.aiassistant.data.repository.RoleplayRepository
+import com.aiassistant.domain.model.CharacterProfile
+import com.aiassistant.domain.model.RoleplayScenario
 import com.aiassistant.domain.model.WorldBook
 import com.aiassistant.utils.RoleplaySmartParser
 import com.aiassistant.utils.WorldBookImport
 import com.aiassistant.utils.WorldBookImportFormat
 import com.google.gson.JsonParser
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -25,6 +30,84 @@ import org.robolectric.annotation.SQLiteMode
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class RoleplayParserAndStreamingTest {
+
+    private suspend fun withCreativeLibrary(block: suspend (AppDatabase, RoleplayRepository) -> Unit) {
+        val db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            block(db, RoleplayRepository(db.characterProfileDao(), db.roleplayScenarioDao(), db.roleplaySessionDao(),
+                db.roleplayMemoryDao(), db.characterTagDao()))
+        } finally { db.close() }
+    }
+
+    @Test
+    fun libraryImportIgnoresForeignIdsAndPreservesExistingLocalMetadata() = runBlocking {
+        withCreativeLibrary { db, repository ->
+            val originalId = db.characterProfileDao().insertCharacter(CharacterProfile(name = "合成原角色",
+                avatarUri = "content://synthetic/portrait", isDefault = true, isFavorite = true, createdAt = 21,
+                personality = "冷静"))
+            val unrelatedId = db.characterProfileDao().insertCharacter(CharacterProfile(name = "合成其他角色", personality = "谨慎"))
+            val imported = repository.importCharacter(CharacterProfile(id = originalId, name = "合成新角色", personality = "乐观"))
+            assertTrue(imported.id != originalId)
+            assertEquals("冷静", db.characterProfileDao().getCharacterById(originalId)!!.personality)
+            val overwrite = repository.importCharacter(CharacterProfile(id = unrelatedId, name = " 合成原角色 ", personality = "果断"), overwrite = true)
+            assertEquals(originalId, overwrite.id)
+            assertEquals("果断", overwrite.personality)
+            assertEquals(21L, overwrite.createdAt)
+            assertEquals("content://synthetic/portrait", overwrite.avatarUri)
+            assertTrue(overwrite.isDefault)
+            assertTrue(overwrite.isFavorite)
+            assertEquals("谨慎", db.characterProfileDao().getCharacterById(unrelatedId)!!.personality)
+            assertEquals(3, db.characterProfileDao().getCharacterCount())
+        }
+    }
+
+    @Test
+    fun characterLibraryMergeMatchesCompleteLibraryAndRepeatedImportsDoNotGrowCards() = runBlocking {
+        withCreativeLibrary { db, repository ->
+            val id = db.characterProfileDao().insertCharacter(CharacterProfile(name = "Synthetic Navigator", knowledge = "航海"))
+            val first = repository.importCharacter(CharacterProfile(name = " synthetic navigator ", knowledge = "航海；修船"))
+            val repeated = repository.importCharacter(CharacterProfile(name = "Synthetic Navigator", knowledge = "航海；修船"))
+            assertEquals(id, first.id)
+            assertEquals(id, repeated.id)
+            assertEquals(first.knowledge, repeated.knowledge)
+            assertEquals("航海\n修船", repeated.knowledge)
+            assertEquals(1, db.characterProfileDao().getCharacterCount())
+        }
+    }
+
+    @Test
+    fun copyImportsHaveDistinctNamesAndWorldImportsCannotOverwriteAnUnrelatedId() = runBlocking {
+        withCreativeLibrary { db, repository ->
+            db.characterProfileDao().insertCharacter(CharacterProfile(name = "合成人物"))
+            db.characterProfileDao().insertCharacter(CharacterProfile(name = "合成人物 (副本)"))
+            val second = repository.importCharacter(CharacterProfile(name = "合成人物", isDefault = true), createCopy = true)
+            val third = repository.importCharacter(CharacterProfile(name = "合成人物"), createCopy = true)
+            assertEquals("合成人物 (副本 2)", second.name)
+            assertEquals("合成人物 (副本 3)", third.name)
+            assertFalse(second.isDefault)
+            val originalId = db.roleplayScenarioDao().insertScenario(RoleplayScenario(name = "合成旧世界", worldview = "群岛"))
+            val imported = repository.importScenario(RoleplayScenario(id = originalId, name = "合成新世界", worldview = "山脉"))
+            assertTrue(imported.id != originalId)
+            assertEquals("群岛", db.roleplayScenarioDao().getScenarioById(originalId)!!.worldview)
+            assertEquals(2, db.roleplayScenarioDao().getScenarioCount())
+        }
+    }
+
+    @Test
+    fun aFailedCreativeImportRollsBackTheWholeBatch() = runBlocking {
+        withCreativeLibrary { db, repository ->
+            val failed = runCatching {
+                db.withTransaction {
+                    repository.importCharacter(CharacterProfile(name = "合成人物"))
+                    repository.importScenario(RoleplayScenario(name = ""))
+                }
+            }.isFailure
+            assertTrue(failed)
+            assertTrue(db.characterProfileDao().getAllCharacters().first().isEmpty())
+            assertEquals(0, db.roleplayScenarioDao().getScenarioCount())
+        }
+    }
 
     @Test
     fun worldBookImportRecognizesTavernObjectAndPreservesKeywordPhrases() {

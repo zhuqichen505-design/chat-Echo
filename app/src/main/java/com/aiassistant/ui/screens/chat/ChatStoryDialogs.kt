@@ -126,12 +126,16 @@ fun ActionChip(text: String, onClick: () -> Unit) {
 fun SmartAppendStoryDialog(
     hazeState: HazeState,
     onDismiss: () -> Unit,
-    onAppendAndMerge: (List<CharacterProfile>, RoleplayScenario?, Map<String, ConflictAction>) -> Unit
+    onAppendAndMerge: (List<CharacterProfile>, RoleplayScenario?, Map<String, ConflictAction>, (Boolean, String?) -> Unit) -> Unit,
+    preferredConfigId: Long? = null,
+    preferredModel: String? = null
 ) {
     com.aiassistant.ui.screens.chat.story.SmartAppendStoryDialog(
         hazeState = hazeState,
         onDismiss = onDismiss,
-        onAppendAndMerge = onAppendAndMerge
+        onAppendAndMerge = onAppendAndMerge,
+        preferredConfigId = preferredConfigId,
+        preferredModel = preferredModel
     )
 }
 
@@ -140,12 +144,14 @@ fun TimelineReconcileDialog(
     hazeState: HazeState,
     initialResult: TimelineReconcileResult,
     onDismiss: () -> Unit,
-    onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit
+    onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
+    isApplying: Boolean = false
 ) {
     com.aiassistant.ui.screens.chat.story.TimelineReconcileDialog(
         hazeState = hazeState,
         initialResult = initialResult,
         onDismiss = onDismiss,
-        onApply = onApply
+        onApply = onApply,
+        isApplying = isApplying
     )
 }

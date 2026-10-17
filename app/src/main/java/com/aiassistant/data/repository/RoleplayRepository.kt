@@ -3,6 +3,7 @@ package com.aiassistant.data.repository
 import com.aiassistant.data.local.*
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.TimelineMemoryHelper
+import com.aiassistant.utils.RoleplaySmartAnalyzer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
@@ -62,6 +63,55 @@ class RoleplayRepository(
 
     suspend fun getCharactersByIds(ids: List<Long>): List<CharacterProfile> {
         return ids.mapNotNull { characterProfileDao.getCharacterById(it) }
+    }
+
+    /** 导入只按完整资料库匹配；外部文件的 ID 不能成为本地更新依据。由调用方包在同一事务中。 */
+    suspend fun importCharacter(
+        incoming: CharacterProfile,
+        createCopy: Boolean = false,
+        overwrite: Boolean = false
+    ): CharacterProfile {
+        val library = characterProfileDao.getAllCharacters().firstOrNull().orEmpty()
+        val existing = library.firstOrNull { it.name.trim().equals(incoming.name.trim(), ignoreCase = true) }
+        val now = System.currentTimeMillis()
+        val resolved = if (existing != null && !createCopy) {
+            val profile = if (overwrite) incoming else RoleplaySmartAnalyzer.mergeCharacters(existing, incoming)
+            profile.copy(id = existing.id, name = incoming.name.trim(),
+                avatarUri = profile.avatarUri ?: existing.avatarUri,
+                isFavorite = existing.isFavorite, isDefault = existing.isDefault,
+                createdAt = existing.createdAt, updatedAt = now)
+        } else {
+            var name = incoming.name.trim()
+            if (existing != null) {
+                val names = library.map { it.name.trim().lowercase(java.util.Locale.ROOT) }.toSet()
+                var suffix = 1
+                do {
+                    name = if (suffix == 1) "${incoming.name.trim()} (副本)" else "${incoming.name.trim()} (副本 $suffix)"
+                    suffix++
+                } while (name.lowercase(java.util.Locale.ROOT) in names)
+            }
+            incoming.copy(id = 0, name = name, isDefault = false, createdAt = now, updatedAt = now)
+        }
+        require(resolved.name.isNotBlank()) { "角色名称不能为空" }
+        return if (resolved.id > 0) {
+            characterProfileDao.updateCharacter(resolved)
+            resolved
+        } else resolved.copy(id = characterProfileDao.insertCharacter(resolved))
+    }
+
+    suspend fun importScenario(incoming: RoleplayScenario): RoleplayScenario {
+        require(incoming.name.isNotBlank()) { "世界观名称不能为空" }
+        val existing = roleplayScenarioDao.getAllScenarios().firstOrNull().orEmpty()
+            .firstOrNull { it.name.trim().equals(incoming.name.trim(), ignoreCase = true) }
+        val now = System.currentTimeMillis()
+        if (existing != null) {
+            val merged = RoleplaySmartAnalyzer.mergeScenarios(existing, incoming)
+                .copy(name = incoming.name.trim(), createdAt = existing.createdAt, updatedAt = now)
+            roleplayScenarioDao.updateScenario(merged)
+            return merged
+        }
+        val profile = incoming.copy(id = 0, name = incoming.name.trim(), createdAt = now, updatedAt = now)
+        return profile.copy(id = roleplayScenarioDao.insertScenario(profile))
     }
 
     // ============ 场景卡操作 ============
@@ -305,7 +355,8 @@ class RoleplayRepository(
         includeHistory: Boolean = true,
         maxHistoryMessages: Int = 50,
         queryText: String? = null,
-        includeWorldBook: Boolean = true
+        includeWorldBook: Boolean = true,
+        includeTimelineContext: Boolean = true
     ): String {
         val session = roleplaySessionDao.getSessionById(sessionId)
             ?: return userMessage ?: ""
@@ -360,27 +411,35 @@ class RoleplayRepository(
             }
         }
 
-        // 5. 剧情专属记忆与时间线
+        // 5. 长期事实不参与时间推断；正式时间线由聊天仓库统一注入。
         val pinnedFacts = roleplayMemoryDao.getPinnedFacts(sessionId).map { it.content }
         val sessionMemories = memoryDao?.getCandidateMemories(session.conversationId)
             ?.filter { it.isEnabled && it.scope == "conversation" }
             ?.map { it.content } ?: emptyList()
 
-        val allRoleplayMemories = (pinnedFacts + sessionMemories).distinct()
+        val allRoleplayMemories = (pinnedFacts + sessionMemories).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        fun isLegacyTimeAnchor(content: String): Boolean = content.startsWith("【当前故事时间】：") || content.startsWith("当前故事时间：")
+        val (legacyTimeline, longTermFacts) = allRoleplayMemories.partition {
+            isLegacyTimeAnchor(it) || TimelineMemoryHelper.isExplicitTimelineEvent(it)
+        }
+        if (longTermFacts.isNotEmpty()) {
+            parts.add("【本故事长期事实与规则】\n以下是已确认的角色事实、习惯与约束；其中的早餐、早晚或日常作息不是当前故事时段，也不能将习惯改写为已发生事件。\n" +
+                longTermFacts.joinToString("\n") { "- $it" })
+        }
+        if (legacyTimeline.isNotEmpty()) {
+            parts.add("【兼容旧版剧情记录】\n以下原文是旧版保存的历史证据，按原有标签理解。旧时间标签不覆盖独立时间线中的当前锚点，不据此推算当前早晚或虚构经过的天数。\n" +
+                legacyTimeline.joinToString("\n") { "- $it" })
+        }
         val conversationStoryTime = conversationDao?.getConversationById(session.conversationId)
             ?.currentStoryTime?.takeIf { it.isNotBlank() && it != "未确定" }
-        if (allRoleplayMemories.isNotEmpty() || conversationStoryTime != null) {
-            // 时间线参照的“当前故事时间”必须是真实时间标签，严禁把剧情摘要 currentPlotSummary 当作时间注入
-            // （否则【故事当前时间节点】会变成一段摘要，模型的时间记忆随之错乱）。
-            // 优先取会话行上维护的 currentStoryTime，回退到会话记忆中的【当前故事时间】条目。
-            val memoryStoryTime = sessionMemories
-                .firstOrNull { it.startsWith("【当前故事时间】：") || it.startsWith("当前故事时间：") }
+        if (includeTimelineContext) {
+            // 独立调用仍兼容当前自然时间；普通聊天传 false，由 AiRepository 注入唯一时间线。
+            val memoryStoryTime = allRoleplayMemories
+                .firstOrNull(::isLegacyTimeAnchor)
                 ?.substringAfter("：")?.trim()?.takeIf { it.isNotBlank() }
-            val timelineContext = TimelineMemoryHelper.buildTimelinePromptContext(
-                currentStoryTime = conversationStoryTime ?: memoryStoryTime,
-                memoryContents = allRoleplayMemories
-            )
-            parts.add(timelineContext)
+            (conversationStoryTime ?: memoryStoryTime)?.let { time ->
+                parts.add("【故事当前时间节点】：$time\n保留该自然时间锚点及明确的跨度；未明确的日期和时段保持未定，历史事件与生活习惯不能补全当前早晚。")
+            }
         }
 
         // 跨会话长期背景参考 (若明确开启，按相关性匹配注入)

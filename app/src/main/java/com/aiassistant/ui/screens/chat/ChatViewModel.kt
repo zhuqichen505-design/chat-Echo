@@ -3,6 +3,7 @@ package com.aiassistant.ui.screens.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.aiassistant.AiAssistantApp
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.TimelineMemoryHelper
@@ -19,6 +20,7 @@ import com.aiassistant.data.repository.AutoTimelineUpdateResult
 import com.google.gson.Gson
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -169,6 +171,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     // 全量历史时间轴梳理与校对状态
     private val _isReconcilingTimeline = MutableStateFlow(false)
     val isReconcilingTimeline: StateFlow<Boolean> = _isReconcilingTimeline.asStateFlow()
+    private val _isApplyingTimeline = MutableStateFlow(false)
+    val isApplyingTimeline: StateFlow<Boolean> = _isApplyingTimeline.asStateFlow()
 
     private val _timelineReconcileResult = MutableStateFlow<TimelineReconcileResult?>(null)
     val timelineReconcileResult: StateFlow<TimelineReconcileResult?> = _timelineReconcileResult.asStateFlow()
@@ -1251,7 +1255,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         userMessage = null, // 设定与上下文纯净解耦，用户消息由 user 角色独立发送
                         globalRoleplayPrompt = globalRpPrompt,
                         queryText = content,
-                        includeWorldBook = false // 世界书统一由实际请求链按本轮开关、范围和预算注入一次
+                        includeWorldBook = false, // 世界书统一由实际请求链按本轮开关、范围和预算注入一次
+                        includeTimelineContext = false // 时间线及当前参照由实际请求链统一注入
                     )
                 } else {
                     currentSystemPrompt
@@ -1887,13 +1892,25 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     // 重命名对话标题
-    fun renameConversation(newTitle: String) {
+    fun renameConversation(
+        newTitle: String,
+        targetConversationId: Long = conversationId,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            conversation?.let { conv ->
-                val updated = conv.copy(title = newTitle)
-                AiAssistantApp.instance.database.conversationDao().updateConversation(updated)
-                conversation = updated
-                _uiState.update { it.copy(conversationTitle = newTitle) }
+            try {
+                val cleanTitle = newTitle.trim()
+                repository.updateConversationTitle(targetConversationId, cleanTitle)
+                if (targetConversationId == conversationId) {
+                    conversation = conversation?.copy(title = cleanTitle)
+                    _uiState.update { it.copy(conversationTitle = cleanTitle) }
+                }
+                onComplete(true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "重命名失败：${e.message ?: "请重试"}"
+                onComplete(false)
             }
         }
     }
@@ -1938,10 +1955,13 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 ?.content
                 ?.let { generateTitleFromContent(it) }
             val title = generatedTitle ?: fallbackTitle ?: return@launch
-            val updated = latestConversation.copy(title = title)
-            AiAssistantApp.instance.database.conversationDao().updateConversation(updated)
-            conversation = updated
-            _uiState.update { it.copy(conversationTitle = title) }
+            AiAssistantApp.instance.database.withTransaction {
+                val current = repository.getConversationById(conversationId) ?: return@withTransaction
+                if (current.title != latestConversation.title) return@withTransaction
+                repository.updateConversationTitle(conversationId, title)
+                conversation = current.copy(title = title)
+                _uiState.update { it.copy(conversationTitle = title) }
+            }
         }
     }
 
@@ -2010,13 +2030,18 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         val finalContent = customContent?.trim()?.ifBlank { null } ?: candidate.distilledContent
         viewModelScope.launch {
             val targetScope = if (scope == "session" || scope == "conversation") "conversation" else "user"
-            repository.saveConfirmedMemory(
-                content = finalContent,
-                scope = targetScope,
-                conversationId = if (targetScope == "conversation") candidate.conversationId else null,
-                sourceMessageId = candidate.sourceMessageId
-            )
-            _pendingMemoryCandidate.value = null
+            try {
+                repository.saveConfirmedMemory(
+                    content = finalContent,
+                    scope = targetScope,
+                    conversationId = if (targetScope == "conversation") candidate.conversationId else null,
+                    sourceMessageId = candidate.sourceMessageId,
+                    targetMemoryId = candidate.targetMemoryId.takeIf { targetScope == candidate.suggestedScope },
+                    previousContent = candidate.previousContent
+                )
+                _pendingMemoryCandidate.compareAndSet(candidate, null)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _error.value = e.message ?: "保存设定失败，候选已保留" }
         }
     }
 
@@ -2062,7 +2087,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun startTimelineReconciliation(startFromDraft: Boolean = false, fromCheckpoint: Boolean = false) {
-        if (_isReconcilingTimeline.value) return
+        if (_isReconcilingTimeline.value || _isApplyingTimeline.value) return
         _isReconcilingTimeline.value = true
         _timelineReconcileProgress.value = when {
             startFromDraft -> "正在读取先前进度继续梳理..."
@@ -2216,37 +2241,32 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         _liveReconcileDraft.value = null
     }
 
-    fun openSavedDraftForReview() {
-        // 草稿文件可能损坏（显式 null / 未知枚举）：无害化后展示，彻底坏则静默忽略，绝不闪退
-        val draft = try {
-            TimelineDraftManager.sanitizeDraft(getSavedTimelineDraft() ?: _liveReconcileDraft.value) ?: return
-        } catch (e: Exception) {
-            Log.w("ChatViewModel", "打开时间线草稿失败，已忽略损坏草稿: ${e.message}")
-            return
-        }
-        _timelineReconcileResult.value = TimelineReconcileResult(
-            currentStoryTime = draft.currentStoryTime,
-            events = draft.events.toMutableList(),
-            atemporalSettings = draft.atemporalSettings.toMutableList(),
-            extractionSource = "SAVED_DRAFT"
-        )
-        _showTimelineReconcileDialog.value = true
-    }
+    fun openSavedDraftForReview() = openTimelineDraftForReview(preferLive = false)
 
-    fun openLiveDraftForReview() {
-        val draft = try {
-            TimelineDraftManager.sanitizeDraft(_liveReconcileDraft.value ?: getSavedTimelineDraft()) ?: return
-        } catch (e: Exception) {
-            Log.w("ChatViewModel", "打开实时梳理快照失败，已忽略损坏草稿: ${e.message}")
-            return
+    fun openLiveDraftForReview() = openTimelineDraftForReview(preferLive = true)
+
+    private fun openTimelineDraftForReview(preferLive: Boolean) {
+        viewModelScope.launch {
+            // 可编辑审阅先暂停提取，冻结事实与水线，避免后台刷新覆盖用户审阅内容。
+            timelineReconcileJob?.cancelAndJoin()
+            timelineReconcileJob = null
+            val draft = try {
+                val candidate = if (preferLive) _liveReconcileDraft.value ?: getSavedTimelineDraft()
+                    else getSavedTimelineDraft() ?: _liveReconcileDraft.value
+                TimelineDraftManager.sanitizeDraft(candidate) ?: return@launch
+            } catch (e: Exception) {
+                _error.value = "读取时间线草稿失败，请重试"
+                return@launch
+            }
+            _timelineReconcileResult.value = TimelineReconcileResult(
+                currentStoryTime = draft.currentStoryTime,
+                events = draft.events.toMutableList(),
+                atemporalSettings = draft.atemporalSettings.toMutableList(),
+                extractionSource = if (preferLive) "LIVE_PROGRESS" else "SAVED_DRAFT",
+                lastProcessedMessageId = draft.lastProcessedMessageId
+            )
+            _showTimelineReconcileDialog.value = true
         }
-        _timelineReconcileResult.value = TimelineReconcileResult(
-            currentStoryTime = draft.currentStoryTime,
-            events = draft.events.toMutableList(),
-            atemporalSettings = draft.atemporalSettings.toMutableList(),
-            extractionSource = "LIVE_PROGRESS"
-        )
-        _showTimelineReconcileDialog.value = true
     }
 
     fun applySavedDraft() {
@@ -2259,114 +2279,95 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         applyReconciledTimeline(
             currentStoryTime = draft.currentStoryTime,
             events = draft.events,
-            confirmedSettings = draft.atemporalSettings
+            confirmedSettings = draft.atemporalSettings,
+            reviewedMessageId = draft.lastProcessedMessageId
         )
     }
 
     fun applyReconciledTimeline(
         currentStoryTime: String,
         events: List<TimelineEventItem>,
-        confirmedSettings: List<AtemporalSettingItem> = emptyList()
+        confirmedSettings: List<AtemporalSettingItem> = emptyList(),
+        reviewedMessageId: Long? = null
     ) {
+        if (_isApplyingTimeline.value) return
+        _isApplyingTimeline.value = true
+        val sourceMessageId = reviewedMessageId
+            ?: _timelineReconcileResult.value?.lastProcessedMessageId?.takeIf { it > 0 }
+            ?: 0L
+        val reviewedMessages = _messages.value
+            .filter { !it.isExcluded && it.role != "system" && it.content.isNotBlank() }
+            .sortedWith(compareBy<Message> { it.createdAt }.thenBy { it.id })
         viewModelScope.launch {
-            // 1. 故事时间独立存入 Conversation 表
-            val cleanStoryTime = currentStoryTime.trim().takeIf { it.isNotBlank() && it != "未确定" }
-            repository.updateStoryTime(conversationId, cleanStoryTime)
-
-            // 2. 时间与事件独立存入 timeline_nodes 表，保留明确时序与分类
-            val nodesToSave = events.mapIndexed { idx, ev ->
-                TimelineNode(
-                    conversationId = conversationId,
-                    timeTag = ev.timeTag.trim(),
-                    event = ev.content.trim(),
-                    category = ev.category.key,
-                    orderIndex = idx,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
-                )
-            }
-            repository.replaceTimelineNodes(conversationId, nodesToSave)
-
-            // 3. 清理之前误存放在 memory_items 中的时间线碎片，但完整保留用户自定义的纯净设定与规则
             try {
-                val oldMemories = repository.getConversationMemoriesList(conversationId)
-                for (oldMem in oldMemories) {
-                    val trimmed = oldMem.content.trim()
-                    if (trimmed.startsWith("【当前故事时间】：") || trimmed.startsWith("当前故事时间：") || TimelineMemoryHelper.isExplicitTimelineEvent(trimmed)) {
-                        repository.deleteMemory(oldMem.id)
-                    }
+                timelineReconcileJob?.cancelAndJoin()
+                timelineReconcileJob = null
+                val cleanStoryTime = currentStoryTime.trim().takeIf { it.isNotBlank() && it != "未确定" }
+                val nodesToSave = events.filter { it.content.isNotBlank() }.mapIndexed { idx, ev ->
+                    TimelineNode(conversationId = conversationId, timeTag = ev.timeTag.trim(),
+                        event = ev.content.trim(), category = ev.category.key, orderIndex = idx)
                 }
-            } catch (e: Exception) {
-                Log.w("ChatViewModel", "清理旧时间线记忆缓存失败: ${e.message}")
-            }
+                AiAssistantApp.instance.database.withTransaction {
+                    // 1. 故事时间独立存入 Conversation 表
+                    repository.updateStoryTime(conversationId, cleanStoryTime)
 
-            // 4. 需求 8：展示的世界观与固有设定 100% 真正保存进记忆中（在会话专属记忆与角色扮演记忆中立即可见并生效）
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentRpSession = _uiState.value.roleplaySession
-            for (setting in confirmedSettings) {
-                if (setting.isSelected && setting.content.isNotBlank()) {
-                    val formatted = "【${setting.category}】${setting.content.trim()}"
-                    // 无论 targetScope 是 session 还是 global，都向当前会话专属记忆存入一条（带 conversationId），确保在当前会话的“会话专属记忆与规则”列表中 100% 立即可见！
-                    repository.addConversationMemory(conversationId, formatted)
-                    // 若用户明确选择 global，额外存入一条 user 级全局记忆，让跨会话生效
-                    if (setting.targetScope == "global") {
-                        repository.addUserMemory(formatted)
-                    }
-                    // 若当前处于角色扮演/剧情创作会话，同时写入角色扮演专属记忆表 (RoleplayMemory) 并标记为已固定，确保在角色扮演上下文组装中立即生效
-                    if (currentRpSession != null) {
-                        try {
-                            roleplayRepo.insertMemory(
-                                RoleplayMemory(
-                                    sessionId = currentRpSession.id,
-                                    memoryType = "fact",
-                                    content = formatted,
-                                    isPinned = true
-                                )
-                            )
-                        } catch (e: Exception) {
-                            Log.w("ChatViewModel", "保存角色扮演专属记忆失败: ${e.message}")
+                    // 时间标签保留原文证据与人工顺序，不强制改写成日历。
+                    repository.replaceTimelineNodes(conversationId, nodesToSave)
+
+                    // 3. 清理之前误存放在 memory_items 中的时间线碎片，但完整保留用户自定义的纯净设定与规则
+                    try {
+                        val oldMemories = repository.getConversationMemoriesList(conversationId)
+                        for (oldMem in oldMemories) {
+                            val trimmed = oldMem.content.trim()
+                            if (trimmed.startsWith("【当前故事时间】：") || trimmed.startsWith("当前故事时间：") || TimelineMemoryHelper.isExplicitTimelineEvent(trimmed)) {
+                                repository.deleteMemory(oldMem.id)
+                            }
                         }
+                    } catch (e: Exception) {
+                        Log.w("ChatViewModel", "清理旧时间线记忆缓存失败: ${e.message}")
                     }
+
+                    // 所有设定由同一个增量维护入口保存，不重复插入旧设定或角色记忆镜像。
+                    repository.applyConfirmedSessionSettings(conversationId, confirmedSettings)
+                    val latest = AiAssistantApp.instance.database.conversationDao().getConversationById(conversationId)
+                        ?: error("当前会话已不存在")
+                    if (latest.enableSessionMemory != true) {
+                        repository.updateConversation(latest.copy(enableSessionMemory = true))
+                    }
+                } // transaction: 时间、事件与设定共同提交；冲突时全部回滚。
+
+                // 记录时间线水线检查点 (Checkpoint)
+                try {
+                    val lastIdx = reviewedMessages.indexOfFirst { it.id == sourceMessageId }
+                        .takeIf { it >= 0 }?.let { it + 1 } ?: 0
+                    val checkpoint = TimelineReconcileCheckpoint(
+                        conversationId = conversationId,
+                        lastReconciledMessageId = sourceMessageId,
+                        lastReconciledMessageIndex = lastIdx,
+                        totalMessageCountAtReconciliation = reviewedMessages.size,
+                        storyTimeAtReconciliation = cleanStoryTime,
+                        nodeCountAtReconciliation = nodesToSave.size,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    TimelineDraftManager.saveCheckpoint(AiAssistantApp.instance, checkpoint)
+                    _timelineCheckpoint.value = checkpoint
+                } catch (e: Exception) {
+                    Log.w("ChatViewModel", "记录时间线水线检查点失败: ${e.message}")
                 }
+
+                // 清理已应用的草稿
+                TimelineDraftManager.clearDraft(AiAssistantApp.instance, conversationId)
+                _liveReconcileDraft.value = null
+
+                dismissTimelineReconcileDialog()
+                loadConversation()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                Log.e("ChatViewModel", "保存时间线与设定失败", e)
+                _error.value = e.message ?: "保存失败，提取结果和草稿已保留，请重试"
+            } finally {
+                _isApplyingTimeline.value = false
             }
-
-            // 确保当前会话的会话记忆功能处于开启状态，使刚存入的设定立即可用
-            conversation?.let { conv ->
-                if (conv.enableSessionMemory != true) {
-                    repository.updateConversation(conv.copy(enableSessionMemory = true))
-                }
-            }
-
-            // 记录时间线水线检查点 (Checkpoint)
-            try {
-                val allMsgs = _messages.value
-                    .filter { !it.isExcluded && it.role != "system" && it.content.isNotBlank() }
-                    .sortedBy { it.createdAt }
-                val lastProcessedId = _timelineReconcileResult.value?.lastProcessedMessageId
-                    ?: _liveReconcileDraft.value?.lastProcessedMessageId
-                    ?: allMsgs.lastOrNull()?.id ?: 0L
-                val lastIdx = allMsgs.indexOfFirst { it.id == lastProcessedId }.takeIf { it >= 0 }?.let { it + 1 } ?: allMsgs.size
-                val checkpoint = TimelineReconcileCheckpoint(
-                    conversationId = conversationId,
-                    lastReconciledMessageId = lastProcessedId,
-                    lastReconciledMessageIndex = lastIdx,
-                    totalMessageCountAtReconciliation = allMsgs.size,
-                    storyTimeAtReconciliation = cleanStoryTime,
-                    nodeCountAtReconciliation = nodesToSave.size,
-                    timestamp = System.currentTimeMillis()
-                )
-                TimelineDraftManager.saveCheckpoint(AiAssistantApp.instance, checkpoint)
-                _timelineCheckpoint.value = checkpoint
-            } catch (e: Exception) {
-                Log.w("ChatViewModel", "记录时间线水线检查点失败: ${e.message}")
-            }
-
-            // 清理已应用的草稿
-            TimelineDraftManager.clearDraft(AiAssistantApp.instance, conversationId)
-            _liveReconcileDraft.value = null
-
-            dismissTimelineReconcileDialog()
-            loadConversation()
         }
     }
 
@@ -2586,7 +2587,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         newCharacters: List<CharacterProfile>,
         newScenario: RoleplayScenario?,
         resolutionMap: Map<String, com.aiassistant.ui.screens.roleplay.ConflictAction>,
-        onComplete: (String) -> Unit = {}
+        onComplete: (Boolean, String?) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
             try {
@@ -2619,9 +2620,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     _uiState.update { it.copy(roleplaySession = updated, roleplayCharacter = effective.firstOrNull(),
                         roleplayCharacters = effective, roleplayScenario = world) }
                 }
-                onComplete("已将 ${newCharacters.size} 位人物${if (newScenario != null) "与世界观" else ""}保存到本作品；资料库保持原样")
+                onComplete(true, null)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { onComplete("追加融合失败：${failure.message}") }
+            catch (failure: Exception) { onComplete(false, "追加融合失败：${failure.message}") }
         }
     }
 
@@ -2758,52 +2759,47 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-            val roleplayRepo = AiAssistantApp.instance.roleplayRepository
-            val currentSession = roleplayRepo.getSessionByConversationId(conversationId)
-                ?: error("当前故事已不存在，无法应用设定")
+                storySettingsSaveMutex.withLock {
+                    val roleplayRepo = AiAssistantApp.instance.roleplayRepository
+                    val currentSession = roleplayRepo.getSessionByConversationId(conversationId)
+                        ?: error("当前故事已不存在，无法应用设定")
 
-            // 1. 如果有新增/更新角色，存入局部角色列表
-            var updatedSession = currentSession
-            if (characters.isNotEmpty()) {
-                val baseChars = _uiState.value.roleplayCharacters
-                val currentCustomized = currentSession.getCustomizedCharacters(baseChars).toMutableList()
-                characters.forEach { newChar ->
-                    val idx = currentCustomized.indexOfFirst { (it.id > 0 && it.id == newChar.id) || it.name == newChar.name }
-                    if (idx >= 0) {
-                        currentCustomized[idx] = newChar
-                    } else {
-                        currentCustomized.add(newChar)
+                    // 同时维护人物快照和参与集合，新增人物立即进入本故事上下文。
+                    var updatedSession = currentSession
+                    for (character in characters) {
+                        val allCharacters = updatedSession.getCustomizedCharacters(
+                            roleplayRepo.getEffectiveCharactersForSession(updatedSession)
+                        )
+                        val existing = allCharacters.firstOrNull {
+                            (character.id != 0L && it.id == character.id) || it.name.trim() == character.name.trim()
+                        }
+                        updatedSession = StorySessionBindings.upsertCharacter(updatedSession, allCharacters,
+                            if (existing != null) character.copy(id = existing.id) else character.copy(id = 0L))
+                    }
+
+                    // 2. 如果有更新世界观，存入局部世界观
+                    if (scenario != null) {
+                        val jsonStr = com.google.gson.Gson().toJson(scenario)
+                        updatedSession = updatedSession.copy(
+                            customScenarioData = jsonStr,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    }
+
+                    roleplayRepo.updateSession(updatedSession)
+                    val effectiveChars = roleplayRepo.getEffectiveCharactersForSession(updatedSession)
+                    val effectiveScenario = roleplayRepo.getEffectiveScenarioForSession(updatedSession)
+                    _uiState.update {
+                        it.copy(
+                            roleplaySession = updatedSession,
+                            roleplayCharacter = effectiveChars.firstOrNull(),
+                            roleplayCharacters = effectiveChars,
+                            roleplayScenario = effectiveScenario,
+                            suggestedProposal = null
+                        )
                     }
                 }
-                val jsonStr = com.google.gson.Gson().toJson(currentCustomized)
-                updatedSession = updatedSession.copy(
-                    customCharacterData = jsonStr,
-                    updatedAt = System.currentTimeMillis()
-                )
-            }
-
-            // 2. 如果有更新世界观，存入局部世界观
-            if (scenario != null) {
-                val jsonStr = com.google.gson.Gson().toJson(scenario)
-                updatedSession = updatedSession.copy(
-                    customScenarioData = jsonStr,
-                    updatedAt = System.currentTimeMillis()
-                )
-            }
-
-            roleplayRepo.updateSession(updatedSession)
-            val effectiveChars = roleplayRepo.getEffectiveCharactersForSession(updatedSession)
-            val effectiveScenario = roleplayRepo.getEffectiveScenarioForSession(updatedSession)
-            _uiState.update {
-                it.copy(
-                    roleplaySession = updatedSession,
-                    roleplayCharacter = effectiveChars.firstOrNull(),
-                    roleplayCharacters = effectiveChars,
-                    roleplayScenario = effectiveScenario,
-                    suggestedProposal = null
-                )
-            }
-            onSaved()
+                onSaved()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

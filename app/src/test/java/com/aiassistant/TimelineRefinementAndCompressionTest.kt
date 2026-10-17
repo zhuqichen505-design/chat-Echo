@@ -235,8 +235,7 @@ class TimelineRefinementAndCompressionTest {
             userMessage = "吃完早餐了，我们准备去北门市场吧。",
             assistantReply = "两人吃完热腾腾的早点，收拾好随身装备，动身走出客栈，向繁华的北门街市走去。"
         )
-        assertNotNull("吃完早餐动身出发应当推进时空节点", advancedFromMorning)
-        assertEquals("第 1 天·上午", advancedFromMorning)
+        assertNull("吃完早餐只是动作，不足以确定已经进入上午", advancedFromMorning)
 
         // 2. 时段描写自然推进：下午 -> 傍晚
         val advancedToDusk = TimelineMemoryHelper.detectAutoStoryTimeAdvancement(
@@ -304,6 +303,12 @@ class TimelineRefinementAndCompressionTest {
 
         val invalidEvent2 = "我拔出短剑冷冷地看着他你到底是谁"
         assertTrue("直接抄录用户发言的事件必须被拦截判定为非法", TimelineMemoryHelper.isInvalidOrUserInstructionEvent(invalidEvent2, userInputs))
+        assertTrue("冒号与不同引号不能绕过原样搬运检查", TimelineMemoryHelper.isInvalidOrUserInstructionEvent(
+            "我拔出短剑，冷冷地看着他：\"你到底是谁？\"", userInputs))
+        assertFalse("改写为第三人称的实际行动可以来自用户扮演内容", TimelineMemoryHelper.isInvalidOrUserInstructionEvent(
+            "合成角色拔出短剑质问对方身份", userInputs))
+        assertFalse("用户提供的客观第三人称事实不能仅因文字相同就丢弃", TimelineMemoryHelper.isInvalidOrUserInstructionEvent(
+            "合成角色在车站领回遗失的钱包", listOf("合成角色在车站领回遗失的钱包")))
 
         val validNarrativeEvent = "两人于雨夜车站点燃香烟并达成初步同盟"
         assertFalse("客观第三人称的剧情事实不应被误判为非法", TimelineMemoryHelper.isInvalidOrUserInstructionEvent(validNarrativeEvent, userInputs))
@@ -328,7 +333,7 @@ class TimelineRefinementAndCompressionTest {
         // 验证：应当在前半句逗号处完整断开，保持主谓宾完整，绝不能变成半截残句
         assertTrue("精炼句子应当保留完整的语法分句", compacted == "两人前往藏书阁寻找失落的古卷" || compacted.endsWith("策略暗号"))
         assertFalse("绝不能出现半截残词腰斩", compacted.endsWith("的") || compacted.endsWith("应对") || compacted.endsWith("在路"))
-        assertTrue("字数应当合理控制在 28 字内", compacted.length <= 28)
+        assertEquals("旧长度参数不应删除任何剧情事实", longSentence, compacted)
 
         // 验证冗长无增量前缀自动清理
         val redundantPrefixSentence = "两人在对话中达成共识，决定次日清晨启程出发"

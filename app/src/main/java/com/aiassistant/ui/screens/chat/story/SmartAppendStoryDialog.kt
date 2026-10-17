@@ -160,7 +160,9 @@ fun ActionChip(text: String, onClick: () -> Unit) {
 fun SmartAppendStoryDialog(
     hazeState: dev.chrisbanes.haze.HazeState,
     onDismiss: () -> Unit,
-    onAppendAndMerge: (List<CharacterProfile>, RoleplayScenario?, Map<String, ConflictAction>) -> Unit
+    onAppendAndMerge: (List<CharacterProfile>, RoleplayScenario?, Map<String, ConflictAction>, (Boolean, String?) -> Unit) -> Unit,
+    preferredConfigId: Long? = null,
+    preferredModel: String? = null
 ) {
     val context = LocalContext.current
     val repository = remember { com.aiassistant.AiAssistantApp.instance.repository }
@@ -170,15 +172,23 @@ fun SmartAppendStoryDialog(
     var progressStatus by remember { mutableStateOf("") }
     var analyzeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var extractedBundle by remember { mutableStateOf<com.aiassistant.utils.AnalyzedRoleplayBundle?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
 
     val apiConfigs by repository.getAllApiConfigs().collectAsState(initial = emptyList())
+    val enabledConfigs = remember(apiConfigs) { apiConfigs.filter { it.isEnabled } }
     var selectedConfig by remember { mutableStateOf<com.aiassistant.domain.model.ApiConfig?>(null) }
+    var configMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(apiConfigs) {
-        if (selectedConfig == null && apiConfigs.isNotEmpty()) {
-            selectedConfig = apiConfigs.firstOrNull { it.isDefault } ?: apiConfigs.firstOrNull()
-        }
+    LaunchedEffect(enabledConfigs, preferredConfigId) {
+        selectedConfig = enabledConfigs.firstOrNull { it.id == selectedConfig?.id }
+            ?: enabledConfigs.firstOrNull { it.id == preferredConfigId }
+            ?: enabledConfigs.firstOrNull { it.isDefault } ?: enabledConfigs.firstOrNull()
     }
+    val selectedModel = if (selectedConfig?.id == preferredConfigId) {
+        preferredModel?.takeIf { it.isNotBlank() } ?: selectedConfig?.modelName.orEmpty()
+    } else selectedConfig?.modelName.orEmpty()
+    val canAnalyze = selectedConfig?.id?.let { id -> enabledConfigs.any { it.id == id } } == true
 
     if (extractedBundle == null) {
         EchoGlassDialog(
@@ -209,6 +219,27 @@ fun SmartAppendStoryDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (enabledConfigs.isEmpty()) {
+                        Text("尚无启用的 API 配置，请先在设置中启用一个配置后再进行 AI 解析。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Box {
+                            OutlinedButton(enabled = !isAnalyzing, onClick = { configMenu = true }) {
+                                Text("解析配置：${selectedConfig?.name.orEmpty()}")
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = configMenu, onDismissRequest = { configMenu = false }) {
+                                enabledConfigs.forEach { config ->
+                                    DropdownMenuItem(text = { Text(config.name.ifBlank { config.provider }) }, onClick = {
+                                        selectedConfig = config
+                                        configMenu = false
+                                    })
+                                }
+                            }
+                        }
+                        Text("本次解析模型：$selectedModel", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
@@ -252,6 +283,7 @@ fun SmartAppendStoryDialog(
                 EchoPrimaryButton(
                     onClick = {
                         analyzeJob = scope.launch {
+                            val config = enabledConfigs.firstOrNull { it.id == selectedConfig?.id } ?: return@launch
                             isAnalyzing = true
                             progressStatus = "正在提取人设与世界观..."
                             try {
@@ -259,13 +291,15 @@ fun SmartAppendStoryDialog(
                                     context = context,
                                     rawText = inputText,
                                     repository = repository,
-                                    preferredConfig = selectedConfig,
-                                    selectedModel = selectedConfig?.modelName.orEmpty(),
+                                    preferredConfig = config,
+                                    selectedModel = selectedModel,
                                     onProgress = { progressStatus = it }
                                 )
-                                extractedBundle = bundle
+                                if (bundle.characters.isEmpty() && bundle.scenario == null) {
+                                    Toast.makeText(context, "没有识别到可追加的人物或世界观，请补充明确的资料。", Toast.LENGTH_LONG).show()
+                                } else extractedBundle = bundle
                             } catch (e: kotlinx.coroutines.CancellationException) {
-                                Toast.makeText(context, "解析已取消", Toast.LENGTH_SHORT).show()
+                                throw e
                             } catch (e: Exception) {
                                 Toast.makeText(context, "分析失败: ${e.message}", Toast.LENGTH_LONG).show()
                             } finally {
@@ -273,7 +307,7 @@ fun SmartAppendStoryDialog(
                             }
                         }
                     },
-                    enabled = inputText.isNotBlank() && !isAnalyzing
+                    enabled = inputText.isNotBlank() && !isAnalyzing && canAnalyze
                 ) {
                     Text(if (isAnalyzing) "解析中..." else "开始解析")
                 }
@@ -297,7 +331,7 @@ fun SmartAppendStoryDialog(
         val resolutionMap = remember { mutableStateMapOf<String, ConflictAction>() }
         EchoGlassDialog(
             hazeState = hazeState,
-            onDismissRequest = { extractedBundle = null },
+            onDismissRequest = { if (!isSaving) extractedBundle = null },
             title = { Text("确认追加/融合至本故事") },
             text = {
                 Column(
@@ -306,7 +340,12 @@ fun SmartAppendStoryDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    saveError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                     Text("识别到 ${bundle.characters.size} 位角色与 ${if (bundle.scenario != null) 1 else 0} 个世界观设定：", style = MaterialTheme.typography.labelSmall)
+                    if (!bundle.isAiAnalyzed) {
+                        Text("AI 解析未完成，本次结果来自本地格式识别，请仔细核对后再追加。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                     bundle.characters.forEach { char ->
                         EchoGlassCard(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(8.dp)) {
@@ -318,6 +357,7 @@ fun SmartAppendStoryDialog(
                                         val isSelected = (resolutionMap[char.name.trim()] ?: ConflictAction.MERGE) == action
                                         FilterChip(
                                             selected = isSelected,
+                                            enabled = !isSaving,
                                             onClick = { resolutionMap[char.name.trim()] = action },
                                             label = { Text(action.displayName, style = MaterialTheme.typography.labelSmall) }
                                         )
@@ -339,18 +379,31 @@ fun SmartAppendStoryDialog(
             confirmButton = {
                 EchoPrimaryButton(
                     onClick = {
-                        onAppendAndMerge(bundle.characters, bundle.scenario, resolutionMap.toMap())
-                    }
+                        if (isSaving) return@EchoPrimaryButton
+                        isSaving = true
+                        saveError = null
+                        try {
+                            onAppendAndMerge(bundle.characters, bundle.scenario, resolutionMap.toMap()) { success, error ->
+                                isSaving = false
+                                if (success) onDismiss()
+                                else saveError = error?.takeIf { it.isNotBlank() } ?: "保存失败，解析结果已保留，请重试。"
+                            }
+                        } catch (failure: Exception) {
+                            isSaving = false
+                            saveError = failure.message ?: "保存失败，解析结果已保留，请重试。"
+                        }
+                    },
+                    enabled = !isSaving
                 ) {
-                    Text("确认融合并入")
+                    Text(if (isSaving) "正在保存…" else "确认融合并入")
                 }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(enabled = !isSaving, onClick = onDismiss) {
                         Text("放弃")
                     }
-                    TextButton(onClick = { extractedBundle = null }) {
+                    TextButton(enabled = !isSaving, onClick = { extractedBundle = null; saveError = null }) {
                         Text("上一步")
                     }
                 }

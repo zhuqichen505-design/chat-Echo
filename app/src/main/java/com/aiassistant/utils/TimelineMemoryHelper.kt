@@ -2,6 +2,8 @@ package com.aiassistant.utils
 
 import com.aiassistant.domain.model.Message
 import com.aiassistant.domain.model.TimelineNode
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.util.UUID
 import java.util.regex.Pattern
@@ -114,7 +116,12 @@ data class AtemporalSettingItem(
     var category: String = "角色特质", // 6维/5维设定轮转
     var content: String = "",
     var isSelected: Boolean = true,
-    var targetScope: String = "session" // "session" (会话专属记忆) 或 "global" (长期记忆)
+    var targetScope: String = "session", // "session" (会话专属记忆) 或 "global" (长期记忆)
+    val action: String = "ADD",
+    val targetMemoryId: Long? = null,
+    val previousContent: String? = null,
+    val evidence: String = "",
+    val changeReason: String = ""
 ) {
     fun nextCategory(): String = when (category) {
         "角色设定", "角色特质" -> "习惯偏好"
@@ -235,33 +242,27 @@ object TimelineMemoryHelper {
         if (instructionStarts.any { trimmed.startsWith(it) }) return true
 
         // 4. 与用户历史发言进行比对，防止直接截取用户输入作为事件
-        val cleanContent = trimmed.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
+        fun normalizedSpeech(text: String) = text.replace(Regex("""[\p{P}\p{Z}\s]"""), "")
+        val cleanContent = normalizedSpeech(trimmed)
         for (userMsg in userMessages) {
-            val cleanUser = userMsg.trim().replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
+            val cleanUser = normalizedSpeech(userMsg.trim())
+            // 已发生的第三人称用户叙述同样是剧情来源。只防搬运导演口令/第一人称台词，
+            // 不能因字符相似就拒绝客观事实改写。
+            if (!isPureDirectorInstruction(userMsg) && !cleanUser.startsWith("我")) continue
             if (cleanUser.length >= 4) {
                 // 完全相等或包含关系（长度接近）
                 if (cleanContent == cleanUser) return true
                 if (cleanContent.contains(cleanUser) && cleanContent.length <= cleanUser.length + 6) return true
                 if (cleanUser.contains(cleanContent) && cleanUser.length <= cleanContent.length + 6) return true
 
-                // Jaccard 字符交集比对
-                val setA = cleanContent.toSet()
-                val setB = cleanUser.toSet()
-                val inter = setA.intersect(setB).size
-                val union = setA.union(setB).size
-                if (union > 0 && inter.toFloat() / union >= 0.52f && cleanContent.length in (cleanUser.length - 8)..(cleanUser.length + 8)) {
-                    return true
-                }
             }
         }
 
         return false
     }
 
-    /**
-     * 将长事件文本精炼收敛，坚决避免暴力劈砍导致句子被中间腰斩（解决问题 2）
-     * 优先基于标点符号寻找完整语法分句，保持主谓宾完整，字数控制在 12~28 字最佳区间
-     */
+    /** 兼容旧调用的文本清理器。事件详略由原文信息决定，长度参数不再截断事实。 */
+    @Suppress("UNUSED_PARAMETER")
     fun compactSentenceKeepComplete(text: String, maxIdealLen: Int = 28): String {
         var clean = text.trim()
             .replace(Regex("""^\[.*?\]\s*"""), "")
@@ -281,53 +282,7 @@ object TimelineMemoryHelper {
             }
         }
 
-        if (clean.length <= maxIdealLen) return clean
-
-        // 若超长，绝不可直接暴力劈断！基于标点符号寻找完整分句
-        val punctuationIndices = mutableListOf<Int>()
-        val punctuations = charArrayOf('，', '。', '；', '！', '？', '、')
-        for (i in clean.indices) {
-            if (punctuations.contains(clean[i])) {
-                punctuationIndices.add(i)
-            }
-        }
-
-        // 优先在 10..maxIdealLen 范围内寻找最近标点截断，保留完整句子
-        val goodCut = punctuationIndices.lastOrNull { it in 10..maxIdealLen }
-        if (goodCut != null) {
-            return clean.substring(0, goodCut).trim()
-        }
-
-        // 寻找在 maxIdealLen..34 范围内的第一个标点断句（允许略微放宽以确保句意绝对完整不腰斩）
-        val slightlyLongerCut = punctuationIndices.firstOrNull { it in maxIdealLen..34 }
-        if (slightlyLongerCut != null) {
-            return clean.substring(0, slightlyLongerCut).trim()
-        }
-
-        // 若没有标点，寻找核心连词断开
-        val conjunctions = listOf("并", "且", "而", "但", "随后", "决定")
-        for (conj in conjunctions) {
-            val idx = clean.indexOf(conj)
-            if (idx in 12..maxIdealLen) {
-                return clean.substring(0, idx).trim()
-            }
-        }
-
-        // 兜底截断：截取并在末尾修剪悬挂的连词或虚词
-        val sub = clean.take(maxIdealLen)
-        return sub.replace(Regex("""[的了着与和把在被向从到，、；]$"""), "").trim()
-    }
-
-    private fun getPhaseOrder(subPhase: String): Int {
-        val clean = subPhase.trim()
-        return when {
-            clean.contains("早") || clean.contains("晨") || clean.contains("上午") || clean.contains("破晓") || clean.contains("拂晓") -> 1
-            clean.contains("中") || clean.contains("正午") || clean.contains("午间") || clean.contains("晌午") -> 2
-            clean.contains("下午") || clean.contains("午后") -> 3
-            clean.contains("傍晚") || clean.contains("黄昏") || clean.contains("日落") || clean.contains("夕阳") -> 4
-            clean.contains("晚") || clean.contains("夜") || clean.contains("宿") || clean.contains("子时") || clean.contains("掌灯") -> 5
-            else -> 0
-        }
+        return clean
     }
 
     /**
@@ -335,6 +290,7 @@ object TimelineMemoryHelper {
      * 返回跃迁的天数（> 0），若非时间跨度则返回 0
      * 核心改进：严谨排除“两年前”、“这两天”、“数日前”、“持续数日”等非前向推进语境，杜绝异常时间暴跳！
      */
+    @Deprecated("仅兼容历史工具调用；剧情提取、时间推进及上下文禁止用估算天数改写自然时间")
     fun estimateTimeSpanJumpDays(tag: String): Int {
         val clean = tag.trim().lowercase()
 
@@ -386,90 +342,36 @@ object TimelineMemoryHelper {
     }
 
     /**
-     * 单调递增时序状态机：
-     * 1. 解决同日内多轮对话事件（如同一顿午餐、同一下午讨论）被机械识别为递增天数的严重割裂问题；
-     * 2. 拥抱自然文学叙事与阶段锚点：全面兼容“两周过后”、“暑假开始”、“一年后·春”等自然时间标签。
+     * 保留旧入口与存储格式，只规范显式天数的排版，不再以日序状态机改写文学时间。
+     * 列表顺序代表叙事呈现顺序；自然跨度、章节锚点、倒叙与并行剧情均保留原标签。
      */
-    fun normalizeMonotonicTimeline(events: List<TimelineEventItem>): List<TimelineEventItem> {
-        var currentDay = 1
-        var lastPhaseOrder = 0
-        var hasSeenDayInCurrentEpoch = false
-        val normalized = mutableListOf<TimelineEventItem>()
+    fun normalizeMonotonicTimeline(events: List<TimelineEventItem>): List<TimelineEventItem> = events.map { item ->
+        val tag = item.timeTag.trim().trim('[', ']', '【', '】')
+        val explicitDay = Regex("""^(?:第\s*(\d+)\s*天|DAY\s*(\d+))(?:[·\s\-]*(.*))?$""", RegexOption.IGNORE_CASE).matchEntire(tag)
+        val normalizedTag = if (explicitDay != null) {
+            val day = explicitDay.groupValues[1].ifBlank { explicitDay.groupValues[2] }
+            val phase = explicitDay.groupValues[3].trim()
+            "第 $day 天" + if (phase.isBlank()) "" else "·$phase"
+        } else tag
+        item.copy(timeTag = normalizedTag)
+    }
 
-        for (item in events) {
-            val tag = item.timeTag.trim()
-            val matcher = DAY_NUMBER_PATTERN.matcher(tag)
-            val isRelativeNextDay = tag.contains("第二天") || tag.contains("次日") || tag.contains("翌日") || tag.contains("隔天") || tag.contains("又过了一天")
-            val spanJumpDays = estimateTimeSpanJumpDays(tag)
+    /** 回忆的发生时间保留在事件中，但不把主线“现在”搬回过去。 */
+    fun isRetrospectiveTime(timeTag: String): Boolean =
+        listOf("回忆", "倒叙", "往事", "追忆", "闪回", "梦境", "假设", "计划").any { timeTag.contains(it) }
 
-            val updatedTag = if (matcher.find()) {
-                val parsedDay = (matcher.group(1) ?: matcher.group(2))?.toIntOrNull() ?: 1
-                val subPhase = tag.substringAfter("·", "").ifBlank {
-                    tag.substringAfter("天", "").trim('-', ' ', '·')
-                }
-                val phaseOrder = getPhaseOrder(subPhase)
-
-                if (parsedDay > currentDay) {
-                    currentDay = parsedDay
-                    lastPhaseOrder = phaseOrder
-                    hasSeenDayInCurrentEpoch = true
-                } else if (parsedDay == currentDay) {
-                    // 仅当包含明确的次日指示（如“第二天/次日”）且此前已记录过当前天数事件时，才推进到次日；
-                    // 或前一事件已是入夜/深夜(order >= 4)，后一事件回到早晨/上午(order == 1)且包含过夜或次日指示时，才推进；
-                    // 核心铁律：同一天内的同一时段（如吃饭点菜、就餐、餐桌交谈，或下午同一场会谈）绝对不累加天数！
-                    if (isRelativeNextDay && hasSeenDayInCurrentEpoch) {
-                        currentDay++
-                        lastPhaseOrder = phaseOrder
-                    } else if (lastPhaseOrder >= 4 && phaseOrder == 1 && (item.content.contains("睡") || item.content.contains("醒") || isRelativeNextDay)) {
-                        currentDay++
-                        lastPhaseOrder = phaseOrder
-                    } else {
-                        if (phaseOrder > lastPhaseOrder) {
-                            lastPhaseOrder = phaseOrder
-                        }
-                        hasSeenDayInCurrentEpoch = true
-                    }
-                } else {
-                    // parsedDay < currentDay
-                    // 若此前发生过自然时间跨度跳跃（如“两周过后”），重置 epoch 后合理顺延
-                    if (!hasSeenDayInCurrentEpoch) {
-                        currentDay++
-                    }
-                    lastPhaseOrder = phaseOrder
-                    hasSeenDayInCurrentEpoch = true
-                }
-
-                if (subPhase.isNotBlank()) "第 $currentDay 天·$subPhase" else "第 $currentDay 天"
-            } else if (isRelativeNextDay) {
-                currentDay++
-                val subPhase = when {
-                    tag.contains("早") || tag.contains("晨") || tag.contains("上午") -> "早晨"
-                    tag.contains("午") -> "中午"
-                    tag.contains("下午") -> "下午"
-                    tag.contains("傍晚") || tag.contains("黄昏") -> "傍晚"
-                    tag.contains("夜") || tag.contains("晚") -> "夜间"
-                    else -> "白天"
-                }
-                lastPhaseOrder = getPhaseOrder(subPhase)
-                hasSeenDayInCurrentEpoch = true
-                "第 $currentDay 天·$subPhase"
-            } else if (spanJumpDays > 0) {
-                currentDay += spanJumpDays
-                lastPhaseOrder = 0
-                hasSeenDayInCurrentEpoch = false
-                tag
-            } else {
-                val subPhase = tag.substringAfter("·", "")
-                if (subPhase.isNotBlank()) {
-                    lastPhaseOrder = getPhaseOrder(subPhase)
-                }
-                tag
-            }
-
-            normalized.add(item.copy(timeTag = updatedTag))
+    /** 同一节点的增量补充只能增加信息；保留旧事实、反转经过与尚未收尾的线索。 */
+    fun supplementEventContent(previous: String, incoming: String): String {
+        val old = previous.trim()
+        val addition = incoming.trim()
+        if (old.isBlank()) return addition
+        if (addition.isBlank() || normalizedFact(old).contains(normalizedFact(addition))) return old
+        if (normalizedFact(addition).contains(normalizedFact(old))) return addition
+        val sentences = old.split(Regex("""(?<=[。！？；])|\n+""")).map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+        addition.split(Regex("""(?<=[。！？；])|\n+""")).map { it.trim() }.filter { it.isNotBlank() }.forEach { sentence ->
+            if (sentences.none { normalizedFact(it) == normalizedFact(sentence) }) sentences += sentence
         }
-
-        return normalized
+        return sentences.joinToString("\n")
     }
 
     /**
@@ -576,7 +478,7 @@ object TimelineMemoryHelper {
         val stripped = stripThinkingTags(rawOutput)
         val trimmed = stripped.ifBlank { rawOutput.trim() }
         if (trimmed.isBlank()) {
-            val safeTime = fallbackCurrentTime?.takeIf { it.isNotBlank() && it != "未确定" && it != "未知" } ?: "第 1 天·起始"
+            val safeTime = fallbackCurrentTime?.takeIf { it.isNotBlank() && it != "未确定" && it != "未知" } ?: "未确定"
             return TimelineReconcileResult(currentStoryTime = safeTime, events = mutableListOf())
         }
 
@@ -624,21 +526,7 @@ object TimelineMemoryHelper {
                     if (atemporalArray != null) {
                         for (item in atemporalArray) {
                             if (item.isJsonObject) {
-                                val itemObj = item.asJsonObject
-                                val cat = itemObj.get("category")?.asString?.trim() ?: "角色核心特质"
-                                val text = itemObj.get("content")?.asString?.trim()
-                                    ?: itemObj.get("setting")?.asString?.trim().orEmpty()
-                                val scope = itemObj.get("targetScope")?.asString?.trim() ?: "session"
-                                if (text.isNotBlank()) {
-                                    atemporalList.add(
-                                        AtemporalSettingItem(
-                                            category = cat,
-                                            content = text,
-                                            isSelected = true,
-                                            targetScope = if (scope == "global") "global" else "session"
-                                        )
-                                    )
-                                }
+                                SessionSettingReconciler.parse(item.asJsonObject)?.let(atemporalList::add)
                             } else if (item.isJsonPrimitive) {
                                 val text = item.asString.trim()
                                 if (text.isNotBlank()) {
@@ -655,7 +543,7 @@ object TimelineMemoryHelper {
                     }
 
                     val normalizedEvents = normalizeMonotonicTimeline(eventsList)
-                    val resolvedTime = if (currentTime.isNotBlank() && currentTime != "未确定" && currentTime != "未知") {
+                    val resolvedTime = if (currentTime.isNotBlank() && currentTime != "未确定" && currentTime != "未知" && !isRetrospectiveTime(currentTime)) {
                         currentTime
                     } else {
                         inferCurrentStoryTime(normalizedEvents, fallbackCurrentTime)
@@ -674,6 +562,118 @@ object TimelineMemoryHelper {
         // 2. 纯文本行列表解析兜底
         return parseTextFallback(trimmed, fallbackCurrentTime)
     }
+
+    /** 空数组也是有效的“无新事实”结果；格式失败不能冒充已处理完整片段。 */
+    fun hasStructuredTimelinePayload(rawOutput: String): Boolean = runCatching {
+        val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching false
+        val element = JsonParser.parseString(json)
+        element.isJsonObject && element.asJsonObject.let { obj ->
+            listOf("timelineEvents", "events").any { obj.get(it)?.isJsonArray == true }
+        }
+    }.getOrDefault(false)
+
+    /**
+     * 仅验证本次模型请求的逐源覆盖，不限制旧节点、备份或草稿格式。
+     * 每条源消息必须关联输出事实，或给出无新事实理由；输出事实也必须有来源。
+     */
+    fun hasCompleteSourceCoverage(rawOutput: String, expectedMessageIds: Collection<Long>): Boolean = runCatching {
+        val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching false
+        val obj = JsonParser.parseString(json).asJsonObject
+        validateSourceCoverage(obj, expectedMessageIds)
+    }.getOrDefault(false)
+
+    private fun exactJsonLong(value: JsonElement?): Long? = runCatching {
+        if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) return@runCatching null
+        value.asBigDecimal.longValueExact()
+    }.getOrNull()
+
+    private fun optionalJsonString(obj: JsonObject, key: String, default: String = ""): String {
+        val value = obj.get(key) ?: return default
+        require(value.isJsonPrimitive && value.asJsonPrimitive.isString) { "$key 必须是字符串" }
+        return value.asString.trim()
+    }
+
+    private fun validateSourceCoverage(obj: JsonObject, expectedMessageIds: Collection<Long>): Boolean {
+        val coverage = obj.getAsJsonArray("sourceCoverage") ?: return false
+        val events = obj.getAsJsonArray("timelineEvents") ?: return false
+        val settings = obj.getAsJsonArray("atemporalSettings")
+        val expected = expectedMessageIds.toSet()
+        val reviewed = mutableSetOf<Long>()
+        val sourcedEvents = mutableSetOf<Int>()
+        val sourcedSettings = mutableSetOf<Int>()
+        for (entry in coverage) {
+            if (!entry.isJsonObject) return false
+            val item = entry.asJsonObject
+            val id = exactJsonLong(item.get("messageId")) ?: return false
+            if (id !in expected || !reviewed.add(id)) return false
+            fun indices(key: String): List<Int> {
+                val value = item.get(key) ?: return emptyList()
+                require(value.isJsonArray)
+                return value.asJsonArray.map { index ->
+                    val number = requireNotNull(exactJsonLong(index))
+                    require(number in 0L..Int.MAX_VALUE.toLong())
+                    number.toInt()
+                }.also { require(it.distinct().size == it.size) }
+            }
+            val eventIndices = indices("eventIndices")
+            val settingIndices = indices("settingIndices")
+            if (eventIndices.any { it !in 0 until events.size() } ||
+                settingIndices.any { it !in 0 until (settings?.size() ?: 0) }) return false
+            val reason = optionalJsonString(item, "noFactReason")
+            if (eventIndices.isEmpty() && settingIndices.isEmpty() && reason.isBlank()) return false
+            sourcedEvents += eventIndices
+            sourcedSettings += settingIndices
+        }
+        return reviewed == expected && sourcedEvents == (0 until events.size()).toSet() &&
+            sourcedSettings == (0 until (settings?.size() ?: 0)).toSet()
+    }
+
+    /**
+     * 新请求使用严格解析：同一 JSON 完成类型、精确整数、目标设定和来源校验后才生成结果。
+     * 不走旧格式的行文本兜底，避免损坏 JSON 被当作剧情并推进已处理水线。
+     */
+    fun parseVerifiedModelOutput(
+        rawOutput: String,
+        expectedMessageIds: Collection<Long>,
+        existingSettingIds: Collection<Long>,
+        fallbackCurrentTime: String? = null
+    ): TimelineReconcileResult? = runCatching {
+        val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching null
+        val obj = JsonParser.parseString(json).asJsonObject
+        val currentTime = optionalJsonString(obj, "currentStoryTime")
+        val rawEvents = obj.getAsJsonArray("timelineEvents") ?: return@runCatching null
+        val rawSettings = obj.getAsJsonArray("atemporalSettings") ?: return@runCatching null
+        val events = rawEvents.map { element ->
+            require(element.isJsonObject)
+            val item = element.asJsonObject
+            val content = optionalJsonString(item, "content").also { require(it.isNotBlank()) }
+            TimelineEventItem(timeTag = optionalJsonString(item, "timeTag"), content = content,
+                category = TimelineCategory.fromKey(optionalJsonString(item, "category")))
+        }
+        val knownTargets = existingSettingIds.toSet()
+        val settings = rawSettings.map { element ->
+            require(element.isJsonObject)
+            val item = element.asJsonObject
+            require(optionalJsonString(item, "content").isNotBlank())
+            listOf("category", "evidence", "changeReason", "targetScope").forEach { optionalJsonString(item, it) }
+            val action = optionalJsonString(item, "action", "ADD").uppercase(java.util.Locale.ROOT)
+            require(action in setOf("ADD", "SUPPLEMENT", "REVISE"))
+            val target = item.get("targetMemoryId")
+            val targetId = if (action == "ADD") {
+                require(target == null || target.isJsonNull)
+                null
+            } else {
+                requireNotNull(exactJsonLong(target)).also { require(it > 0L && it in knownTargets) }
+            }
+            requireNotNull(SessionSettingReconciler.parse(item)).copy(targetMemoryId = targetId)
+        }
+        require(validateSourceCoverage(obj, expectedMessageIds))
+        val normalizedEvents = normalizeMonotonicTimeline(events)
+        val resolvedTime = currentTime.takeIf { it.isNotBlank() && it !in setOf("未确定", "未知") && !isRetrospectiveTime(it) }
+            ?: inferCurrentStoryTime(normalizedEvents, fallbackCurrentTime)
+        TimelineReconcileResult(currentStoryTime = resolvedTime, events = normalizedEvents.toMutableList(),
+            atemporalSettings = settings.toMutableList())
+    }.getOrNull()
 
     private fun extractJsonString(text: String): String? {
         val codeBlockRegex = Regex("""```(?:json)?\s*([\s\S]*?)\s*```""", RegexOption.IGNORE_CASE)
@@ -758,23 +758,28 @@ object TimelineMemoryHelper {
         // 1. 倒序寻找最新发生的事件有效时间标签
         for (item in events.reversed()) {
             val tag = item.timeTag.trim().trim('[', ']', '【', '】')
-            if (tag.isNotBlank() && tag != "未确定" && tag != "未知") {
+            if (tag.isNotBlank() && tag != "未确定" && tag != "未知" && !isRetrospectiveTime(tag)) {
                 return tag
             }
         }
-        // 2. 倒序从事件正文中嗅探文学/自然叙事时间锚点
-        val timeRegex = Regex("""(第\s*\d+\s*天(?:[·\s\-][^，。；\s]+)?|[两三四五六七八九十\d]+[年月周天日]+[后过后之余]*|暑假(?:开始|首日|期间)?|寒假(?:开始|首日)?|新学期(?:伊始|首日)?|[春夏秋冬][季天]?·?[^，。；\s]*)""")
-        for (item in events.reversed()) {
-            val match = timeRegex.find(item.content)
-            if (match != null && match.value.isNotBlank()) {
-                return match.value.trim()
-            }
-        }
-        // 3. 继承外部已知的既有故事驻留时间节点
-        if (!fallbackTime.isNullOrBlank() && fallbackTime != "未确定" && fallbackTime != "未知") {
-            return fallbackTime
-        }
-        return "第 1 天·起始"
+        // 没有可确认的主线锚点时继承既有时间；正文提到的往事/计划不作为现在。
+        return fallbackTime?.takeIf { it.isNotBlank() && it != "未知" } ?: "未确定"
+    }
+
+    /** 只解析独立明确日序，避免把“承接【第6天】·两周后”的参照误认成当前日序。 */
+    private fun explicitStoryDay(timeTag: String): Int? {
+        val tag = timeTag.trim().trim('[', ']', '【', '】')
+        if (isRetrospectiveTime(tag) || listOf("后", "前", "周", "月", "年", "承接").any { tag.contains(it) }) return null
+        val match = Regex("""^(?:第\s*(\d+)\s*天|DAY\s*(\d+))(?:[·\s\-].*)?$""", RegexOption.IGNORE_CASE).matchEntire(tag) ?: return null
+        return match.groupValues[1].ifBlank { match.groupValues[2] }.toIntOrNull()
+    }
+
+    /** 当前时段只能来自时间锚点末端明确写出的时段，不能沿用参照事件或人物习惯。 */
+    private fun explicitCurrentPhase(timeTag: String): DayPhase? {
+        if (isRetrospectiveTime(timeTag)) return null
+        val phase = Regex("""(?:^|[·\s])(?:清晨|早晨|早上|晨曦|破晓|上午|中午|正午|午间|下午|午后|傍晚|黄昏|入夜|晚上|夜晚|晚间|夜间|深夜|凌晨|拂晓)(?:时分|时刻)?$""")
+            .find(timeTag.trim())?.value?.trim('·', ' ') ?: return null
+        return DayPhase.inferFromText(phase)
     }
 
     /**
@@ -785,16 +790,13 @@ object TimelineMemoryHelper {
         val cleanEvent = eventTimeTag.trim().trim('[', ']', '【', '】')
         val cleanCurrent = currentTimeTag.trim().trim('[', ']', '【', '】')
         if (cleanEvent.isBlank() || cleanCurrent.isBlank()) return null
-        if (cleanEvent == cleanCurrent) return "今天"
+        if (cleanEvent == cleanCurrent && explicitStoryDay(cleanEvent) != null) return "今天"
 
-        val eventMatcher = DAY_NUMBER_PATTERN.matcher(cleanEvent)
-        val currentMatcher = DAY_NUMBER_PATTERN.matcher(cleanCurrent)
+        val eventDay = explicitStoryDay(cleanEvent)
+        val currentDay = explicitStoryDay(cleanCurrent)
 
         // 1. 双方均包含具体天数：精准计算相对天数与周/月换算
-        if (eventMatcher.find() && currentMatcher.find()) {
-            val eventDay = (eventMatcher.group(1) ?: eventMatcher.group(2))?.toIntOrNull() ?: return null
-            val currentDay = (currentMatcher.group(1) ?: currentMatcher.group(2))?.toIntOrNull() ?: return null
-
+        if (eventDay != null && currentDay != null) {
             val diff = currentDay - eventDay
             return when {
                 diff == 0 -> "今天"
@@ -815,102 +817,8 @@ object TimelineMemoryHelper {
             }
         }
 
-        // 2. 粗粒度/文学与阶段性时间节点相对推导
-        val currentJump = estimateTimeSpanJumpDays(cleanCurrent)
-        val eventJump = estimateTimeSpanJumpDays(cleanEvent)
-
-        // 语义级阶段匹配
-        if (cleanCurrent.contains("新学期") || cleanCurrent.contains("开学")) {
-            return when {
-                cleanEvent.contains("暑假快结束") || cleanEvent.contains("暑假尾声") -> "暑假末尾（数天前）"
-                cleanEvent.contains("放假首日") || cleanEvent.contains("暑假开始") || cleanEvent.contains("放假之初") -> "放假之初（约两个多月前）"
-                cleanEvent.contains("暑假期间") || cleanEvent.contains("暑假中期") || cleanEvent.contains("暑假") -> "暑假期间（约1-2个月前）"
-                cleanEvent.contains("上学期") || cleanEvent.contains("期末") || cleanEvent.contains("第 1 天") -> "上学期（数月前）"
-                else -> "上一学期/假期"
-            }
-        }
-
-        if (cleanCurrent.contains("暑假快结束") || cleanCurrent.contains("暑假尾声")) {
-            return when {
-                cleanEvent.contains("暑假开始") || cleanEvent.contains("放假首日") -> "暑假之初（约两个月前）"
-                cleanEvent.contains("暑假期间") || cleanEvent.contains("暑假中期") -> "暑假中期（约一个月前）"
-                cleanEvent.contains("第 1 天") || cleanEvent.contains("期末") -> "放假前（两个多月前）"
-                else -> "暑假前期"
-            }
-        }
-
-        if (cleanCurrent.contains("暑假期间") || cleanCurrent.contains("暑假中期") || cleanCurrent.contains("暑假过半")) {
-            return when {
-                cleanEvent.contains("放假首日") || cleanEvent.contains("暑假开始") || cleanEvent.contains("刚放假") -> "放假之初（约一个月前）"
-                cleanEvent.contains("第 1 天") || cleanEvent.contains("学期") -> "放假前（一个多月前）"
-                else -> "放假前夕"
-            }
-        }
-
-        if (cleanCurrent.contains("暑假开始") || cleanCurrent.contains("放假首日") || cleanCurrent.contains("刚放假")) {
-            return when {
-                cleanEvent.contains("期末") || cleanEvent.contains("学期末") || cleanEvent.contains("学期") || cleanEvent.contains("第 1 天") -> "放假前"
-                else -> "放假前"
-            }
-        }
-
-        if (cleanCurrent.contains("深秋") || cleanCurrent.contains("中秋") || cleanCurrent.contains("入秋")) {
-            return when {
-                cleanEvent.contains("暑假") || cleanEvent.contains("夏天") -> "盛夏（约两三个月前）"
-                cleanEvent.contains("新学期") || cleanEvent.contains("开学") -> "开学之初（约一个月前）"
-                cleanEvent.contains("春天") || cleanEvent.contains("第 1 天") -> "春季（半年前）"
-                else -> "上一季节"
-            }
-        }
-
-        if (cleanCurrent.contains("寒假") || cleanCurrent.contains("新年") || cleanCurrent.contains("过年") || cleanCurrent.contains("春节")) {
-            return when {
-                cleanEvent.contains("新学期") || cleanEvent.contains("开学") -> "秋季学期之初（数月前）"
-                cleanEvent.contains("暑假") -> "去年夏天（半年前）"
-                cleanEvent.contains("深秋") -> "几个月前"
-                else -> "去年/上学期"
-            }
-        }
-
-        if (cleanCurrent.contains("来年春天") || cleanCurrent.contains("次年春")) {
-            return when {
-                cleanEvent.contains("寒假") || cleanEvent.contains("过年") || cleanEvent.contains("冬天") -> "上一冬季（两三个月前）"
-                cleanEvent.contains("暑假") || cleanEvent.contains("夏天") -> "去年盛夏（大半年前）"
-                cleanEvent.contains("第 1 天") || cleanEvent.contains("最初") -> "整整一年前"
-                else -> "上一年度"
-            }
-        }
-
-        // 自然相对跨度匹配
-        if (cleanCurrent.contains("两周") && (cleanEvent.contains("第 1 天") || cleanEvent.contains("第1天") || cleanEvent.contains("初遇") || cleanEvent.contains("初期") || cleanEvent.contains("当初"))) {
-            return "约两周前"
-        }
-        if (cleanCurrent.contains("一周") && (cleanEvent.contains("第 1 天") || cleanEvent.contains("第1天") || cleanEvent.contains("初遇"))) {
-            return "约一周前"
-        }
-        if ((cleanCurrent.contains("几天后") || cleanCurrent.contains("数日后")) && (cleanEvent.contains("第 1 天") || cleanEvent.contains("前日"))) {
-            return "数日前"
-        }
-
-        // 跨度换算推导
-        if (currentJump > 0 && eventJump > 0) {
-            val jumpDiff = currentJump - eventJump
-            return when {
-                jumpDiff == 0 -> "同一时期"
-                jumpDiff in 1..2 -> "一两天前"
-                jumpDiff in 3..6 -> "数天前"
-                jumpDiff in 7..13 -> "约1周前"
-                jumpDiff in 14..27 -> "约两周前"
-                jumpDiff in 28..59 -> "约1个月前"
-                jumpDiff in 60..89 -> "约2个月前"
-                jumpDiff >= 90 -> "数月前"
-                jumpDiff in -6..-1 -> "数天后"
-                jumpDiff in -27..-7 -> "数周后"
-                jumpDiff <= -28 -> "数月后"
-                else -> null
-            }
-        }
-
+        // 自然标签的参照点未必相同：“两周后”与“一个月后”不能直接相减。
+        // 季节/假期长度也没有固定值，保留原标签交由模型根据原文理解。
         return null
     }
 
@@ -1031,14 +939,11 @@ object TimelineMemoryHelper {
         // 1. 故事当前时间与时空看板
         sb.append("【故事当前时间节点】：$effectiveCurrent\n")
         sb.append("【故事当前时间节点与时空看板】：\n")
-        sb.append("• 当前绝对故事时间：$effectiveCurrent\n")
+        sb.append("• 当前主线时间参照：$effectiveCurrent\n")
 
-        val currentDayMatcher = DAY_NUMBER_PATTERN.matcher(effectiveCurrent)
-        val currentDay = if (currentDayMatcher.find()) {
-            (currentDayMatcher.group(1) ?: currentDayMatcher.group(2))?.toIntOrNull() ?: 1
-        } else 1
+        val currentDay = explicitStoryDay(effectiveCurrent)
 
-        val currentPhase = DayPhase.inferFromText(effectiveCurrent)
+        val currentPhase = explicitCurrentPhase(effectiveCurrent)
 
         // 2. 全域重大里程碑与关键转折防漂移看板（泛化模型：涵盖人际剧变、冲突决战、生死境界、人生转折等）
         val coreMilestones = events.filter { isCoreMilestoneEvent(it.content) }
@@ -1046,10 +951,9 @@ object TimelineMemoryHelper {
             sb.append("• 核心关系与重大里程碑锚点（绝对禁止混淆时序！）：\n")
             coreMilestones.forEach { m ->
                 val rel = calculateRelativeTime(m.timeTag, effectiveCurrent)
-                val mMatcher = DAY_NUMBER_PATTERN.matcher(m.timeTag)
-                val mDay = if (mMatcher.find()) (mMatcher.group(1) ?: mMatcher.group(2))?.toIntOrNull() else null
+                val mDay = explicitStoryDay(m.timeTag)
                 val distanceHint = when {
-                    mDay != null && currentDay > mDay -> {
+                    mDay != null && currentDay != null && currentDay > mDay -> {
                         val daysAgo = currentDay - mDay
                         if (daysAgo >= 2) " [注意：此事件发生在 $daysAgo 天前，距今已过去 $daysAgo 天（$daysAgo 个日夜），绝非昨天！绝非刚刚发生，严禁时序错乱！]"
                         else " [注意：发生在昨天]"
@@ -1079,18 +983,17 @@ object TimelineMemoryHelper {
         sb.append("【时空连贯性与日内时序守护铁律（时序交互准则，全域叙事时序三大铁律，大模型必须无条件遵守）】：\n")
         sb.append("1.【时序参照系与相对跨度守恒律】：当提及以往发生的人际变故、重大转折、盟约决裂、生死考验或往事经历时，必须以当前故事时间节点（$effectiveCurrent）为基准严格推算相对时间跨度。若某重大转折发生在多日、数周或数月前，严禁叙述为“昨天才发生”或“刚发生”；若发生在几天前，亦不得夸大为“多年以前”。\n")
 
-        val lastEvent = events.lastOrNull { it.timeTag.isNotBlank() || it.content.isNotBlank() }
-        val inferredPhase = currentPhase ?: lastEvent?.let { DayPhase.inferFromText(it.timeTag + " " + it.content) }
+        val inferredPhase = currentPhase
         if (inferredPhase != null) {
             val phaseName = inferredPhase.displayName
             sb.append("2.【日内时序与生理作息连贯律】：当前故事时段停留在【$phaseName】（典型活动：${inferredPhase.typicalActivities}）。")
             if (inferredPhase.order <= DayPhase.NOON.order) {
-                sb.append("当前仍处于白天！若上一情境为早晨/吃早餐/上午行动，严格禁止在未描写数小时时间自然流逝（如“夕阳西下”、“待到夜幕降临”）的情况下，突兀跳跃到“天黑了/深夜入睡”！时间默认保持当前时段，仅当正文明确描写时间流逝或活动/场景结束时才顺延至相邻时段（单轮至多一段），严禁过早推进！\n")
+                sb.append("当前仍处于白天！若上一情境为早晨/吃早餐/上午行动，严格禁止在未描写数小时时间自然流逝（如“夕阳西下”、“待到夜幕降临”）的情况下，突兀跳跃到“天黑了/深夜入睡”！无时间证据时保持当前时段；正文明确推进了数小时、数周或数月时，直接尊重原文跨度，不受相邻时段限制。\n")
             } else {
-                sb.append("剧情推进必须保持时空自然过渡，严禁时序倒流或无逻辑时空突变！时间默认保持当前时段，仅当正文明确描写时间流逝或活动/场景结束时才顺延至相邻时段（单轮至多一段）。\n")
+                sb.append("剧情推进尊重原文的时间过渡；允许明确的跨日、周、月跳跃及带标记的倒叙，回忆不改变主线现在。\n")
             }
         } else {
-            sb.append("2.【日内时序与生理作息连贯律】：严格保持日内时间流逝与生活节律的自然过渡。若当前为早晨/白天，严禁在无明确时间流逝过渡描述的情况下突兀跳转至夜间就寝；若当前为深更半夜，亦严禁突兀转入次日白昼活动。时间默认保持当前时段，单轮至多顺延一个相邻时段。\n")
+            sb.append("2.【日内时序与生理作息连贯律】：当前锚点没有明确日内时段，不从旧事件、角色习惯或参照时间推断当前早晚。保留自然跨度与模糊程度，依据新正文继续推进，不逐日补齐。\n")
         }
 
         sb.append("3.【跨度锚点与宏观阶段连贯律】：当故事经历“几天后”、“数周后”、“暑假”或“新学期”等时间跨度跃迁时，角色心理状态、环境演变及事件沉淀必须符合该跨度长度，禁止在跃迁后仍表现得如同事件就在上一秒发生。\n")
@@ -1125,8 +1028,8 @@ object TimelineMemoryHelper {
                 val tag = if (node.timeTag.isNotBlank()) "[${node.timeTag}] " else ""
                 append("[${index + 1}] $tag【${TimelineCategory.fromKey(node.category).displayName}】${node.event.trim()}\n")
             }
-            append("请严格基于该时序脉络推进。当前节点仅是交互开始时的基准；无时间证据时保持当前时段。明确的时间跳跃以新原文为准。\n")
-            append("回忆、计划和假设不等于已发生；近期明确修订优先。这里只列出本轮相关节点，未列出的历史不代表不存在。\n")
+            append("请严格基于该时序脉络推进。当前节点仅是交互开始时的基准；无时间证据时保持当前时段。明确的时间跳跃以新原文为准。节点编号是叙事顺序；时间标签才是故事发生时间，回忆/并行线不能据编号强行改为次日。\n")
+            append("回忆、计划和假设不等于已发生；近期明确修订优先。保留周/月/模糊跨度和它们的参照事件，无法确定的日期不换算成第几天或昨天。这里只列出本轮相关节点，未列出的历史不代表不存在。\n")
             append("</session_timeline>")
         }
     }
@@ -1158,112 +1061,56 @@ object TimelineMemoryHelper {
         val from = currentStoryTime?.trim().orEmpty()
         val to = proposedStoryTime?.trim().orEmpty()
         if (from.isBlank() || to.isBlank() || from == to) return false
-        val fromDay = DAY_NUMBER_PATTERN.matcher(from).let { m ->
-            if (m.find()) (m.group(1) ?: m.group(2))?.toIntOrNull() else null
-        }
-        val toDay = DAY_NUMBER_PATTERN.matcher(to).let { m ->
-            if (m.find()) (m.group(1) ?: m.group(2))?.toIntOrNull() else null
-        }
-        if (fromDay != null && toDay != null && fromDay != toDay) return false
+        val fromDay = explicitStoryDay(from)
+        val toDay = explicitStoryDay(to)
+        if (fromDay == null || toDay == null || fromDay != toDay) return false
         val fromPhase = DayPhase.inferFromText(from) ?: return false
         val toPhase = DayPhase.inferFromText(to) ?: return false
         return toPhase.order - fromPhase.order > 1 && !hasExplicitTimePassageDescription(replyText)
     }
 
     /**
-     * 智能检测当前轮次对话中的时空推进
-     * 解决模型错误地一直“停留在当前时空”、时空冻结的问题
+     * 模型不可用时只采纳正文中可复核的显式过渡。它是安全兜底，不替代语义抽取，
+     * 不读导演指令、不从早餐/晚餐等活动推断时钟，也不把模糊周月换算为天数。
      */
+    @Suppress("UNUSED_PARAMETER")
     fun detectAutoStoryTimeAdvancement(
         currentStoryTime: String?,
         userMessage: String,
         assistantReply: String
     ): String? {
-        val baseTime = currentStoryTime?.trim()?.takeIf { it.isNotBlank() && it != "未确定" && it != "未知" } ?: "第 1 天·清晨"
-        val combined = "$userMessage $assistantReply".trim()
-        if (combined.length < 6) return null
-
-        // 1. 显式跨天 / 相对跨度推进匹配
-        val nextDayKeywords = listOf("第二天", "次日", "次晨", "翌日", "隔天", "又过了一天", "一夜无话", "睡下后", "一觉醒来", "次日清晨", "翌日清晨")
-        val matcher = DAY_NUMBER_PATTERN.matcher(baseTime)
-        val currentDay = if (matcher.find()) {
-            (matcher.group(1) ?: matcher.group(2))?.toIntOrNull() ?: 1
-        } else 1
-
-        val spanJumpDays = estimateTimeSpanJumpDays(combined)
-        if (spanJumpDays > 0) {
-            val newDay = currentDay + spanJumpDays
-            val inferredPhase = DayPhase.inferFromText(combined)?.displayName?.substringBefore("/") ?: "白天"
-            return "第 $newDay 天·$inferredPhase"
+        val base = currentStoryTime?.trim()?.takeIf { it.isNotBlank() && it !in setOf("未确定", "未知") }
+        val text = stripThinkingTags(assistantReply).trim()
+        if (text.isBlank()) return null
+        val explicitLabel = Regex("""^[\[【]([^\]】]+)[\]】]""").find(text)?.groupValues?.get(1)
+        if (explicitLabel != null && !isRetrospectiveTime(explicitLabel) &&
+            (DAY_NUMBER_PATTERN.matcher(explicitLabel).find() || Regex("""[年月周日天季]|清晨|傍晚|暑假|学期""").containsMatchIn(explicitLabel))) {
+            return normalizeMonotonicTimeline(listOf(TimelineEventItem(timeTag = explicitLabel))).first().timeTag
+                .takeIf { it != base }
         }
-
-        if (nextDayKeywords.any { combined.contains(it) }) {
-            val newDay = currentDay + 1
-            val phase = DayPhase.inferFromText(combined)?.displayName?.substringBefore("/") ?: "清晨"
-            return "第 $newDay 天·$phase"
+        val clauses = text.split(Regex("""[。！？；\n，,]""")).map { it.trim() }
+        val span = Regex("""^(?:(又?过了|转眼(?:间)?(?:已)?(?:过了)?|一晃(?:已)?(?:过了)?|时间(?:又)?过去了)\s*)?((?:约|大约)?[一二两三四五六七八九十百半数几\d]+(?:到[一二两三四五六七八九十\d]+)?(?:个)?(?:星期|周|月|年|天|日))(?:\s*(后|过后|之后|过去了))?""")
+        for (clause in clauses) {
+            val match = span.find(clause) ?: continue
+            if (match.groupValues[1].isBlank() && match.groupValues[3].isBlank()) continue
+            if (clause.drop(match.value.length).trimStart().let { it.startsWith("再") || it.startsWith("会") || it.startsWith("要") }) continue
+            val marker = match.value.trim()
+            return if (base == null) marker else "承接【$base】·$marker"
         }
-
-        // 2. 日内时段推移：当前已有时段 -> 文本中体现出向后时段推进
-        val currentPhase = DayPhase.inferFromText(baseTime) ?: DayPhase.EARLY_MORNING
-        val textPhase = DayPhase.inferFromText(combined)
-        val dayPrefix = if (baseTime.contains("第") && baseTime.contains("天")) {
-            baseTime.substringBefore("·").substringBefore("-").trim()
-        } else {
-            "第 $currentDay 天"
+        val nextDay = clauses.firstOrNull { Regex("""^(?:一夜无话[，,]?)?(?:次日|翌日|第二天|次晨)""").containsMatchIn(it) }
+        if (nextDay != null) {
+            val day = base?.let(::explicitStoryDay)
+            val phase = DayPhase.inferFromText(nextDay)?.displayName?.substringBefore("/")
+            return if (day != null) "第 ${day + 1} 天" + (phase?.let { "·$it" } ?: "")
+                else (base?.let { "承接【$it】·" } ?: "") + nextDay.takeWhile { it != '的' }.trim()
         }
-
-        // 防虚假跳跃与篡改铁律：
-        // 若当前处于早晨/上午，严禁在一轮常规对话中无日内变迁描写地直接跃迁至入夜/夜晚/深夜（跨越>=4个时段）！
-        // 防过度推进（单步守时）：顺延超过一个相邻时段时，必须以正文明确的时间流逝描写为依据；
-        // 否则不采纳（例如上午提及“今晚聚餐的计划”或回忆“去年黄昏的往事”绝不代表时段已流转），
-        // 落空后交由第 3 段的单步活动顺延兜底。
-        if (textPhase != null && textPhase.order > currentPhase.order) {
-            val step = textPhase.order - currentPhase.order
-            val isLeapToNight = (currentPhase == DayPhase.EARLY_MORNING || currentPhase == DayPhase.MORNING) &&
-                (textPhase == DayPhase.NIGHT || textPhase == DayPhase.LATE_NIGHT)
-            val hasExplicitEveningTransition = combined.contains("夕阳西下") || combined.contains("夜幕降临") ||
-                combined.contains("直到晚上") || combined.contains("天色彻底黑了下来") || combined.contains("转眼到了晚上")
-
-            val allowed = when {
-                step <= 1 -> true
-                isLeapToNight -> hasExplicitEveningTransition
-                else -> hasExplicitTimePassageDescription(combined)
-            }
-            if (allowed) {
-                val cleanPhase = textPhase.displayName.substringBefore("/")
-                return "$dayPrefix·$cleanPhase"
-            }
+        if (base == null || !hasExplicitTimePassageDescription(text)) return null
+        val explicitPhase = when {
+            listOf("夕阳西下", "暮色四合", "日落", "待到傍晚").any { text.contains(it) } -> "傍晚"
+            listOf("夜幕降临", "直到晚上", "转眼到了晚上", "天色彻底黑了下来").any { text.contains(it) } -> "夜间"
+            else -> return null
         }
-
-        // 3. 典型活动结束触发顺延（例如：吃完早餐出发、会议结束、傍晚散场）
-        val morningCompletionKeywords = listOf("吃完早餐", "吃完早点", "吃过早餐", "早餐过后", "晨间准备完毕", "动身出发", "走出客栈", "动身前往")
-        val noonCompletionKeywords = listOf("吃完午饭", "吃过午餐", "午休结束", "午后出发")
-        val duskCompletionKeywords = listOf("夜幕降临", "天色暗了下来", "掌灯时分", "夕阳西下", "晚霞消退", "华灯初上")
-        val nightCompletionKeywords = listOf("回房就寝", "熄灯休息", "吹熄烛火", "互道晚安", "沉沉睡去", "进入梦乡")
-
-        if (currentPhase == DayPhase.EARLY_MORNING && morningCompletionKeywords.any { combined.contains(it) }) {
-            return "$dayPrefix·上午"
-        }
-        if (currentPhase == DayPhase.MORNING && (combined.contains("午餐") || combined.contains("吃午饭") || combined.contains("正午"))) {
-            return "$dayPrefix·中午"
-        }
-        if (currentPhase == DayPhase.NOON && noonCompletionKeywords.any { combined.contains(it) }) {
-            return "$dayPrefix·下午"
-        }
-        if (currentPhase.order <= DayPhase.AFTERNOON.order && duskCompletionKeywords.any { combined.contains(it) }) {
-            return "$dayPrefix·傍晚"
-        }
-        if (currentPhase.order <= DayPhase.DUSK.order && (combined.contains("晚饭") || combined.contains("晚餐") || combined.contains("夜间"))) {
-            return "$dayPrefix·入夜"
-        }
-        if (currentPhase == DayPhase.NIGHT && nightCompletionKeywords.any { combined.contains(it) }) {
-            return "$dayPrefix·深夜"
-        }
-        if (currentPhase == DayPhase.LATE_NIGHT && (combined.contains("天亮") || combined.contains("破晓") || combined.contains("晨光"))) {
-            return "第 ${currentDay + 1} 天·清晨"
-        }
-
-        return null
+        return base.substringBefore("·") + "·$explicitPhase"
     }
 
     /** Remove only exact duplicate facts at the same time; preserve every distinct statement for review. */
@@ -1291,7 +1138,7 @@ object TimelineMemoryHelper {
     fun consolidateFinalAtemporalSettings(settings: List<AtemporalSettingItem>): List<AtemporalSettingItem> {
         return settings.filter { it.content.isNotBlank() && !isPureDirectorInstruction(it.content) }
             .map { it.copy(content = it.content.trim()) }
-            .distinctBy { it.targetScope to normalizedFact(it.content) }
+            .distinctBy { Triple(it.targetScope, it.targetMemoryId, normalizedFact(it.content)) }
     }
 
     private fun normalizedFact(text: String): String = text.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")

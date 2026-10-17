@@ -3,10 +3,75 @@ package com.aiassistant
 import com.aiassistant.domain.model.MemoryItem
 import com.aiassistant.domain.model.Message
 import com.aiassistant.utils.AdvancedMemoryEngine
+import com.aiassistant.utils.AtemporalSettingItem
+import com.aiassistant.utils.SessionSettingReconciler
+import com.aiassistant.utils.SmartMemoryExtractor
+import com.aiassistant.utils.TimelineDraftManager
+import com.aiassistant.utils.TimelineReconcileDraft
+import com.google.gson.Gson
+import com.google.gson.JsonParser
 import org.junit.Assert.*
 import org.junit.Test
 
 class MemoryAndCompressionEngineTest {
+
+    @Test fun settingSemanticNoopAndInvalidTargetsNeverBecomeNewRows() {
+        val old = MemoryItem(id = 41, scope = "conversation", conversationId = 7, content = "【习惯偏好】合成角色总在夜间练琴")
+        val semanticNoop = SessionSettingReconciler.parse(JsonParser.parseString("""{"action":"NOOP","targetMemoryId":41,"content":"合成角色习惯在深夜演奏钢琴"}""").asJsonObject)
+        assertNull(semanticNoop)
+        val proposals = listOf(
+            AtemporalSettingItem(content = "合成角色总在夜间练琴。"),
+            AtemporalSettingItem(content = "练琴时戴手套", action = "SUPPLEMENT", targetMemoryId = 99),
+            AtemporalSettingItem(content = "改成清晨练琴", action = "REVISE", targetMemoryId = 13)
+        )
+        assertTrue(SessionSettingReconciler.reconcileCandidates(proposals, listOf(old)).isEmpty())
+        val globalWithSameId = old.copy(scope = "user", conversationId = null)
+        assertTrue(SessionSettingReconciler.reconcileCandidates(listOf(proposals[1].copy(targetMemoryId = 41)), listOf(globalWithSameId)).isEmpty())
+    }
+
+    @Test fun supplementsKeepComplementaryOldInformationAndAreIdempotentAcrossConsolidation() {
+        val old = MemoryItem(id = 41, scope = "conversation", conversationId = 7,
+            content = "【习惯偏好】合成角色总在夜间练琴；练琴时关闭窗户")
+        val first = AtemporalSettingItem(content = "只演奏自己作的曲子", action = "SUPPLEMENT", targetMemoryId = 41,
+            evidence = "她只弹自己写的曲子")
+        val second = first.copy(content = "演奏前先调音", evidence = "她先为琴调音")
+        val merged = SessionSettingReconciler.reconcileCandidates(listOf(first, second), listOf(old)).single()
+        assertEquals(old.content, merged.previousContent)
+        assertEquals(41L, merged.targetMemoryId)
+        assertEquals("合成角色总在夜间练琴；练琴时关闭窗户；只演奏自己作的曲子；演奏前先调音", merged.content)
+        assertEquals(merged.content, SessionSettingReconciler.reconcileCandidates(listOf(merged), listOf(old)).single().content)
+        // A new subject, negation or condition is not erased through character-overlap guesses.
+        val distinct = listOf("合成角色甲喜欢绿茶", "合成角色乙喜欢绿茶", "合成角色甲不喜欢绿茶", "合成角色甲仅在冬天喝绿茶")
+            .map { AtemporalSettingItem(content = it) }
+        assertEquals(4, SessionSettingReconciler.reconcileCandidates(distinct, emptyList()).size)
+    }
+
+    @Test fun revisionsNeedExplicitSelectionAndModelCannotPromoteStoryFactsToGlobal() {
+        val parsed = SessionSettingReconciler.parse(JsonParser.parseString("""{"action":"REVISE","targetMemoryId":41,"targetScope":"global","content":"合成角色已不再练琴","evidence":"旧伤使她决定放弃弹奏","changeReason":"正文明确修订"}""").asJsonObject)!!
+        assertFalse(parsed.isSelected)
+        assertEquals("session", parsed.targetScope)
+        val old = MemoryItem(id = 41, scope = "conversation", conversationId = 7, content = "【习惯偏好】合成角色每天练琴")
+        val revision = SessionSettingReconciler.reconcileCandidates(listOf(parsed), listOf(old)).single()
+        assertEquals(old.content, revision.previousContent)
+        assertEquals("REVISE", revision.action)
+        assertFalse(revision.isSelected)
+        assertTrue(SessionSettingReconciler.contract(listOf(old)).contains("\"id\":41"))
+        assertEquals("conversation", SmartMemoryExtractor.extractCandidate("【设定：主角名为合成领航员，代号星舟】")!!.suggestedScope)
+    }
+
+    @Test fun legacyDraftSettingsGainSafeMetadataAndReviewedEditsSurviveRoundTrip() {
+        val gson = Gson()
+        val legacy = gson.fromJson("""{"conversationId":7,"atemporalSettings":[{"content":"合成旧设定","action":null,"evidence":null,"changeReason":null}]}""", TimelineReconcileDraft::class.java)
+        val safe = TimelineDraftManager.sanitizeDraft(legacy)!!.atemporalSettings.single()
+        assertEquals("ADD", safe.action)
+        assertEquals("", safe.evidence)
+        assertEquals("", safe.changeReason)
+        assertNull(safe.targetMemoryId)
+        val reviewed = safe.copy(action = "SUPPLEMENT", targetMemoryId = 41L, previousContent = "既有合成设定", evidence = "正文依据", changeReason = "新增条件")
+        val restored = TimelineDraftManager.sanitizeDraft(gson.fromJson(gson.toJson(TimelineReconcileDraft(conversationId = 7,
+            atemporalSettings = listOf(reviewed))), TimelineReconcileDraft::class.java))!!.atemporalSettings.single()
+        assertEquals(reviewed, restored)
+    }
 
     @Test
     fun testInferFactCategoryAndImportance() {

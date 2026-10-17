@@ -11,7 +11,6 @@ import com.aiassistant.AiAssistantApp
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.RoleplayRepository
 import com.aiassistant.domain.model.*
-import com.aiassistant.utils.RoleplaySmartAnalyzer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -344,7 +343,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 val character = characterId?.let { repository.getCharacterById(it) }
                 val scenario = scenarioId?.let { repository.getScenarioById(it) }
                 val apiConfig = (database.apiConfigDao().getConfigById(apiConfigId)?.takeIf { it.isEnabled }
-                    ?: database.apiConfigDao().getDefaultConfig()
+                    ?: database.apiConfigDao().getDefaultConfig()?.takeIf { it.isEnabled }
                     ?: database.apiConfigDao().getEnabledConfigs().first().firstOrNull())
                     ?: throw IllegalStateException("未找到有效的 API 配置（或已被停用）")
 
@@ -357,6 +356,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
                 val conversation = Conversation(
                     title = title,
+                    enableSessionMemory = true,
                     apiConfigId = apiConfig.id,
                     modelName = apiConfig.modelName,
                     temperature = apiConfig.temperature ?: 0.95f,
@@ -367,17 +367,20 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                     enableWebSearch = apiConfig.enableWebSearch ?: false
                 )
 
-                val conversationId = database.conversationDao().insertConversation(conversation)
-
-                val roleplaySession = RoleplaySession(
-                    characterId = characterId,
-                    scenarioId = scenarioId,
-                    conversationId = conversationId,
-                    narrativeMode = narrativeMode.value,
-                    currentPlotSummary = scenario?.premise ?: ""
-                )
-
-                val sessionId = repository.insertSession(roleplaySession)
+                val (conversationId, sessionId) = database.withTransaction {
+                    val conversationId = database.conversationDao().insertConversation(conversation)
+                    val roleplaySession = RoleplaySession(
+                        characterId = character?.id,
+                        characterIds = com.google.gson.Gson().toJson(listOfNotNull(character?.id)),
+                        scenarioId = scenario?.id,
+                        conversationId = conversationId,
+                        narrativeMode = narrativeMode.value,
+                        customCharacterData = character?.let { com.google.gson.Gson().toJson(listOf(it)) },
+                        customScenarioData = scenario?.let { com.google.gson.Gson().toJson(it) },
+                        currentPlotSummary = scenario?.premise.orEmpty()
+                    )
+                    conversationId to repository.insertSession(roleplaySession)
+                }
                 _currentSession.value = repository.getSessionById(sessionId)
 
                 _uiState.value = RoleplayUiState.Idle
@@ -426,7 +429,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 val characters = repository.getCharactersByIds(characterIds)
                 val scenario = scenarioId?.let { repository.getScenarioById(it) }
                 val apiConfig = (database.apiConfigDao().getConfigById(apiConfigId)?.takeIf { it.isEnabled }
-                    ?: database.apiConfigDao().getDefaultConfig()
+                    ?: database.apiConfigDao().getDefaultConfig()?.takeIf { it.isEnabled }
                     ?: database.apiConfigDao().getEnabledConfigs().first().firstOrNull())
                     ?: throw IllegalStateException("未找到有效的 API 配置（或已被停用）")
 
@@ -461,9 +464,9 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 val (conversationId, sessionId) = database.withTransaction {
                     val conversationId = database.conversationDao().insertConversation(conversation)
                     val roleplaySession = RoleplaySession(
-                        characterId = characterIds.firstOrNull(),
-                        characterIds = com.google.gson.Gson().toJson(characterIds),
-                        scenarioId = scenarioId,
+                        characterId = characters.firstOrNull()?.id,
+                        characterIds = com.google.gson.Gson().toJson(characters.map { it.id }.distinct()),
+                        scenarioId = scenario?.id,
                         conversationId = conversationId,
                         narrativeMode = narrativeMode.value,
                         customCharacterData = characters.takeIf { it.isNotEmpty() }?.let { com.google.gson.Gson().toJson(it) },
@@ -496,18 +499,15 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 _uiState.value = RoleplayUiState.Saving
-                val charIdsJson = if (newCharacterIds.isNotEmpty()) {
-                    com.google.gson.Gson().toJson(newCharacterIds)
-                } else null
-
-                val updatedSession = session.copy(
-                    characterId = newCharacterIds.firstOrNull(),
-                    characterIds = charIdsJson,
-                    scenarioId = newScenarioId,
-                    narrativeMode = newNarrativeMode?.value ?: session.narrativeMode,
-                    currentPlotSummary = newPlotSummary ?: session.currentPlotSummary,
-                    updatedAt = System.currentTimeMillis()
-                )
+                val current = repository.getSessionById(session.id) ?: error("当前故事已不存在")
+                val characters = (current.getCustomizedCharacters(repository.getEffectiveCharactersForSession(current)) +
+                    repository.getCharactersByIds(newCharacterIds.filter { it > 0 })).distinctBy { it.id }
+                val selected = StorySessionBindings.select(current, characters, newCharacterIds, newScenarioId,
+                    newNarrativeMode ?: NarrativeMode.fromValue(current.narrativeMode), newPlotSummary ?: current.currentPlotSummary)
+                val updatedSession = if (selected.customScenarioData == null && selected.scenarioId != null) {
+                    selected.copy(customScenarioData = repository.getScenarioById(selected.scenarioId)
+                        ?.let { com.google.gson.Gson().toJson(it) })
+                } else selected
 
                 repository.updateSession(updatedSession)
                 _currentSession.value = updatedSession
@@ -591,52 +591,17 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 _uiState.value = RoleplayUiState.Saving
-                val currentExistingChars = _characters.value
-                val finalCharacterIds = mutableListOf<Long>()
-
-                characters.forEach { incoming ->
-                    val existing = currentExistingChars.firstOrNull { it.name.trim() == incoming.name.trim() }
-                    val action = resolutionMap[incoming.name.trim()] ?: ConflictAction.CREATE_COPY
-
-                    if (existing != null) {
-                        when (action) {
-                            ConflictAction.CREATE_COPY -> {
-                                val copyChar = incoming.copy(name = "${incoming.name} (副本)")
-                                val newId = repository.insertCharacter(copyChar)
-                                finalCharacterIds.add(newId)
-                            }
-                            ConflictAction.OVERWRITE -> {
-                                val updated = incoming.copy(id = existing.id, isFavorite = existing.isFavorite)
-                                repository.updateCharacter(updated)
-                                finalCharacterIds.add(existing.id)
-                            }
-                            ConflictAction.MERGE -> {
-                                val merged = RoleplaySmartAnalyzer.mergeCharacters(existing, incoming)
-                                repository.updateCharacter(merged)
-                                finalCharacterIds.add(existing.id)
-                            }
-                        }
-                    } else {
-                        val newId = repository.insertCharacter(incoming)
-                        finalCharacterIds.add(newId)
-                    }
-                }
-
-                var scenarioId: Long? = null
-                if (scenario != null) {
-                    val currentScenarios = _scenarios.value
-                    val existingSc = currentScenarios.firstOrNull { it.name.trim() == scenario.name.trim() }
-                    if (existingSc != null) {
-                        val mergedSc = RoleplaySmartAnalyzer.mergeScenarios(existingSc, scenario)
-                        repository.updateScenario(mergedSc)
-                        scenarioId = existingSc.id
-                    } else {
-                        scenarioId = repository.insertScenario(scenario)
-                    }
+                val (finalCharacterIds, scenarioId) = database.withTransaction {
+                    val ids = characters.map { incoming ->
+                        val action = resolutionMap[incoming.name.trim()] ?: ConflictAction.CREATE_COPY
+                        repository.importCharacter(incoming, createCopy = action == ConflictAction.CREATE_COPY,
+                            overwrite = action == ConflictAction.OVERWRITE).id
+                    }.distinct()
+                    ids to scenario?.let { repository.importScenario(it).id }
                 }
 
                 if (startSession && (finalCharacterIds.isNotEmpty() || scenarioId != null)) {
-                    val targetApiId = apiConfigId ?: (database.apiConfigDao().getDefaultConfig()
+                    val targetApiId = apiConfigId ?: (database.apiConfigDao().getDefaultConfig()?.takeIf { it.isEnabled }
                         ?: database.apiConfigDao().getEnabledConfigs().first().firstOrNull())?.id
 
                     if (targetApiId != null) {
@@ -702,7 +667,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
             try {
                 // 与普通会话共用事务删除：取消生成并一并清除消息、会话记忆和分支。
                 // 只删除 RoleplaySession 会留下“失去故事身份”的聊天与残留记录。
-                repository.deleteSession(session)
+                AiAssistantApp.instance.repository.deleteConversation(session.conversationId)
                 if (_currentSession.value?.id == session.id) {
                     _currentSession.value = null
                 }
@@ -718,8 +683,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         if (normalized.isBlank()) return
         viewModelScope.launch {
             try {
-                val current = database.conversationDao().getConversationById(conversationId) ?: return@launch
-                database.conversationDao().updateConversation(current.copy(title = normalized))
+                AiAssistantApp.instance.repository.updateConversationTitle(conversationId, normalized)
                 _uiState.value = RoleplayUiState.SaveSuccess("故事已重命名")
             } catch (e: Exception) {
                 _uiState.value = RoleplayUiState.Error("重命名失败: ${e.message}")
@@ -768,9 +732,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 conversationIds.forEach { conversationId ->
-                    val story = repository.getSessionByConversationId(conversationId)
-                    if (story != null) repository.deleteSession(story)
-                    else AiAssistantApp.instance.repository.deleteConversation(conversationId)
+                    AiAssistantApp.instance.repository.deleteConversation(conversationId)
                 }
                 _uiState.value = RoleplayUiState.SaveSuccess("已删除 ${conversationIds.size} 个故事及其对话记录")
             } catch (e: Exception) {

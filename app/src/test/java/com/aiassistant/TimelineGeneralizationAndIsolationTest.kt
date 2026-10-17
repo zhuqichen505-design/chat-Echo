@@ -65,40 +65,15 @@ class TimelineGeneralizationAndIsolationTest {
         assertEquals("约1个月前", TimelineMemoryHelper.calculateRelativeTime("第 1 天", "第 35 天"))
         assertEquals("数月前（约100天前）", TimelineMemoryHelper.calculateRelativeTime("第 1 天", "第 101 天"))
 
-        // 粗粒度阶段：开学/新学期视角相对推算
-        val relFromNewSemester1 = TimelineMemoryHelper.calculateRelativeTime("暑假期间", "新学期")
-        assertNotNull(relFromNewSemester1)
-        assertTrue("新学期看暑假应为暑假期间（约1-2个月前）", relFromNewSemester1!!.contains("暑假期间") || relFromNewSemester1.contains("个月前"))
-
-        val relFromNewSemester2 = TimelineMemoryHelper.calculateRelativeTime("暑假快结束", "开学第一天")
-        assertNotNull(relFromNewSemester2)
-        assertTrue("开学看暑假尾声应为数天前", relFromNewSemester2!!.contains("数天前") || relFromNewSemester2.contains("末尾"))
-
-        val relFromNewSemester3 = TimelineMemoryHelper.calculateRelativeTime("放假首日", "新学期")
-        assertNotNull(relFromNewSemester3)
-        assertTrue("新学期看放假首日应为放假之初（两个多月前）", relFromNewSemester3!!.contains("放假之初") || relFromNewSemester3.contains("两个多月前"))
-
-        // 粗粒度阶段：暑假尾声看暑假之初
-        val relFromSummerEnd = TimelineMemoryHelper.calculateRelativeTime("暑假开始", "暑假快结束")
-        assertNotNull(relFromSummerEnd)
-        assertTrue("暑假尾声看暑假开始应为暑假之初（约两个月前）", relFromSummerEnd!!.contains("暑假之初") || relFromSummerEnd.contains("两个月前"))
-
-        // 粗粒度阶段：深秋看开学与盛夏
-        val relFromAutumn = TimelineMemoryHelper.calculateRelativeTime("开学", "深秋")
-        assertNotNull(relFromAutumn)
-        assertTrue("深秋看开学应为开学之初（约一个月前）", relFromAutumn!!.contains("开学之初") || relFromAutumn.contains("一个月前"))
-
-        // 粗粒度阶段：来年春天看上一冬季
-        val relFromSpring = TimelineMemoryHelper.calculateRelativeTime("寒假", "来年春天")
-        assertNotNull(relFromSpring)
-        assertTrue("来年春天看寒假应为上一冬季（两三个月前）", relFromSpring!!.contains("上一冬季") || relFromSpring.contains("几个月前"))
-
-        // 文学跨度推导：两周后、几天后相对于第1天
-        val relFromTwoWeeks = TimelineMemoryHelper.calculateRelativeTime("第 1 天", "两周后")
-        assertEquals("约两周前", relFromTwoWeeks)
-
-        val relFromFewDays = TimelineMemoryHelper.calculateRelativeTime("第 1 天", "几天后")
-        assertEquals("数日前", relFromFewDays)
+        // 没有共同参照的自然时间不能套用固定学期/假期长度或直接相减。
+        listOf("暑假期间" to "新学期", "暑假快结束" to "开学第一天",
+            "放假首日" to "新学期", "暑假开始" to "暑假快结束",
+            "开学" to "深秋", "寒假" to "来年春天",
+            "第 1 天" to "两周后", "第 1 天" to "几天后",
+            "两周后" to "一个月后").forEach { (past, now) ->
+            assertNull("自然标签没有共同精确参照，不能臆造相对天数：$past / $now",
+                TimelineMemoryHelper.calculateRelativeTime(past, now))
+        }
     }
 
     // 3. 全时空时序守护提示词看板测试：泛化里程碑与三大铁律注入
@@ -116,9 +91,11 @@ class TimelineGeneralizationAndIsolationTest {
         assertTrue(promptContext.contains("【故事当前时间节点与时空看板】"))
         assertTrue(promptContext.contains("新学期·晨曦"))
 
-        // 2. 验证全域泛化里程碑防漂移（灭门誓仇、突破元婴等均应被识别并计算相对跨度）
+        // 2. 里程碑保留原阶段锚点；没有实际日期，不能凭假期/学期名称编造相对跨度。
         assertTrue("必须识别灭门逃亡里程碑", promptContext.contains("宗门惨遭神秘仇家灭门"))
-        assertTrue("灭门里程碑必须具有相对时间警示", promptContext.contains("注意：此事件发生在") && promptContext.contains("严禁时序错乱！"))
+        assertTrue("里程碑必须保留已知的原文阶段", promptContext.contains("★ [放假首日] 宗门惨遭神秘仇家灭门"))
+        assertFalse("无法从放假首日与新学期推出固定的日/月差", promptContext.contains("注意：此事件发生在"))
+        assertFalse("不能臆造假期长度", promptContext.contains("两个月前"))
 
         // 3. 验证三大泛化时序铁律完整注入
         assertTrue("必须包含三大铁律总纲", promptContext.contains("全域叙事时序三大铁律，大模型必须无条件遵守"))

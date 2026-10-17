@@ -125,7 +125,7 @@ class ChronicleTimelineStudioTest {
         assertEquals("session", result.atemporalSettings[0].targetScope)
 
         assertEquals("世界法则", result.atemporalSettings[1].category)
-        assertEquals("global", result.atemporalSettings[1].targetScope)
+        assertEquals("session", result.atemporalSettings[1].targetScope)
     }
 
     @Test
@@ -153,8 +153,8 @@ class ChronicleTimelineStudioTest {
         assertEquals(4, normalized.size)
         assertEquals("第 1 天·下午", normalized[0].timeTag)
         assertEquals("第 2 天·傍晚", normalized[1].timeTag)
-        assertEquals("第 3 天·早上", normalized[2].timeTag) // 成功单调累加至第 3 天！
-        assertEquals("第 4 天·夜间", normalized[3].timeTag) // 再次单调累加至第 4 天！
+        assertEquals("第 2 天·早上", normalized[2].timeTag) // 日内倒叙不能仅凭位置改成第三天。
+        assertEquals("第二天·夜间", normalized[3].timeTag) // 自然相对标签由语义提取确定参照，存储层不盲目加天。
     }
 
     @Test

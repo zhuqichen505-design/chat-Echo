@@ -125,6 +125,9 @@ interface ConversationDao {
     @Query("UPDATE conversations SET updatedAt = :timestamp WHERE id = :id")
     suspend fun updateTimestamp(id: Long, timestamp: Long = System.currentTimeMillis())
 
+    @Query("UPDATE conversations SET title = :title, updatedAt = :timestamp WHERE id = :id")
+    suspend fun updateTitle(id: Long, title: String, timestamp: Long = System.currentTimeMillis()): Int
+
     @Query("UPDATE conversations SET messageCount = :count, totalTokens = :tokens WHERE id = :id")
     suspend fun updateStats(id: Long, count: Int, tokens: Int)
 

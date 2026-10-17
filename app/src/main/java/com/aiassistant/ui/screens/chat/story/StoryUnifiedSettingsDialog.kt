@@ -124,7 +124,7 @@ fun StoryUnifiedSettingsDialog(
                                     overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } },
                             navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回正文") } },
-                            actions = { TextButton(enabled = !saving, onClick = { save() }) { Text(if (saving) "保存中…" else if (changed) "保存修改" else "返回正文") } }
+                            actions = { TextButton(enabled = !saving, onClick = { if (changed) save() else onDismiss() }) { Text(if (saving) "保存中…" else if (changed) "保存修改" else "返回正文") } }
                         )
                         ScrollableTabRow(selectedTabIndex = tabs.indexOfFirst { it.first == section }.coerceAtLeast(0),
                             edgePadding = 12.dp, containerColor = MaterialTheme.colorScheme.background) {
@@ -175,7 +175,7 @@ fun StoryUnifiedSettingsDialog(
                             WorkspaceHeading("已发生的剧情摘要", "摘要帮助续写，规则放在会话设定，事件放在时间线。")
                             OutlinedTextField(value = draft.summary, onValueChange = { draft = draft.copy(summary = it) },
                                 modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 7, label = { Text("当前剧情摘要") })
-                            WorkspaceAction("提炼剧情与关键事实", "从已保存的故事内容生成摘要及事实", Icons.Default.AutoAwesome, onSummarizeMemories)
+                            WorkspaceAction("提炼剧情与关键事实", "从已保存的故事内容生成摘要及事实", Icons.Default.AutoAwesome) { save { onSummarizeMemories() } }
                             WorkspaceAction("上下文与压缩", "检查实际预算、压缩档位和滚动摘要", Icons.Default.DataUsage) { save { onOpenContext() } }
                             WorkspaceAction("模型与生成", "${currentOption?.modelName ?: fallbackModel} · ${if (draft.settings.enableReplyDirections) "${draft.settings.replyDirectionCount} 个回复方向" else "直接回复"}", Icons.Default.Tune) {
                                 save { onOpenSharedSettings() }
@@ -306,8 +306,8 @@ fun StoryUnifiedSettingsDialog(
         dismissButton = { TextButton(onClick = { customPlotAction = null }) { Text("取消") } }) }
     if (discardChanges) EchoConfirmDialog(title = "放弃未保存的写作设置？", text = "人物选择、写作要求和开关尚未保存。已经保存的会话设定与时间线不会撤销。",
         confirmText = "放弃修改", onConfirm = { discardChanges = false; onDismiss() }, onDismiss = { discardChanges = false })
-    if (confirmConvert) EchoConfirmDialog(title = "转为普通对话？", text = "已保存的故事设定会合并进系统提示词，消息继续保留。请先保存当前未提交的修改。",
-        confirmText = "转换", onConfirm = { confirmConvert = false; onConvertToNormal() }, onDismiss = { confirmConvert = false })
+    if (confirmConvert) EchoConfirmDialog(title = "转为普通对话？", text = "将先保存本页修改，再把故事设定合并进系统提示词，消息继续保留。保存失败时会留在工作台供重试。",
+        confirmText = "保存并转换", onConfirm = { confirmConvert = false; save { onConvertToNormal() } }, onDismiss = { confirmConvert = false })
     if (templateName != null) AlertDialog(onDismissRequest = { templateName = null }, title = { Text("保存提示词模板") },
         text = { OutlinedTextField(value = templateName.orEmpty(), onValueChange = { templateName = it }, label = { Text("模板名称") }) },
         confirmButton = { TextButton(enabled = !templateName.isNullOrBlank(), onClick = { onSavePromptTemplate(templateName.orEmpty(), draft.instructions); templateName = null }) { Text("保存") } },

@@ -70,7 +70,7 @@ class TimelineDeepModelExtractionTest {
         val setting2 = parsed.atemporalSettings[1]
         assertEquals("世界规则", setting2.category)
         assertEquals("所有契约魔法均以真名与等价灵魂交换为基石", setting2.content)
-        assertEquals("global", setting2.targetScope)
+        assertEquals("session", setting2.targetScope)
     }
 
     @Test

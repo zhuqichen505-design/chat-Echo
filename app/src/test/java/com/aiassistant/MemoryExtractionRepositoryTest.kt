@@ -10,10 +10,19 @@ import com.aiassistant.utils.CryptoManager
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.TavilySearchManager
 import com.aiassistant.utils.WorldBookImport
+import com.aiassistant.utils.AtemporalSettingItem
+import com.aiassistant.utils.TimelineEventItem
+import com.aiassistant.utils.TimelineReconcileDraft
+import com.aiassistant.utils.SessionSettingReconciler
+import com.aiassistant.utils.RoleplaySmartAnalyzer
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonNull
 import com.google.gson.JsonParser
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -165,6 +174,243 @@ class MemoryExtractionRepositoryTest {
         f.db.roleplayMemoryDao(), f.db.characterTagDao(), f.db.conversationDao(),
         f.db.messageDao(), f.db.worldBookDao(), f.db.memoryDao()
     )
+
+    @Test fun creativeAnalysisUsesBothProtocolsAndSendsCompleteLongText() = runBlocking {
+        for ((protocol, model) in listOf("openai" to "vendor/gpt-5.2:Exact-ID", "anthropic" to "synthetic-anthropic-model")) {
+            Endpoint { socket, _ -> completedSummaryReply(socket, """{"characters":[{"name":"合成领航员"}]}""", protocol) }
+                .use { endpoint -> Fixture().use { f ->
+                    val (config, _) = f.conversation(endpoint.url, model, protocol)
+                    val text = "创作资料：" + "合成正文".repeat(6000) + "末尾必须保留的合成设定"
+                    val result = f.repository.analyzeCreativeText(config, text, model)
+                    assertTrue(result.contains("合成领航员"))
+                    val request = endpoint.payloads.single()
+                    assertEquals(text, request.getAsJsonArray("messages").single().asJsonObject.get("content").asString)
+                    assertEquals(model, request.get("model").asString)
+                    assertNull(request.get("temperature"))
+                    if (protocol == "openai") {
+                        assertTrue(endpoint.paths.single().contains("chat/completions"))
+                        assertTrue(request.has("max_completion_tokens"))
+                        assertFalse(request.has("max_tokens"))
+                    } else {
+                        assertTrue(endpoint.paths.single().contains("/messages"))
+                        assertTrue(request.has("max_tokens"))
+                    }
+                    val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                    assertEquals("story_analysis", stat.requestKind)
+                    assertTrue(stat.success)
+                    assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+                } }
+        }
+    }
+
+    @Test fun creativeAnalyzerIntegrationForwardsCompleteInputAndDisabledConfigDoesNotRequest() = runBlocking {
+        Endpoint { socket, _ -> completedSummaryReply(socket, """{"characters":[{"name":"合成领航员","identity":"合成船长"}],"scenario":null}""") }
+            .use { endpoint -> Fixture().use { f ->
+                val (config, _) = f.conversation(endpoint.url, "synthetic-creative-model")
+                // A no-op progress callback still switches dispatchers inside the analyzer.
+                val mainExecutor = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+                Dispatchers.setMain(mainExecutor)
+                try {
+                    val text = "合成故事开头" + "海上合成剧情".repeat(4000) + "结尾合成设定：角色对花粉过敏"
+                    val bundle = withTimeout(10000) { RoleplaySmartAnalyzer.analyzeTextOrNovel(f.context, text,
+                        f.repository, config, config.modelName) }
+                    assertTrue(bundle.isAiAnalyzed)
+                    assertEquals("合成领航员", bundle.characters.single().name)
+                    val prompt = endpoint.payloads.single().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                    assertTrue(prompt.contains("合成故事开头"))
+                    assertTrue(prompt.contains("结尾合成设定：角色对花粉过敏"))
+                    val count = endpoint.payloads.size
+                    val disabled = withTimeout(10000) { RoleplaySmartAnalyzer.analyzeTextOrNovel(f.context,
+                        "角色名称：合成船员", f.repository, config.copy(isEnabled = false), config.modelName) }
+                    assertFalse(disabled.isAiAnalyzed)
+                    assertEquals(count, endpoint.payloads.size)
+                } finally { Dispatchers.resetMain(); mainExecutor.close() }
+            } }
+    }
+
+    @Test fun creativeAnalysisRejectsIncompleteResponsesEvenWhenJsonCanBeParsed() = runBlocking {
+        for ((protocol, stop) in listOf("openai" to "length", "anthropic" to "max_tokens")) {
+            Endpoint { socket, _ ->
+                val text = """{"characters":[{"name":"只有前半部分的合成角色"}]}"""
+                val body = if (protocol == "anthropic") mapOf("stop_reason" to stop, "content" to listOf(mapOf("type" to "text", "text" to text)))
+                    else mapOf("choices" to listOf(mapOf("finish_reason" to stop, "message" to mapOf("content" to text))))
+                reply(socket, Gson().toJson(body))
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, _) = f.conversation(endpoint.url, "synthetic-creative-model", protocol)
+                val result = runCatching { f.repository.analyzeCreativeText(config, "请提取合成人物设定") }
+                assertTrue(result.isFailure)
+                assertTrue(result.exceptionOrNull()!!.message.orEmpty().contains("未完整结束"))
+                assertEquals(1, endpoint.payloads.size)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertEquals("story_analysis", stat.requestKind)
+                assertEquals("interrupted", stat.completionStatus)
+                assertFalse(stat.success)
+            } }
+        }
+    }
+
+    @Test fun creativeAnalysisRejectsOversizeAndDisabledInputsBeforeHttp() = runBlocking {
+        Endpoint { socket, _ -> completedSummaryReply(socket, "{}") }.use { endpoint -> Fixture().use { f ->
+            val (config, _) = f.conversation(endpoint.url, "synthetic-small-window-model")
+            f.db.selectedModelDao().insertModel(SelectedModel(apiConfigId = config.id, modelName = config.modelName, contextWindowTokens = 4000))
+            assertTrue(runCatching { f.repository.analyzeCreativeText(config, "合成超长正文".repeat(6000)) }.isFailure)
+            val selected = f.db.selectedModelDao().getModelByName(config.id, config.modelName)!!
+            f.db.selectedModelDao().updateModel(selected.copy(isEnabled = false))
+            assertTrue(runCatching { f.repository.analyzeCreativeText(config, "合成正文") }.isFailure)
+            f.db.apiConfigDao().updateConfig(config.copy(isEnabled = false))
+            assertTrue(runCatching { f.repository.analyzeCreativeText(config, "合成正文") }.isFailure)
+            assertEquals(0, endpoint.payloads.size)
+        } }
+    }
+
+    @Test fun creativeAnalysisCancellationStopsWaitingForHttp() = runBlocking {
+        val entered = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        Endpoint { socket, _ ->
+            entered.countDown()
+            check(released.await(10, TimeUnit.SECONDS))
+            completedSummaryReply(socket, "{}")
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, _) = f.conversation(endpoint.url, "synthetic-creative-model")
+            val job = async(Dispatchers.IO) { f.repository.analyzeCreativeText(config, "合成小说解析") }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                withTimeout(3000) { job.cancelAndJoin() }
+                assertTrue(job.isCancelled)
+                assertEquals(1, endpoint.payloads.size)
+            } finally { released.countDown(); job.cancelAndJoin() }
+        } }
+    }
+
+    @Test fun explicitGlobalSettingChoiceIsRespectedInCreativeSession() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.conversation("https://model.invalid", tags = "story")
+            f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id))
+            f.repository.applyConfirmedSessionSettings(id, listOf(AtemporalSettingItem(category = "写作规则",
+                content = "合成作品始终采用第三人称", targetScope = "global")))
+            assertEquals(1, f.db.memoryDao().getConversationMemories(id).size)
+            assertEquals(1, f.db.memoryDao().getGlobalMemoriesFlow().first().size)
+        }
+    }
+
+    @Test fun semanticSettingNoopIsAuthoritativeAndExistingIdsAreSentToModel() = runBlocking {
+        Endpoint { socket, _ -> memoryReply(socket, """{"action":"NOOP"}""") }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            val oldId = f.repository.addConversationMemory(id, "【习惯偏好】合成角色只在夜晚练琴")
+            val messageId = f.repository.saveMessage(Message(conversationId = id, role = "user",
+                content = "请记住当前会话设定：合成角色习惯趁夜色弹琴"))
+            assertNull(f.repository.processSavedMessageMemory(messageId, config.id, config.modelName))
+            val memories = f.db.memoryDao().getConversationMemories(id)
+            assertEquals(listOf(oldId), memories.map { it.id })
+            val prompt = endpoint.payloads.single().getAsJsonArray("messages").joinToString { it.asJsonObject.get("content").asString }
+            assertTrue(prompt.contains("\"id\":$oldId"))
+            assertTrue(prompt.contains("同义改写"))
+            assertTrue(f.db.memoryDao().getCandidateMemories(id).all { it.scope == "conversation" })
+        } }
+    }
+
+    @Test fun singleMessageSettingSupplementIsStableAndRevisionWaitsForConfirmation() = runBlocking {
+        val targetId = java.util.concurrent.atomic.AtomicLong()
+        val requests = AtomicInteger()
+        Endpoint { socket, _ ->
+            val response = if (requests.getAndIncrement() == 0)
+                """{"action":"SUPPLEMENT","targetMemoryId":${targetId.get()},"content":"只演奏自己作的曲子","evidence":"她只弹自己写的曲子"}"""
+            else """{"action":"REVISE","targetMemoryId":${targetId.get()},"content":"合成角色因旧伤已不再练琴","evidence":"旧伤让她停止练琴","changeReason":"正文明确纠正当前习惯"}"""
+            memoryReply(socket, response)
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            targetId.set(f.repository.addConversationMemory(id, "【习惯偏好】合成角色在夜间练琴；练琴时关闭窗户"))
+            val firstMessage = f.repository.saveMessage(Message(conversationId = id, role = "user",
+                content = "请记住当前会话设定：她只弹自己写的曲子"))
+            val supplement = f.repository.processSavedMessageMemory(firstMessage, config.id, config.modelName)!!
+            assertEquals("SUPPLEMENT", supplement.action)
+            assertEquals(targetId.get(), supplement.targetMemoryId)
+            val supplemented = f.db.memoryDao().getConversationMemories(id).single()
+            assertEquals(targetId.get(), supplemented.id)
+            assertTrue(supplemented.content.contains("关闭窗户"))
+            assertTrue(supplemented.content.contains("自己作的曲子"))
+            val secondMessage = f.repository.saveMessage(Message(conversationId = id, role = "user",
+                content = "修订当前会话设定：旧伤让她停止练琴"))
+            val revision = f.repository.processSavedMessageMemory(secondMessage, config.id, config.modelName)!!
+            assertEquals("REVISE", revision.action)
+            assertEquals(supplemented.content, f.db.memoryDao().getMemoryById(targetId.get())!!.content)
+            f.repository.saveConfirmedMemory(revision.distilledContent, "conversation", id, revision.sourceMessageId,
+                revision.targetMemoryId, revision.previousContent)
+            val saved = f.db.memoryDao().getConversationMemories(id).single()
+            assertEquals(targetId.get(), saved.id)
+            assertEquals("合成角色因旧伤已不再练琴", saved.content)
+        } }
+    }
+
+    @Test fun reviewedSupplementsUpdateStableRowsAndCreativeMirrorsWithoutLosingFacts() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.conversation("https://model.invalid", tags = "story")
+            val sessionId = f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id))
+            val original = "【习惯偏好】合成角色在夜间练琴；练琴时关闭窗户"
+            val oldId = f.repository.addConversationMemory(id, original)
+            val mirrorId = f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = sessionId,
+                memoryType = "fact", content = original, isPinned = true))
+            val proposals = SessionSettingReconciler.reconcileCandidates(listOf(AtemporalSettingItem(
+                category = "习惯偏好", content = "只演奏自己作的曲子", action = "SUPPLEMENT", targetMemoryId = oldId)),
+                f.db.memoryDao().getConversationMemories(id))
+            f.repository.applyConfirmedSessionSettings(id, proposals)
+            f.repository.applyConfirmedSessionSettings(id, proposals)
+            val saved = f.db.memoryDao().getConversationMemories(id).single()
+            assertEquals(oldId, saved.id)
+            assertEquals("【习惯偏好】合成角色在夜间练琴；练琴时关闭窗户；只演奏自己作的曲子", saved.content)
+            val mirror = f.db.roleplayMemoryDao().getMemoriesListBySession(sessionId).single()
+            assertEquals(mirrorId, mirror.id)
+            assertEquals(saved.content, mirror.content)
+            assertTrue(f.db.memoryDao().getCandidateMemories(0).isEmpty())
+        }
+    }
+
+    @Test fun staleOrCrossConversationSettingEditsFailWithoutPartialWrites() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.conversation("https://model.invalid")
+            val (_, otherId) = f.conversation("https://model.invalid")
+            val oldId = f.repository.addConversationMemory(id, "【世界规则】合成城禁止火焰魔法")
+            val original = f.db.memoryDao().getMemoryById(oldId)!!
+            val revision = AtemporalSettingItem(category = "世界规则", content = "合成城允许受控火焰魔法", action = "REVISE",
+                targetMemoryId = oldId, previousContent = original.content)
+            assertTrue(runCatching { f.repository.applyConfirmedSessionSettings(otherId, listOf(revision)) }.isFailure)
+            f.db.memoryDao().updateMemory(original.copy(content = "人工修改：合成城仍禁止一切火焰魔法"))
+            val newSetting = AtemporalSettingItem(content = "合成城每月举行灯会")
+            assertTrue(runCatching { f.repository.applyConfirmedSessionSettings(id, listOf(newSetting, revision)) }.isFailure)
+            val saved = f.db.memoryDao().getConversationMemories(id).single()
+            assertEquals("人工修改：合成城仍禁止一切火焰魔法", saved.content)
+            assertTrue(f.db.memoryDao().getConversationMemories(otherId).isEmpty())
+        }
+    }
+
+    @Test fun renameBranchOnlyChangesTargetTitleAndRejectsBlankOrDeletedTargets() = runBlocking {
+        Fixture().use { f ->
+            val (config, parentId) = f.conversation("https://model.invalid")
+            val childId = f.db.conversationDao().insertConversation(Conversation(title = "对话（分支2）",
+                apiConfigId = config.id, modelName = config.modelName, currentStoryTime = "第六天"))
+            val messageId = f.repository.saveMessage(Message(conversationId = parentId, role = "assistant", content = "合成分支起点"))
+            f.db.conversationBranchDao().insertBranch(ConversationBranch(parentConversationId = parentId,
+                childConversationId = childId, branchMessageId = messageId))
+            // Simulate another feature writing its current state after the rename dialog was opened.
+            val liveChild = f.db.conversationDao().getConversationById(childId)!!
+                .copy(currentStoryTime = "两周后", rollingSummary = "合成角色已抵达港口", messageCount = 23, isPinned = true)
+            f.db.conversationDao().updateConversation(liveChild)
+            f.repository.updateConversationTitle(childId, "  海港另一条路  ")
+            val saved = f.db.conversationDao().getConversationById(childId)!!
+            assertEquals("海港另一条路", saved.title)
+            assertEquals("两周后", saved.currentStoryTime)
+            assertEquals("合成角色已抵达港口", saved.rollingSummary)
+            assertEquals(23, saved.messageCount)
+            assertTrue(saved.isPinned)
+            assertEquals("memory regression", f.db.conversationDao().getConversationById(parentId)!!.title)
+            val link = f.db.conversationBranchDao().getBranchesByParent(parentId).first().single()
+            assertEquals(childId, link.childConversationId)
+            assertEquals(messageId, link.branchMessageId)
+            assertTrue(runCatching { f.repository.updateConversationTitle(childId, "  ") }.isFailure)
+            f.db.conversationDao().deleteConversationById(childId)
+            assertTrue(runCatching { f.repository.updateConversationTitle(childId, "已删目标") }.isFailure)
+        }
+    }
 
     @Test fun storyContextKeepsUserRulesAndCharacterFactsWithoutRepeatedStyleMandates() = runBlocking {
         Fixture().use { f ->
@@ -615,7 +861,8 @@ class MemoryExtractionRepositoryTest {
                 com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·清晨", content = "林岚抵达古塔并与守门人缔结盟约"),
                 "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = "林岚抵达古塔",
                 atemporalSettings = listOf(
-                    com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "古塔禁止一切火焰魔法", targetScope = "global"),
+                    // Model proposals default to this session; global promotion requires an explicit UI choice.
+                    com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "古塔禁止一切火焰魔法", targetScope = "session"),
                     com.aiassistant.utils.AtemporalSettingItem(content = "未选中不应保存", isSelected = false)))
             f.repository.applyAutoTimelineProposal(id, proposal)
             f.repository.applyAutoTimelineProposal(id, proposal)
@@ -628,6 +875,7 @@ class MemoryExtractionRepositoryTest {
             assertEquals("conversation", memory.scope)
             assertEquals(id, memory.conversationId)
             assertEquals(1, f.db.memoryDao().getCandidateMemories(id).size)
+            assertTrue(f.db.memoryDao().getGlobalMemoriesFlow().first().isEmpty())
             val rp = f.db.roleplayMemoryDao().getMemoriesListBySession(rpId).single()
             assertEquals(memory.content, rp.content)
             assertTrue(rp.isPinned)
@@ -1490,6 +1738,212 @@ class MemoryExtractionRepositoryTest {
                 assertEquals("timeline", stat.requestKind)
                 assertEquals("interrupted", stat.completionStatus)
                 assertFalse(stat.success)
+            } }
+        }
+    }
+
+    @Test fun timelineReconciliationChecksEverySourceTurnAndKeepsShoppingProcessWithoutASecondCompressionCall() = runBlocking {
+        val facts = listOf("合成角色甲陪同角色乙挑选生日礼物，两人最终选中蓝色围巾",
+            "两人在生鲜区因预算发生争执，之后决定各自退掉一件零食以保留礼物",
+            "结账前角色乙发现钱包遗失，角色甲陪同沿货架寻找并在服务台领回",
+            "两人结账返家并分好食材，约定下次购物前共同列清单")
+        var sourceIds = emptyList<Long>()
+        val complete = java.util.concurrent.atomic.AtomicBoolean(false)
+        Endpoint { socket, _ ->
+            val events = if (complete.get()) facts else listOf("合成角色甲乙购物后回家")
+            val covered = if (complete.get()) sourceIds else sourceIds.takeLast(1)
+            memoryReply(socket, Gson().toJson(mapOf(
+                "currentStoryTime" to "购物当天·返家后",
+                "sourceCoverage" to covered.mapIndexed { index, messageId -> mapOf("messageId" to messageId,
+                    "eventIndices" to listOf(if (complete.get()) (index / 6).coerceAtMost(3) else 0), "settingIndices" to emptyList<Int>()) },
+                "timelineEvents" to events.map { mapOf("timeTag" to "购物当天", "content" to it, "category" to "PLOT_EVENT") },
+                "atemporalSettings" to emptyList<String>())))
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-model")
+            val conversation = f.db.conversationDao().getConversationById(id)!!
+            f.db.conversationDao().updateConversation(conversation.copy(contextWindowTokens = 32000))
+            sourceIds = (0 until 20).map { index -> f.repository.saveMessage(Message(conversationId = id,
+                role = if (index % 2 == 0) "user" else "assistant", content = "合成购物片段$index：${facts[(index / 6).coerceAtMost(3)]}", createdAt = index.toLong())) }
+            var draftCount = 0
+            val failure = runCatching { f.repository.reconcileConversationTimeline(id, config.id, config.modelName,
+                onIntermediateResult = { draftCount++ }) }.exceptionOrNull()
+            assertTrue("只覆盖最后一条源消息不能宣称完成", failure is IllegalStateException)
+            assertEquals(0, draftCount)
+            assertTrue(f.repository.getTimelineNodes(id).isEmpty())
+            complete.set(true)
+            val staleNode = TimelineNode(conversationId = id, timeTag = "第7天", event = "旧的错误概括")
+            val result = f.repository.reconcileConversationTimeline(id, config.id, config.modelName,
+                existingTimelineNodes = listOf(staleNode))
+            assertEquals(facts, result.events.map { it.content })
+            assertEquals("购物当天·返家后", result.currentStoryTime)
+            assertEquals(sourceIds.last(), result.lastProcessedMessageId)
+            assertEquals(20, result.totalProcessedMessages)
+            assertEquals("失败一次、成功一次；完成后不再调用模型二次压缩", 2, endpoint.payloads.size)
+            val prompt = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            sourceIds.forEach { assertTrue(prompt.contains("消息 $it ·")) }
+            assertTrue(endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun malformedTimelineResponsesCannotAdvanceAResumedDraftOrChangeSavedFacts() = runBlocking {
+        val response = java.util.concurrent.atomic.AtomicReference("")
+        Endpoint { socket, _ -> memoryReply(socket, response.get()) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 32000))
+            f.repository.updateStoryTime(id, "购物当天·返家后")
+            val ids = (0..1).map { index -> f.repository.saveMessage(Message(conversationId = id,
+                role = "assistant", content = "合成角色在车站交换第${index + 1}份采购清单", createdAt = index.toLong())) }
+            f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                timeTag = "购物当天", event = "合成角色已经领回钱包"))
+            val targetId = f.db.memoryDao().insertMemory(MemoryItem(scope = "conversation", conversationId = id,
+                content = "【习惯偏好】合成角色每周整理采购清单"))
+            val globalId = f.db.memoryDao().insertMemory(MemoryItem(scope = "global", conversationId = id,
+                content = "明确合成的跨范围对照资料"))
+            val draft = TimelineReconcileDraft(conversationId = id, lastProcessedMessageId = ids.first(),
+                currentStoryTime = "购物当天·返家后", events = listOf(TimelineEventItem(timeTag = "购物当天", content = "合成角色已经领回钱包")))
+            val beforeNodes = f.repository.getTimelineNodes(id)
+            val beforeSettings = f.db.memoryDao().getConversationMemories(id)
+            val valid = JsonParser.parseString("""{"currentStoryTime":"购物后约两周","timelineEvents":[{"timeTag":"购物后约两周","content":"合成角色在车站交换第二份采购清单"}],"atemporalSettings":[{"action":"ADD","targetMemoryId":null,"content":"合成角色不能食用花生"}],"sourceCoverage":[{"messageId":${ids.last()},"eventIndices":[0],"settingIndices":[0]}]}""").asJsonObject
+            val malformed = listOf<Pair<String, (JsonObject) -> Unit>>(
+                "null 时间" to { it.add("currentStoryTime", JsonNull.INSTANCE) },
+                "null 正文" to { it.getAsJsonArray("timelineEvents")[0].asJsonObject.add("content", JsonNull.INSTANCE) },
+                "空正文" to { it.getAsJsonArray("timelineEvents")[0].asJsonObject.addProperty("content", " ") },
+                "小数源 ID" to { it.getAsJsonArray("sourceCoverage")[0].asJsonObject.addProperty("messageId", ids.last() + 0.5) },
+                "小数事件索引" to { it.getAsJsonArray("sourceCoverage")[0].asJsonObject.add("eventIndices", JsonParser.parseString("[0.5]")) },
+                "不存在的补充目标" to { it.getAsJsonArray("atemporalSettings")[0].asJsonObject.apply {
+                    addProperty("action", "SUPPLEMENT"); addProperty("targetMemoryId", targetId + 1000) } },
+                "跨范围的修订目标" to { it.getAsJsonArray("atemporalSettings")[0].asJsonObject.apply {
+                    addProperty("action", "REVISE"); addProperty("targetMemoryId", globalId) } }
+            )
+            for ((label, damage) in malformed) {
+                response.set(valid.deepCopy().also(damage).toString())
+                val emitted = mutableListOf<TimelineReconcileDraft>()
+                val failure = runCatching { f.repository.reconcileConversationTimeline(id, config.id, config.modelName,
+                    startFromDraft = draft, existingTimelineNodes = beforeNodes, onIntermediateResult = { emitted += it }) }.exceptionOrNull()
+                assertTrue(label, failure is IllegalStateException)
+                assertTrue("$label 不能发布已完成草稿", emitted.isEmpty())
+                assertEquals(ids.first(), draft.lastProcessedMessageId)
+                assertEquals(beforeNodes, f.repository.getTimelineNodes(id))
+                assertEquals(beforeSettings, f.db.memoryDao().getConversationMemories(id))
+                assertEquals("购物当天·返家后", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            }
+            response.set(valid.toString())
+            val accepted = f.repository.reconcileConversationTimeline(id, config.id, config.modelName,
+                startFromDraft = draft, existingTimelineNodes = beforeNodes)
+            assertEquals(ids.last(), accepted.lastProcessedMessageId)
+            assertEquals(listOf("合成角色已经领回钱包", "合成角色在车站交换第二份采购清单"), accepted.events.map { it.content })
+            assertEquals("ADD", accepted.atemporalSettings.single().action)
+            assertNull(accepted.atemporalSettings.single().targetMemoryId)
+            val supplement = valid.deepCopy().apply { getAsJsonArray("atemporalSettings")[0].asJsonObject.apply {
+                addProperty("action", "SUPPLEMENT"); addProperty("targetMemoryId", targetId)
+                addProperty("content", "整理清单时会额外标注过敏食材") } }
+            response.set(supplement.toString())
+            val supplemented = f.repository.reconcileConversationTimeline(id, config.id, config.modelName, startFromDraft = draft)
+            assertEquals(targetId, supplemented.atemporalSettings.single().targetMemoryId)
+            assertTrue(supplemented.atemporalSettings.single().content.contains("每周整理采购清单"))
+            assertTrue(supplemented.atemporalSettings.single().content.contains("额外标注过敏食材"))
+            assertEquals(beforeNodes, f.repository.getTimelineNodes(id))
+            assertEquals(beforeSettings, f.db.memoryDao().getConversationMemories(id))
+            assertEquals(malformed.size + 2, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun aMalformedLaterTimelineChunkKeepsOnlyTheCompletedSourceRange() = runBlocking {
+        var ids = emptyList<Long>()
+        val calls = AtomicInteger(0)
+        Endpoint { socket, _ ->
+            val first = calls.getAndIncrement() == 0
+            val chunkIds = if (first) ids.take(25) else ids.drop(25)
+            val text = Gson().toJson(mapOf("currentStoryTime" to "购物当天·结账前",
+                "timelineEvents" to listOf(mapOf("timeTag" to "购物当天", "content" to "合成角色已经选好礼物并解决预算分歧")),
+                "atemporalSettings" to emptyList<String>(),
+                "sourceCoverage" to chunkIds.map { mapOf("messageId" to it, "eventIndices" to listOf(0)) }))
+            val body = JsonParser.parseString(text).asJsonObject
+            if (!first) body.getAsJsonArray("timelineEvents")[0].asJsonObject.add("content", JsonNull.INSTANCE)
+            memoryReply(socket, body.toString())
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 32000))
+            f.repository.updateStoryTime(id, "购物当天·出发前")
+            f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "购物当天", event = "此前已确认的合成事件"))
+            ids = (0 until 26).map { index -> f.repository.saveMessage(Message(conversationId = id,
+                role = if (index % 2 == 0) "user" else "assistant", content = "合成角色购物片段$index：选礼物并核对预算", createdAt = index.toLong())) }
+            val beforeNodes = f.repository.getTimelineNodes(id)
+            val drafts = mutableListOf<TimelineReconcileDraft>()
+            val failure = runCatching { f.repository.reconcileConversationTimeline(id, config.id, config.modelName,
+                onIntermediateResult = { drafts += it }) }.exceptionOrNull()
+            assertTrue(failure is IllegalStateException)
+            assertTrue(failure!!.message.orEmpty().contains("第 2 段"))
+            val kept = drafts.single()
+            assertFalse(kept.isCompleted)
+            assertEquals(1, kept.processedChunks)
+            assertEquals(2, kept.totalChunks)
+            assertEquals(ids[24], kept.lastProcessedMessageId)
+            assertEquals("合成角色已经选好礼物并解决预算分歧", kept.events.single().content)
+            assertEquals(beforeNodes, f.repository.getTimelineNodes(id))
+            assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+            assertEquals("购物当天·出发前", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertEquals(2, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun reviewedShoppingClosureSupplementsPersistedProcessInOrdinaryAndCreativeConversations() = runBlocking {
+        for (tags in listOf<String?>(null, "story")) {
+            val target = java.util.concurrent.atomic.AtomicLong(0)
+            val old = "合成角色甲乙挑选蓝色围巾。两人在生鲜区因预算争执后退掉零食。角色乙遗失的钱包已从服务台领回。"
+            val ending = "两人结账后提着食材回家，约定下次共同列购物清单"
+            Endpoint { socket, _ -> memoryReply(socket, Gson().toJson(mapOf("newStoryTime" to null,
+                "action" to "UPDATE", "targetNodeId" to target.get(),
+                "newEvent" to mapOf("timeTag" to "购物当天", "content" to ending),
+                "atemporalSettings" to emptyList<String>()))) }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, tags = tags)
+                target.set(f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "购物当天", event = old)))
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "一起回家吧", ending, config.id, config.modelName)!!
+                assertEquals("UPDATE", proposal.action)
+                assertEquals(old, proposal.previousEventContent)
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                val saved = f.repository.getTimelineNodes(id).single()
+                assertEquals(target.get(), saved.id)
+                assertTrue(saved.event.contains("挑选蓝色围巾"))
+                assertTrue(saved.event.contains("因预算争执后退掉零食"))
+                assertTrue(saved.event.contains("钱包已从服务台领回"))
+                assertTrue(saved.event.contains(ending))
+                assertTrue(saved.event.length > 28)
+                assertEquals(1, endpoint.payloads.size)
+            } }
+        }
+    }
+
+    @Test fun naturalWeekAndMonthJumpsPersistAndRemainTheTimeAnchorInTheNextChatRequest() = runBlocking {
+        for (span in listOf("购物返家后约一两周", "购物返家后一两个月")) {
+            Endpoint { socket, payload ->
+                if (payload.get("stream")?.asBoolean == true) streamReply(socket)
+                else {
+                    val prompt = payload.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                    if (prompt.contains("[助手剧情正文]: 继续讨论清单")) memoryReply(socket, "NO_UPDATE")
+                    else memoryReply(socket, Gson().toJson(mapOf("newStoryTime" to span, "newEvent" to null,
+                        "atemporalSettings" to emptyList<String>())))
+                }
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                f.repository.updateStoryTime(id, "第6天·上午")
+                f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第6天·上午", event = "合成角色甲乙购物返家"))
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续剧情", "过了${span.substringAfter("后")}，两人再次见面", config.id, config.modelName)!!
+                assertEquals(span, proposal.updatedStoryTime)
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                assertEquals(span, f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+                assertNull(f.repository.evaluateAndAutoUpdateTimeline(id, "继续聊吧", "继续讨论清单", config.id, config.modelName))
+                chat(f, config, id)
+                val request = endpoint.payloads.last().getAsJsonArray("messages").joinToString { it.asJsonObject.get("content").asString }
+                assertTrue(request.contains("【当前故事时间节点】：$span"))
+                assertFalse(request.contains("第 7 天"))
+                assertTrue(request.contains("[第6天·上午]"))
+                assertEquals(3, endpoint.payloads.size)
             } }
         }
     }

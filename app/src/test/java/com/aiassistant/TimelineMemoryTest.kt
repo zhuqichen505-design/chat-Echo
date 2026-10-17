@@ -229,6 +229,6 @@ class TimelineMemoryTest {
         assertEquals("session", result.atemporalSettings[0].targetScope)
 
         assertEquals("世界法则", result.atemporalSettings[1].category)
-        assertEquals("global", result.atemporalSettings[1].targetScope)
+        assertEquals("session", result.atemporalSettings[1].targetScope)
     }
 }

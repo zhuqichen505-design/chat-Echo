@@ -462,4 +462,210 @@ class RoleplayModelsTest {
         assertEquals(listOf("Synthetic new"), newCharacter.getParticipatingCharacters(emptyList()).map { it.name })
         assertEquals(2, newCharacter.getCustomizedCharacters(emptyList()).size)
     }
+
+    @Test
+    fun storyRevisionUsesStableLocalIdAndReplacesOnlyChangedFields() {
+        val original = CharacterProfile(id = -7, name = "合成人物甲", goals = "寻找失踪的队友",
+            background = "出身港口，擅长维修。", constraints = "不伤害平民", avatarUri = "content://synthetic/avatar",
+            isFavorite = true, createdAt = 11, updatedAt = 12)
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"hasSettingUpdates":true,"updatedCharacters":[{"characterId":-7,"name":"合成人物甲",
+              "profile":{"name":"合成人物新名","goals":"队友已经获救，下一步返回港口","id":99,"isFavorite":false}}],
+              "newCharacters":[],"scenarioUpdate":null}
+        """.trimIndent(), listOf(original), null, true)
+        val revised = result.updatedCharacters.single().character
+        assertEquals(-7L, revised.id)
+        assertEquals("合成人物新名", revised.name)
+        assertEquals("队友已经获救，下一步返回港口", revised.goals)
+        assertEquals(original.background, revised.background)
+        assertEquals(original.constraints, revised.constraints)
+        assertEquals(original.avatarUri, revised.avatarUri)
+        assertEquals(original.createdAt, revised.createdAt)
+        assertTrue(revised.isFavorite)
+        assertTrue(result.newCharacters.isEmpty())
+    }
+
+    @Test
+    fun storyRevisionSupportsExplicitlyClearingAnObsoleteState() {
+        val original = CharacterProfile(id = 4, name = "合成人物", goals = "临时调查任务", knowledge = "会修船")
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"updatedCharacters":[{"characterId":4,"profile":{"goals":""}}]}
+        """.trimIndent(), listOf(original), null, true)
+        assertEquals("", result.updatedCharacters.single().character.goals)
+        assertEquals("会修船", result.updatedCharacters.single().character.knowledge)
+    }
+
+    @Test
+    fun storyRevisionClassifiesAnExistingNameAsAnUpdateEvenIfModelCallsItNew() {
+        val original = CharacterProfile(id = 8, name = "Synthetic Character", knowledge = "航海")
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"newCharacters":[{"profile":{"name":"synthetic character","knowledge":"航海；新增修船技能"}}]}
+        """.trimIndent(), listOf(original), null, true)
+        assertEquals(8L, result.updatedCharacters.single().character.id)
+        assertTrue(result.newCharacters.isEmpty())
+    }
+
+    @Test
+    fun storyRevisionCombinesSeveralPatchesForTheSameCharacterWithoutDuplicatingCards() {
+        val original = CharacterProfile(id = 8, name = "合成人物", personality = "冷静")
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"updatedCharacters":[{"characterId":8,"profile":{"goals":"返回港口"}},
+              {"characterId":8,"profile":{"knowledge":"修船"}}]}
+        """.trimIndent(), listOf(original), null, true)
+        assertEquals(1, result.updatedCharacters.size)
+        val revised = result.updatedCharacters.single().character
+        assertEquals("返回港口", revised.goals)
+        assertEquals("修船", revised.knowledge)
+        assertEquals("冷静", revised.personality)
+    }
+
+    @Test
+    fun unchangedStoryFieldsDoNotCreateAReviewProposal() {
+        val original = CharacterProfile(id = 2, name = "合成人物", personality = "冷静")
+        val scenario = RoleplayScenario(id = 3, name = "合成港口", worldview = "群岛世界", narrativePerspective = "第三人称")
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"hasSettingUpdates":true,"updatedCharacters":[{"characterId":2,"profile":{"personality":"冷静"}}],
+             "scenarioUpdate":{"scenario":{"worldview":"群岛世界"}}}
+        """.trimIndent(), listOf(original), scenario, true)
+        assertFalse(result.hasAnyUpdates)
+        assertEquals(0, result.totalCount)
+    }
+
+    @Test
+    fun explicitNoStoryUpdateIsAuthoritativeAndUnknownIdsCannotReplaceKnownCharacters() {
+        val original = CharacterProfile(id = 2, name = "合成人物", personality = "冷静")
+        val noUpdate = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"hasSettingUpdates":false,"newCharacters":[{"profile":{"name":"不应出现的人物"}}]}
+        """.trimIndent(), listOf(original), null, true)
+        assertFalse(noUpdate.hasAnyUpdates)
+        val invalidId = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"updatedCharacters":[{"characterId":999,"profile":{"name":"合成人物","personality":"冲动"}}]}
+        """.trimIndent(), listOf(original), null, true)
+        assertFalse(invalidId.hasAnyUpdates)
+    }
+
+    @Test
+    fun worldRevisionPreservesUnmentionedRulesAndPerspectiveWithoutConcatenatingOldState() {
+        val world = RoleplayScenario(id = -3, name = "合成世界", worldview = "群岛与深海",
+            time = "冬季", location = "旧港", rules = "禁用明火", narrativePerspective = "第三人称",
+            createdAt = 22, updatedAt = 23)
+        val result = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson("""
+            {"scenarioUpdate":{"scenario":{"time":"翌年春季","location":"新港"}}}
+        """.trimIndent(), emptyList(), world, true)
+        val revised = result.scenarioUpdate!!.scenario
+        assertEquals(-3L, revised.id)
+        assertEquals("翌年春季", revised.time)
+        assertEquals("新港", revised.location)
+        assertEquals("禁用明火", revised.rules)
+        assertEquals("第三人称", revised.narrativePerspective)
+        assertEquals(world.worldview, revised.worldview)
+        assertEquals(world.createdAt, revised.createdAt)
+    }
+
+    @Test
+    fun repeatedCharacterAndWorldImportsAreIdempotentAndKeepComplementaryNegation() {
+        val original = CharacterProfile(id = 4, name = "合成人物", identity = "修船师", personality = "冷静；谨慎",
+            background = "生于港口。曾经出海。", goals = "寻找航图", relationships = "信任船长",
+            knowledge = "修船；航海", constraints = "喜欢甜食", behaviorRules = "天亮起床",
+            greeting = "你好", exampleDialogue = "船已修好。", tags = "航海,群岛", createdAt = 11, updatedAt = 12)
+        val same = com.aiassistant.utils.RoleplaySmartAnalyzer.mergeCharacters(original, original.copy(id = 0))
+        assertEquals(original, same)
+        val supplemented = com.aiassistant.utils.RoleplaySmartAnalyzer.mergeCharacters(original,
+            CharacterProfile(name = "合成人物", knowledge = "航海；辨认星图", constraints = "不喜欢甜食"))
+        assertEquals("修船；航海\n辨认星图", supplemented.knowledge)
+        assertEquals("喜欢甜食\n不喜欢甜食", supplemented.constraints)
+        val repeated = com.aiassistant.utils.RoleplaySmartAnalyzer.mergeCharacters(supplemented,
+            CharacterProfile(name = "合成人物", knowledge = "航海；辨认星图", constraints = "不喜欢甜食"))
+        assertEquals(supplemented, repeated)
+        val world = RoleplayScenario(id = 3, name = "合成世界", worldview = "海上有群岛。岛间乘船通行。",
+            rules = "禁用明火；夜间停航", narrativePerspective = "第三人称", updatedAt = 12)
+        assertEquals(world, com.aiassistant.utils.RoleplaySmartAnalyzer.mergeScenarios(world, world.copy(id = 0)))
+    }
+
+    @Test
+    fun creativeAnalysisKeepsInstructionsAndEveryPartOfLongSourceMaterial() {
+        val instructions = "比较完整人物档案；只返回确实变化的字段；保持否定与例外。"
+        val source = "开篇人物：合成甲。\n" + "长篇正文，保留旅程经过。".repeat(2500) +
+            "\n结尾关键设定：合成甲不能登船，只有合成乙可以登船。\n引号\"与反斜线\\及新行。"
+        val prompt = com.aiassistant.utils.RoleplaySmartAnalyzer.buildCreativeAnalysisPrompt(instructions, source)
+        assertTrue(prompt.startsWith(instructions))
+        val encodedSource = prompt.substringAfter("JSON：\n")
+        val restored = com.google.gson.JsonParser.parseString(encodedSource).asString
+        assertEquals(source, restored)
+        assertTrue(restored.length > 20000)
+        assertTrue(restored.endsWith("引号\"与反斜线\\及新行。"))
+    }
+
+    @Test
+    fun malformedStoryAnalysisCannotBecomeAnAuthoritativeNoUpdate() {
+        listOf("{\"updatedCharacters\":[", "null", "{}", "{\"updatedCharacters\":\"broken\"}").forEach { invalid ->
+            org.junit.Assert.assertThrows(com.google.gson.JsonParseException::class.java) {
+                com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson(invalid, emptyList(), null, true)
+            }
+        }
+        val noUpdate = com.aiassistant.utils.RoleplaySmartAnalyzer.parseStorySettingProposalJson(
+            "{\"hasSettingUpdates\":false}", emptyList(), null, true)
+        assertTrue(noUpdate.isAiAnalyzed)
+        assertFalse(noUpdate.hasAnyUpdates)
+    }
+
+    @Test
+    fun creativeContextKeepsHabitsAndLegacyEvidenceWithoutTurningThemIntoCurrentDaytime() = kotlinx.coroutines.runBlocking {
+        val habit = "【习惯偏好】合成角色习惯早餐后整理航图"
+        val legacyEvent = "[第6天·上午]合成角色在旧港吃完早餐后买好了备用船帆"
+        val session = RoleplaySession(id = 3, conversationId = 4)
+        for (span in listOf("承接【第6天·上午】·过了一两个月", "两周后")) {
+            val repository = creativeContextRepository(session, span, listOf(habit), listOf(legacyEvent))
+            val standalone = repository.assembleRoleplayContext(session.id, null, null, includeHistory = false)
+            assertTrue(standalone.contains("【本故事长期事实与规则】"))
+            assertTrue(standalone.contains(habit))
+            assertTrue(standalone.contains("【兼容旧版剧情记录】"))
+            assertTrue(standalone.contains(legacyEvent))
+            assertTrue(standalone.contains("【故事当前时间节点】：$span"))
+            assertFalse(standalone.contains("当前是白天"))
+            assertFalse(standalone.contains("现在是白天"))
+            assertFalse(standalone.contains("当前仍处于白天"))
+            assertFalse(standalone.contains("剧情推进时间线与日常演进明细"))
+            val chatContext = repository.assembleRoleplayContext(session.id, null, null, includeHistory = false,
+                includeTimelineContext = false)
+            assertTrue(chatContext.contains(habit))
+            assertTrue(chatContext.contains(legacyEvent))
+            assertFalse(chatContext.contains("【故事当前时间节点】"))
+            assertFalse(chatContext.contains("<session_timeline>"))
+        }
+        val legacyOnly = creativeContextRepository(session, null, emptyList(), listOf("【当前故事时间】：两个月后", legacyEvent))
+            .assembleRoleplayContext(session.id, null, null, includeHistory = false)
+        assertTrue(legacyOnly.contains(legacyEvent))
+        assertTrue(legacyOnly.contains("【故事当前时间节点】：两个月后"))
+        assertFalse(legacyOnly.contains("当前是白天"))
+    }
+
+    private fun creativeContextRepository(
+        session: RoleplaySession,
+        currentTime: String?,
+        facts: List<String>,
+        pinned: List<String>
+    ): com.aiassistant.data.repository.RoleplayRepository {
+        val conversation = com.aiassistant.domain.model.Conversation(id = session.conversationId,
+            title = "合成故事", apiConfigId = 1, modelName = "synthetic-model", currentStoryTime = currentTime)
+        return com.aiassistant.data.repository.RoleplayRepository(
+            stubDao(com.aiassistant.data.local.CharacterProfileDao::class.java, emptyMap()),
+            stubDao(com.aiassistant.data.local.RoleplayScenarioDao::class.java, emptyMap()),
+            stubDao(com.aiassistant.data.local.RoleplaySessionDao::class.java, mapOf("getSessionById" to session)),
+            stubDao(com.aiassistant.data.local.RoleplayMemoryDao::class.java, mapOf("getPinnedFacts" to pinned.map {
+                RoleplayMemory(sessionId = session.id, memoryType = "fact", content = it, isPinned = true)
+            })),
+            stubDao(com.aiassistant.data.local.CharacterTagDao::class.java, emptyMap()),
+            conversationDao = stubDao(com.aiassistant.data.local.ConversationDao::class.java, mapOf("getConversationById" to conversation)),
+            memoryDao = stubDao(com.aiassistant.data.local.MemoryDao::class.java, mapOf("getCandidateMemories" to facts.map {
+                com.aiassistant.domain.model.MemoryItem(scope = "conversation", conversationId = session.conversationId, content = it)
+            }))
+        )
+    }
+
+    private fun <T> stubDao(type: Class<T>, values: Map<String, Any>): T = type.cast(
+        java.lang.reflect.Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { _, method, _ ->
+            values[method.name] ?: error("Unexpected DAO call: ${type.simpleName}.${method.name}")
+        }
+    )
 }

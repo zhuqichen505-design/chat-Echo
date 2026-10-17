@@ -266,11 +266,13 @@ class HomeViewModel : ViewModel() {
     }
 
     fun renameConversation(conversationId: Long, newTitle: String) {
+        if (newTitle.isBlank()) return
         viewModelScope.launch {
-            val conversation = repository.getConversationById(conversationId)
-            conversation?.let {
-                val updated = it.copy(title = newTitle)
-                AiAssistantApp.instance.database.conversationDao().updateConversation(updated)
+            try {
+                repository.updateConversationTitle(conversationId, newTitle)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                android.widget.Toast.makeText(AiAssistantApp.instance, "重命名失败，请重试", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }

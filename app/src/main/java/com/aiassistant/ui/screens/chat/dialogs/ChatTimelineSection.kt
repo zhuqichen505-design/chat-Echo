@@ -492,7 +492,7 @@ fun ChatSettingsTimelineSection(
                 ) {
                     TextButton(
                         onClick = {
-                            addTimeTag = currentStoryTime?.takeIf { it.isNotBlank() } ?: "第 1 天"
+                            addTimeTag = currentStoryTime?.takeIf { it.isNotBlank() } ?: ""
                             addEventText = ""
                             addCategory = TimelineCategory.PLOT_EVENT
                             showAddDialog = true
@@ -539,7 +539,7 @@ fun ChatSettingsTimelineSection(
                         )
                         OutlinedButton(
                             onClick = {
-                                addTimeTag = currentStoryTime?.takeIf { it.isNotBlank() } ?: "第 1 天"
+                                addTimeTag = currentStoryTime?.takeIf { it.isNotBlank() } ?: ""
                                 addEventText = ""
                                 addCategory = TimelineCategory.PLOT_EVENT
                                 showAddDialog = true
@@ -703,7 +703,7 @@ fun ChatSettingsTimelineSection(
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "设定当前故事推进到的时间点（如：第 1 天·清晨、三天后·黄昏、暑假开始等）：",
+                        "保留剧情原有的日期、跨度或阶段；不确定时可以留空（如：购物当天、两周后、入学前的回忆）：",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -766,7 +766,7 @@ fun ChatSettingsTimelineSection(
                         value = addTimeTag,
                         onValueChange = { addTimeTag = it },
                         label = { Text("时间标签", style = MaterialTheme.typography.bodySmall) },
-                        placeholder = { Text("如：第 1 天·傍晚、次日拂晓", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text("如：购物当天、两周后、数月后的重逢", style = MaterialTheme.typography.bodySmall) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp)
