@@ -7,9 +7,10 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 **当前源码版本**: v2.8.10（versionCode 196）
 **本次更新**: 纳入剧情时间线、设定与创作流程重构，以及约 2000 轮长会话压缩实际生效修复；细写情节保留过程，周/月跨度依据原文，已有设定增量维护，分支支持长按改名。确认摘要档实际整理、增量占用不回计全历史，保存/取消/发送与跨 API 窗口一致；详细行为见 UPDATE_LOG.md。
 **数据库版本**: 35（20 个实体）
-**本版范围（2026-10-17）**: 用户明确要求构建 APK，2.8.10/196 来源为 main 的 e93c6a6，包含此前 e02ae35；本轮只升版并维护发布文档，Room v35/20 实体及旧记录兼容不变。验收、构建和上传分阶段核实，不沿用此前“未发版”状态。
-**最新源码验证**: 2.8.10/196 冻结后的标准 verify 与 Gradle 均退出 0，总 410.969 秒；compileDebugKotlin、完整 testDebugUnitTest、lintDebug 均实际执行（EXECUTED），85 套件/797 项测试全通过，失败/错误/跳过 0，测试任务 77.333 秒。Lint XML 为 0 Error/95 Warning，输入前后哈希一致（inputsChangedDuringRun=false），git diff --check 退出 0。通过后仅进行 Release 构建与文档收尾，不重复源码验收。
-**本次安装包状态**: Echo-v2.8.10.apk 的 Release 构建退出 0，耗时 274.010 秒；aapt/apksigner/ZIP/哈希核验均退出 0。APK 25,341,425 字节、446 条目，com.aiassistant、2.8.10/196、min26/target34/compile34、arm64-v8a、非 debuggable；SHA256 见 [最新发布说明](release-notes/latest.md)。v2 签名通过，证书与 v2.8.9 一致，为非正式生产签名。内容隐私复核与指定目录排他复制均退出 0，源/副本 SHA256 一致；原 206 个历史文件（205 APK）的名称、大小、哈希全部不变。Git 与远端发布尚待执行；设备安装、启动、触控与真实接口尚未验收。
+**本版范围（2026-10-17 构建验收，2026-10-18 发布核验）**: 用户明确要求构建 APK，2.8.10/196 来源为 main 的 e93c6a6，包含此前 e02ae35；本轮只升版并维护发布文档，Room v35/20 实体及旧记录兼容不变。
+**最新源码验证（2026-10-17）**: 2.8.10/196 冻结后的标准 verify 与 Gradle 均退出 0，总 410.969 秒；compileDebugKotlin、完整 testDebugUnitTest、lintDebug 均实际执行（EXECUTED），85 套件/797 项测试全通过，失败/错误/跳过 0，测试任务 77.333 秒。Lint XML 为 0 Error/95 Warning，输入前后哈希一致（inputsChangedDuringRun=false），git diff --check 退出 0。通过后仅进行 Release 构建与文档收尾，不重复源码验收。
+**本次安装包状态**: 2026-10-17 构建的 Echo-v2.8.10.apk，Release 构建退出 0，耗时 274.010 秒；aapt/apksigner/ZIP/哈希核验均退出 0。APK 25,341,425 字节、446 条目，com.aiassistant、2.8.10/196、minSdk26/targetSdk34/compileSdk34、arm64-v8a、非 debuggable；SHA256 见 [最新发布说明](release-notes/latest.md)。v2 签名通过，证书与 v2.8.9 一致，为非正式生产签名。内容隐私复核与指定目录排他复制均退出 0，源/副本 SHA256 一致；原 206 个历史文件（205 APK）的名称、大小、哈希全部不变。设备安装、启动、触控与真实接口尚未验收。
+**远端发布核验（2026-10-18）**: 版本提交 `5b344bf958159d28f0138ee9834fee39920d871e` 与 annotated `v2.8.10` 已原子推送，退出 0；`git ls-remote` 确认 main 和标签解引用均指向该提交。完整版本候选工作区、暂存及提交三阶段审核均退出 0，暂存与提交的 8 个完整 blob 哈希一致，公共提交与标签元数据核验退出 0。[v2.8.10 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.10) 仅含 Echo-v2.8.10.apk，上传 digest、匿名公开下载 SHA256 均与本机一致；再次独立下载核验后，仅撤下新仓库旧 v2.8.9 Release/远端版本标签，当前仅保留 v2.8.10。本机历史 APK 和本机标签保留，未操作旧仓库；发布后文档另行提交，不移动版本标签。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 

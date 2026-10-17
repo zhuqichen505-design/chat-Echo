@@ -1,6 +1,6 @@
 # 维护记录
 
-## 2026-10-17：Echo v2.8.10（196）构建发布准备
+## 2026-10-18：Echo v2.8.10（196）发布完成（10 月 17 日构建验收）
 
 临时实施方案：按用户“构建 APK”要求，以当前 main 的 `e93c6a6` 为来源，将此前 `e02ae35` 的剧情时间线、设定与创作流程重构，以及长会话压缩实际生效修复一并纳入 2.8.10/196。只递增版本配置并整理发布文档，不新增功能或修改数据库；Room v35、20 个实体和既有聊天/备份结构保持兼容。下方两份“未构建 APK”记录保留各自开发阶段的真实状态，本次发布结果以本条为准。
 
@@ -11,11 +11,13 @@
 
 影响文件：本轮为 `app/build.gradle.kts` 与七份发布文档；功能源码来自上述两个已提交更新。更新来源直接位于当前仓库，无外部目录同步，不读取 APP改进，原未跟踪素材与本机私有文件排除。
 
-验收状态：2.8.10/196 冻结后的 `pwsh -File scripts/verify.ps1`（使用本机可写 Gradle 缓存）与 Gradle 均退出 0，总 410.969 秒。compileDebugKotlin、完整 testDebugUnitTest、lintDebug 均为 EXECUTED；85 套件/797 项测试全通过，失败/错误/跳过 0，测试任务 77.333 秒。Lint XML 为 0 Error/95 Warning，输入前后哈希一致（inputsChangedDuringRun=false）；git diff --check 退出 0。`assembleRelease --no-daemon` 退出 0，耗时 274.010 秒；aapt/apksigner/ZIP/哈希核验均退出 0。APK 为 Echo-v2.8.10.apk，25,341,425 字节、446 条目，com.aiassistant、2.8.10/196、minSdk26/targetSdk34/compileSdk34、arm64-v8a、非 debuggable；SHA256 f8e991533ae2199abc9e80912ce240e1e190484361726c75c7faa078217417b1。v2 签名有效，证书 SHA256 939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f，与 v2.8.9 一致，为 Android Debug 非正式生产签名。APK 内容隐私审核与指定发布目录的排他复制均退出 0，源文件和副本 SHA256 一致；原有 206 个历史文件（205 个 APK）的名称、大小和 SHA256 全部未变，现为 207 个文件。不改源码或重复全量验收。
+验收状态（2026-10-17）：2.8.10/196 冻结后的 `pwsh -File scripts/verify.ps1`（使用本机可写 Gradle 缓存）与 Gradle 均退出 0，总 410.969 秒。compileDebugKotlin、完整 testDebugUnitTest、lintDebug 均为 EXECUTED；85 套件/797 项测试全通过，失败/错误/跳过 0，测试任务 77.333 秒。Lint XML 为 0 Error/95 Warning，输入前后哈希一致（inputsChangedDuringRun=false）；git diff --check 退出 0。`assembleRelease --no-daemon` 退出 0，耗时 274.010 秒；aapt/apksigner/ZIP/哈希核验均退出 0。APK 为 Echo-v2.8.10.apk，25,341,425 字节、446 条目，com.aiassistant、2.8.10/196、minSdk26/targetSdk34/compileSdk34、arm64-v8a、非 debuggable；SHA256 f8e991533ae2199abc9e80912ce240e1e190484361726c75c7faa078217417b1。v2 签名有效，证书 SHA256 939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f，与 v2.8.9 一致，为 Android Debug 非正式生产签名。APK 内容隐私审核与指定发布目录的排他复制均退出 0，源文件和副本 SHA256 一致；原有 206 个历史文件（205 个 APK）的名称、大小和 SHA256 全部未变，现为 207 个文件。不改源码或重复全量验收。
 
 安装包隐私核查：446 个 ZIP 条目全部通过 CRC，核查 30,733 个 DEX 字符串、10,617 个 AXML/ARSC 字符串、186 张图片的元数据、签名块与证书，并对已知私人值逐字节扫描。295 个新增唯一字符串逐项全文人工复核；3 个候选均精确核实为标准 Android 资源命名空间，按条目和字符串哈希限定，不作宽泛排除；186 张图片均与前版逐字节一致。未发现用户私人值，未解决项为 0，核查退出 0；未知私人值、设备数据和外部平台缓存不在模式扫描保证范围。
 
-上传状态：安装包核查已完成，完整 Git 候选、全部待推送提交/标签/元数据仍待逐项核查；Git 提交、`v2.8.10` 标签、推送和 GitHub Release 尚未在本条确认完成。仅上传最新 `Echo-v2.8.10.apk`，公开下载验证成功后再撤下新仓库旧 Release/远端版本标签；本机历史 APK 永久保留。设备安装、启动、触控与真实模型接口效果尚未验收。
+发布核验（2026-10-18）：完整版本候选的工作区、暂存与提交三阶段审核均退出 0，暂存与提交的 8 个完整 blob 哈希一致，公共提交与标签元数据核验退出 0。版本提交 `5b344bf958159d28f0138ee9834fee39920d871e` 与 annotated `v2.8.10` 已原子推送，退出 0；标签对象 `bb835bc2788e41fc880d358b55ccfec16a8a2c82`，`git ls-remote` 确认 main 与标签解引用均指向该版本提交。[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.10) 唯一附件为 Echo-v2.8.10.apk（资产 650890205，25,341,425 字节），上传 digest 与匿名公开下载 SHA256 均与本机一致。
+
+发布恢复与旧版处理：首次发布辅助程序退出 1，原因是本机程序用公开 URL 检查尚未发布草稿的临时地址，APK 当时已正确上传，旧版仍保留。仅修正本机忽略的辅助程序后，独立只读复核同一标签草稿、同一资产及发布说明，重试退出 0，无重复上传或覆盖；清理前再次独立匿名下载核验成功，清理退出 0，仅撤下新仓库旧 v2.8.9 Release/远端版本标签，当前仅保留 v2.8.10。未操作旧仓库，本机历史 APK 与本机标签保留。发布说明与版本标签、Release 正文保持一致，发布后文档另行提交并重新核查，不移动版本标签、不重复 Gradle。设备安装、启动、触控与真实模型接口效果尚未验收。
 
 ## 2026-10-17：长会话压缩实际应用与占用统计修复（源码更新，未构建 APK）
 
