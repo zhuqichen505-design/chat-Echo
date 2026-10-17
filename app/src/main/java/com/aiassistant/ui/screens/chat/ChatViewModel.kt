@@ -709,7 +709,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     apiConfigIdOverride = _currentModelOption.value?.apiConfigId
                 )
                 // Refreshing a snapshot must not finish a separate operation or erase its result.
-                _contextUsage.update { it.copy(usage = usage) }
+                _contextUsage.update { it.copy(usage = usage,
+                    canRetryCompression = it.canRetryCompression || repository.hasPendingSummaryFailure(conversationId)) }
                 if (evaluateAuto) evaluateAutoCompression()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -762,6 +763,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             it.copy(
                 isCompressing = !updateSummaryOnly,
                 isGeneratingSummary = updateSummaryOnly,
+                // A new attempt consumes the previous retry affordance.  It is
+                // restored below when the model call fails so the user can press
+                // the same compression action again without changing the policy.
+                canRetryCompression = false,
                 pendingAutoTier = null,
                 statusMessage = when {
                     saveForNextRequest -> "正在保存压缩档位，本轮回复继续使用原上下文…"
@@ -802,7 +807,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     initialUsage?.canCompress == true -> "已按滚动摘要策略重新组装上下文，可审阅摘要确认关键事实"
                     else -> "暂无新的可压缩历史"
                 }
-                _contextUsage.update { it.copy(usage = usage, statusMessage = message) }
+                _contextUsage.update { it.copy(usage = usage, canRetryCompression = false, statusMessage = message) }
             } catch (cancelled: CancellationException) {
                 // Cancellation stops model work, but must not lose a policy already confirmed
                 // by the user. The send path also awaits this same save before building a request.
@@ -812,11 +817,15 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
                         val usage = repository.getConversationContextUsage(conversationId, modelName, maxTokens, contextOverride,
                             apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
-                        _contextUsage.update { it.copy(usage = usage, statusMessage =
+                        _contextUsage.update { it.copy(usage = usage,
+                            canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
+                            statusMessage =
                             if (targetTier != null) "已保存「${targetTier.displayName}」并取消本次摘要整理；下一轮发送将使用所选策略"
                             else "已取消整理；原始聊天记录和已保存摘要完整保留") }
                     } catch (failure: Exception) {
-                        _contextUsage.update { it.copy(statusMessage = failure.message ?: "压缩档位保存失败，请重新确认") }
+                        _contextUsage.update { it.copy(
+                            canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
+                            statusMessage = failure.message ?: "压缩档位保存失败，请重新确认") }
                     }
                 }
                 throw cancelled
@@ -829,7 +838,13 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
                     _contextUsage.update { it.copy(usage = usage) }
                 }
-                _contextUsage.update { it.copy(statusMessage = error.message ?: "整理失败，原文与上次摘要已保留") }
+                // Keep a retry action available even when the failed policy has
+                // already been persisted.  Previously the refreshed usage could
+                // report canCompress=false, leaving the dialog's action disabled
+                // until the custom percentage was changed again.
+                _contextUsage.update { it.copy(
+                    canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
+                    statusMessage = error.message ?: "整理失败，原文与上次摘要已保留") }
             } finally {
                 _contextUsage.update { it.copy(isCompressing = false, isGeneratingSummary = false) }
                 contextOperationJob = null
@@ -3263,6 +3278,8 @@ data class ContextUsageUiState(
     val usage: ConversationContextUsage? = null,
     val isCompressing: Boolean = false,
     val isGeneratingSummary: Boolean = false,
+    /** Allows retrying the same compression policy after a failed model call. */
+    val canRetryCompression: Boolean = false,
     val statusMessage: String? = null,
     val pendingAutoTier: com.aiassistant.domain.model.CompressionTier? = null
 )

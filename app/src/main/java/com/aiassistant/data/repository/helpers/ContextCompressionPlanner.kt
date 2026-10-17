@@ -16,6 +16,42 @@ object ContextCompressionPlanner {
     fun messageTokens(message: Message): Int =
         TokenEstimationHelper.estimateTokenCount(message.content) + 24
 
+    /**
+     * Stable transcript representation used by rolling-summary requests.
+     *
+     * Keeping the role and source id in one place prevents the request builder and
+     * its budget calculator from disagreeing about what was actually sent.  The
+     * default keeps every source message; callers may pass a limit only when they
+     * have already proved that the omitted messages are represented elsewhere.
+     */
+    fun summaryTranscript(messages: List<Message>, maxMessages: Int = Int.MAX_VALUE): String =
+        messages.take(maxMessages.coerceAtLeast(0)).joinToString("\n") { message ->
+            val role = when (message.role.lowercase()) {
+                "user" -> "用户"
+                "assistant" -> "助手"
+                else -> message.role
+            }
+            "[$role · 原文ID ${message.id}] ${message.content}"
+        }
+
+    /**
+     * Conservative token estimate for the text sent to a summary endpoint.
+     *
+     * The regular estimate is intentionally cheap and works well for ordinary
+     * request previews, but it can undercount CJK-heavy UTF-8 text.  Counting half
+     * the encoded bytes (rounded up) provides a bounded safety floor without
+     * requiring a provider-specific tokenizer.
+     */
+    fun summaryInputTokens(text: String): Int {
+        if (text.isEmpty()) return 0
+        val utf8Half = (text.toByteArray(Charsets.UTF_8).size + 1) / 2
+        return maxOf(TokenEstimationHelper.estimateTokenCount(text), utf8Half)
+    }
+
+    /** Cost of one line in [summaryTranscript], including its separator allowance. */
+    fun summaryMessageTokens(message: Message): Int =
+        summaryInputTokens(summaryTranscript(listOf(message))) + 1
+
     fun plan(
         messages: List<Message>,
         tier: CompressionTier,
@@ -93,10 +129,15 @@ object ContextCompressionPlanner {
     }
 
     /** Sequential bounded chunks; a large message is split without dropping the middle. */
-    fun chunks(messages: List<Message>, tokenBudget: Int, maxMessages: Int = 40): List<List<Message>> {
+    fun chunks(
+        messages: List<Message>,
+        tokenBudget: Int,
+        maxMessages: Int = 40,
+        tokenCounter: (Message) -> Int = { message -> messageTokens(message) }
+    ): List<List<Message>> {
         val budget = tokenBudget.coerceAtLeast(256)
         val fragments = messages.flatMap { message ->
-            if (messageTokens(message) <= budget) listOf(message) else {
+            if (tokenCounter(message) <= budget) listOf(message) else {
                 val parts = mutableListOf<Message>()
                 var remaining = message.content
                 while (remaining.isNotEmpty()) {
@@ -104,7 +145,7 @@ object ContextCompressionPlanner {
                     var high = remaining.length
                     while (low < high) {
                         val mid = (low + high + 1) / 2
-                        if (TokenEstimationHelper.estimateTokenCount(remaining.take(mid)) + 32 <= budget) low = mid else high = mid - 1
+                        if (tokenCounter(message.copy(content = remaining.take(mid))) <= budget) low = mid else high = mid - 1
                     }
                     val boundary = remaining.take(low).indexOfLast { it == '\n' || it in "。！？；.!?" }
                     var length = if (boundary >= low / 2) boundary + 1 else low
@@ -112,6 +153,13 @@ object ContextCompressionPlanner {
                     // independent request cannot replace half of an emoji with a replacement glyph.
                     if (length < remaining.length && remaining[length - 1].isHighSurrogate() && remaining[length].isLowSurrogate()) {
                         length = if (length > 1) length - 1 else 2
+                    }
+                    // A custom counter may include a larger transcript wrapper than
+                    // the default estimate.  Ensure progress without ever emitting
+                    // an empty fragment if even one source character is over budget.
+                    if (length <= 0) length = 1
+                    while (length > 1 && tokenCounter(message.copy(content = remaining.take(length))) > budget) {
+                        length--
                     }
                     parts += message.copy(content = remaining.take(length))
                     remaining = remaining.drop(length)
@@ -123,7 +171,7 @@ object ContextCompressionPlanner {
         var current = mutableListOf<Message>()
         var tokens = 0
         for (message in fragments) {
-            val cost = messageTokens(message)
+            val cost = tokenCounter(message)
             if (current.isNotEmpty() && (tokens + cost > budget || current.size >= maxMessages)) {
                 result += current
                 current = mutableListOf()

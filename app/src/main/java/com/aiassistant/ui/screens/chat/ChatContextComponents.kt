@@ -433,8 +433,9 @@ internal fun ContextUsageDialog(
                             selection = selection ?: ContextCompressionSelection.from(usage),
                             busy = busy,
                             onSelectionChanged = { draft = it },
-                            onApplyTier = { _, _, _ -> applySelection() },
+                            onApplyTier = { _, _, _ -> if (hasPendingChange) applySelection() else onCompress() },
                             onPreviewSettingsChanged = onPreviewCompressionSettings,
+                            canRetryCompression = state.canRetryCompression,
                         )
                     }
                     if (onUpdateContextLimit != null) {
@@ -550,9 +551,14 @@ internal fun ContextOptimizationActions(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onCompress, enabled = !busy && (usage.canCompress || hasPendingChange), modifier = Modifier.align(Alignment.End)) {
+                Button(
+                    onClick = onCompress,
+                    enabled = !busy && (usage.canCompress || hasPendingChange || state.canRetryCompression),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
                     Text(when {
                         state.isCompressing -> "正在应用…"
+                        state.canRetryCompression && !hasPendingChange -> "重试压缩"
                         hasPendingChange -> "应用所选策略"
                         !usage.canCompress -> "暂无待压缩历史"
                         appliesRollingTier -> "应用滚动摘要并压缩"
@@ -1106,7 +1112,8 @@ internal fun ContextCompressionTierSelectorCard(
     busy: Boolean,
     onSelectionChanged: (ContextCompressionSelection) -> Unit,
     onApplyTier: ((com.aiassistant.domain.model.CompressionTier, Int, Int) -> Unit)?,
-    onPreviewSettingsChanged: ((Int, Int) -> Unit)? = null
+    onPreviewSettingsChanged: ((Int, Int) -> Unit)? = null,
+    canRetryCompression: Boolean = false
 ) {
     val selectedTier = selection.tier
     val l2Rounds = selection.recentRounds
@@ -1116,7 +1123,7 @@ internal fun ContextCompressionTierSelectorCard(
 
     // 应用当前待确认的档位/参数变更（胶囊内"确认应用并生效"与宿主对话框"完成"键共用）
     fun applyPendingChange() {
-        if (busy || !hasPendingChange) return
+        if (busy || (!hasPendingChange && !canRetryCompression)) return
         onApplyTier?.invoke(selectedTier, l2Rounds, customPercent)
     }
 
@@ -1357,7 +1364,7 @@ internal fun ContextCompressionTierSelectorCard(
 
             // 前后对比预览卡片与确认生效
             AnimatedVisibility(
-                visible = hasPendingChange,
+                visible = hasPendingChange || canRetryCompression,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
@@ -1377,7 +1384,7 @@ internal fun ContextCompressionTierSelectorCard(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "前后对比预览（确认后生效）",
+                                text = if (canRetryCompression && !hasPendingChange) "摘要未完成，可用当前比例重试" else "前后对比预览（确认后生效）",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -1441,7 +1448,8 @@ internal fun ContextCompressionTierSelectorCard(
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("确认应用并生效", style = MaterialTheme.typography.labelMedium)
+                                Text(if (canRetryCompression && !hasPendingChange) "按当前比例重新压缩" else "确认应用并生效",
+                                    style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }

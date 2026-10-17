@@ -95,8 +95,11 @@ class ChatRetryRepositoryTest {
                                 check(count > 0)
                                 read += count
                             }
-                            payloads.add(String(body, Charsets.UTF_8))
-                            respond(socket, payloads.size)
+                            val requestIndex = synchronized(payloads) {
+                                payloads.add(String(body, Charsets.UTF_8))
+                                payloads.size
+                            }
+                            respond(socket, requestIndex)
                         } catch (_: java.io.IOException) { /* Expected peer cancellation. */ }
                     } }
                 } catch (_: java.io.IOException) { if (server.isClosed) break }
@@ -377,6 +380,157 @@ class ChatRetryRepositoryTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun shoppingChatCanCompressRegenerateBranchContinueAndRenameWithoutChangingItsParentInBothProtocols() = runBlocking {
+        newSingleThreadContext("shopping-branch-flow-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (protocol in listOf("openai", "anthropic")) {
+                    val replies = java.util.concurrent.atomic.AtomicInteger()
+                    lateinit var endpoint: Endpoint
+                    endpoint = Endpoint { socket, index ->
+                        val payload = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+                        if (payload["stream"]?.asBoolean == true) {
+                            socket.response("200 OK", syntheticStreamResponse(protocol, "合成购物回复${replies.incrementAndGet()}。"), "text/event-stream")
+                        } else {
+                            val prompt = payload.getAsJsonArray("messages").single().asJsonObject["content"].asString
+                            // A saved story-time anchor also enables background timeline
+                            // analysis. It is a separate request from the paid summary.
+                            val response = if (prompt.contains("你是一个专业的故事时间线与常驻设定增量提取引擎")) {
+                                val noUpdate = if (protocol == "anthropic") mapOf("content" to listOf(mapOf("type" to "text", "text" to "NO_UPDATE")))
+                                    else mapOf("choices" to listOf(mapOf("message" to mapOf("content" to "NO_UPDATE"))))
+                                com.google.gson.Gson().toJson(noUpdate)
+                            } else syntheticSummaryResponse(protocol)
+                            socket.response("200 OK", response)
+                        }
+                    }
+                    endpoint.use { Fixture().use { f ->
+                        f.enableViewModel()
+                        // Unlike a summary-only fixture, the foreground send requires an
+                        // enabled key. Keep the existing synthetic localhost credential.
+                        val (_, parentId) = f.config(endpoint.url, protocol)
+                        f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(parentId)!!.copy(
+                            contextWindowTokens = 32768, enableSessionMemory = false, currentStoryTime = "合成购物当天"))
+                        val parentVm = ChatViewModel(parentId)
+                        var childVm: ChatViewModel? = null
+                        var childId: Long? = null
+                        try {
+                            suspend fun ready(vm: ChatViewModel) {
+                                withTimeout(5000) { while (vm.currentModelOption.value == null || vm.contextUsage.value.usage == null) delay(10) }
+                            }
+                            suspend fun send(vm: ChatViewModel, id: Long, input: String, replyNumber: Int) {
+                                val previous = f.db.messageDao().getMessagesList(id)
+                                withContext(Dispatchers.Main) { vm.sendMessage(input) }
+                                withTimeout(10000) {
+                                    while (vm.isGenerating.value || f.db.messageDao().getMessagesList(id).none {
+                                        it.role == "assistant" && it.content == "合成购物回复$replyNumber。"
+                                    }) {
+                                        if (!vm.isGenerating.value) assertNull("正式发送提前失败：$protocol/$replyNumber", vm.error.value)
+                                        delay(10)
+                                    }
+                                }
+                                val saved = f.db.messageDao().getMessagesList(id)
+                                assertNull(vm.error.value)
+                                assertEquals("正式发送只新增一条输入和一条回复", previous.size + 2, saved.size)
+                                assertEquals(1, saved.count { it.role == "user" && it.content == input })
+                                assertEquals(previous, saved.take(previous.size))
+                            }
+                            ready(parentVm)
+                            val shoppingSteps = listOf("商定预算并出门", "领取蓝色购物袋", "比较两种牛奶", "在生鲜区核对清单", "发现预算不足",
+                                "协商退掉零食", "寻找遗失的钱包", "从服务台领回钱包", "核对找零并结账", "提着食材回家并约定下次列清单")
+                            shoppingSteps.forEachIndexed { index, step ->
+                                send(parentVm, parentId, "合成购物第${index + 1}轮：$step。", index + 1)
+                            }
+                            val originals = f.db.messageDao().getMessagesList(parentId)
+                            assertEquals(20, originals.size)
+                            withContext(Dispatchers.Main) { parentVm.setCompressionTier(CompressionTier.L4) }
+                            withTimeout(10000) { while (parentVm.contextUsage.value.isCompressing) delay(10) }
+                            val compressed = f.db.conversationDao().getConversationById(parentId)!!
+                            assertEquals(CompressionTier.L4.level, compressed.compressionTier)
+                            assertEquals(originals[17].id, compressed.summaryUpdatedMessageId)
+                            assertFalse(compressed.rollingSummary.isNullOrBlank())
+                            assertEquals(2, parentVm.contextUsage.value.usage!!.recentMessageCount)
+                            assertEquals(originals, f.db.messageDao().getMessagesList(parentId))
+                            val summaryPrompts = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }
+                                .filter { it["stream"]?.asBoolean != true && it.toString().contains("新增对话历史") }.joinToString("\n")
+                            originals.take(18).forEach { assertTrue("购物过程原文必须进入摘要请求", summaryPrompts.contains("原文ID ${it.id}]")) }
+
+                            withContext(Dispatchers.Main) { parentVm.regenerateLastMessage(originals.last()) }
+                            withTimeout(10000) {
+                                while (parentVm.isGenerating.value || f.db.messageDao().getMessagesList(parentId).none { it.content == "合成购物回复11。" }) delay(10)
+                            }
+                            assertNull(parentVm.error.value)
+                            val beforeBranch = f.db.messageDao().getMessagesList(parentId)
+                            assertEquals("重生成不能重复保存用户输入", 10, beforeBranch.count { it.role == "user" })
+                            assertEquals(21, beforeBranch.size)
+                            val regenerated = beforeBranch.single { it.content == "合成购物回复11。" }
+                            val variants = beforeBranch.filter { it.variantGroupId == regenerated.variantGroupId }
+                            assertEquals(listOf("合成购物回复10。", "合成购物回复11。"), variants.map { it.content })
+                            val regenerationWire = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }
+                                .last { it["stream"]?.asBoolean == true }
+                            val regenerationSystem = if (protocol == "anthropic") regenerationWire["system"].asString
+                                else regenerationWire.getAsJsonArray("messages").first().asJsonObject["content"].asString
+                            assertTrue(regenerationSystem.contains(compressed.rollingSummary!!))
+                            assertFalse("重生成请求不能夹带旧版本回复", regenerationWire.toString().contains("合成购物回复10。"))
+                            assertFalse("压缩后正式请求不能重新携带首轮原文", regenerationWire.toString().contains("合成购物第1轮"))
+
+                            val created = CompletableDeferred<Pair<Long, String>>()
+                            withContext(Dispatchers.Main) {
+                                parentVm.createBranch(regenerated.id, beforeBranch) { id, title -> created.complete(id to title) }
+                            }
+                            val branch = withTimeout(5000) { created.await() }
+                            childId = branch.first
+                            assertTrue(branch.second.contains("分支"))
+                            val branchLink = f.repository.getBranchByChild(branch.first)!!
+                            assertEquals(parentId, branchLink.parentConversationId)
+                            assertEquals(regenerated.id, branchLink.branchMessageId)
+                            val copied = f.db.messageDao().getMessagesList(branch.first)
+                            assertEquals(beforeBranch.map { it.content }, copied.map { it.content })
+                            assertTrue("分支必须拥有独立消息记录", copied.none { copy -> beforeBranch.any { it.id == copy.id } })
+                            assertEquals(2, copied.count { it.variantGroupId == copied.last().variantGroupId })
+                            assertEquals(compressed.rollingSummary, f.db.conversationDao().getConversationById(branch.first)!!.rollingSummary)
+
+                            send(parentVm, parentId, "SYNTHETIC_PARENT_ONLY：父路线决定下次改去北港。", 12)
+                            val parentMessages = f.db.messageDao().getMessagesList(parentId)
+                            val parentState = f.db.conversationDao().getConversationById(parentId)!!
+                            val branchVm = ChatViewModel(branch.first)
+                            childVm = branchVm
+                            ready(branchVm)
+                            send(branchVm, branch.first, "SYNTHETIC_BRANCH_ONLY：分支路线决定先整理购物袋。", 13)
+                            val branchWire = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }
+                                .last { it["stream"]?.asBoolean == true }
+                            assertTrue(branchWire.toString().contains("SYNTHETIC_BRANCH_ONLY"))
+                            assertFalse("创建分支后父路线的新输入不得泄入分支", branchWire.toString().contains("SYNTHETIC_PARENT_ONLY"))
+                            assertFalse(branchWire.toString().contains("合成购物回复12。"))
+                            assertEquals(parentMessages, f.db.messageDao().getMessagesList(parentId))
+                            val renamed = CompletableDeferred<Boolean>()
+                            withContext(Dispatchers.Main) {
+                                parentVm.renameConversation("  合成购物另一条路线  ", branch.first) { renamed.complete(it) }
+                            }
+                            assertTrue(withTimeout(5000) { renamed.await() })
+                            val childState = f.db.conversationDao().getConversationById(branch.first)!!
+                            assertEquals("合成购物另一条路线", childState.title)
+                            assertEquals("合成购物当天", childState.currentStoryTime)
+                            assertEquals(parentState.title, f.db.conversationDao().getConversationById(parentId)!!.title)
+                            assertEquals(parentState.rollingSummary, f.db.conversationDao().getConversationById(parentId)!!.rollingSummary)
+                            assertEquals(parentState.summaryUpdatedMessageId, f.db.conversationDao().getConversationById(parentId)!!.summaryUpdatedMessageId)
+                            assertEquals(parentMessages, f.db.messageDao().getMessagesList(parentId))
+                            assertEquals(copied, f.db.messageDao().getMessagesList(branch.first).take(copied.size))
+                            assertEquals(13, replies.get())
+                        } finally {
+                            parentVm.stopGeneration()
+                            childVm?.stopGeneration()
+                            parentVm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            childVm?.viewModelScope?.coroutineContext?.get(Job)?.cancelAndJoin()
+                            ChatGenerationManager.cancelSession(parentId)
+                            childId?.let { ChatGenerationManager.cancelSession(it) }
+                        }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
     @Test fun sameTierParameterChangesApplyWhilePreviewAndCompleteTiersDoNotPretendToSaveOrCharge() = runBlocking {
         newSingleThreadContext("context-policy-parameters-main").use { main ->
             Dispatchers.setMain(main)
@@ -486,20 +640,28 @@ class ChatRetryRepositoryTest {
                     val vm = ChatViewModel(id)
                     try {
                         withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
-                        withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.L4) }
+                        // Keep the custom policy unchanged across the failed request. The
+                        // dialog must expose a retry even when the refreshed usage says that
+                        // this policy has no additional raw turns to retire.
+                        withContext(Dispatchers.Main) {
+                            vm.setCompressionTier(CompressionTier.LC, customPercent = 50)
+                        }
                         withTimeout(20000) { while (vm.contextUsage.value.isCompressing) delay(10) }
                         assertTrue(endpoint.payloads.isNotEmpty())
-                        assertEquals(CompressionTier.L4.level, f.db.conversationDao().getConversationById(id)!!.compressionTier)
+                        assertEquals(CompressionTier.LC.level, f.db.conversationDao().getConversationById(id)!!.compressionTier)
+                        assertEquals(50, f.db.conversationDao().getConversationById(id)!!.compressionCustomPercent)
                         assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
                         assertEquals(original, f.db.messageDao().getMessagesList(id))
                         val failure = vm.contextUsage.value.statusMessage.orEmpty()
                         assertTrue("模型整理失败必须保留可见错误：$failure", failure.contains("失败") || failure.contains("500"))
                         assertFalse(failure.contains("已切换") || failure.contains("已总结并保存"))
+                        assertTrue("压缩失败后应可用相同自定义比例直接重试", vm.contextUsage.value.canRetryCompression)
                         failSummary.set(false)
                         withContext(Dispatchers.Main) { vm.compressContextNow() }
                         withTimeout(10000) { while (vm.contextUsage.value.isCompressing) delay(10) }
                         assertFalse(f.db.conversationDao().getConversationById(id)!!.rollingSummary.isNullOrBlank())
-                        assertEquals(2, vm.contextUsage.value.usage!!.recentMessageCount)
+                        assertEquals(20, vm.contextUsage.value.usage!!.recentMessageCount)
+                        assertFalse("压缩成功后不应继续显示重试动作", vm.contextUsage.value.canRetryCompression)
                     } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
                 } }
             } finally { Dispatchers.resetMain() }

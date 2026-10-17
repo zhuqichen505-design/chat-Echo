@@ -17,6 +17,11 @@ object RetrofitClient {
     val DEFAULT_USER_AGENT = "Echo-Assistant/${com.aiassistant.BuildConfig.VERSION_NAME} (Android; Mobile)"
     const val RESPONSE_HEADER_TIMEOUT_SECONDS = 120L
     const val STREAM_IDLE_TIMEOUT_SECONDS = 600L
+    // 摘要属于可重试的辅助操作，不能沿用时间线/深度分析的 600 秒长通道。
+    // 模型不可达时应在几十秒内把失败交给 UI，而不是让压缩按钮长时间占用。
+    const val SUMMARY_CONNECT_TIMEOUT_SECONDS = 10L
+    const val SUMMARY_RESPONSE_TIMEOUT_SECONDS = 30L
+    const val SUMMARY_CALL_TIMEOUT_SECONDS = 45L
 
     // Route recovery must stay enabled: an unreachable first DNS address must not prevent
     // trying the next address. One-shot POST bodies prevent replay AFTER sending starts,
@@ -82,6 +87,19 @@ object RetrofitClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // 专用于滚动摘要。它仍保留动态 HTTP 访问策略和发送前地址恢复，但将
+    // 连接、响应头和整次调用都设为有限的短超时，避免摘要失败拖延数分钟。
+    val summaryHttpClient = HttpAccessPolicy.guard(OkHttpClient.Builder())
+        .addInterceptor(noPostReplayInterceptor)
+        .addInterceptor(loggingInterceptor)
+        .retryOnConnectionFailure(true)
+        .connectionPool(sharedConnectionPool)
+        .connectTimeout(SUMMARY_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(SUMMARY_RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(SUMMARY_RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(SUMMARY_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     // 专用于全量时间线提炼、长文本深度分析与设定提炼（设置 600s 充足超时与弹性连接，支持超长篇上下文深度推理）
     val longAnalysisHttpClient = HttpAccessPolicy.guard(OkHttpClient.Builder())
         .addInterceptor(noPostReplayInterceptor)
@@ -100,6 +118,12 @@ object RetrofitClient {
 
     @Volatile
     private var currentAnalysisService: AiApiService? = null
+
+    @Volatile
+    private var currentSummaryBaseUrl: String = ""
+
+    @Volatile
+    private var currentSummaryService: AiApiService? = null
 
     fun getService(baseUrl: String): AiApiService {
         val normalizedUrl = normalizeBaseUrl(baseUrl)
@@ -135,12 +159,29 @@ object RetrofitClient {
         }
     }
 
+    fun getSummaryService(baseUrl: String): AiApiService {
+        val normalizedUrl = normalizeBaseUrl(baseUrl)
+        return synchronized(lock) {
+            if (normalizedUrl != currentSummaryBaseUrl || currentSummaryService == null) {
+                currentSummaryBaseUrl = normalizedUrl
+                val retrofit = Retrofit.Builder()
+                    .baseUrl(normalizedUrl)
+                    .client(summaryHttpClient)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                currentSummaryService = retrofit.create(AiApiService::class.java)
+            }
+            currentSummaryService!!
+        }
+    }
+
     fun postJson(
         baseUrl: String,
         path: String,
         headers: Map<String, String>,
         json: String,
-        onCallCreated: ((Call) -> Unit)? = null
+        onCallCreated: ((Call) -> Unit)? = null,
+        client: OkHttpClient = streamHttpClient
     ): okhttp3.Response {
         val url = normalizeBaseUrl(baseUrl).trimEnd('/') + "/" + path.trimStart('/')
         val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -154,7 +195,7 @@ object RetrofitClient {
             requestBuilder.header(name, value)
         }
 
-        val call = streamHttpClient.newCall(requestBuilder.build())
+        val call = client.newCall(requestBuilder.build())
         onCallCreated?.invoke(call)
         return call.execute()
     }

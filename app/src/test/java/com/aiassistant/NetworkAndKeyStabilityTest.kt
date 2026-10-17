@@ -55,7 +55,8 @@ class NetworkAndKeyStabilityTest {
         LocalEndpoint { it.reply(body = "ok") }.use { server ->
             var rules = com.aiassistant.data.remote.HttpAccessRules()
             policy.initialize { rules }
-            for (client in listOf(RetrofitClient.restHttpClient, RetrofitClient.streamHttpClient, RetrofitClient.longAnalysisHttpClient)) {
+            for (client in listOf(RetrofitClient.restHttpClient, RetrofitClient.streamHttpClient,
+                RetrofitClient.summaryHttpClient, RetrofitClient.longAnalysisHttpClient)) {
                 try { client.newCall(request(server.port)).execute().close(); fail("Closed HTTP policy sent a request") }
                 catch (e: com.aiassistant.data.remote.HttpAccessDeniedException) { assertTrue(e.message!!.contains("HTTP 访问已关闭")) }
             }
@@ -107,6 +108,22 @@ class NetworkAndKeyStabilityTest {
             }
         }
     }
+    @Test fun socketCancellationInsideCallTimeoutRemainsFailureWhileExplicitUserCancellationWins() {
+        val timeout = InterruptedIOException("timeout").apply { initCause(java.io.IOException("Canceled")) }
+        val wrapped = IllegalStateException("summary request failed", timeout)
+        for (error in listOf(timeout, wrapped)) {
+            assertTrue(AiRepository.isTimeoutException(error))
+            assertFalse("OkHttp内部终止socket不代表用户取消", AiRepository.isRequestCancellation(error))
+            assertEquals(com.aiassistant.domain.model.RetryErrorType.TIMEOUT,
+                com.aiassistant.domain.model.RetryErrorType.classify(error))
+        }
+        val userStop = kotlinx.coroutines.CancellationException("user stopped", timeout)
+        for (error in listOf(userStop, IllegalStateException("wrapped user stop", userStop), java.io.IOException("Canceled"))) {
+            assertTrue("显式取消必须继续阻止重试", AiRepository.isRequestCancellation(error))
+            assertFalse(com.aiassistant.domain.model.RetryPolicy().canRetry(error, 0))
+        }
+    }
+
     @Test fun firstTokenDeadlineCannotConvertUserStopIntoTimeout() {
         LocalEndpoint { Thread.sleep(1000) }.use { server ->
             val call = RetrofitClient.streamHttpClient.newCall(request(server.port))
@@ -234,7 +251,8 @@ class NetworkAndKeyStabilityTest {
     }
 
     @Test fun allAiClientsRecoverBeforeSendingButDoNotReplaySentPosts() {
-        for (base in listOf(RetrofitClient.restHttpClient, RetrofitClient.longAnalysisHttpClient)) {
+        for (base in listOf(RetrofitClient.restHttpClient, RetrofitClient.summaryHttpClient,
+            RetrofitClient.longAnalysisHttpClient)) {
             LocalEndpoint { it.reply(body = "ok") }.use { server ->
                 val client = base.newBuilder().dns(object : Dns {
                     override fun lookup(hostname: String) = listOf(InetAddress.getByName("127.0.0.2"), InetAddress.getByName("127.0.0.1"))
@@ -388,6 +406,16 @@ class NetworkAndKeyStabilityTest {
         val restClient = RetrofitClient.restHttpClient
         assertTrue(restClient.retryOnConnectionFailure)
         assertNotNull("restClient 应配置专用连接池", restClient.connectionPool)
+
+        val summaryClient = RetrofitClient.summaryHttpClient
+        assertTrue("summaryHttpClient 应允许发送前地址回退", summaryClient.retryOnConnectionFailure)
+        assertEquals(RetrofitClient.SUMMARY_CONNECT_TIMEOUT_SECONDS * 1_000,
+            summaryClient.connectTimeoutMillis.toLong())
+        assertEquals(RetrofitClient.SUMMARY_RESPONSE_TIMEOUT_SECONDS * 1_000,
+            summaryClient.readTimeoutMillis.toLong())
+        assertEquals(RetrofitClient.SUMMARY_CALL_TIMEOUT_SECONDS * 1_000,
+            summaryClient.callTimeoutMillis.toLong())
+        assertNotNull("summaryHttpClient 应配置专用连接池", summaryClient.connectionPool)
 
         assertEquals("默认 User-Agent 必须使用当前应用版本", "Echo-Assistant/${BuildConfig.VERSION_NAME} (Android; Mobile)", RetrofitClient.DEFAULT_USER_AGENT)
     }

@@ -246,6 +246,69 @@ class ContextCompressionAndBudgetTest {
         assertTrue(chunks.all { part -> part.sumOf(com.aiassistant.data.repository.helpers.ContextCompressionPlanner::messageTokens) <= 512 })
     }
 
+    @Test fun summaryTranscriptUsesStableRolesAndSourceIdsAndConservativeUtf8Budget() {
+        val messages = listOf(
+            Message(id = 41, conversationId = 1, role = "user", content = "你好，北港。"),
+            Message(id = 42, conversationId = 1, role = "assistant", content = "已记录🌠。"),
+            Message(id = 43, conversationId = 1, role = "tool", content = "外部资料")
+        )
+        val transcript = ContextCompressionPlanner.summaryTranscript(messages)
+        assertEquals(
+            "[用户 · 原文ID 41] 你好，北港。\n" +
+                "[助手 · 原文ID 42] 已记录🌠。\n" +
+                "[tool · 原文ID 43] 外部资料",
+            transcript
+        )
+        val expectedFloor = (transcript.toByteArray(Charsets.UTF_8).size + 1) / 2
+        assertEquals(
+            maxOf(AiRepository.estimateTokenCount(transcript), expectedFloor),
+            ContextCompressionPlanner.summaryInputTokens(transcript)
+        )
+        assertEquals(
+            ContextCompressionPlanner.summaryInputTokens(ContextCompressionPlanner.summaryTranscript(messages.take(1))) + 1,
+            ContextCompressionPlanner.summaryMessageTokens(messages.first())
+        )
+    }
+
+    @Test fun summaryChunksKeepLongEmojiMessageCompleteUnderWrappedConservativeBudget() {
+        val text = "开头🌠𠮷。" + "中段唯一事实：铜钥匙仍在北港。".repeat(1600) + "结尾✅。"
+        val message = Message(id = 7, conversationId = 1, role = "user", content = text)
+        val counter = ContextCompressionPlanner::summaryMessageTokens
+        val chunks = ContextCompressionPlanner.chunks(
+            listOf(message), tokenBudget = 512, tokenCounter = counter
+        )
+        assertTrue(chunks.size > 20)
+        assertEquals(text, chunks.flatten().joinToString("") { it.content })
+        assertTrue(chunks.all { chunk -> chunk.sumOf(counter) <= 512 })
+        assertTrue(chunks.flatten().all { fragment ->
+            fragment.content.isEmpty() ||
+                (!fragment.content.first().isLowSurrogate() && !fragment.content.last().isHighSurrogate()) &&
+                String(fragment.content.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == fragment.content
+        })
+    }
+
+    @Test fun summaryChunksCoverTwoThousandRoundsWithoutDroppingSourceIds() {
+        val messages = (1L..4_000L).map { id ->
+            Message(
+                id = id,
+                conversationId = 1,
+                role = if (id % 2L == 1L) "user" else "assistant",
+                content = "第${(id + 1) / 2}轮的合成事实[$id]：记录沿途变化并保留铜钥匙。"
+            )
+        }
+        val counter = ContextCompressionPlanner::summaryMessageTokens
+        val chunks = ContextCompressionPlanner.chunks(
+            messages,
+            tokenBudget = 768,
+            maxMessages = 40,
+            tokenCounter = counter
+        )
+        assertTrue("2000轮历史必须拆为多个可发送分段", chunks.size > 100)
+        assertEquals(messages.map { it.id }, chunks.flatten().map { it.id })
+        assertEquals(messages.map { it.content }, chunks.flatten().map { it.content })
+        assertTrue(chunks.all { chunk -> chunk.size <= 40 && chunk.sumOf(counter) <= 768 })
+    }
+
     @Test fun smallContextCompressesOldWholeTurnsWithoutDroppingLastTurnOrPinnedText() {
         val messages = (1L..20L).map { id -> Message(id = id, conversationId = 1,
             role = if (id % 2 == 1L) "user" else "assistant", content = "事实${id}。".repeat(100), isPinned = id == 3L) }

@@ -99,6 +99,17 @@ class AiRepository(
     private val activeMemoryJobs = ConcurrentHashMap<Long, Pair<Long, Job>>()
     private val modelContextWindowCache = ConcurrentHashMap<String, Int>()
     private val summaryLocks = ConcurrentHashMap<Long, Mutex>()
+    private class SummaryRequestFailure(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+    private class SummaryContinuationUnavailable(message: String, cause: Throwable) : IllegalStateException(message, cause)
+    private data class SummaryRequestIdentity(val config: ApiConfig, val model: String, val window: Int)
+    private data class SummaryFailureState(val identity: SummaryRequestIdentity, val error: SummaryRequestFailure)
+    private val summaryFailures = ConcurrentHashMap<Long, SummaryFailureState>()
+    private val streamingSummaryEndpoints = ConcurrentHashMap.newKeySet<SummaryRequestIdentity>()
+
+    private fun summaryRequestIdentity(config: ApiConfig, model: String, window: Int) =
+        SummaryRequestIdentity(config.copy(apiKey = parseApiKeys(config.apiKey).firstOrNull().orEmpty()), model, window)
+
+    fun hasPendingSummaryFailure(conversationId: Long): Boolean = summaryFailures.containsKey(conversationId)
 
     companion object {
         const val UNCOMPRESSED_RECENT_MESSAGE_COUNT = 16 // 最近十几次对话不做压缩，原汁原味无损保留（涵盖8~10轮对话）
@@ -191,11 +202,8 @@ class AiRepository(
         }
     }
 
-    private fun isRequestCancellation(error: Throwable): Boolean {
-        if (error is CancellationException) return true
-        if (error.message.equals("Canceled", ignoreCase = true)) return true
-        return error.cause?.let(::isRequestCancellation) == true
-    }
+    private fun isRequestCancellation(error: Throwable): Boolean =
+        NetworkExceptionClassifier.isRequestCancellation(error)
 
     private fun isContextLimitError(error: Throwable): Boolean {
         val messages = mutableListOf<String>()
@@ -222,6 +230,17 @@ class AiRepository(
             "过长"
         ).any { it in message }
         return hasTokenOrContext && hasOverflow
+    }
+
+    /** Summary requests use this broader check to decide whether a failed slice can be split. */
+    private fun isSummaryCapacityError(error: Throwable): Boolean {
+        if (isContextLimitError(error)) return true
+        val message = generateSequence(error) { it.cause }
+            .take(16)
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
+        return listOf("模型窗口", "上下文窗口", "prompt 太长", "prompt过长", "input 太大", "请求过大").any(message::contains)
     }
 
     // ============ 文件夹相关 ============
@@ -743,6 +762,7 @@ class AiRepository(
     }
 
     suspend fun deleteConversation(id: Long) {
+        summaryFailures.remove(id)
         ChatGenerationManager.cancelSession(id)
         cancelActiveRequest(id)
         val db = com.aiassistant.AiAssistantApp.instance.database
@@ -1377,7 +1397,7 @@ class AiRepository(
             val retryPolicy = personalizationManager.getRetryPolicy()
             // Empty responses use only their configured retry budget, never a second
             // hidden compression/retry round after that budget is exhausted.
-            if (retryPolicy.enabled && isContextLimitError(e)) {
+            if (retryPolicy.enabled && e !is SummaryRequestFailure && e !is SummaryContinuationUnavailable && isContextLimitError(e)) {
                 if (personalizationManager.isContextFallbackPermanentlyIgnored(conversationId)) {
                     Log.i(tag, "会话 $conversationId 已永久忽略上下文回退，保全完整上下文")
                 } else {
@@ -1498,6 +1518,9 @@ class AiRepository(
                     if (isRequestCancellation(e)) throw e
                     lastException = e
                     if (e is com.aiassistant.data.remote.HttpAccessDeniedException) throw e
+                    // No chat request has started. Replaying a local summary failure
+                    // through every chat retry/key cannot repair the missing summary.
+                    if (e is SummaryRequestFailure || e is SummaryContinuationUnavailable) throw e
 
                     // 保护策略：如果已经收到部分内容，坚决不自动重试，避免向用户重复输出
                     if (hasEmittedTokens) {
@@ -1612,7 +1635,7 @@ class AiRepository(
 
         val safeRetryOutput = (options?.maxTokens ?: 4096).coerceIn(256, (retryWindow / 4).coerceIn(256, 16384))
 
-        runCatching {
+        val compression = runCatching {
             compressConversationContext(
                 conversationId = conversationId,
                 modelNameOverride = requestModel,
@@ -1622,8 +1645,9 @@ class AiRepository(
             ).getOrThrow()
         }.onFailure {
             if (isRequestCancellation(it)) throw CancellationException("请求已取消", it)
-            Log.w(tag, "上下文超限后自动压缩失败，仍尝试缩小窗口重试", it)
+            Log.w(tag, "上下文超限后自动压缩失败，保留历史并停止重发", it)
         }
+        if (compression.isFailure) return false
 
         val retryOptions = (options ?: ChatRequestOptions()).copy(
             contextWindowOverrideTokens = retryWindow,
@@ -2769,8 +2793,21 @@ class AiRepository(
         check(budget.fixed + plan.estimatedHistoryTokens + (if (needsSummary) budget.summary else estimateTokenCount(conversation?.rollingSummary.orEmpty())) <= budget.prompt) {
             "当前输入、置顶内容或设定超过上下文预算。请缩短内容或提高上下文上限后继续；尚未发起额外摘要请求。"
         }
+        val requestIdentity = summaryRequestIdentity(config, modelName, budget.window)
         val summary = if (needsSummary) {
-            ensureRollingSummary(conversation?.copy(contextWindowTokens = budget.window), config, modelName, plan.summarySource, budget.summary)
+            if (!forceCompression) {
+                val previousFailure = conversation?.let { summaryFailures[it.id] }
+                    ?.takeIf { it.identity == requestIdentity }
+                if (previousFailure != null) {
+                    return buildSummaryFailureContinuation(conversation, usable, plan, budget, previousFailure.error)
+                }
+            }
+            try {
+                ensureRollingSummary(conversation?.copy(contextWindowTokens = budget.window), config, modelName, plan.summarySource, budget.summary)
+            } catch (failure: SummaryRequestFailure) {
+                if (forceCompression) throw failure
+                return buildSummaryFailureContinuation(conversation, usable, plan, budget, failure)
+            }
         } else conversation?.rollingSummary
         check(!needsSummary || !summary.isNullOrBlank()) { "上下文需要压缩但摘要未生成，请重试压缩后继续" }
         val retained = plan.retainedMessages
@@ -2778,6 +2815,41 @@ class AiRepository(
             "当前消息、置顶内容或提示设定超过上下文预算。已保留完整原文，请缩短本轮内容、减少置顶或提高上下文上限后继续。"
         }
         return ContextBundle(summary, budget.memory, retained)
+    }
+
+    /** A failed optional summary must not block a conversation whose complete
+     * uncovered history still fits. Never retire a source without a saved summary. */
+    private suspend fun buildSummaryFailureContinuation(
+        conversation: Conversation?,
+        usable: List<Message>,
+        plan: ContextCompressionPlanner.Plan,
+        budget: ContextBudget,
+        failure: SummaryRequestFailure
+    ): ContextBundle {
+        currentCoroutineContext().ensureActive()
+        val current = conversation?.let { getConversationById(it.id) } ?: throw failure
+        check(current.rollingSummary == conversation.rollingSummary &&
+            current.summaryUpdatedMessageId == conversation.summaryUpdatedMessageId &&
+            current.summaryUpdatedAt == conversation.summaryUpdatedAt) { "摘要已被修改，请重新发送以使用最新内容" }
+        val ids = usable.mapTo(mutableSetOf()) { it.id }
+        val now = getMessagesList(current.id).collapseVariantsForHistory().filter { it.id in ids }
+        check(now == usable) { "原文或回复选择已变化，请重新发送以使用最新内容" }
+        val coveredIndex = if (current.rollingSummary.isNullOrBlank()) -1
+            else usable.indexOfFirst { it.id == current.summaryUpdatedMessageId }
+        var uncoveredStart = coveredIndex + 1
+        // A legacy/manual checkpoint may end at a user message. Restore that
+        // whole turn so Anthropic cannot discard an orphan assistant response.
+        while (uncoveredStart in 1 until usable.size && usable[uncoveredStart].role != "user") uncoveredStart--
+        val required = plan.retainedMessages.mapTo(mutableSetOf()) { it.id }
+        usable.drop(uncoveredStart).forEach { required += it.id }
+        val retained = usable.filter { it.id in required }
+        val tokens = budget.fixed + retained.sumOf(ContextCompressionPlanner::messageTokens) +
+            estimateTokenCount(current.rollingSummary.orEmpty())
+        if (tokens > budget.prompt) {
+            throw SummaryContinuationUnavailable(
+                "上次摘要失败，尚未摘要的完整历史无法装入当前模型窗口。请在上下文面板点击“重试压缩”，或更换可用模型/提高上下文上限后继续。原文与上次摘要已保留。原因：${failure.message}", failure)
+        }
+        return ContextBundle(current.rollingSummary, budget.memory, retained)
     }
 
     private fun estimatePromptBudgetTokens(
@@ -2909,70 +2981,118 @@ class AiRepository(
     ): String? {
         if (conversation == null || olderMessages.isEmpty()) return conversation?.rollingSummary
         return summaryLocks.getOrPut(conversation.id) { Mutex() }.withLock {
-            val latest = getConversationById(conversation.id) ?: error("对话已删除")
-            val summaryBudget = tokenBudget.coerceIn(300, 2400)
-            val selectedHistory = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
-                it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
-            }
-            check(selectedHistory.take(olderMessages.size).map { Triple(it.id, it.role, it.content) } ==
-                olderMessages.map { Triple(it.id, it.role, it.content) }) { "等待压缩期间原文或回复选择已变化，请重新整理" }
-            val latestCoveredIndex = if (latest.rollingSummary.isNullOrBlank()) -1
-                else selectedHistory.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
-            // Another operation may have advanced farther while this request waited for
-            // the lock. Reuse that checkpoint; never overwrite it with an older prefix.
-            if (latestCoveredIndex >= olderMessages.lastIndex &&
-                estimateTokenCount(latest.rollingSummary.orEmpty()) <= summaryBudget) return@withLock latest.rollingSummary
-            val sourceMessages = if (latestCoveredIndex >= olderMessages.size) selectedHistory.take(latestCoveredIndex + 1)
-                else olderMessages
-            val coveredIndex = if (latest.rollingSummary.isNullOrBlank() ||
-                estimateTokenCount(latest.rollingSummary.orEmpty()) > summaryBudget) -1
-                else sourceMessages.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
-            val pending = sourceMessages.drop(coveredIndex + 1)
-            if (pending.isEmpty() && !latest.rollingSummary.isNullOrBlank()) return@withLock latest.rollingSummary
-            val epoch = ChatGenerationManager.mutationEpoch(conversation.id)
-            val contextWindow = conversation.contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
-            val anchor = resolveLatestTimelineAnchor(conversation.id)
-            val constraints = resolveExistingPreferencesAndConstraints(conversation.id)
-            var summary = latest.rollingSummary.takeIf { coveredIndex >= 0 }
-            // Reserve the actual template, optional memories, the largest merged summary and
-            // completion space together. A fixed 2400-token allowance fails on small windows.
-            val emptyPrompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(null, "", summaryBudget, anchor, constraints)
-            val chunkBudget = minOf(12000, contextWindow - estimateTokenCount(emptyPrompt) -
-                maxOf(summaryBudget, estimateTokenCount(summary.orEmpty())) - summaryCompletionReserve(contextWindow, summaryBudget) - 576)
-            require(chunkBudget >= 256) { "摘要模板与已有设定占满模型窗口，请减少设定或提高上下文上限；原文与上次摘要已保留" }
-            for (chunk in ContextCompressionPlanner.chunks(pending, chunkBudget)) {
-                currentCoroutineContext().ensureActive()
-                summary = generateRollingSummary(config, modelName, summary, chunk, summaryBudget,
-                    latestTimelineAnchor = anchor, existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow)
-                    ?: error("摘要生成失败，已保留原文与上次摘要；请检查模型后重试或增大上下文窗口")
-                if (estimateTokenCount(summary) > summaryBudget) {
-                    // One bounded semantic rewrite; never cut sentences or drop a source slice.
-                    summary = generateRollingSummary(config, modelName, summary, emptyList(),
-                        (summaryBudget * 0.75f).toInt().coerceAtLeast(300), latestTimelineAnchor = anchor,
-                        existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow,
-                        conversationId = conversation.id)
-                        ?: error("摘要缩短失败，已保留原文与上次摘要，请重试压缩")
-                }
-                check(estimateTokenCount(summary) <= summaryBudget) { "摘要超过预算，已保留原文与上次摘要，请重试压缩" }
-            }
-            currentCoroutineContext().ensureActive()
-            com.aiassistant.AiAssistantApp.instance.database.withTransaction {
-                check(epoch == ChatGenerationManager.mutationEpoch(conversation.id)) { "压缩期间对话已变化，请重新整理" }
-                val currentConversation = getConversationById(conversation.id) ?: error("对话已删除")
-                check(currentConversation.rollingSummary == latest.rollingSummary &&
-                    currentConversation.summaryUpdatedMessageId == latest.summaryUpdatedMessageId &&
-                    currentConversation.summaryUpdatedAt == latest.summaryUpdatedAt) {
-                    "压缩期间摘要已被修改，请重新整理；已保留您的修改"
-                }
-                val current = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
+            try {
+                val latest = getConversationById(conversation.id) ?: error("对话已删除")
+                val summaryBudget = tokenBudget.coerceIn(300, 2400)
+                val selectedHistory = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
                     it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
-                }.take(sourceMessages.size)
-                check(current.size == sourceMessages.size && current.zip(sourceMessages).all { (now, original) ->
-                    now.id == original.id && now.role == original.role && now.content == original.content
-                }) { "压缩期间原文或回复选择已变化，请重新整理" }
-                conversationDao.updateRollingSummary(conversation.id, summary, sourceMessages.last().id, System.currentTimeMillis())
+                }
+                check(selectedHistory.take(olderMessages.size).map { Triple(it.id, it.role, it.content) } ==
+                    olderMessages.map { Triple(it.id, it.role, it.content) }) { "等待压缩期间原文或回复选择已变化，请重新整理" }
+                val latestCoveredIndex = if (latest.rollingSummary.isNullOrBlank()) -1
+                    else selectedHistory.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
+                // Another operation may have advanced farther while this request waited for
+                // the lock. Reuse that checkpoint; never overwrite it with an older prefix.
+                if (latestCoveredIndex >= olderMessages.lastIndex &&
+                    ContextCompressionPlanner.summaryInputTokens(latest.rollingSummary.orEmpty()) <= summaryBudget) {
+                    summaryFailures.remove(conversation.id)
+                    return@withLock latest.rollingSummary
+                }
+                val sourceMessages = if (latestCoveredIndex >= olderMessages.size) selectedHistory.take(latestCoveredIndex + 1)
+                    else olderMessages
+                val coveredIndex = if (latest.rollingSummary.isNullOrBlank() ||
+                    ContextCompressionPlanner.summaryInputTokens(latest.rollingSummary.orEmpty()) > summaryBudget) -1
+                    else sourceMessages.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
+                val pending = sourceMessages.drop(coveredIndex + 1)
+                if (pending.isEmpty() && !latest.rollingSummary.isNullOrBlank()) {
+                    summaryFailures.remove(conversation.id)
+                    return@withLock latest.rollingSummary
+                }
+                val epoch = ChatGenerationManager.mutationEpoch(conversation.id)
+                val contextWindow = conversation.contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
+                val anchor = resolveLatestTimelineAnchor(conversation.id)
+                val constraints = resolveExistingPreferencesAndConstraints(conversation.id)
+                var summary = latest.rollingSummary.takeIf { coveredIndex >= 0 }
+                // Reserve the actual template, optional memories, the largest merged summary and
+                // completion space together. A fixed 2400-token allowance fails on small windows.
+                val emptyPrompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(null, "", summaryBudget, anchor, constraints)
+                // The ordinary history estimator is deliberately inexpensive, but it can
+                // undercount CJK and emoji-heavy UTF-8 input.  Use the same conservative
+                // transcript accounting as the actual summary chunks so the request planner
+                // does not send a prompt that only appears to fit the configured window.
+                val chunkBudget = minOf(12000, contextWindow - ContextCompressionPlanner.summaryInputTokens(emptyPrompt) -
+                    maxOf(summaryBudget, ContextCompressionPlanner.summaryInputTokens(summary.orEmpty())) -
+                    summaryCompletionReserve(contextWindow, summaryBudget) - 576)
+                require(chunkBudget >= 256) { "摘要模板与已有设定占满模型窗口，请减少设定或提高上下文上限；原文与上次摘要已保留" }
+                val summaryChunks = java.util.ArrayDeque(
+                    ContextCompressionPlanner.chunks(
+                        pending,
+                        chunkBudget,
+                        tokenCounter = ContextCompressionPlanner::summaryMessageTokens
+                    )
+                )
+                while (summaryChunks.isNotEmpty()) {
+                    val chunk = summaryChunks.removeFirst()
+                    currentCoroutineContext().ensureActive()
+                    try {
+                        summary = generateRollingSummary(config, modelName, summary, chunk, summaryBudget,
+                            latestTimelineAnchor = anchor, existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow)
+                            ?: throw SummaryRequestFailure("摘要生成失败，已保留原文与上次摘要；请检查模型后重试")
+                    } catch (capacity: Exception) {
+                        // A provider can advertise a larger window than the selected model
+                        // actually accepts.  Split only the failed source slice and retry it
+                        // with the already committed rolling summary; no coverage checkpoint
+                        // advances until every slice succeeds.
+                        if (!isSummaryCapacityError(capacity)) throw capacity
+                        val currentCost = chunk.sumOf(ContextCompressionPlanner::summaryMessageTokens)
+                        val smallerBudget = (currentCost / 2).coerceAtLeast(256)
+                        val smaller = ContextCompressionPlanner.chunks(
+                            chunk,
+                            smallerBudget,
+                            tokenCounter = ContextCompressionPlanner::summaryMessageTokens
+                        )
+                        if (smaller.size <= 1 && smaller.firstOrNull()?.size == chunk.size) throw capacity
+                        smaller.asReversed().forEach { summaryChunks.addFirst(it) }
+                        continue
+                    }
+                    if (ContextCompressionPlanner.summaryInputTokens(summary) > summaryBudget) {
+                        // One bounded semantic rewrite; never cut sentences or drop a source slice.
+                        summary = generateRollingSummary(config, modelName, summary, emptyList(),
+                            (summaryBudget * 0.75f).toInt().coerceAtLeast(300), latestTimelineAnchor = anchor,
+                            existingPreferencesAndConstraints = constraints, contextWindowTokens = contextWindow,
+                            conversationId = conversation.id)
+                            ?: throw SummaryRequestFailure("摘要缩短失败，已保留原文与上次摘要，请重试压缩")
+                    }
+                    if (ContextCompressionPlanner.summaryInputTokens(summary) > summaryBudget) {
+                        throw SummaryRequestFailure("摘要超过预算，已保留原文与上次摘要，请重试压缩")
+                    }
+                }
+                currentCoroutineContext().ensureActive()
+                com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+                    check(epoch == ChatGenerationManager.mutationEpoch(conversation.id)) { "压缩期间对话已变化，请重新整理" }
+                    val currentConversation = getConversationById(conversation.id) ?: error("对话已删除")
+                    check(currentConversation.rollingSummary == latest.rollingSummary &&
+                        currentConversation.summaryUpdatedMessageId == latest.summaryUpdatedMessageId &&
+                        currentConversation.summaryUpdatedAt == latest.summaryUpdatedAt) {
+                        "压缩期间摘要已被修改，请重新整理；已保留您的修改"
+                    }
+                    val current = getMessagesList(conversation.id).collapseVariantsForHistory().filter {
+                        it.role in listOf("user", "assistant") && it.content.isNotBlank() && !it.isExcluded && !isErrorPlaceholderMessage(it.content)
+                    }.take(sourceMessages.size)
+                    check(current.size == sourceMessages.size && current.zip(sourceMessages).all { (now, original) ->
+                        now.id == original.id && now.role == original.role && now.content == original.content
+                    }) { "压缩期间原文或回复选择已变化，请重新整理" }
+                    conversationDao.updateRollingSummary(conversation.id, summary, sourceMessages.last().id, System.currentTimeMillis())
+                }
+                summaryFailures.remove(conversation.id)
+                summary
+            } catch (failure: SummaryRequestFailure) {
+                if (!isRequestCancellation(failure)) {
+                    summaryFailures[conversation.id] = SummaryFailureState(
+                        summaryRequestIdentity(config, modelName, conversation.contextWindowTokens ?: estimateModelContextWindowTokens(modelName)), failure)
+                }
+                throw failure
             }
-            summary
         }
     }
 
@@ -3000,7 +3120,7 @@ class AiRepository(
             existingPreferencesAndConstraints = existingPreferencesAndConstraints
         )
         val summaryWindow = contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
-        val headroom = summaryWindow - estimateTokenCount(prompt) - 512
+        val headroom = summaryWindow - ContextCompressionPlanner.summaryInputTokens(prompt) - 512
         require(headroom >= tokenBudget) { "摘要提示与输出预算超过模型窗口，请减少设定或提高上下文上限" }
         val completionTokens = minOf(summaryCompletionReserve(summaryWindow, tokenBudget), headroom)
 
@@ -3018,10 +3138,15 @@ class AiRepository(
                     it == com.aiassistant.domain.model.ModelVendor.MINIMAX
             }
 
-        for (key in allKeys) {
+        var stopAfterConnectivityFailure = false
+        keysLoop@ for (key in allKeys) {
             val cleanKey = key.removePrefix("Bearer ").trim()
             val retryPolicy = personalizationManager.getRetryPolicy()
             for (attempt in 1..(com.aiassistant.domain.model.RetryPolicy.MAX_RETRIES + 1)) {
+                var summaryStreamAttempted = false
+                var usingCachedSummaryStream = false
+                var summaryResponseCompleted = false
+                var emptyResponseGatewayError: String? = null
                 try {
                     if (config.apiType == "anthropic") {
                         val request = AnthropicRequest(
@@ -3030,17 +3155,31 @@ class AiRepository(
                             max_tokens = completionTokens,
                             temperature = null
                         )
-                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                        val response = awaitMemoryCall(RetrofitClient.getSummaryService(normalizedUrl)
                             .anthropicMessages(apiKey = cleanKey, request = request), conversationId, config.copy(modelName = modelName), "summary", prompt)
                         if (!response.isSuccessful) {
                             val errBody = response.errorBody()?.string()?.take(300).orEmpty()
+                            if (response.code() == 413 || isContextLimitError(IllegalStateException(errBody))) {
+                                throw IllegalStateException("摘要输入超过模型上下文上限（HTTP ${response.code()}）：$errBody")
+                            }
                             throw Exception("HTTP ${response.code()}: $errBody")
                         }
+                        summaryResponseCompleted = true
                         check(response.body()?.stop_reason !in setOf("max_tokens", "refusal", "pause_turn")) { "摘要未完整结束，保留原文与上次摘要" }
                         val text = response.body()?.content?.filter { it.type == "text" }?.joinToString("\n") { it.text.orEmpty() }
                         val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(text, preserveCompleteText = true)
-                        if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
+                        if (!sanitized.isNullOrBlank() && isUsableSummaryCompletion(sanitized)) return sanitized
                     } else {
+                        val identity = summaryRequestIdentity(config.copy(apiKey = cleanKey), modelName, summaryWindow)
+                        if (identity in streamingSummaryEndpoints) {
+                            summaryStreamAttempted = true
+                            usingCachedSummaryStream = true
+                            val text = executeStreamingCompletion(config.copy(baseUrl = normalizedUrl, modelName = modelName),
+                                cleanKey, prompt, completionTokens, kind = "summary", useShortTimeout = true)
+                            val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(text, preserveCompleteText = true)
+                            if (!sanitized.isNullOrBlank() && isUsableSummaryCompletion(sanitized)) return sanitized
+                            error("流式摘要没有返回完整有效正文；原文与上次摘要已保留")
+                        }
                         // 优先尝试标准非流式请求
                         val request = ChatCompletionRequest(
                             model = modelName,
@@ -3050,9 +3189,10 @@ class AiRepository(
                             max_completion_tokens = if (isModernOpenAiStyle) completionTokens else null,
                             stream = false
                         )
-                        val response = awaitMemoryCall(RetrofitClient.getAnalysisService(normalizedUrl)
+                        val response = awaitMemoryCall(RetrofitClient.getSummaryService(normalizedUrl)
                             .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), conversationId, config.copy(modelName = modelName), "summary", prompt)
                         if (response.isSuccessful) {
+                            summaryResponseCompleted = true
                             val body = response.body()
                             if (body?.error != null) {
                                 throw Exception(body.error.message ?: "OpenAI API 返回错误")
@@ -3061,31 +3201,73 @@ class AiRepository(
                             check(choice?.finish_reason !in setOf("length", "content_filter", "tool_calls", "function_call")) { "摘要未完整结束，保留原文与上次摘要" }
                             val text = choice?.message?.content?.ifBlank { null }
                             val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(text, preserveCompleteText = true)
-                            if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) return sanitized
+                            if (!sanitized.isNullOrBlank() && isUsableSummaryCompletion(sanitized)) return sanitized
+                            val reason = if (!choice?.message?.reasoning_content.isNullOrBlank() && text.isNullOrBlank())
+                                "模型只返回了思考内容，没有返回摘要正文；请切换到可输出正文的模型或关闭深度思考后重试"
+                            else if (text.isNullOrBlank()) "模型返回空摘要正文，请检查该模型的接口响应后重试"
+                            else "模型返回的摘要正文不完整或只有标题，请重新压缩或更换模型"
+                            throw IllegalStateException(reason)
                         } else {
-                            val errBody = response.errorBody()?.string()?.take(300).orEmpty()
-                            if (response.code() !in setOf(400, 405, 415, 501)) throw Exception("HTTP ${response.code()}: $errBody")
+                            val rawErrorBody = response.errorBody()?.string().orEmpty()
+                            val errBody = rawErrorBody.take(300)
+                            // 只有网关明确拒绝非流式协议时才走流式通道。400 常见于
+                            // 上下文超限，不能再发一份相同大小的请求拖延失败。
+                            if (response.code() == 413 || isContextLimitError(IllegalStateException(errBody))) {
+                                throw IllegalStateException("摘要输入超过模型上下文上限（HTTP ${response.code()}）：$errBody")
+                            }
+                            val emptyGateway = response.code() in setOf(500, 502) &&
+                                runCatching {
+                                    gson.fromJson(rawErrorBody, com.google.gson.JsonObject::class.java)
+                                        ?.getAsJsonObject("error")?.get("message")?.asString
+                                        ?.contains("empty response detected", ignoreCase = true) == true
+                                }.getOrDefault(false)
+                            if (emptyGateway) emptyResponseGatewayError = "HTTP ${response.code()}: $errBody"
+                            if (response.code() !in setOf(405, 415, 501) && !emptyGateway) throw Exception("HTTP ${response.code()}: $errBody")
                             Log.w(tag, "generateRollingSummary 非流式 HTTP ${response.code()}: $errBody，尝试流式通道备用")
                         }
 
-                        // 非流式未返回或网关仅支持流式时，自动启用流式保底通道
+                        // A narrowly identified empty-response gateway can work in streaming
+                        // mode even when its non-streaming compatibility layer returns 500.
+                        summaryStreamAttempted = true
                         val streamResult = executeStreamingCompletion(
                             config = config.copy(baseUrl = normalizedUrl, modelName = modelName),
                             key = cleanKey,
                             prompt = prompt,
-                            maxTokens = completionTokens, kind = "summary"
+                            maxTokens = completionTokens, kind = "summary", useShortTimeout = true
                         )
                         val sanitized = ConversationTitleHelper.sanitizeSummaryCompletion(streamResult, preserveCompleteText = true)
-                        if (!sanitized.isNullOrBlank() && isSummarySubstantiallyComplete(sanitized)) {
+                        if (!sanitized.isNullOrBlank() && isUsableSummaryCompletion(sanitized)) {
+                            if (emptyResponseGatewayError != null) streamingSummaryEndpoints += identity
                             return sanitized
                         }
+                        error("流式摘要没有返回完整有效正文；原文与上次摘要已保留")
                     }
                     throw Exception("模型未返回有效的完整摘要")
                 } catch (e: Exception) {
-                    lastException = e
+                    lastException = if (emptyResponseGatewayError != null)
+                        IllegalStateException("非流式摘要返回 $emptyResponseGatewayError；流式兼容请求失败：${e.message}", e) else e
                     Log.w(tag, "generateRollingSummary Key报错或请求异常 (attempt $attempt): ${e.message}")
+                    if (summaryStreamAttempted) streamingSummaryEndpoints.remove(summaryRequestIdentity(config.copy(apiKey = cleanKey), modelName, summaryWindow))
                     if (isRequestCancellation(e)) throw e
                     if (e is com.aiassistant.data.remote.HttpAccessDeniedException) throw e
+                    if (isSummaryCapacityError(e)) {
+                        // The prompt is identical for every key; retrying it with another
+                        // credential cannot change the provider's context limit.
+                        stopAfterConnectivityFailure = true
+                        break
+                    }
+                    // 连接失败/超时不再把同一个不可达模型叠加到重试策略和备用
+                    // Key 上，摘要请求使用专用短通道后应立即把真实错误交给 UI。
+                    if (isNetworkFluctuationException(e) || isTimeoutException(e)) {
+                        stopAfterConnectivityFailure = true
+                        break
+                    }
+                    if (usingCachedSummaryStream && RetryErrorType.classify(e) in setOf(
+                            RetryErrorType.AUTHENTICATION, RetryErrorType.PERMISSION, RetryErrorType.RATE_LIMIT)) break
+                    if (summaryStreamAttempted || summaryResponseCompleted) {
+                        stopAfterConnectivityFailure = true
+                        break
+                    }
                     if (retryPolicy.canRetry(e, attempt - 1)) {
                         kotlinx.coroutines.delay(retryPolicy.delayMillis(attempt - 1))
                         continue
@@ -3093,20 +3275,17 @@ class AiRepository(
                     break
                 }
             }
+            if (stopAfterConnectivityFailure) break@keysLoop
         }
         if (lastException != null) {
             Log.w(tag, "generateRollingSummary 所有Key均尝试失败: ${lastException.message}")
-            throw IllegalStateException("摘要请求失败：${lastException.message ?: "未获得完整摘要"}；原文与上次摘要已保留", lastException)
+            throw SummaryRequestFailure("摘要请求失败：${lastException.message ?: "未获得完整摘要"}；原文与上次摘要已保留", lastException)
         }
         return null
     }
 
-    private fun buildSummaryTranscript(messages: List<Message>, maxMessages: Int): String {
-        return messages.joinToString("\n") { message ->
-            val role = if (message.role == "user") "用户" else "助手"
-            "[$role · 原文ID ${message.id}] ${message.content}"
-        }
-    }
+    private fun buildSummaryTranscript(messages: List<Message>, maxMessages: Int): String =
+        ContextCompressionPlanner.summaryTranscript(messages, maxMessages)
 
     private fun buildExtractiveConversationSummary(
         messages: List<Message>,
@@ -3123,6 +3302,20 @@ class AiRepository(
         val block = structured.toPromptBlock()
         if (block.isBlank()) return null
         return compactTextToTokenBudget(block, tokenBudget)
+    }
+
+    /** Transport completed but the structured validator rejected the model text. */
+    private fun isUsableSummaryCompletion(summary: String?): Boolean {
+        val clean = summary?.trim().orEmpty()
+        if (clean.length < 24) return false
+        val lower = clean.lowercase()
+        if (listOf("无法返回", "无法生成", "未能生成", "不能生成", "抱歉，", "抱歉,", "sorry,", "i cannot", "i can't")
+                .any(lower::startsWith)) return false
+        if (isSummarySubstantiallyComplete(clean)) return true
+        val last = clean.lineSequence().map(String::trim).filter(String::isNotBlank).lastOrNull().orEmpty()
+        if (last.endsWith("：") || last.endsWith(":")) return false
+        if (last.matches(Regex("^【.+?】[：:]?\\s*$"))) return false
+        return clean.any { it in "。！？.!?" } || clean.lineSequence().count { it.isNotBlank() } >= 2
     }
 
     fun buildEffectiveSystemPrompt(
@@ -3546,7 +3739,7 @@ class AiRepository(
                     }
                     override fun onFailure(call: retrofit2.Call<T>, error: Throwable) {
                         if (continuation.isActive) continuation.resumeWithException(
-                            if (call.isCanceled) CancellationException("记忆提炼已取消", error) else error
+                            if (call.isCanceled && !isTimeoutException(error)) CancellationException("记忆提炼已取消", error) else error
                         )
                     }
                 })
@@ -3842,9 +4035,9 @@ class AiRepository(
 
             【剧情覆盖与详略】
             - 按原文叙事顺序检查开头、中段和结尾，保持人物、地点、行动、冲突/选择、原因、结果、关系变化与未解决线索。
-            - 摘要详略应与剧情投入的信息量相称。展开多轮的购物、旅行、交谈或战斗可以用多句保留重要过程，也可按有意义的变化拆为几个事件；没有固定字数或每场景一条的限制。
+            ${AdvancedMemoryEngine.EVENT_SUMMARY_GUIDANCE}
             - 不逐句抄写动作流水账，也不以收尾取代过程。例如十轮购物包含挑选礼物、预算争执、妥协、遗失物品、返家，不能只留下“两人购物后回家”。
-            - 同场景的事实按先后保留；重复叙述只记一次，细节补充应融入已有经过，反转须同时保留先前状态及变化原因。
+            - 同场景的事实按先后保留；重复叙述只记一次，有剧情作用的新事实融入已有经过，反转须同时保留先前状态及变化原因。
 
             【时间语义】
             - 区分叙事顺序与故事发生时间。timeTag 使用原文可支持的日期、自然跨度或事件锚点，不强制改写为第几天，不填补未描写的早晚。
@@ -3868,13 +4061,13 @@ class AiRepository(
             对每条消息关联它支持的事件索引 eventIndices 或设定索引 settingIndices（索引从 0 开始）；
             没有新事实时 noFactReason 写明原因，如纯写作指导、已重复确认、寒暄、未实现的计划。
             所有输出事件/设定必须至少关联一条原消息。不把开头、中段标为无事实来只概括结尾；
-            对较长正文逐段检查其关键变化，详细场景不能仅关联最终离开的结果。
+            对较长正文逐段检查关键变化；细节渲染可无新增事实，但不得遗漏中途独立事件或仅关联最终离开的结果。
 
             只输出 JSON（timelineEvents 可多句；没有新增设定时 atemporalSettings 为 []）：
             {
               "sourceCoverage": [{"messageId":123,"eventIndices":[0],"settingIndices":[],"noFactReason":""}],
               "currentStoryTime": "片段结束时的主线时间或未确定",
-              "timelineEvents": [{"timeTag":"有参照的故事时间","category":"PLOT_EVENT","content":"与原文信息量相称的完整事件经过"}],
+              "timelineEvents": [{"timeTag":"有参照的故事时间","category":"PLOT_EVENT","content":"保留独立事件和必要因果、删去无作用细节的完整经过"}],
               "atemporalSettings": [{"category":"世界规则","content":"新的规则或已有设定的补充","action":"ADD","targetMemoryId":null,"evidence":"原文依据","targetScope":"session"}]
             }
 
@@ -4225,9 +4418,10 @@ class AiRepository(
                 newEvent 和每条 atemporalSettings 可附 evidence 字段，引用本轮原文中的短片段便于核对；没有证据时不提取。
                 请深度理解正文对话，敏锐判断并智能提取：
                 1.【时间】以剧情语义和原文证据判断，不按一天早晚轮转。没有证据保持原时间；明确过了一两周/数月时保留跨度、模糊程度及参照事件，不能把第六天之后两周写成第七天，不把月份换为固定天数。回忆/倒叙注明过去时间，主线 newStoryTime 不倒退；计划和假设不改变现在。
-                2.【同一事件补充】只有目标 ID、同一故事时间和同一事件均明确时才 UPDATE。newEvent.content 写本轮新增经过与影响，程序会保留原节点全部细节。已有事实换说法不重提；事件收尾不能覆盖中途发生的选择、争执、承诺与线索。
+                2.【同一事件补充】只有目标 ID、同一故事时间和同一事件均明确时才 UPDATE。newEvent.content 只写本轮新增的事件变化与影响，程序会保留已有事实，不重复复述原节点。已有事实换说法不重提；事件收尾不能覆盖中途发生的选择、争执、承诺与线索。
                 3.【新事件】不同时间、场景转折或独立变化可以 APPEND。同一场景允许多个有意义的阶段，不必强压成一条结果，也不按每轮对话机械建节点。
-                4.【详略】没有固定字数限制。展开越充分的内容可保留更完整的过程；保留因果、关系变化与悬而未决的问题，用第三人称叙述已发生事实，不搬运导演口令。
+                4.【详略】用第三人称总结已发生事实，不搬运导演口令。
+                ${AdvancedMemoryEngine.EVENT_SUMMARY_GUIDANCE}
 
                 注意：
                 1. 独立提取正文中新增、明确成立的常驻角色特质、习惯偏好、生理禁忌、世界规则与人际羁绊，写入 atemporalSettings；临时动作、事件和导演指令不算设定，不得记录为现实用户的全局偏好。没有时间推进也可以提取事件或设定。
@@ -4241,7 +4435,7 @@ class AiRepository(
                   "newEvent": {
                     "timeTag": "有依据的时间标签，可为购物返家后约两周或回忆·五年前",
                     "category": "PLOT_EVENT",
-                    "content": "本轮新增的完整事实经过，详略与原文信息量相称"
+                    "content": "本轮新增的事件、关键转折与结果，省略无剧情作用的描写"
                   },
                   "atemporalSettings": [{"category": "世界规则", "content": "正文中新确认的长期规则"}]
                 }
@@ -5027,7 +5221,8 @@ class AiRepository(
         key: String,
         prompt: String,
         maxTokens: Int,
-        kind: String = "auxiliary"
+        kind: String = "auxiliary",
+        useShortTimeout: Boolean = false
     ): String? {
         val started = System.nanoTime()
         val content = StringBuilder()
@@ -5056,15 +5251,28 @@ class AiRepository(
             try {
                 RetrofitClient.postJson(config.baseUrl, "chat/completions",
                     headers = mapOf("Authorization" to RetrofitClient.formatApiKey(key), "Accept" to "text/event-stream"),
-                    json = gson.toJson(request), onCallCreated = { activeCall = it; if (owner?.isActive == false) it.cancel() }).use { response ->
-                    check(response.isSuccessful) { "HTTP ${response.code}" }
+                    json = gson.toJson(request), onCallCreated = { activeCall = it; if (owner?.isActive == false) it.cancel() },
+                    client = if (useShortTimeout) RetrofitClient.summaryHttpClient else RetrofitClient.streamHttpClient).use { response ->
+                    if (!response.isSuccessful) {
+                        val detail = if (useShortTimeout) response.body?.string()?.take(300).orEmpty() else ""
+                        if (useShortTimeout && (response.code == 413 || isContextLimitError(IllegalStateException(detail)))) {
+                            error("摘要输入超过模型上下文上限（HTTP ${response.code}）：$detail")
+                        }
+                        error("HTTP ${response.code}${if (detail.isBlank()) "" else ": $detail"}")
+                    }
                     val body = response.body ?: error("响应体为空")
                     body.charStream().buffered().use { reader ->
                         while (true) {
                             currentCoroutineContext().ensureActive()
                             val line = reader.readLine() ?: break
                             val chunk = parseOpenAiStreamLine(line.trim(), gson) ?: continue
-                            if (!chunk.inlineErrorMessage.isNullOrBlank()) error("流式回复错误")
+                            if (!chunk.inlineErrorMessage.isNullOrBlank()) {
+                                val detail = chunk.inlineErrorMessage.take(300)
+                                if (useShortTimeout && isContextLimitError(IllegalStateException(detail))) {
+                                    error("摘要输入超过模型上下文上限：$detail")
+                                }
+                                error(if (useShortTimeout) "摘要流式回复错误：$detail" else "流式回复错误")
+                            }
                             if ((!chunk.contentDelta.isNullOrEmpty() || !chunk.thinkingDelta.isNullOrEmpty()) && firstMs == 0L)
                                 firstMs = ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)
                             chunk.contentDelta?.let(content::append)
@@ -5085,6 +5293,10 @@ class AiRepository(
             failed = true
             cancelled = isRequestCancellation(error) || !currentCoroutineContext().isActive
             if (cancelled) throw CancellationException("辅助请求已取消", error)
+            // Preserve the transport/capacity error for summary policy decisions.
+            // Turning it into null would incorrectly classify it as an empty response
+            // and start another long retry/key loop.
+            if (useShortTimeout) throw error
             Log.w(tag, "辅助流式调用未完成", error)
             return null
         } finally {

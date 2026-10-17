@@ -52,6 +52,7 @@ class MemoryExtractionRepositoryTest {
         val payloads = CopyOnWriteArrayList<JsonObject>()
         val paths = CopyOnWriteArrayList<String>()
         val failures = CopyOnWriteArrayList<Throwable>()
+        val authorizations = java.util.concurrent.ConcurrentHashMap<Socket, String>()
         init {
             HttpTestAccess.allow(url)
             executor.submit {
@@ -78,6 +79,7 @@ class MemoryExtractionRepositoryTest {
                                         val header = line()
                                         if (header.isEmpty()) break
                                         if (header.startsWith("Content-Length:", true)) length = header.substringAfter(':').trim().toInt()
+                                        if (header.startsWith("Authorization:", true)) authorizations[socket] = header.substringAfter(':').trim()
                                     }
                                     val bytes = ByteArray(length)
                                     var read = 0
@@ -128,6 +130,18 @@ class MemoryExtractionRepositoryTest {
         reply(socket, Gson().toJson(response))
     }
 
+    /** Reconstruct only source slices, excluding repeated templates and rolling summaries. */
+    private fun sourceFragmentsFromSummaryPrompt(prompt: String): List<Pair<Long, String>> {
+        check(prompt.contains("新增对话历史：\n"))
+        val transcript = prompt.substringAfter("新增对话历史：\n")
+        val headers = Regex("(?m)^[ \\t]*\\[(?:用户|助手) · 原文ID (\\d+)] ").findAll(transcript).toList()
+        return headers.mapIndexed { index, header ->
+            val nextHeader = headers.getOrNull(index + 1)
+            val content = transcript.substring(header.range.last + 1, nextHeader?.range?.first ?: transcript.length)
+            header.groupValues[1].toLong() to if (nextHeader == null) content else content.removeSuffix("\n")
+        }
+    }
+
     private class Fixture : AutoCloseable {
         val context = RuntimeEnvironment.getApplication()
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
@@ -167,6 +181,29 @@ class MemoryExtractionRepositoryTest {
         f.repository.sendChatMessageWithConfig(config, id, "reply OK", onToken = { tokens.append(it) },
             onComplete = { text, _, _ -> assertEquals("OK", text) }, onError = { fail(it) })
         assertEquals("OK", tokens.toString())
+    }
+
+    private fun isSummaryPayload(payload: JsonObject): Boolean =
+        payload.getAsJsonArray("messages").singleOrNull()?.asJsonObject?.get("content")
+            ?.takeIf { it.isJsonPrimitive }?.asString?.contains("新增对话历史：\n") == true
+
+    /** Match the UI: persist the current user first, then let the repository save its reply. */
+    private suspend fun chatWithSavedUser(f: Fixture, config: ApiConfig, id: Long, content: String): String? {
+        f.db.messageDao().insertMessage(Message(conversationId = id, role = "user", content = content))
+        val tokens = StringBuilder()
+        var completed: String? = null
+        var error: String? = null
+        f.repository.sendChatMessageWithConfig(config, id, content,
+            options = ChatRequestOptions(maxTokens = 512, enableSessionMemory = false, enableExternalMemory = false),
+            onToken = { tokens.append(it) }, onComplete = { text, _, _ -> completed = text }, onError = { error = it })
+        if (error == null) {
+            assertEquals("OK", completed)
+            assertEquals("OK", tokens.toString())
+        } else {
+            assertNull("失败发送不能同时完成回复", completed)
+            assertEquals("", tokens.toString())
+        }
+        return error
     }
 
     private fun roleplayRepository(f: Fixture) = RoleplayRepository(
@@ -1463,6 +1500,641 @@ class MemoryExtractionRepositoryTest {
                 assertEquals(summary, saved.rollingSummary)
                 assertEquals(if (generateAll) ids.last() else ids[7], saved.summaryUpdatedMessageId)
                 assertEquals(24, f.db.messageDao().getMessagesList(id).size)
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun summaryCapacityRejectionSplitsOnlyFailedLongSourceAndPreservesEverySuccessfulCharacterInBothProtocols() = runBlocking {
+        val summary = "合成船队仍须保留蓝印凭证；已记录各站通行经过，铜钥匙仍在北港资料柜。下一步等待领航员确认航线。"
+        for (protocol in listOf("openai", "anthropic")) {
+            val rejected = java.util.concurrent.atomic.AtomicBoolean()
+            val longSourceId = java.util.concurrent.atomic.AtomicLong()
+            val rejectedPrompt = java.util.concurrent.atomic.AtomicReference<String>()
+            val successfulPrompts = CopyOnWriteArrayList<String>()
+            Endpoint { socket, payload ->
+                if (payload.get("stream")?.asBoolean == true) {
+                    if (protocol == "openai") streamReply(socket) else reply(socket,
+                        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                            "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+                } else {
+                    val prompt = payload.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                    val sources = sourceFragmentsFromSummaryPrompt(prompt)
+                    if (sources.any { it.first == longSourceId.get() } && rejected.compareAndSet(false, true)) {
+                        rejectedPrompt.set(prompt)
+                        reply(socket, "{\"error\":{\"message\":\"maximum context length is 8192 tokens; input too long\"}}", "400 Bad Request")
+                    } else {
+                        successfulPrompts.add(prompt)
+                        completedSummaryReply(socket, summary, protocol)
+                    }
+                }
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-capacity-summary-model", protocol, enabled = false)
+                val originalContent = (1..86).map { index ->
+                    if (index == 41) "长片段首段：收到蓝印凭证。\n" + "合成中段经过：核对铜钥匙与沿途通行记录。".repeat(1_200) +
+                        "\n长片段末段：待领航员确认 synthetic-capacity-route.json"
+                    else "容量回归合成原文[$index]：记录沿途变化并保留蓝印凭证。"
+                }
+                val ids = f.db.messageDao().insertMessages(originalContent.mapIndexed { index, text -> Message(
+                    conversationId = id, role = if (index % 2 == 0) "user" else "assistant", content = text, createdAt = index.toLong()) })
+                longSourceId.set(ids[40])
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+                val originalMessages = f.db.messageDao().getMessagesList(id)
+                val result = withTimeout(20_000) { f.repository.compressConversationContext(id).getOrThrow() }
+                assertTrue("必须真实经过服务端容量错误", rejected.get())
+                val summaries = endpoint.payloads.toList()
+                assertEquals("容量错误不能换成同大小的流式请求", 0, summaries.count { it.get("stream")?.asBoolean == true })
+                assertEquals("只拒绝一个原始分段", successfulPrompts.size + 1, summaries.size)
+                val failedIndex = summaries.indexOfFirst {
+                    it.getAsJsonArray("messages").single().asJsonObject.get("content").asString == rejectedPrompt.get()
+                }
+                assertTrue("失败前应已有成功分段，验证不会从头重来", failedIndex > 0)
+                val failedLength = sourceFragmentsFromSummaryPrompt(rejectedPrompt.get()).sumOf { it.second.length }
+                val nextPrompt = summaries[failedIndex + 1].getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                val nextFragments = sourceFragmentsFromSummaryPrompt(nextPrompt)
+                assertEquals("重试应从失败的原文开始", ids[40], nextFragments.first().first)
+                assertTrue("容量错误后必须缩小失败分段", nextFragments.sumOf { it.second.length } < failedLength)
+                val reconstructed = linkedMapOf<Long, StringBuilder>()
+                val successfulOrder = mutableListOf<Long>()
+                successfulPrompts.forEach { prompt ->
+                    sourceFragmentsFromSummaryPrompt(prompt).forEach { (sourceId, text) ->
+                        reconstructed.getOrPut(sourceId) { StringBuilder() }.append(text)
+                        if (successfulOrder.lastOrNull() != sourceId) successfulOrder += sourceId
+                    }
+                }
+                assertEquals("成功请求必须连续覆盖每条待退休原文且不重复已成功片段", ids.take(84), successfulOrder)
+                assertEquals(ids.take(84), reconstructed.keys.toList())
+                ids.take(84).forEachIndexed { index, sourceId ->
+                    assertEquals("原文 $sourceId 的首中尾与换行不能因容量重试丢失", originalContent[index], reconstructed.getValue(sourceId).toString())
+                }
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(summary, saved.rollingSummary)
+                assertEquals(ids[83], saved.summaryUpdatedMessageId)
+                assertEquals(2, result.recentMessageCount)
+                assertEquals(originalMessages, f.db.messageDao().getMessagesList(id))
+                chat(f, config, id)
+                val wire = endpoint.payloads.last()
+                val system = if (protocol == "anthropic") wire.get("system").asString else
+                    wire.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                assertTrue("成功压缩后的实际对话请求必须注入摘要", system.contains(summary))
+                assertFalse("已压缩早期原文不得继续发送", wire.toString().contains("容量回归合成原文[1]"))
+                assertTrue("最近完整轮次仍须保留", wire.toString().contains("容量回归合成原文[86]"))
+                assertEquals("正式发送只新增回复，原文保留", originalMessages, f.db.messageDao().getMessagesList(id).take(originalMessages.size))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun completedPlainAndSingleHeadingSummariesAreSavedAndUsedInFollowingChatInBothProtocols() = runBlocking {
+        val summaries = listOf(
+            "合成角色已一同完成超市采购，挑选了蓝色购物袋并核对找零，回家后将铜钥匙放回北港资料柜。下一步等待确认晚餐安排。",
+            "【合成采购记录】\n两名合成角色已挑选蓝色购物袋并完成采购，回家后铜钥匙仍保存在北港资料柜，接下来等待确认晚餐安排。"
+        )
+        for (protocol in listOf("openai", "anthropic")) for (summary in summaries) {
+            Endpoint { socket, payload ->
+                if (payload.get("stream")?.asBoolean == true) {
+                    if (protocol == "openai") streamReply(socket) else reply(socket,
+                        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                            "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+                } else completedSummaryReply(socket, summary, protocol)
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-plain-summary-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成采购原文[$index]：核对蓝色购物袋与铜钥匙。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+                val originals = f.db.messageDao().getMessagesList(id)
+                f.repository.compressConversationContext(id).getOrThrow()
+                assertEquals("正常结束的完整正文不能因缺少固定四标题被拒绝", 1, endpoint.payloads.size)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(summary, saved.rollingSummary)
+                assertEquals(ids[21], saved.summaryUpdatedMessageId)
+                chat(f, config, id)
+                val request = endpoint.payloads.last()
+                val system = if (protocol == "anthropic") request.get("system").asString else
+                    request.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                assertTrue(system.contains(summary))
+                assertFalse(request.toString().contains("合成采购原文[1]"))
+                assertTrue(request.toString().contains("合成采购原文[24]"))
+                assertEquals(originals, f.db.messageDao().getMessagesList(id).take(24))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun unknownSummaryBadRequestNeverSplitsOrFallsBackToStreamingAndKeepsSavedSummaryInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ -> reply(socket, "{\"error\":{\"message\":\"synthetic unsupported argument\"}}", "400 Bad Request") }
+                .use { endpoint -> Fixture().use { f ->
+                    f.settings.setModelRetryEnabled(false)
+                    f.settings.setBackupKeyFallbackEnabled(false)
+                    val (_, id) = f.conversation(endpoint.url, "synthetic-unknown-bad-request-model", protocol, enabled = false)
+                    val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                        role = if (index % 2 == 1) "user" else "assistant", content = "合成未知参数失败原文[$index]。", createdAt = index.toLong()) })
+                    f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                        contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                        rollingSummary = "上次确认：合成队伍仍在北港，尚未出发。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 123L))
+                    val original = f.db.conversationDao().getConversationById(id)!!
+                    val originalMessages = f.db.messageDao().getMessagesList(id)
+                    val result = f.repository.compressConversationContext(id)
+                    assertTrue(result.isFailure)
+                    assertTrue(result.exceptionOrNull()!!.message.orEmpty().contains("400"))
+                    assertEquals("未知400不能拆分原文或再发流式请求", 1, endpoint.payloads.size)
+                    assertFalse(endpoint.payloads.single().get("stream")?.asBoolean == true)
+                    val saved = f.db.conversationDao().getConversationById(id)!!
+                    assertEquals(original.rollingSummary, saved.rollingSummary)
+                    assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                    assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                    assertEquals(originalMessages, f.db.messageDao().getMessagesList(id))
+                    assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+                } }
+        }
+    }
+
+    @Test fun emptyInvalidAndTruncatedSummaryResponsesFailOnceAndPreservePreviousCheckpointInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (kind in listOf("empty", "invalid", "truncated")) {
+            Endpoint { socket, _ ->
+                val text = when (kind) {
+                    "empty" -> ""
+                    "invalid" -> "抱歉，我无法生成这份摘要，因为本次没有获得能够独立使用的完整上下文，请重新提供全部有效原文之后再试。"
+                    else -> "合成队伍已经核对蓝印凭证并准备出发。这段正文看起来完整，但接口明确声明输出已截断。"
+                }
+                val response = if (protocol == "openai") mapOf("choices" to listOf(mapOf(
+                    "finish_reason" to if (kind == "truncated") "length" else "stop", "message" to mapOf("content" to text))))
+                    else mapOf("stop_reason" to if (kind == "truncated") "max_tokens" else "end_turn",
+                        "content" to listOf(mapOf("type" to "text", "text" to text)))
+                reply(socket, Gson().toJson(response))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (_, id) = f.conversation(endpoint.url, "synthetic-invalid-summary-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成摘要保留原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = "上次已确认：合成角色仍保管铜钥匙，不能提前离开北港。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 321L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                val result = f.repository.compressConversationContext(id)
+                assertTrue("$protocol/$kind 必须失败，不能把无效正文当成已压缩", result.isFailure)
+                assertEquals("$protocol/$kind 不能再走流式通道或自动重放", 1, endpoint.payloads.size)
+                assertFalse(endpoint.payloads.single().get("stream")?.asBoolean == true)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(original.rollingSummary, saved.rollingSummary)
+                assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun refusedSummaryConnectionStopsDespiteNetworkRetriesAndBackupKeysAndKeepsCheckpointInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            val closedPort = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+            val url = "http://127.0.0.1:$closedPort/v1"
+            HttpTestAccess.allow(url)
+            Fixture().use { f ->
+                f.settings.setModelRetryEnabled(true)
+                f.settings.saveRetryRule(RetryErrorType.NETWORK, RetryRule(true, 20))
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.conversation(url, "synthetic-refused-summary-model", protocol, enabled = false)
+                f.db.apiConfigDao().updateConfig(config.copy(apiKey = "test-first\ntest-second\ntest-third"))
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成连接拒绝原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = "此前确认：合成船队仍在北港，蓝印凭证尚未交出。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 456L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                val started = System.nanoTime()
+                val result = withTimeout(10_000) { f.repository.compressConversationContext(id) }
+                val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+                assertTrue(result.isFailure)
+                assertTrue("连接拒绝应及时交还UI，实际${elapsedMillis}ms", elapsedMillis < 5_000)
+                val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).filter { it.requestKind == "summary" }
+                assertEquals("连接拒绝不能叠加20次重试或备用Key", 1, stats.size)
+                assertFalse(stats.single().success)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(original.rollingSummary, saved.rollingSummary)
+                assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+            }
+        }
+    }
+
+    @Test fun streamOnlySummaryDisconnectIsNotReclassifiedAsEmptyResponseOrReplayedAcrossKeys() = runBlocking {
+        Endpoint { socket, payload ->
+            if (payload.get("stream")?.asBoolean == true) socket.shutdownOutput()
+            else reply(socket, "{\"error\":{\"message\":\"synthetic endpoint only supports streaming\"}}", "405 Method Not Allowed")
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(true)
+            f.settings.saveRetryRule(RetryErrorType.EMPTY_RESPONSE, RetryRule(true, 20))
+            f.settings.saveRetryRule(RetryErrorType.NETWORK, RetryRule(true, 20))
+            f.settings.setBackupKeyFallbackEnabled(true)
+            val (config, id) = f.conversation(endpoint.url, "synthetic-stream-summary-disconnect-model", enabled = false)
+            f.db.apiConfigDao().updateConfig(config.copy(apiKey = "test-first\ntest-second\ntest-third"))
+            val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成流式摘要断连原文[$index]。", createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                rollingSummary = "上次确认：合成角色仍在北港，铜钥匙没有转交给他人。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 567L))
+            val original = f.db.conversationDao().getConversationById(id)!!
+            val originals = f.db.messageDao().getMessagesList(id)
+            val result = withTimeout(10_000) { f.repository.compressConversationContext(id) }
+            assertTrue(result.isFailure)
+            assertEquals("仅允许非流式405之后进入一次流式通道，断连不能重放", 2, endpoint.payloads.size)
+            assertFalse(endpoint.payloads[0].get("stream")?.asBoolean == true)
+            assertTrue(endpoint.payloads[1].get("stream")?.asBoolean == true)
+            assertFalse("网络断连必须保留原始错误类别", result.exceptionOrNull()!!.message.orEmpty().contains("模型未返回有效"))
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(original.rollingSummary, saved.rollingSummary)
+            assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+            assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+            assertEquals(originals, f.db.messageDao().getMessagesList(id))
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun streamOnlySummaryCapacityErrorsSplitFailedSourceWithoutReplayingItsBodyOrDroppingText() = runBlocking {
+        val summary = "合成领航员仍在北港保管铜钥匙，蓝印凭证已经核对；此前各段通行经过均已记录，接下来等待确认新航线。"
+        for (failureKind in listOf("http413", "http400", "sse200")) {
+            val longSourceId = java.util.concurrent.atomic.AtomicLong()
+            val failedPrompt = java.util.concurrent.atomic.AtomicReference<String>()
+            val successfulPrompts = CopyOnWriteArrayList<String>()
+            Endpoint { socket, payload ->
+                val prompt = payload.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                if (payload.get("stream")?.asBoolean != true) {
+                    reply(socket, "{\"error\":{\"message\":\"synthetic endpoint only supports streaming\"}}", "405 Method Not Allowed")
+                } else {
+                    val sources = sourceFragmentsFromSummaryPrompt(prompt)
+                    if (sources.any { it.first == longSourceId.get() }) failedPrompt.compareAndSet(null, prompt)
+                    if (prompt == failedPrompt.get()) {
+                        when (failureKind) {
+                            // No textual context hint: the HTTP status itself must trigger splitting.
+                            "http413" -> reply(socket, "{\"error\":{\"message\":\"synthetic upload rejected\"}}", "413 Payload Too Large")
+                            "http400" -> reply(socket,
+                                "{\"error\":{\"type\":\"context_length_exceeded\",\"message\":\"context_length_exceeded: input too long\"}}", "400 Bad Request")
+                            else -> reply(socket,
+                                "data: {\"error\":{\"type\":\"context_length_exceeded\",\"message\":\"context_length_exceeded: input too long\"}}\n\n",
+                                type = "text/event-stream")
+                        }
+                    } else {
+                        successfulPrompts.add(prompt)
+                        val content = Gson().toJson(summary)
+                        reply(socket,
+                            "data: {\"choices\":[{\"delta\":{\"content\":$content},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                            type = "text/event-stream")
+                    }
+                }
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(true)
+                listOf(RetryErrorType.BAD_REQUEST, RetryErrorType.TOO_LARGE, RetryErrorType.EMPTY_RESPONSE,
+                    RetryErrorType.OTHER_HTTP, RetryErrorType.OTHER).forEach { f.settings.saveRetryRule(it, RetryRule(true, 20)) }
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-stream-capacity-model", enabled = false)
+                f.db.apiConfigDao().updateConfig(config.copy(apiKey = "test-first\ntest-second\ntest-third"))
+                val contents = (1..44).map { index ->
+                    if (index == 41) "流式长原文首段：蓝印凭证已核对。\n" +
+                        "流式中段合成事实：铜钥匙仍由北港领航员保管。".repeat(800) +
+                        "\n流式长原文末段：等待确认 synthetic-stream-route.json"
+                    else "流式容量回归合成原文[$index]：核对北港通行记录。"
+                }
+                val ids = f.db.messageDao().insertMessages(contents.mapIndexed { index, content -> Message(conversationId = id,
+                    role = if (index % 2 == 0) "user" else "assistant", content = content, createdAt = index.toLong()) })
+                longSourceId.set(ids[40])
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+                val originals = f.db.messageDao().getMessagesList(id)
+                val result = withTimeout(20_000) { f.repository.compressConversationContext(id).getOrThrow() }
+                assertNotNull("$failureKind 必须真实经过容量错误", failedPrompt.get())
+                val streams = endpoint.payloads.filter { it.get("stream")?.asBoolean == true }
+                val streamPrompts = streams.map { it.getAsJsonArray("messages").single().asJsonObject.get("content").asString }
+                assertEquals("$failureKind 不能对同一失败输入叠加20次重试或备用Key", 1, streamPrompts.count { it == failedPrompt.get() })
+                assertEquals("每个逻辑请求只允许一次405探测和一次流式调用", streams.size * 2, endpoint.payloads.size)
+                val failureIndex = streamPrompts.indexOf(failedPrompt.get())
+                assertTrue("应先成功整理早期分段，再拒绝长来源片段", failureIndex > 0)
+                val failedSources = sourceFragmentsFromSummaryPrompt(failedPrompt.get())
+                val nextSources = sourceFragmentsFromSummaryPrompt(streamPrompts[failureIndex + 1])
+                assertEquals("容量错误只重排失败的来源片段", ids[40], nextSources.first().first)
+                assertTrue("$failureKind 必须缩小失败输入", nextSources.sumOf { it.second.length } < failedSources.sumOf { it.second.length })
+                val reconstructed = linkedMapOf<Long, StringBuilder>()
+                val sourceOrder = mutableListOf<Long>()
+                successfulPrompts.forEach { prompt ->
+                    sourceFragmentsFromSummaryPrompt(prompt).forEach { (sourceId, content) ->
+                        reconstructed.getOrPut(sourceId) { StringBuilder() }.append(content)
+                        if (sourceOrder.lastOrNull() != sourceId) sourceOrder += sourceId
+                    }
+                }
+                assertEquals("失败片段拆分不能回到已成功的早期原文", ids.take(42), sourceOrder)
+                assertEquals(ids.take(42), reconstructed.keys.toList())
+                ids.take(42).forEachIndexed { index, sourceId ->
+                    assertEquals("$failureKind 原文 $sourceId 必须逐字完整进入成功请求", contents[index], reconstructed.getValue(sourceId).toString())
+                }
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(summary, saved.rollingSummary)
+                assertEquals(ids[41], saved.summaryUpdatedMessageId)
+                assertEquals(2, result.recentMessageCount)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun connectedButSilentSummaryUsesRealResponseTimeoutWithoutRetryingOrChangingCheckpoint() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        Endpoint { _, _ ->
+            entered.countDown()
+            release.await(50, TimeUnit.SECONDS)
+        }.use { endpoint -> Fixture().use { f ->
+            try {
+                f.settings.setModelRetryEnabled(true)
+                f.settings.saveRetryRule(RetryErrorType.TIMEOUT, RetryRule(true, 20))
+                f.settings.saveRetryRule(RetryErrorType.NETWORK, RetryRule(true, 20))
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-silent-summary-model", enabled = false)
+                f.db.apiConfigDao().updateConfig(config.copy(apiKey = "test-first\ntest-second\ntest-third"))
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成无响应摘要原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = "此前确认：合成队伍已经回到北港，仍须保管蓝印凭证。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 678L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                val started = System.nanoTime()
+                val result = withTimeout(40_000) { f.repository.compressConversationContext(id) }
+                val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+                assertEquals("必须建立真实HTTP连接后等待服务端无响应", 0L, entered.count)
+                assertTrue(result.isFailure)
+                assertTrue("实际读超时不能退回600秒通道，耗时${elapsedMillis}ms", elapsedMillis in 25_000L..39_999L)
+                assertEquals("读超时不能叠加20次重试或备用Key", 1, endpoint.payloads.size)
+                val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).filter { it.requestKind == "summary" }
+                assertEquals(1, stats.size)
+                assertFalse(stats.single().success)
+                assertEquals("超时应作为失败反馈，不能误标为用户取消", "failed", stats.single().completionStatus)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(original.rollingSummary, saved.rollingSummary)
+                assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } finally {
+                release.countDown()
+            }
+        } }
+    }
+
+    @Test fun failedManualSummaryAllowsTwoCompleteChatsAndSameTierManualRecoveryInBothProtocols() = runBlocking {
+        val previous = "【核心背景与用户固定约束】\n旧摘要唯一事实：合成船队携带蓝印凭证。\n【历史关键里程碑与决策推进】\n已核对最初两条合成记录。\n【当前未决议题与待办上下文】\n等待继续整理。"
+        val recovered = "【核心背景与用户固定约束】\n恢复摘要唯一事实：合成船队仍携带蓝印凭证。\n【历史关键里程碑与决策推进】\n已补齐此前未覆盖的合成通行经过。\n【当前未决议题与待办上下文】\n等待下一轮确认。"
+        for (protocol in listOf("openai", "anthropic")) {
+            val serviceRecovered = java.util.concurrent.atomic.AtomicBoolean(false)
+            Endpoint { socket, payload ->
+                if (isSummaryPayload(payload)) {
+                    if (serviceRecovered.get()) completedSummaryReply(socket, recovered, protocol)
+                    else reply(socket, "{\"error\":{\"message\":\"empty response detected\",\"type\":\"internal_server_error\"}}", "500 Internal Server Error")
+                } else if (protocol == "openai") streamReply(socket) else reply(socket,
+                    "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                        "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-manual-summary-recovery-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "待覆盖合成原文[$index]：核对通行记录。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, maxTokens = 512, compressionTier = CompressionTier.LC.level,
+                    compressionCustomPercent = 30, rollingSummary = previous, summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 123L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                assertTrue(f.repository.compressConversationContext(id).isFailure)
+                val failedRequests = endpoint.payloads.filter(::isSummaryPayload)
+                assertEquals("只允许OpenAI额外尝试一次兼容流式，不能普通重试", if (protocol == "openai") 2 else 1, failedRequests.size)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+
+                for (round in 1..2) {
+                    val current = "合成失败后继续发送第${round}轮"
+                    assertNull("摘要服务失败不能阻断预算内的完整正式对话", chatWithSavedUser(f, config, id, current))
+                    val request = endpoint.payloads.last()
+                    assertTrue(request.get("stream").asBoolean)
+                    assertFalse(isSummaryPayload(request))
+                    val body = request.toString()
+                    assertTrue("旧摘要必须继续注入", body.contains("旧摘要唯一事实"))
+                    originals.drop(2).forEach { source -> assertTrue("遗漏未覆盖原文 ${source.id}", body.contains(source.content)) }
+                    assertFalse("已有摘要覆盖且不在原文窗口中的早期消息无需重发", body.contains(originals.first().content))
+                    assertEquals("当前用户消息只能发送一次", 1, request.getAsJsonArray("messages").count {
+                        it.asJsonObject.get("content").toString().contains(current)
+                    })
+                    assertEquals("后续发送不能再次调用同一失败摘要服务", failedRequests.size, endpoint.payloads.count(::isSummaryPayload))
+                    val saved = f.db.conversationDao().getConversationById(id)!!
+                    assertEquals(original.rollingSummary, saved.rollingSummary)
+                    assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                    assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                    assertEquals(original.compressionTier, saved.compressionTier)
+                    assertEquals(original.compressionCustomPercent, saved.compressionCustomPercent)
+                    assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                }
+                val chats = endpoint.payloads.filterNot(::isSummaryPayload)
+                assertEquals(2, chats.size)
+                assertTrue("第二轮需包含第一轮已保存的用户内容", chats[1].toString().contains("合成失败后继续发送第1轮"))
+                assertEquals(28, f.db.messageDao().getMessagesList(id).size)
+
+                serviceRecovered.set(true)
+                val resumed = f.repository.compressConversationContext(id).getOrThrow()
+                assertEquals(CompressionTier.LC, resumed.compressionTier)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(recovered, saved.rollingSummary)
+                assertNotEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                assertEquals(original.compressionCustomPercent, saved.compressionCustomPercent)
+                assertEquals("无需更改档位或比例即可手动重试", failedRequests.size + 1, endpoint.payloads.count(::isSummaryPayload))
+                assertNull(chatWithSavedUser(f, config, id, "合成恢复后的正式发送"))
+                val next = endpoint.payloads.last().toString()
+                assertTrue(next.contains("恢复摘要唯一事实"))
+                assertFalse("成功摘要覆盖的旧原文不能再占正式请求", next.contains(originals[2].content))
+                assertTrue(next.contains(originals.last().content))
+                assertEquals("成功后本轮不应再次补摘要", failedRequests.size + 1, endpoint.payloads.count(::isSummaryPayload))
+                assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun firstAutomaticSummaryFailureKeepsEveryUncoveredSourceAndDoesNotBlockFollowingChatsInBothProtocols() = runBlocking {
+        val previous = "旧自动摘要唯一事实：合成领航员保管蓝印凭证，此前两条记录已核对。"
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, payload ->
+                if (isSummaryPayload(payload)) reply(socket,
+                    "{\"error\":{\"message\":\"synthetic summary service unavailable\",\"type\":\"internal_server_error\"}}", "500 Internal Server Error")
+                else if (protocol == "openai") streamReply(socket) else reply(socket,
+                    "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                        "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-auto-summary-failure-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "自动回退完整合成原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, maxTokens = 512, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = previous, summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 123L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                for (round in 1..2) {
+                    assertNull(chatWithSavedUser(f, config, id, "合成自动回退第${round}轮"))
+                    assertEquals("首次失败只调用一次，之后不再重复失败摘要", 1, endpoint.payloads.count(::isSummaryPayload))
+                    val request = endpoint.payloads.last()
+                    assertTrue(request.get("stream").asBoolean)
+                    assertTrue(request.toString().contains(previous))
+                    originals.drop(2).forEach { source ->
+                        assertTrue("$protocol/$round 必须完整恢复未摘要来源 ${source.id}", request.toString().contains(source.content))
+                    }
+                    val saved = f.db.conversationDao().getConversationById(id)!!
+                    assertEquals(original.rollingSummary, saved.rollingSummary)
+                    assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                    assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                    assertEquals(original.compressionTier, saved.compressionTier)
+                    assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                }
+                assertEquals(2, endpoint.payloads.count { !isSummaryPayload(it) && it.get("stream")?.asBoolean == true })
+                assertEquals(28, f.db.messageDao().getMessagesList(id).size)
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun failedAutomaticSummaryCannotSilentlyDropOverBudgetSourcesOrRepeatItsFailureInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ -> reply(socket,
+                "{\"error\":{\"message\":\"synthetic summary service unavailable\",\"type\":\"internal_server_error\"}}", "500 Internal Server Error")
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-no-room-after-failed-summary-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", createdAt = index.toLong(),
+                    content = if (index <= 22) "超预算完整合成记录[$index]：" + "合成跨窗事实仍需保留。".repeat(60)
+                    else "最新合成原文[$index]。") })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 4000, maxTokens = 512, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = "旧超限摘要唯一事实：前两条合成记录已经核对。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 123L))
+                val original = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                assertTrue("回归前提：完整恢复所有未覆盖来源会超过4K输入预算",
+                    originals.drop(2).sumOf { AiRepository.estimateTokenCount(it.content) + 24 } > 4000)
+                for (round in 1..2) {
+                    val error = chatWithSavedUser(f, config, id, "合成超限失败第${round}轮")
+                    assertNotNull("不能丢弃来源来伪装正式发送成功", error)
+                    assertTrue("应提供同档位手动重试入口的提示：$error", error!!.contains("重试压缩"))
+                    if (round == 2) assertTrue("后续发送应明确说明上次摘要失败：$error", error.contains("上次摘要失败"))
+                    assertEquals("同一失败摘要服务不能在每轮再次调用", 1, endpoint.payloads.size)
+                    assertTrue("预算放不下完整原文时不能发送正式聊天", endpoint.payloads.all(::isSummaryPayload))
+                    val saved = f.db.conversationDao().getConversationById(id)!!
+                    assertEquals(original.rollingSummary, saved.rollingSummary)
+                    assertEquals(original.summaryUpdatedMessageId, saved.summaryUpdatedMessageId)
+                    assertEquals(original.summaryUpdatedAt, saved.summaryUpdatedAt)
+                    assertEquals(original.compressionTier, saved.compressionTier)
+                    assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                    assertEquals("失败仅保留UI已保存的当前输入，不产生助手伪回复", originals.size + round, f.db.messageDao().getMessagesList(id).size)
+                }
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun explicitEmptyResponseServerErrorAllowsOneShortOpenAiStreamAndCommitsOnlyCompletedSummary() = runBlocking {
+        val summary = "合成兼容恢复事实：北港领航员仍保管蓝印凭证，旧航程已经核对，接下来检查新的合成路线。"
+        Endpoint { socket, payload ->
+            if (payload.get("stream")?.asBoolean != true) reply(socket,
+                "{\"error\":{\"message\":\"empty response detected\",\"type\":\"internal_server_error\"}}", "500 Internal Server Error")
+            else reply(socket,
+                "data: {\"choices\":[{\"delta\":{\"content\":${Gson().toJson(summary)}},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                type = "text/event-stream")
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            f.settings.setBackupKeyFallbackEnabled(false)
+            val (_, id) = f.conversation(endpoint.url, "synthetic-empty-server-stream-recovery-model", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成兼容回归原文[$index]。", createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+            val originals = f.db.messageDao().getMessagesList(id)
+            f.repository.compressConversationContext(id).getOrThrow()
+            assertEquals("只允许非流式一次和兼容流式一次", 2, endpoint.payloads.size)
+            assertFalse(endpoint.payloads[0].get("stream")?.asBoolean == true)
+            assertTrue(endpoint.payloads[1].get("stream").asBoolean)
+            assertEquals("兼容通道必须处理完全相同的来源", endpoint.payloads[0].getAsJsonArray("messages"), endpoint.payloads[1].getAsJsonArray("messages"))
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(summary, saved.rollingSummary)
+            assertEquals(ids[21], saved.summaryUpdatedMessageId)
+            assertEquals(originals, f.db.messageDao().getMessagesList(id))
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun longEmptyGatewayErrorsCacheStreamingPerActualBackupKeyAcrossEverySourceChunk() = runBlocking {
+        val summary = "合成备用通道事实：领航员已经核对北港蓝印凭证，各段合成通行记录均已整理，下一步等待核对新的合成路线。"
+        for (status in listOf("500 Internal Server Error", "502 Bad Gateway")) {
+            val attempts = CopyOnWriteArrayList<Triple<String, Boolean, String>>()
+            val successfulPrompts = CopyOnWriteArrayList<String>()
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, payload ->
+                val authorization = endpoint.authorizations[socket].orEmpty()
+                val stream = payload.get("stream")?.asBoolean == true
+                val prompt = payload.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                attempts += Triple(authorization, stream, prompt)
+                when {
+                    authorization == "Bearer test-first" -> reply(socket,
+                        "{\"error\":{\"message\":\"synthetic first credential rejected\",\"type\":\"authentication_error\"}}", "401 Unauthorized")
+                    authorization != "Bearer test-second" -> reply(socket,
+                        "{\"error\":{\"message\":\"unexpected synthetic credential\"}}", "401 Unauthorized")
+                    !stream -> reply(socket, Gson().toJson(mapOf("error" to mapOf(
+                        "message" to "empty response detected " + "x".repeat(400), "type" to "internal_server_error"))), status)
+                    else -> {
+                        successfulPrompts += prompt
+                        reply(socket,
+                            "data: {\"choices\":[{\"delta\":{\"content\":${Gson().toJson(summary)}},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                            type = "text/event-stream")
+                    }
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                // The global switch also gates backup credentials. Disable each
+                // retry rule while leaving backup-key failover itself enabled.
+                f.settings.setModelRetryEnabled(true)
+                RetryErrorType.entries.forEach { f.settings.saveRetryRule(it, RetryRule(false, 0)) }
+                f.settings.setBackupKeyFallbackEnabled(true)
+                assertTrue("回归前提：备用凭据回退必须实际开启", f.settings.isBackupKeyFallbackEnabled())
+                val (config, id) = f.conversation(endpoint.url, "synthetic-backup-stream-cache-model", enabled = false)
+                f.db.apiConfigDao().updateConfig(config.copy(apiKey = "Bearer test-first\nBearer test-second"))
+                val ids = f.db.messageDao().insertMessages((1..46).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "备用流式缓存合成原文[$index]：核对通行凭证。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+                val originals = f.db.messageDao().getMessagesList(id)
+                f.repository.compressConversationContext(id).getOrThrow()
+                assertEquals("44条来源应按40条上限分成两块", 2, successfulPrompts.size)
+                assertEquals("备用Key的后续分块必须直接使用已验证的流式通道", 1,
+                    attempts.count { it.first == "Bearer test-second" && !it.second })
+                assertEquals("每块都需由首Key独立鉴权，备用Key的能力缓存不能污染首Key", 2,
+                    attempts.count { it.first == "Bearer test-first" && !it.second })
+                assertEquals("首Key没有流式成功证据，不能继承备用Key的流式能力", 0,
+                    attempts.count { it.first == "Bearer test-first" && it.second })
+                assertEquals(2, attempts.count { it.first == "Bearer test-second" && it.second })
+                assertEquals("两次401、一次网关探测、两次成功流式，不得重放额外请求", 5, attempts.size)
+                assertEquals("首次探测与兼容流式必须处理同一份完整来源", attempts[1].third, attempts[2].third)
+                val reconstructed = successfulPrompts.flatMap(::sourceFragmentsFromSummaryPrompt)
+                assertEquals("所有来源仅在成功请求中覆盖一次，顺序不得改变", ids.take(44), reconstructed.map { it.first })
+                assertEquals("分块不能丢失、裁剪或重复原文", originals.take(44).map { it.content }, reconstructed.map { it.second })
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(summary, saved.rollingSummary)
+                assertEquals(ids[43], saved.summaryUpdatedMessageId)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
                 assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
             } }
         }

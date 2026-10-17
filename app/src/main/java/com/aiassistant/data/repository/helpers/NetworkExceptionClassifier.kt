@@ -20,9 +20,12 @@ object NetworkExceptionClassifier {
     }
 
     fun isRequestCancellation(error: Throwable): Boolean {
-        if (error is CancellationException) return true
-        if (error.message.equals("Canceled", ignoreCase = true)) return true
-        return error.cause?.let(::isRequestCancellation) == true
+        val causes = generateSequence(error) { it.cause }.take(16).toList()
+        if (causes.any { it is CancellationException }) return true
+        // OkHttp's call deadline cancels its socket internally, then wraps that
+        // "Canceled" IOException in an InterruptedIOException("timeout").
+        if (isTimeoutException(error)) return false
+        return causes.any { it.message.equals("Canceled", ignoreCase = true) }
     }
 
     fun isNetworkFluctuationException(e: Throwable): Boolean {
