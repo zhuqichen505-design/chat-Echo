@@ -653,8 +653,17 @@ class InputInjectionRepositoryTest {
             f.message(id, "user", "合成分支旧输入", 1L)
             val assistantId = f.message(id, "assistant", "合成分支截止回复", 2L)
             f.repository.prepareInjectedUserMessage(id, "合成截止后的剧情提示", "合成分支触发语", null)
+            f.repository.updateConversationCompressionTier(id, CompressionTier.LT, 12, 65)
             val before = f.db.messageDao().getMessagesList(id)
             val branch = f.repository.createBranchConversation(id, assistantId, before)
+            val branchConversation = f.db.conversationDao().getConversationById(branch.first)!!
+            assertEquals(CompressionTier.LT.level, branchConversation.compressionTier)
+            assertEquals(12, branchConversation.compressionRecentRounds)
+            assertEquals(65, branchConversation.compressionCustomPercent)
+            val parentConversation = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(CompressionTier.LT.level, parentConversation.compressionTier)
+            assertEquals(12, parentConversation.compressionRecentRounds)
+            assertEquals(65, parentConversation.compressionCustomPercent)
             val copied = f.db.messageDao().getMessagesList(branch.first)
             assertEquals(listOf("合成分支旧输入", "合成分支截止回复"), copied.map { it.content })
             assertTrue(copied.all { it.modelContent == null && it.injectionTargetMessageId == null })

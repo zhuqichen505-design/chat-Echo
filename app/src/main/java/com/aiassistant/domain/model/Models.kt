@@ -101,9 +101,9 @@ data class Conversation(
     val modelAvatarUri: String? = null,
     val currentStoryTime: String? = null,
     val contextWindowTokens: Int? = null, // 会话级独立最大上下文上限（Tokens），null表示跟随模型
-    val compressionTier: Int = 0,        // 会话独立压缩档位：0=L0, 1=L1, 2=L2, 3=L3, 4=L4, 5=LC
+    val compressionTier: Int = 0,        // 会话独立压缩档位：0=L0, 1=L1, 2=L2, 3=L3, 4=L4, 5=LC, 6=LT
     val compressionRecentRounds: Int = 8, // L2 滚动摘要档保留的最近轮数 N (4~32)
-    val compressionCustomPercent: Int = 30, // LC 自定义比例档保留原文的百分比 (10~90)
+    val compressionCustomPercent: Int = 30, // LC 为保留原文比例，LT 为直接截断比例 (10~90)
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     /** Off by default; only new sends use the configured trigger. */
@@ -519,12 +519,14 @@ data class Choice(
     val finish_reason: String?
 )
 
+@com.google.gson.annotations.JsonAdapter(MessageDataAdapter::class)
 data class MessageData(
     val role: String?,
     @field:com.google.gson.annotations.JsonAdapter(ResponseTextAdapter::class)
     val content: String?,
     @field:com.google.gson.annotations.JsonAdapter(ResponseReasoningTextAdapter::class)
-    val reasoning_content: String? = null
+    val reasoning_content: String? = null,
+    val refusal: String? = null
 )
 
 data class Usage(

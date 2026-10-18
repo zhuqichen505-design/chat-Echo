@@ -435,7 +435,7 @@ internal fun ContextUsageDialog(
                             onSelectionChanged = { draft = it },
                             onApplyTier = { _, _, _ -> if (hasPendingChange) applySelection() else onCompress() },
                             onPreviewSettingsChanged = onPreviewCompressionSettings,
-                            canRetryCompression = state.canRetryCompression,
+                            canRetryCompression = state.canRetryCompression && selection?.tier != com.aiassistant.domain.model.CompressionTier.LT,
                         )
                     }
                     if (onUpdateContextLimit != null) {
@@ -523,41 +523,50 @@ internal fun ContextOptimizationActions(
     hasPendingChange: Boolean = false
 ) {
     val busy = state.isCompressing || state.isGeneratingSummary
+    val usesDirectTruncation = selectedTier == com.aiassistant.domain.model.CompressionTier.LT
+    val summaryDisabled = usesDirectTruncation || usage.compressionTier == com.aiassistant.domain.model.CompressionTier.LT
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("历史摘要", style = MaterialTheme.typography.titleSmall)
-                Text(if (usage.hasRollingSummary) "已保存 · ${formatTokenCount(usage.summaryTokens)} tokens · 覆盖至消息 #${usage.compressedThroughMessageId}"
+                Text(if (summaryDisabled) "直接截断档不会发送历史摘要。已保存摘要仍可审阅；切回摘要档后可重新使用或更新。"
+                    else if (usage.hasRollingSummary) "已保存 · ${formatTokenCount(usage.summaryTokens)} tokens · 覆盖至消息 #${usage.compressedThroughMessageId}"
                     else "尚未生成。摘要用于承接早期事实、决定与未完成事项。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("摘要可能遗漏细节，可随时审阅和修订。编辑或删除原文会使旧摘要失效；时间线与会话设定需在对应页面单独确认。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (onEditRollingSummary != null) TextButton(onClick = onEditRollingSummary, enabled = !busy) { Text("审阅 / 编辑") }
-                    FilledTonalButton(onClick = onGenerateRollingSummary, enabled = !busy) {
-                        Text(if (state.isGeneratingSummary) "正在更新…" else "更新摘要")
+                    FilledTonalButton(onClick = onGenerateRollingSummary, enabled = !busy && !summaryDisabled) {
+                        Text(if (summaryDisabled) "本档不生成摘要" else if (state.isGeneratingSummary) "正在更新…" else "更新摘要")
                     }
                 }
             }
         }
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("释放上下文空间", style = MaterialTheme.typography.titleSmall)
+                Text(if (usesDirectTruncation) "直接截断（暴力压缩）" else "释放上下文空间", style = MaterialTheme.typography.titleSmall)
                 val appliesRollingTier = selectedTier == com.aiassistant.domain.model.CompressionTier.L0 ||
                     selectedTier == com.aiassistant.domain.model.CompressionTier.L1
-                Text(if (appliesRollingTier && !hasPendingChange)
+                Text(if (usesDirectTruncation)
+                    "按所选比例从最早完整对话轮次开始截断，至少保留最近 1 轮和置顶轮次。被截断的早期对话原文及历史摘要不会交给模型，模型可能因此忘记先前剧情与事实。"
+                    else if (appliesRollingTier && !hasPendingChange)
                     "将应用滚动摘要档，保留最近 8 轮完整原文和置顶轮次，连续总结更早内容。摘要成功且原文未变化后才更新覆盖范围。"
                     else "按所选档位连续总结较早原文，保留对应的完整对话轮次和置顶内容。摘要成功且原文未变化后才更新覆盖范围；失败时保留原文和原摘要。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
+                Text(if (usesDirectTruncation)
+                    "确认后立即用于后续请求，不调用摘要模型，也不删除本机聊天。可切回其他档位恢复读取早期原文；已启用的记忆、时间线和世界书保持原设置，仍会与置顶内容、系统设定及本轮输入一起占用预算。"
+                    else "此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(
                     onClick = onCompress,
-                    enabled = !busy && (usage.canCompress || hasPendingChange || state.canRetryCompression),
+                    enabled = !busy && (hasPendingChange || !usesDirectTruncation && (usage.canCompress || state.canRetryCompression)),
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(when {
                         state.isCompressing -> "正在应用…"
+                        usesDirectTruncation && hasPendingChange -> "确认截断并生效"
+                        usesDirectTruncation -> "已按所选比例生效"
                         state.canRetryCompression && !hasPendingChange -> "重试压缩"
                         hasPendingChange -> "应用所选策略"
                         !usage.canCompress -> "暂无待压缩历史"
@@ -846,7 +855,7 @@ internal fun ContextUsageDetails(
                 value = "${usage.recentMessageCount} 条 · ${formatTokenCount(usage.recentTokens)} tokens"
             )
             ContextUsageRow(
-                label = "较早历史消息",
+                label = if (usage.compressionTier == com.aiassistant.domain.model.CompressionTier.LT) "本次截去的早期原文" else "较早历史消息",
                 value = "${usage.olderMessageCount} 条"
             )
             ContextUsageRow(
@@ -855,7 +864,8 @@ internal fun ContextUsageDetails(
             )
             ContextUsageRow(
                 label = "摘要覆盖范围",
-                value = usage.compressedThroughMessageId?.takeIf { usage.hasRollingSummary && it > 0 }?.let { "截至消息 #$it" } ?: "无已确认覆盖"
+                value = if (usage.compressionTier == com.aiassistant.domain.model.CompressionTier.LT) "本档不参与发送"
+                    else usage.compressedThroughMessageId?.takeIf { usage.hasRollingSummary && it > 0 }?.let { "截至消息 #$it" } ?: "无已确认覆盖"
             )
             ContextUsageRow(
                 label = "摘要更新时间",
@@ -871,7 +881,9 @@ internal fun ContextUsageStatus(
     statusMessage: String?
 ) {
     val isHighPressure = usage.usagePercent >= 0.60f
-    val message = statusMessage ?: if (usage.canCompress && isHighPressure) {
+    val message = statusMessage ?: if (usage.compressionTier == com.aiassistant.domain.model.CompressionTier.LT) {
+        "直接截断已生效：早期轮次和历史摘要不参与发送，置顶轮次与最近 1 轮保留。本机聊天未删除，可切回其他档位恢复读取。数值为本机估算。"
+    } else if (usage.canCompress && isHighPressure) {
         "上下文负载较高，可压缩较早对话。发送前会再次核对消息、提示词、附件和输出预算。"
     } else if (usage.canCompress) {
         "存在未压缩的较早历史，可生成连续摘要后释放空间。"
@@ -1039,7 +1051,7 @@ internal fun RollingSummaryEditDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "修订摘要中的事实、时间和未完成事项。保存保留原有覆盖范围；新建的手动摘要不会把未总结的历史标为已压缩。清除后下一次发送会重新读取原文。",
+                    text = "修订摘要中的事实、时间和未完成事项。保存保留原有覆盖范围；新建的手动摘要不会把未总结的历史标为已压缩。清除后，摘要档会重新读取未总结原文；直接截断档仍按所选比例发送。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1095,7 +1107,8 @@ internal data class ContextCompressionSelection(
 ) {
     fun matches(other: ContextCompressionSelection?): Boolean = other != null && tier == other.tier && when (tier) {
         com.aiassistant.domain.model.CompressionTier.L2 -> recentRounds == other.recentRounds
-        com.aiassistant.domain.model.CompressionTier.LC -> customPercent == other.customPercent
+        com.aiassistant.domain.model.CompressionTier.LC,
+        com.aiassistant.domain.model.CompressionTier.LT -> customPercent == other.customPercent
         else -> true
     }
 
@@ -1312,25 +1325,24 @@ internal fun ContextCompressionTierSelectorCard(
                                 }
                             }
 
-                            // LC 自定义比例档：保留原文的百分比滑动选择 (10~90，步长 5)
-                            if (tier == com.aiassistant.domain.model.CompressionTier.LC && isSelected) {
+                            // 两种比例含义不同：LC 保留原文，LT 截断最早轮次。
+                            if ((tier == com.aiassistant.domain.model.CompressionTier.LC ||
+                                    tier == com.aiassistant.domain.model.CompressionTier.LT) && isSelected) {
+                                val isTruncation = tier == com.aiassistant.domain.model.CompressionTier.LT
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(top = 6.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
-                                            text = "保留原文百分比：",
+                                            text = if (isTruncation) "截断最早轮次的比例：" else "保留原文百分比：",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = "保留 $customPercent% 原文（约压缩 ${100 - customPercent}%）",
+                                            text = if (isTruncation) "截断最早 $customPercent%，保留约 ${100 - customPercent}%"
+                                                else "保留 $customPercent% 原文（约压缩 ${100 - customPercent}%）",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                             fontWeight = FontWeight.Bold
@@ -1353,7 +1365,15 @@ internal fun ContextCompressionTierSelectorCard(
                                         },
                                         valueRange = com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT.toFloat()
                                             ..com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT.toFloat(),
+                                        steps = (com.aiassistant.domain.model.CompressionTierPolicy.MAX_CUSTOM_RETAIN_PERCENT -
+                                            com.aiassistant.domain.model.CompressionTierPolicy.MIN_CUSTOM_RETAIN_PERCENT) /
+                                            com.aiassistant.domain.model.CompressionTierPolicy.STEP_CUSTOM_RETAIN_PERCENT - 1,
                                         modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp)
+                                    )
+                                    if (isTruncation) Text(
+                                        text = "按完整轮次向下取整；置顶轮次与最近 1 轮始终保留，实际保留比例可能更高。不会生成或发送历史摘要。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }

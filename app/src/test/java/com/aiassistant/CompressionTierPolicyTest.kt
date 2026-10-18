@@ -88,6 +88,54 @@ class CompressionTierPolicyTest {
     }
 
     @Test
+    fun directTruncationHasStableLevelAndExplicitLossDescription() {
+        assertEquals(CompressionTier.LT, CompressionTier.fromLevel(6))
+        assertEquals(6, CompressionTier.LT.level)
+        val desc = CompressionTierPolicy.getRetainedRoundsDesc(CompressionTier.LT, customRetainPercent = 65)
+        assertTrue(desc.contains("截去最早 65%"))
+        assertTrue(desc.contains("整轮向下取整"))
+        assertTrue(desc.contains("置顶轮次保留"))
+        assertTrue(desc.contains("至少保留最近 1 轮"))
+        assertTrue(CompressionTier.LT.detailLossNote.contains("不由摘要承接"))
+    }
+
+    @Test
+    fun directTruncationPercentUsesSupportedRangeAndFivePercentSteps() {
+        assertEquals(10, CompressionTierPolicy.normalizeTruncatePercent(Int.MIN_VALUE))
+        assertEquals(90, CompressionTierPolicy.normalizeTruncatePercent(Int.MAX_VALUE))
+        assertEquals(30, CompressionTierPolicy.normalizeTruncatePercent(32))
+        assertEquals(35, CompressionTierPolicy.normalizeTruncatePercent(33))
+        for (percent in 10..90 step 5) {
+            assertEquals(percent, CompressionTierPolicy.normalizeTruncatePercent(percent))
+        }
+    }
+
+    @Test
+    fun directTruncationNeverAutomaticallySwitchesToSummaryTiers() {
+        for (usage in listOf(0.70f, 0.80f, 0.90f, 1.25f)) {
+            assertNull(CompressionTierPolicy.evaluateAutoUpgrade(CompressionTier.LT, usage, autoEnabled = true))
+        }
+        assertNull(CompressionTierPolicy.fallbackOnContextOverflow(CompressionTier.LT, 20_000, 2_000))
+    }
+
+    @Test
+    fun directTruncationAssemblyIgnoresOldSummariesAndTheirCoverage() {
+        val messages = (1L..20L).map { id -> Message(id = id, conversationId = 1L,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成消息 $id", isPinned = id == 2L) }
+        val result = ChatContextAssemblyHelper.assembleTieredContextMessages(
+            tier = CompressionTier.LT, usableMessages = messages, recentBudget = 1,
+            existingRollingSummary = "旧滚动摘要不得注入。", structuredSummary = "旧结构化摘要不得注入。",
+            customRetainPercent = 50, coveredThroughId = 18L)
+        val expected = messages.take(2) + messages.drop(10)
+        assertEquals(expected, result.activeMessages)
+        assertNull(result.injectedSummary)
+        assertFalse(result.canCompress)
+        assertEquals(0, result.uncompressedOlderCount)
+        assertEquals(expected.sumOf(com.aiassistant.data.repository.helpers.ContextCompressionPlanner::messageTokens), result.recentTokens)
+        assertTrue("预算不足仍须保留用户选择的窗口，交给调用方提示", result.recentTokens > 1)
+    }
+
+    @Test
     fun testContentPruningHelper() {
         // 1. OCR 文本修剪
         val ocrRaw = "用户问题：\n[图片OCR识别：document.png]\n这里是非常长非常长的一大堆识别出来的印刷体文字，包含很多页的扫描文本。\n\n请帮我翻译第一句话。"

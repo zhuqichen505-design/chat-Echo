@@ -1,6 +1,7 @@
 package com.aiassistant.data.repository.helpers
 
 import com.aiassistant.domain.model.CompressionTier
+import com.aiassistant.domain.model.CompressionTierPolicy
 import com.aiassistant.domain.model.Message
 
 /** Pure planning shared by the usage preview and the request builder. Coverage always refers to real message IDs. */
@@ -94,8 +95,10 @@ object ContextCompressionPlanner {
                 }
                 candidate
             }
+            CompressionTier.LT -> (turns.size.toLong() * CompressionTierPolicy.normalizeTruncatePercent(retainPercent) / 100)
+                .toInt().coerceAtMost(turns.lastIndex)
         }
-        if (!forceCompression && coveredIndex >= 0 && cut > coveredTurnCount && cut - coveredTurnCount < 4) {
+        if (tier != CompressionTier.LT && !forceCompression && coveredIndex >= 0 && cut > coveredTurnCount && cut - coveredTurnCount < 4) {
             // Extend summaries in whole-turn batches during ordinary sends. A shallower
             // tier can restore raw history immediately; existing coverage never limits it.
             cut = coveredTurnCount
@@ -117,6 +120,11 @@ object ContextCompressionPlanner {
             if (turnIndex >= index || turn.any { it.isPinned }) turn else emptyList()
         }
         fun retainedCost(index: Int) = suffixCosts[index] + pinnedPrefixCosts[index]
+        // Direct truncation deliberately has no summary coverage. The selected ratio
+        // is authoritative even when the retained raw history still exceeds budget.
+        if (tier == CompressionTier.LT) {
+            return Plan(retainedAt(cut), emptyList(), 0L, retainedCost(cut), false)
+        }
         while (cut < turns.lastIndex && retainedCost(cut) > historyBudget) cut++
         // Raw retention and summary coverage are independent. Restoring a larger raw
         // window may overlap a checked summary, whose factual range must not regress.

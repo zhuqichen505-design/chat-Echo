@@ -1790,12 +1790,129 @@ class MemoryExtractionRepositoryTest {
         }
     }
 
+    @Test fun policyRefusalsAndProtocolRefusalSignalsNeverReplaceSummaryOrAdvanceCoverage() = runBlocking {
+        val refusal = "由于安全政策限制，我无法处理本次摘要请求，也不能提供这段材料的总结。请调整提供的文本后重新尝试。"
+        val plausible = "合成船队已核对铜钥匙与蓝印凭证，仍在北港等待确认，下一步需要检查 synthetic-route.json。"
+        for (protocol in listOf("openai", "anthropic")) {
+            val kinds = if (protocol == "openai") listOf("policy", "markdown", "field", "block", "finish", "filter")
+                else listOf("policy", "markdown", "finish")
+            for (kind in kinds) Endpoint { socket, _ ->
+                val text = if (kind == "markdown") "**很抱歉**，我不能为你提供这次对话的摘要，因为它触发了内容限制。请修改输入后再试。"
+                    else if (kind == "policy") refusal else plausible
+                val response = if (protocol == "openai") mapOf("choices" to listOf(mapOf(
+                    "finish_reason" to when (kind) { "finish" -> "refusal"; "filter" -> "content_filter"; else -> "stop" },
+                    "message" to mapOf("content" to if (kind == "block") listOf(
+                        mapOf("type" to "text", "text" to plausible), mapOf("type" to "refusal", "refusal" to refusal)) else text,
+                        "refusal" to if (kind == "field") refusal else null))))
+                else mapOf("stop_reason" to if (kind == "finish") "refusal" else "end_turn",
+                    "content" to listOf(mapOf("type" to "text", "text" to text)))
+                reply(socket, Gson().toJson(response))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (_, id) = f.conversation(endpoint.url, "synthetic-policy-summary-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成政策回归原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = plausible, summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 419L))
+                val before = f.db.conversationDao().getConversationById(id)!!
+                val originals = f.db.messageDao().getMessagesList(id)
+                val result = f.repository.compressConversationContext(id)
+                assertTrue("$protocol/$kind 应明确失败", result.isFailure)
+                assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("拒绝生成摘要"))
+                assertEquals("拒绝不能继续同请求重放或调用流式", 1, endpoint.payloads.size)
+                val after = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(before.rollingSummary, after.rollingSummary)
+                assertEquals(before.summaryUpdatedMessageId, after.summaryUpdatedMessageId)
+                assertEquals(before.summaryUpdatedAt, after.summaryUpdatedAt)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertFalse("拒绝不能计为成功摘要调用", stat.success)
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun streamingPolicyAndExplicitRefusalCannotSaveEvenWithPlausiblePartialSummary() = runBlocking {
+        val refusal = "由于安全限制，我无法生成本次请求的摘要。请修改提供的内容后重新尝试总结。"
+        for (explicit in listOf(false, true)) Endpoint { socket, payload ->
+            if (payload.get("stream")?.asBoolean != true) reply(socket, "{}", "405 Method Not Allowed")
+            else {
+                val delta = if (explicit) mapOf("content" to "合成船队已经抵达北港，下一步核对凭证。", "refusal" to refusal)
+                    else mapOf("content" to refusal)
+                val event = Gson().toJson(mapOf("choices" to listOf(mapOf("delta" to delta))))
+                reply(socket, "data: $event\n\ndata: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\ndata: [DONE]\n\n", type = "text/event-stream")
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            val (_, id) = f.conversation(endpoint.url, "synthetic-stream-policy-model", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成流式拒绝原文[$index]。", createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                rollingSummary = "合成旧摘要仍需完整保留，船队等待核对蓝印通行凭证。", summaryUpdatedMessageId = ids[1], summaryUpdatedAt = 613L))
+            val before = f.db.conversationDao().getConversationById(id)!!
+            val result = f.repository.compressConversationContext(id)
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("拒绝生成摘要"))
+            assertEquals(2, endpoint.payloads.size)
+            val after = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(before.rollingSummary, after.rollingSummary)
+            assertEquals(before.summaryUpdatedMessageId, after.summaryUpdatedMessageId)
+            assertEquals(before.summaryUpdatedAt, after.summaryUpdatedAt)
+            assertEquals(24, f.db.messageDao().getMessagesList(id).size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun legacyInvalidSummaryNeverReplacesRawHistoryAndCanBeRebuiltFromOriginals() = runBlocking {
+        for (refusal in listOf(
+            "由于安全政策限制，我无法处理本次摘要请求，也不能提供这段材料的总结。请调整提供的文本后重新尝试。",
+            "## 人物身份与关系\n## 世界观与场景设定\n## 已发生的重要事件\n## 当前状态与未完成事项"
+        )) {
+            val recovered = "合成船队已从北港启程，携带两枚蓝印凭证与铜钥匙，下一步检查 synthetic-recovery.json。"
+            var allowSummary = false
+            Endpoint { socket, payload ->
+                if (payload.get("stream")?.asBoolean == true) streamReply(socket)
+                else completedSummaryReply(socket, if (allowSummary) recovered else refusal)
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, "synthetic-legacy-refusal-model", enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成可恢复原文[$index]。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level,
+                    rollingSummary = refusal, summaryUpdatedMessageId = ids[21], summaryUpdatedAt = 827L))
+                chat(f, config, id)
+                val sent = endpoint.payloads.last().toString()
+                assertFalse("错误摘要不能进入后续请求", sent.contains(refusal))
+                for (index in 1..24) assertTrue("恢复完整未摘要原文[$index]", sent.contains("合成可恢复原文[$index]。"))
+                val preserved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(refusal, preserved.rollingSummary)
+                assertEquals(ids[21], preserved.summaryUpdatedMessageId)
+                assertEquals(827L, preserved.summaryUpdatedAt)
+                allowSummary = true
+                f.repository.compressConversationContext(id).getOrThrow()
+                val summaryPrompt = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                assertFalse("重建不能把拒绝文合并为旧摘要", summaryPrompt.contains(refusal))
+                assertTrue("必须从最早遗漏的原文开始重建", summaryPrompt.contains("合成可恢复原文[1]。"))
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(recovered, saved.rollingSummary)
+                assertNotEquals(827L, saved.summaryUpdatedAt)
+                for (index in 1..24) assertTrue(f.db.messageDao().getMessagesList(id).any { it.content == "合成可恢复原文[$index]。" })
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
     @Test fun emptyInvalidAndTruncatedSummaryResponsesFailOnceAndPreservePreviousCheckpointInBothProtocols() = runBlocking {
-        for (protocol in listOf("openai", "anthropic")) for (kind in listOf("empty", "invalid", "truncated")) {
+        for (protocol in listOf("openai", "anthropic")) for (kind in listOf("empty", "invalid", "titles", "truncated")) {
             Endpoint { socket, _ ->
                 val text = when (kind) {
                     "empty" -> ""
                     "invalid" -> "抱歉，我无法生成这份摘要，因为本次没有获得能够独立使用的完整上下文，请重新提供全部有效原文之后再试。"
+                    "titles" -> "## 人物身份与关系\n## 世界观与场景设定\n## 已发生的重要事件\n## 当前状态与未完成事项"
                     else -> "合成队伍已经核对蓝印凭证并准备出发。这段正文看起来完整，但接口明确声明输出已截断。"
                 }
                 val response = if (protocol == "openai") mapOf("choices" to listOf(mapOf(
@@ -2995,6 +3112,144 @@ class MemoryExtractionRepositoryTest {
                 assertEquals("人工更正：角色仍在旧港，尚未出发。", saved.rollingSummary)
                 assertEquals(ids[3], saved.summaryUpdatedMessageId)
             } finally { released.countDown(); job.cancelAndJoin() }
+        } }
+    }
+
+    @Test fun directTruncationPersistsNormalizedRatioWithoutNetworkOrChangingSummaryCoverage() = runBlocking {
+        Endpoint { socket, _ -> streamReply(socket) }.use { endpoint -> Fixture().use { f ->
+            val (_, id) = f.conversation(endpoint.url, "synthetic-direct-truncation-model", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..20).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成直接截断原文[$index]。",
+                createdAt = index.toLong(), isPinned = index == 2) })
+            val badSummary = "由于安全限制，本模型无法提供该内容的摘要。此合成拒绝说明仅用于回归验证。"
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, rollingSummary = badSummary,
+                summaryUpdatedMessageId = ids[17], summaryUpdatedAt = 123L))
+            val originals = f.db.messageDao().getMessagesList(id)
+
+            f.repository.updateConversationCompressionTier(id, CompressionTier.LT, 8, 33)
+            val usage = f.repository.compressConversationContext(id).getOrThrow()
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(6, saved.compressionTier)
+            assertEquals(35, saved.compressionCustomPercent)
+            assertEquals(CompressionTier.LT, usage.compressionTier)
+            assertEquals(35, usage.compressionCustomPercent)
+            assertEquals("十轮截去三轮，但完整保留第一置顶轮", 16, usage.recentMessageCount)
+            assertEquals("统计必须扣除已保留的置顶整轮", 4, usage.olderMessageCount)
+            assertEquals("未注入旧摘要时不可计入摘要预算", 0, usage.summaryTokens)
+            assertEquals(badSummary, saved.rollingSummary)
+            assertEquals(ids[17], saved.summaryUpdatedMessageId)
+            assertEquals(123L, saved.summaryUpdatedAt)
+            assertEquals(originals, f.db.messageDao().getMessagesList(id))
+            assertTrue("应用直接截断不可请求模型摘要", endpoint.payloads.isEmpty())
+            assertTrue(f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).isEmpty())
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun directTruncationSendsOnlySelectedRawTurnsAndWholePinnedTurnsForBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                if (protocol == "openai") streamReply(socket) else reply(socket,
+                    "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+                        "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, "synthetic-direct-truncation-model", protocol, enabled = false)
+                val ids = f.db.messageDao().insertMessages((1..20).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成线报[$index]：保留完整原始句子。",
+                    createdAt = index.toLong(), isPinned = index == 2) })
+                val badSummary = "由于安全限制，不能生成摘要。该旧合成拒绝文本绝不能作为历史背景继续发送。"
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, rollingSummary = badSummary,
+                    summaryUpdatedMessageId = ids[17], summaryUpdatedAt = 123L))
+                val originals = f.db.messageDao().getMessagesList(id)
+                f.repository.updateConversationCompressionTier(id, CompressionTier.LT, 8, 50)
+
+                chat(f, config, id)
+
+                val request = endpoint.payloads.single()
+                assertTrue(request.get("stream").asBoolean)
+                assertEquals("synthetic-direct-truncation-model", request.get("model").asString)
+                val contents = request.getAsJsonArray("messages")
+                    .filter { it.asJsonObject.get("role").asString != "system" }
+                    .map { it.asJsonObject.get("content").asString }
+                assertEquals((originals.take(2) + originals.drop(10)).map { it.content } + "reply OK", contents)
+                assertFalse(request.toString().contains(badSummary))
+                assertEquals("每次直接截断发送只能产生正式对话请求", 1, endpoint.payloads.size)
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(badSummary, saved.rollingSummary)
+                assertEquals(ids[17], saved.summaryUpdatedMessageId)
+                assertEquals(123L, saved.summaryUpdatedAt)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                assertEquals(originals.size + 1, f.db.messageDao().getMessagesList(id).size)
+                assertTrue(f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).none { it.requestKind == "summary" })
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun loweringDirectTruncationRatioAndReturningToCompleteHistoryRestoresOriginalsInActualRequests() = runBlocking {
+        Endpoint { socket, _ -> streamReply(socket) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-direct-truncation-restore-model", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..20).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "可恢复合成片段[$index]。", createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, rollingSummary = "既有合成摘要：旧港通行安排已确认。",
+                summaryUpdatedMessageId = ids[17], summaryUpdatedAt = 123L))
+            val originals = f.db.messageDao().getMessagesList(id)
+            for ((tier, percent, firstRetained) in listOf(
+                Triple(CompressionTier.LT, 80, 17), Triple(CompressionTier.LT, 20, 5), Triple(CompressionTier.L0, 20, 1))) {
+                f.repository.updateConversationCompressionTier(id, tier, 8, percent)
+                chat(f, config, id)
+                val body = endpoint.payloads.last().toString()
+                for (index in 1..20) {
+                    assertEquals("$tier/$percent 原文片段 $index 的恢复范围必须准确", index >= firstRetained,
+                        body.contains("可恢复合成片段[$index]"))
+                }
+                assertEquals(originals, f.db.messageDao().getMessagesList(id).take(originals.size))
+                assertEquals(ids[17], f.db.conversationDao().getConversationById(id)!!.summaryUpdatedMessageId)
+            }
+            assertEquals(3, endpoint.payloads.size)
+            assertTrue(endpoint.payloads.all { it.get("stream")?.asBoolean == true })
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun overflowingDirectTruncationReportsTheChosenRatioWithoutExtraCutsOrSummaryRequests() = runBlocking {
+        Endpoint { socket, _ -> streamReply(socket) }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            f.settings.setBackupKeyFallbackEnabled(false)
+            val (config, id) = f.conversation(endpoint.url, "synthetic-direct-truncation-overflow-model", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..20).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant",
+                content = "合成超预算原文[$index]：保留用户指定的完整窗口。".repeat(400), createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 4000, rollingSummary = "先前已确认的合成摘要。",
+                summaryUpdatedMessageId = ids[17], summaryUpdatedAt = 123L))
+            f.repository.updateConversationCompressionTier(id, CompressionTier.LT, 8, 50)
+            val before = f.db.conversationDao().getConversationById(id)!!
+            val originals = f.db.messageDao().getMessagesList(id)
+            val usage = f.repository.getConversationContextUsage(id)
+            assertEquals("即使超预算也只截去用户指定的前五轮", 10, usage.recentMessageCount)
+            assertTrue(usage.estimatedInputTokens > usage.promptBudgetTokens)
+            assertEquals(0, usage.summaryTokens)
+            val compressed = f.repository.compressConversationContext(id)
+            assertTrue(compressed.isFailure)
+            assertTrue(compressed.exceptionOrNull()!!.message.orEmpty().contains("截断比例"))
+            val errors = mutableListOf<String>()
+            f.repository.sendChatMessageWithConfig(config, id, "继续合成对话", onToken = { fail("超预算不能发出正文") },
+                onComplete = { _, _, _ -> fail("超预算不能宣称发送成功") }, onError = { errors += it })
+            assertEquals(1, errors.size)
+            assertTrue(errors.single().contains("截断比例"))
+            val after = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(CompressionTier.LT.level, after.compressionTier)
+            assertEquals(50, after.compressionCustomPercent)
+            assertEquals(before.rollingSummary, after.rollingSummary)
+            assertEquals(before.summaryUpdatedMessageId, after.summaryUpdatedMessageId)
+            assertEquals(before.summaryUpdatedAt, after.summaryUpdatedAt)
+            assertEquals(originals, f.db.messageDao().getMessagesList(id))
+            assertTrue("本地超预算不得调用聊天或额外摘要", endpoint.payloads.isEmpty())
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
         } }
     }
 

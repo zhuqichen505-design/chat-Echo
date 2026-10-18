@@ -201,7 +201,7 @@ object ChatContextAssemblyHelper {
         )
     }
 
-    /** Compatibility entry point; only a real coverage boundary permits retiring original history. */
+    /** Compatibility entry point; summary tiers retire history only after confirmed coverage. */
     fun assembleTieredContextMessages(
         tier: com.aiassistant.domain.model.CompressionTier,
         usableMessages: List<Message>,
@@ -213,10 +213,11 @@ object ChatContextAssemblyHelper {
         coveredThroughId: Long? = null
     ): TieredContextResult {
         if (usableMessages.isEmpty()) return TieredContextResult(emptyList(), null, 0, 0, false)
-        val injectedSummary = if (tier == com.aiassistant.domain.model.CompressionTier.L3) {
-            structuredSummary?.takeIf { it.isNotBlank() } ?: existingRollingSummary?.takeIf { it.isNotBlank() }
-        } else {
-            existingRollingSummary?.takeIf { it.isNotBlank() } ?: structuredSummary?.takeIf { it.isNotBlank() }
+        val injectedSummary = when (tier) {
+            com.aiassistant.domain.model.CompressionTier.LT -> null
+            com.aiassistant.domain.model.CompressionTier.L3 ->
+                structuredSummary?.takeIf { it.isNotBlank() } ?: existingRollingSummary?.takeIf { it.isNotBlank() }
+            else -> existingRollingSummary?.takeIf { it.isNotBlank() } ?: structuredSummary?.takeIf { it.isNotBlank() }
         }
         val plan = ContextCompressionPlanner.plan(
             messages = usableMessages,

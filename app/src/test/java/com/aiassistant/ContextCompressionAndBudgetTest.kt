@@ -389,7 +389,7 @@ class ContextCompressionAndBudgetTest {
             Message(id = 4, conversationId = 1, role = "assistant", content = "当前合成分析。".repeat(100)),
             Message(id = 5, conversationId = 1, role = "assistant", content = "当前合成补充。".repeat(100))
         )
-        for (tier in CompressionTier.entries) {
+        for (tier in CompressionTier.entries.filter { it != CompressionTier.LT }) {
             val plan = ContextCompressionPlanner.plan(messages, tier, 1, null, null)
             assertEquals("$tier 不能留下孤立回复或裁掉当前轮内容", messages.takeLast(3), plan.retainedMessages)
             assertEquals(messages.take(2), plan.summarySource)
@@ -477,7 +477,7 @@ class ContextCompressionAndBudgetTest {
             role = if (id % 2 == 1L) "user" else "assistant", content = "合成事实$id。") }
         val retainedCounts = mapOf(CompressionTier.L0 to 32, CompressionTier.L1 to 32, CompressionTier.L2 to 16,
             CompressionTier.L3 to 8, CompressionTier.L4 to 2, CompressionTier.LC to 10)
-        for (tier in CompressionTier.entries) {
+        for (tier in CompressionTier.entries.filter { it != CompressionTier.LT }) {
             val plan = ContextCompressionPlanner.plan(messages, tier, 10000, "已经整理至第十五轮。", 30L, forceCompression = true)
             assertFalse("切换到${tier}不能重新付费整理已覆盖原文", plan.needsSummary)
             assertEquals(30L, plan.summaryThroughId)
@@ -522,7 +522,7 @@ class ContextCompressionAndBudgetTest {
             Message(id = turn * 3 - 2, conversationId = 1, role = "user", content = "合成问题$turn"),
             Message(id = turn * 3 - 1, conversationId = 1, role = "assistant", content = "合成补充$turn"),
             Message(id = turn * 3, conversationId = 1, role = "assistant", content = "合成回答$turn")) }
-        for (through in listOf(17L, 18L)) for (tier in CompressionTier.entries) {
+        for (through in listOf(17L, 18L)) for (tier in CompressionTier.entries.filter { it != CompressionTier.LT }) {
             val plan = ContextCompressionPlanner.plan(messages, tier, 10000, "已有摘要覆盖当前轮的部分或全部消息。", through,
                 forceCompression = true)
             assertEquals(through, plan.summaryThroughId)
@@ -574,6 +574,65 @@ class ContextCompressionAndBudgetTest {
         assertTrue(pressured.needsSummary)
         assertEquals(messages.take(30).takeLast(2), pressured.retainedMessages)
         assertTrue(pressured.estimatedHistoryTokens <= lastTurnBudget)
+    }
+
+    @Test fun directTruncationCutsWholeEarliestTurnsByTheSelectedRatioWithoutSummarizing() {
+        val messages = (1L..10L).flatMap { turn -> listOf(
+            Message(id = turn * 3 - 2, conversationId = 1, role = "user", content = "合成问题 $turn"),
+            Message(id = turn * 3 - 1, conversationId = 1, role = "assistant", content = "合成补充 $turn"),
+            Message(id = turn * 3, conversationId = 1, role = "assistant", content = "合成答复 $turn")) }
+        for (force in listOf(false, true)) for (budget in listOf(1, 100_000)) {
+            val plan = ContextCompressionPlanner.plan(messages, CompressionTier.LT, budget,
+                "旧摘要不得影响直接截断。", 27L, retainPercent = 35, forceCompression = force)
+            assertEquals("十轮的 35% 向下取整截去三轮", messages.drop(9), plan.retainedMessages)
+            assertTrue(plan.summarySource.isEmpty())
+            assertEquals(0L, plan.summaryThroughId)
+            assertFalse(plan.needsSummary)
+            assertEquals(plan.retainedMessages.sumOf(ContextCompressionPlanner::messageTokens), plan.estimatedHistoryTokens)
+        }
+    }
+
+    @Test fun directTruncationProtectsTheWholePinnedTurnAndNeverChangesSourceMessages() {
+        val messages = (1L..20L).map { id -> Message(id = id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "原始合成内容 $id", isPinned = id == 4L) }
+        val original = messages.toList()
+        val plan = ContextCompressionPlanner.plan(messages, CompressionTier.LT, 1, null, null, retainPercent = 80)
+        assertEquals(messages.slice(2..3) + messages.takeLast(4), plan.retainedMessages)
+        assertEquals(original, messages)
+        assertTrue("置顶和用户选择的近期窗口超预算时不得继续多截", plan.estimatedHistoryTokens > 1)
+        assertTrue(plan.summarySource.isEmpty())
+        assertFalse(plan.needsSummary)
+    }
+
+    @Test fun directTruncationKeepsTheOnlyTurnAndRoundsSmallConversationsDown() {
+        val singleTurn = listOf(
+            Message(id = 1, conversationId = 1, role = "user", content = "当前合成问题。"),
+            Message(id = 2, conversationId = 1, role = "assistant", content = "当前合成补充。"),
+            Message(id = 3, conversationId = 1, role = "assistant", content = "当前合成回答。"))
+        for (source in listOf(singleTurn.take(1), singleTurn)) {
+            val plan = ContextCompressionPlanner.plan(source, CompressionTier.LT, 1, "旧摘要。", 3, retainPercent = 90)
+            assertEquals(source, plan.retainedMessages)
+            assertTrue(plan.summarySource.isEmpty())
+            assertFalse(plan.needsSummary)
+        }
+        val threeTurns = (1L..3L).map { Message(id = it, conversationId = 1, role = "user", content = "合成追问 $it") }
+        assertEquals(threeTurns, ContextCompressionPlanner.plan(threeTurns, CompressionTier.LT, 1, null, null,
+            retainPercent = 30).retainedMessages)
+        assertEquals(threeTurns.takeLast(1), ContextCompressionPlanner.plan(threeTurns, CompressionTier.LT, 1, null, null,
+            retainPercent = 90).retainedMessages)
+    }
+
+    @Test fun directTruncationUsesHistoryOrderRatherThanMessageIdsOrOldCoverage() {
+        val messages = (1L..20L).map { id -> Message(id = if (id == 2L) 99L else id, conversationId = 1,
+            role = if (id % 2 == 1L) "user" else "assistant", content = "合成变体内容 $id") }
+        for (through in listOf(null, 99L, 18L)) {
+            val plan = ContextCompressionPlanner.plan(messages, CompressionTier.LT, 100_000,
+                "旧摘要已覆盖不同范围。", through, retainPercent = 50)
+            assertEquals(messages.drop(10), plan.retainedMessages)
+            assertEquals(0L, plan.summaryThroughId)
+            assertTrue(plan.summarySource.isEmpty())
+            assertFalse(plan.needsSummary)
+        }
     }
 
 }

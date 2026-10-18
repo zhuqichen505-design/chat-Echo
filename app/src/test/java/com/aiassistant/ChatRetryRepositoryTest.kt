@@ -533,6 +533,96 @@ class ChatRetryRepositoryTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun directTruncationAppliesAndPreviewsWithoutCallingSummaryOrKeepingItsFailedRetryAction() = runBlocking {
+        newSingleThreadContext("direct-truncation-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Endpoint { socket, _ -> socket.response("400 Bad Request", "{\"error\":{\"message\":\"synthetic summary rejection\"}}") }
+                    .use { endpoint -> Fixture().use { f ->
+                        f.enableViewModel()
+                        f.settings.saveSettings(f.settings.getSettings().copy(autoCompressionTierEnabled = true))
+                        val (config, id) = f.config(endpoint.url)
+                        f.db.messageDao().insertMessages((0 until 40).map { index -> Message(conversationId = id,
+                            role = if (index % 2 == 0) "user" else "assistant", content = "直接截断回归的合成事实 $index。",
+                            createdAt = index.toLong(), modelName = if (index % 2 == 1) config.modelName else null) })
+                        val original = f.db.messageDao().getMessagesList(id)
+                        val oldSummary = "合成旧摘要：队伍持有蓝印凭证，铜钥匙尚未转交。"
+                        val checkpoint = original[1].id
+                        f.db.conversationDao().updateRollingSummary(id, oldSummary, checkpoint, 123L)
+                        val vm = ChatViewModel(id)
+                        try {
+                            withTimeout(5000) { while (vm.contextUsage.value.usage == null) delay(10) }
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.L4) }
+                            withTimeout(10000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertTrue("先制造一次摘要失败以覆盖旧重试状态", vm.contextUsage.value.canRetryCompression)
+                            val failedSummaryCalls = endpoint.payloads.size
+                            assertTrue(failedSummaryCalls > 0)
+
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.LT, customPercent = 50) }
+                            withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertEquals(CompressionTier.LT, vm.contextUsage.value.usage!!.compressionTier)
+                            assertEquals(20, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertFalse(vm.contextUsage.value.canRetryCompression)
+                            assertTrue(vm.contextUsage.value.statusMessage.orEmpty().contains("直接截断已生效"))
+                            assertFalse(vm.contextUsage.value.statusMessage.orEmpty().contains("摘要已保存"))
+                            assertEquals(failedSummaryCalls, endpoint.payloads.size)
+
+                            val confirmedUsage = vm.contextUsage.value.usage!!
+                            withContext(Dispatchers.Main) { vm.previewCompressionSettings(8, 75) }
+                            withTimeout(5000) { while (vm.contextUsage.value.usage!!.tierPreviews.none {
+                                it.tier == CompressionTier.LT && it.retainedRoundsDesc.contains("75%") }) delay(10) }
+                            assertEquals("预览不能提前保存截断比例", 50, vm.contextUsage.value.usage!!.compressionCustomPercent)
+                            assertEquals("未确认前顶部用量与当前档对比条必须保持50%基线",
+                                confirmedUsage.estimatedInputTokens, vm.contextUsage.value.usage!!.estimatedInputTokens)
+                            assertEquals("未确认前当前原文仍保留20条", 20, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertEquals("预览只更新候选档位，不应改变其他已确认用量",
+                                confirmedUsage.copy(tierPreviews = vm.contextUsage.value.usage!!.tierPreviews), vm.contextUsage.value.usage)
+                            assertEquals(50, f.db.conversationDao().getConversationById(id)!!.compressionCustomPercent)
+                            withContext(Dispatchers.Main) { vm.refreshContextUsage() }
+                            val discardedPreviewRefresh = ChatViewModel::class.java.getDeclaredField("contextUsageRefreshJob")
+                                .apply { isAccessible = true }.get(vm) as Job
+                            withTimeout(5000) { discardedPreviewRefresh.join() }
+                            assertEquals("放弃草稿并刷新后仍为已确认的50%", 50, vm.contextUsage.value.usage!!.compressionCustomPercent)
+                            assertEquals(20, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertEquals(confirmedUsage.estimatedInputTokens, vm.contextUsage.value.usage!!.estimatedInputTokens)
+                            assertTrue(vm.contextUsage.value.usage!!.tierPreviews.any {
+                                it.tier == CompressionTier.LT && it.retainedRoundsDesc.contains("50%") })
+                            assertEquals(50, f.db.conversationDao().getConversationById(id)!!.compressionCustomPercent)
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.LT, customPercent = 75) }
+                            withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertEquals(10, vm.contextUsage.value.usage!!.recentMessageCount)
+
+                            withContext(Dispatchers.Main) {
+                                vm.generateRollingSummaryNow()
+                                vm.compressContextNow()
+                            }
+                            withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            withContext(Dispatchers.Main) { vm.refreshContextUsage(evaluateAuto = true) }
+                            val refresh = ChatViewModel::class.java.getDeclaredField("contextUsageRefreshJob")
+                                .apply { isAccessible = true }.get(vm) as Job
+                            withTimeout(5000) { refresh.join() }
+                            assertFalse("切入截断档后不能恢复摘要失败重试入口", vm.contextUsage.value.canRetryCompression)
+                            assertNull(vm.contextUsage.value.pendingAutoTier)
+                            assertEquals("截断、预览、手动压缩和刷新均不应再调用摘要", failedSummaryCalls, endpoint.payloads.size)
+                            val saved = f.db.conversationDao().getConversationById(id)!!
+                            assertEquals(75, saved.compressionCustomPercent)
+                            assertEquals(oldSummary, saved.rollingSummary)
+                            assertEquals(checkpoint, saved.summaryUpdatedMessageId)
+                            assertEquals(123L, saved.summaryUpdatedAt)
+                            assertEquals(original, f.db.messageDao().getMessagesList(id))
+
+                            withContext(Dispatchers.Main) { vm.setCompressionTier(CompressionTier.L0) }
+                            withTimeout(5000) { while (vm.contextUsage.value.isCompressing) delay(10) }
+                            assertEquals("切回完整保留应恢复读取全部原文", 40, vm.contextUsage.value.usage!!.recentMessageCount)
+                            assertEquals(oldSummary, f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                            assertEquals(failedSummaryCalls, endpoint.payloads.size)
+                        } finally { vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+                    } }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
     @Test fun sameTierParameterChangesApplyWhilePreviewAndCompleteTiersDoNotPretendToSaveOrCharge() = runBlocking {
         newSingleThreadContext("context-policy-parameters-main").use { main ->
             Dispatchers.setMain(main)

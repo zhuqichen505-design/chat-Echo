@@ -2,6 +2,7 @@ package com.aiassistant
 
 import com.aiassistant.domain.model.Message
 import com.aiassistant.data.repository.helpers.ConversationTitleHelper
+import com.aiassistant.data.repository.helpers.SummaryResponseValidator
 import com.aiassistant.utils.AdvancedMemoryEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +12,97 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RollingSummaryEnhancementTest {
+
+    @Test
+    fun summaryValidatorRejectsLongTaskRefusalsBehindMarkdownAndPolicyIntroductions() {
+        val refusals = listOf(
+            "由于安全政策限制，我不能为你生成这份摘要。请调整提供的内容，移除不符合规范的部分后再试。",
+            "## 响应说明\n\n> **很抱歉，我无法总结所提供的上下文，因为这些内容触发了安全政策。**\n> 请修改输入后重新提交。",
+            "```text\n根据相关政策，当前请求触发内容审核。请修改提供的文本后重试，以便继续处理摘要任务。\n```",
+            "“我无法完成这个请求。所提供的文本包含不允许的内容，请更换材料之后重新尝试生成摘要。”",
+            "无法生成摘要，因为这段输入不符合适用的内容政策。你可以提供其他材料之后再进行总结。"
+        )
+        refusals.forEach { refusal ->
+            assertNotNull("任务拒绝不能作为历史摘要保存：$refusal", SummaryResponseValidator.refusalReason(refusal))
+            assertFalse(SummaryResponseValidator.isUsableSummary(refusal))
+        }
+    }
+
+    @Test
+    fun summaryValidatorRejectsEnglishRefusalsWithContractionsAndLongExplanations() {
+        val refusals = listOf(
+            "In accordance with safety guidelines, I cannot provide a summary of the supplied text. Please revise the request before trying again.",
+            "**I’m unable to summarize the provided content because it conflicts with the applicable content policy.** I can assist with a different request.",
+            "I'm sorry, but I can't assist with that request. Please remove the restricted material and try a different input.",
+            "We are not permitted to process this request under our safety guidelines. Please modify the input and try again.",
+            "Your request has been blocked under the content policy. Please revise the material and try again."
+        )
+        refusals.forEach { refusal ->
+            assertNotNull("英文拒绝必须单独报告", SummaryResponseValidator.refusalReason(refusal))
+            assertFalse(SummaryResponseValidator.isUsableSummary(refusal))
+        }
+    }
+
+    @Test
+    fun summaryRefusalReasonIsBoundedWithoutAcceptingARepeatedLongExplanation() {
+        val refusal = "很抱歉，受内容政策限制，我无法对此类内容进行处理并生成摘要。" +
+            "这是一段合成的限制说明，请调整输入后重试。".repeat(80)
+        val reason = SummaryResponseValidator.refusalReason(refusal)
+        assertNotNull(reason)
+        assertTrue("展示原因须限制长度", reason!!.length <= 600)
+        assertTrue(reason.contains("无法对此类内容进行处理"))
+        assertFalse(SummaryResponseValidator.isUsableSummary(refusal))
+    }
+
+    @Test
+    fun summaryValidatorPreservesExistingTaskRefusalCoverageAndRejectsBareApologiesByLength() {
+        val refusals = listOf(
+            "无法返回这份摘要，因为本次没有获得能够独立使用的完整上下文，请重新提供有效原文后再试。",
+            "无法生成所请求的摘要，请重新提供完整上下文后再试，当前请求不能被正常完成。",
+            "未能生成这份摘要，因为缺少完成本次任务所需的上下文，请重新提供原文后再试。",
+            "不能生成这份摘要，因为所提供的上下文不完整，请重新提供能够独立使用的全部原文。",
+            "抱歉，我无法协助完成这个请求，请修改输入之后重新尝试生成摘要。",
+            "抱歉, 我不能生成这份摘要，请重新提供符合内容政策的其他材料之后再试。",
+            "Sorry, I cannot provide the requested summary. Please provide the complete source material first.",
+            "I cannot generate a summary of the provided content. Please revise the request before trying again.",
+            "I can't help with that request. Please provide different content that can be summarized."
+        )
+        refusals.forEach { refusal ->
+            assertNotNull(SummaryResponseValidator.refusalReason(refusal))
+            assertFalse(SummaryResponseValidator.isUsableSummary(refusal))
+        }
+        listOf("抱歉，", "抱歉。", "sorry,", "I cannot", "无法生成").forEach { incomplete ->
+            assertFalse("独立道歉或无正文声明不能作为摘要", SummaryResponseValidator.isUsableSummary(incomplete))
+        }
+    }
+
+    @Test
+    fun summaryValidatorPreservesNarrativeSafetyRulesAndQuotedCharacterRefusals() {
+        val summaries = listOf(
+            "【背景约束】\n资料室存在安全限制，守卫只允许持蓝印凭证者进入。\n【经过】\n角色在伪造信件中引用“抱歉，我无法生成这份摘要，因为它违反安全政策。”来揭穿骗局。\n【待办】\n队伍准备核对下一张凭证。",
+            "The guard said, \"I cannot help with that request due to safety policy.\" The synthetic crew left the archive, kept the blue pass, and planned to ask the keeper the next morning.",
+            "合成故事中的角色因安全政策不能进入资料室，因此决定返回北港等待管理员授权；同伴保管蓝印凭证，下一步核对通行名单。",
+            "船队受到安全限制。守卫无法提供通行许可，角色决定先核对身份。蓝印凭证仍由领航员妥善保管。",
+            "角色无法总结此前经历，因此暂缓答复。队伍决定先核对北港记录，并在翌日带齐凭证后再去寻找见证人。",
+            "我无法返回北港，因为新的安全政策暂时禁止船只靠岸；同伴仍保管蓝印凭证，队伍决定先在外港等待通行许可。",
+            "安全政策规定合成魔法不能生成临时通行证，因此队伍改向港口申请正式凭证，并决定等待下一班渡船到来。",
+            "【当前摘要】\n我无法帮助同伴打开上锁的资料柜，因此队伍先返回港口。\n【后续】\n明日寻找管理员取回铜钥匙，现有凭证继续保管。"
+        )
+        summaries.forEach { summary ->
+            assertNull("剧情事实与嵌入引文不等于模型拒绝：$summary", SummaryResponseValidator.refusalReason(summary))
+            assertTrue(SummaryResponseValidator.isUsableSummary(summary))
+        }
+    }
+
+    @Test
+    fun summaryValidatorKeepsPlainCompletedFactsButRejectsOnlyHeadingsAndThinking() {
+        val summary = "合成队伍已完成北港登记，蓝印凭证仍由领航员保管；此前的采购已结账，下一步核对航线并等待放行。"
+        assertTrue(SummaryResponseValidator.isUsableSummary(summary))
+        assertFalse(SummaryResponseValidator.isUsableSummary("【核心背景与用户固定约束】\n【历史关键里程碑与决策推进】"))
+        assertFalse(SummaryResponseValidator.isUsableSummary(null))
+        assertFalse(SummaryResponseValidator.isUsableSummary("<think>这段很长的合成思考并不是摘要正文，不能通过长度检查后进入历史记忆。</think>"))
+        assertNull(ConversationTitleHelper.sanitizeSummaryCompletion("<think>我无法生成摘要，因为触发安全政策。</think>", preserveCompleteText = true))
+    }
 
     @Test
     fun testExtractCompleteSentence_preservesPrimaryPunctuation() {
@@ -297,6 +389,20 @@ class RollingSummaryEnhancementTest {
         assertEquals("合成约束。", ConversationTitleHelper.sanitizeSummaryCompletion(raw))
         assertEquals("合成约束。\n\n【合成待办】",
             ConversationTitleHelper.sanitizeSummaryCompletion(raw, preserveCompleteText = true))
+    }
+
+    @Test
+    fun summaryMustContainFactsBeyondMarkdownHeadingsAndEmptyPlaceholders() {
+        val titleOnly = "## 人物身份与关系\n## 世界观与场景设定\n## 已发生的重要事件\n## 当前状态与未完成事项"
+        val placeholders = "【核心背景固定约束】\n- 待补充\n【历史事件推进】\n- TODO\n【当前未决事项】\n-"
+        val setextTitles = "人物身份与关系\n================\n世界观与场景设定\n----------------\n当前状态与未完成事项\n================"
+        for (empty in listOf(titleOnly, placeholders, setextTitles)) {
+            assertFalse(com.aiassistant.data.repository.helpers.SummaryResponseValidator.hasSubstantiveContent(empty))
+            assertFalse(com.aiassistant.data.repository.helpers.SummaryResponseValidator.isUsableSummary(empty))
+        }
+        val valid = "## 人物身份与关系\n合成船队仍由铜印守卫护送，已核对北港凭证，下一步检查 synthetic-outline.json"
+        assertTrue(com.aiassistant.data.repository.helpers.SummaryResponseValidator.isUsableSummary(valid))
+        assertTrue("短手工事实不能因长度被撤销覆盖", com.aiassistant.data.repository.helpers.SummaryResponseValidator.hasSubstantiveContent("船队已到北港。"))
     }
 
     @Test

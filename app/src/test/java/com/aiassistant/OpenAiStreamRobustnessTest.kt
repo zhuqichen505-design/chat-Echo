@@ -9,6 +9,66 @@ import org.junit.Test
 class OpenAiStreamRobustnessTest {
 
     @Test
+    fun nonStreamingExplicitRefusalStaysSeparateFromBodyAndUsage() {
+        val response = Gson().fromJson("""
+            {"choices":[{"message":{"role":"assistant","content":null,
+              "refusal":"Synthetic policy refusal: this request cannot be summarized."},"finish_reason":"stop"}],
+              "usage":{"prompt_tokens":18,"completion_tokens":6,"total_tokens":24}}
+        """.trimIndent(), ChatCompletionResponse::class.java)
+
+        assertNull(response.choices?.single()?.message?.content)
+        assertEquals("Synthetic policy refusal: this request cannot be summarized.", response.choices?.single()?.message?.refusal)
+        assertEquals("stop", response.choices?.single()?.finish_reason)
+        assertEquals(24, response.usage?.total_tokens)
+    }
+
+    @Test
+    fun structuredRefusalCannotBecomeSummaryBodyOrEraseOtherContent() {
+        val response = Gson().fromJson("""
+            {"choices":[{"message":{"role":"assistant","content":[
+              {"type":"text","text":"合成正文仍需由调用方检查。"},
+              {"type":"refusal","refusal":"合成策略阻断说明。"},
+              {"type":"refusal","text":{"value":"合成额外限制说明。"}},
+              {"type":"thinking","thinking":"不应保存的合成推理"}
+            ]},"finish_reason":"content_filter"}],"usage":{"total_tokens":13}}
+        """.trimIndent(), ChatCompletionResponse::class.java)
+
+        assertEquals("合成正文仍需由调用方检查。", response.choices?.single()?.message?.content)
+        assertEquals("合成策略阻断说明。合成额外限制说明。", response.choices?.single()?.message?.refusal)
+        assertEquals("content_filter", response.choices?.single()?.finish_reason)
+        assertEquals(13, response.usage?.total_tokens)
+    }
+
+    @Test
+    fun streamedRefusalFragmentsStaySeparateFromTextAndCompletionMetadata() {
+        val first = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"refusal":"Synthetic policy "},"finish_reason":null}]}
+        """.trimIndent())
+        val second = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"refusal":"refusal."},"finish_reason":"content_filter"}],"usage":{"total_tokens":7}}
+        """.trimIndent())
+
+        assertEquals("Synthetic policy refusal.", first?.refusalDelta.orEmpty() + second?.refusalDelta.orEmpty())
+        assertNull(first?.contentDelta)
+        assertNull(second?.contentDelta)
+        assertEquals("content_filter", second?.finishReason)
+        assertEquals(7, second?.usage?.total_tokens)
+    }
+
+    @Test
+    fun streamedEmbeddedAndGatewayRefusalsRemainVisibleWithoutLeakingIntoBody() {
+        val result = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"content":[{"type":"output_text","text":"合成普通正文。"},
+              {"type":"refusal","refusal":"合成块拒绝。"}]},
+              "message":{"refusal":"合成网关拒绝。"},"finish_reason":"stop"}]}
+        """.trimIndent())
+
+        assertEquals("合成普通正文。", result?.contentDelta)
+        assertEquals("合成块拒绝。\n合成网关拒绝。", result?.refusalDelta)
+        assertEquals("stop", result?.finishReason)
+    }
+
+    @Test
     fun testParseStandardSseChunk() {
         val line = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello world\"},\"finish_reason\":null}]}"
         val res = AiRepository.parseOpenAiStreamLine(line)

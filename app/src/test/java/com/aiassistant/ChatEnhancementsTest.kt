@@ -8,6 +8,30 @@ import org.junit.Test
 import java.util.Locale
 
 class ChatEnhancementsTest {
+    @Test fun directTruncationPercentageChangesRemainPendingUntilConfirmed() {
+        val saved = com.aiassistant.ui.screens.chat.ContextCompressionSelection(
+            com.aiassistant.domain.model.CompressionTier.LT, recentRounds = 8, customPercent = 30)
+
+        assertTrue(saved.matches(saved.copy(recentRounds = 16)))
+        assertFalse("修改截断比例必须使确认按钮可用", saved.matches(saved.copy(customPercent = 75)))
+        assertFalse("保留比例和截断比例不能当成同一策略", saved.matches(saved.copy(tier = com.aiassistant.domain.model.CompressionTier.LC)))
+        assertFalse(saved.matches(null))
+    }
+
+    @Test fun savedDirectTruncationRestoresItsConfirmedPercentageAsTheDialogBaseline() {
+        val usage = com.aiassistant.domain.model.ConversationContextUsage(
+            compressionTier = com.aiassistant.domain.model.CompressionTier.LT,
+            compressionCustomPercent = 65,
+            compressionRecentRounds = 12)
+
+        val selection = com.aiassistant.ui.screens.chat.ContextCompressionSelection.from(usage)
+
+        assertEquals(com.aiassistant.domain.model.CompressionTier.LT, selection.tier)
+        assertEquals(65, selection.customPercent)
+        assertTrue(selection.matches(com.aiassistant.ui.screens.chat.ContextCompressionSelection.from(usage)))
+        assertFalse(selection.copy(customPercent = 60).matches(selection))
+    }
+
     @Test fun reopeningRegeneratingConversationRecoversVariantHostInsteadOfHidingBehindOldReply() {
         val conversationId = 908090L
         val manager = com.aiassistant.data.repository.ChatGenerationManager

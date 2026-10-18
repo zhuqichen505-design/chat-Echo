@@ -16,7 +16,8 @@ data class OpenAiStreamChunkResult(
     val finishReason: String? = null,
     val isDone: Boolean = false,
     val usage: Usage? = null,
-    val inlineErrorMessage: String? = null
+    val inlineErrorMessage: String? = null,
+    val refusalDelta: String? = null
 )
 
 /**
@@ -94,8 +95,16 @@ object OpenAiStreamChunkParser {
             contentDelta = contentDelta,
             thinkingDelta = thinkingDelta,
             finishReason = choice?.get("finish_reason").stringOrNull(),
-            usage = usage
+            usage = usage,
+            refusalDelta = listOfNotNull(refusalFrom(delta), refusalFrom(message)).distinct()
+                .takeIf { it.isNotEmpty() }?.joinToString("\n")
         )
+    }
+
+    private fun refusalFrom(message: JsonObject?): String? {
+        if (message == null) return null
+        return listOfNotNull(ApiResponseText.refusal(message.get("refusal")), ApiResponseText.embeddedRefusal(message.get("content")))
+            .filter(String::isNotBlank).distinct().takeIf { it.isNotEmpty() }?.joinToString("\n")
     }
 
     private fun reasoningFrom(message: JsonObject?): String? {

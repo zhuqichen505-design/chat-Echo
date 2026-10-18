@@ -45,6 +45,12 @@ enum class CompressionTier(
         displayName = "自定义比例",
         shortDesc = "保留最近 X% 消息原文，其余合并为摘要",
         detailLossNote = "按自定义百分比保留最近一段消息原文（预算内尽可能保留），更早历史交由摘要承载。"
+    ),
+    LT(
+        level = 6,
+        displayName = "直接截断",
+        shortDesc = "按比例截去最早轮次，不生成或使用摘要",
+        detailLossNote = "从本次请求中截去最早的指定比例完整轮次，置顶轮次完整保留且至少保留最近 1 轮；原始消息仍在本机，截去内容不由摘要承接。"
     );
 
     companion object {
@@ -54,6 +60,7 @@ enum class CompressionTier(
             3 -> L3
             4 -> L4
             5 -> LC
+            6 -> LT
             else -> L0
         }
     }
@@ -81,11 +88,15 @@ object CompressionTierPolicy {
     const val MIN_L2_RECENT_ROUNDS = 4
     const val MAX_L2_RECENT_ROUNDS = 32
 
-    /** LC 自定义比例档：保留原文的消息条数占总消息数的百分比（10~90，步长 5） */
+    /** LC 表示保留消息比例，LT 表示截去早期轮次比例（10~90，步长 5）。 */
     const val DEFAULT_CUSTOM_RETAIN_PERCENT = 30
     const val MIN_CUSTOM_RETAIN_PERCENT = 10
     const val MAX_CUSTOM_RETAIN_PERCENT = 90
     const val STEP_CUSTOM_RETAIN_PERCENT = 5
+
+    fun normalizeTruncatePercent(percent: Int): Int =
+        ((percent.coerceIn(MIN_CUSTOM_RETAIN_PERCENT, MAX_CUSTOM_RETAIN_PERCENT) +
+            STEP_CUSTOM_RETAIN_PERCENT / 2) / STEP_CUSTOM_RETAIN_PERCENT) * STEP_CUSTOM_RETAIN_PERCENT
 
     const val DEFAULT_THRESHOLD_L2 = 0.75f
     const val DEFAULT_THRESHOLD_L3 = 0.85f
@@ -104,7 +115,7 @@ object CompressionTierPolicy {
         thresholdL3: Float = DEFAULT_THRESHOLD_L3,
         thresholdL4: Float = DEFAULT_THRESHOLD_L4
     ): CompressionTier? {
-        if (!autoEnabled) return null
+        if (!autoEnabled || currentTier == CompressionTier.LT) return null
 
         val targetTier = when {
             usagePercent >= thresholdL4 -> CompressionTier.L4
@@ -135,6 +146,7 @@ object CompressionTierPolicy {
             CompressionTier.L3 -> CompressionTier.L4
             CompressionTier.LC -> CompressionTier.L4 // 自定义比例档仍溢出时按既定阶梯降到极限档
             CompressionTier.L4 -> null // 已是极限档位
+            CompressionTier.LT -> null // 直接截断量只由用户选择，不自动切换到摘要档。
         }
     }
 
@@ -153,6 +165,7 @@ object CompressionTierPolicy {
             CompressionTier.L3 -> "保留最近 4 轮原文"
             CompressionTier.L4 -> "保留最近 1 轮原文"
             CompressionTier.LC -> "保留最近 $customRetainPercent% 消息原文（预算内尽量保留）"
+            CompressionTier.LT -> "截去最早 ${normalizeTruncatePercent(customRetainPercent)}% 轮次（整轮向下取整）；置顶轮次保留，至少保留最近 1 轮"
         }
     }
 }

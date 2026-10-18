@@ -721,7 +721,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 )
                 // Refreshing a snapshot must not finish a separate operation or erase its result.
                 _contextUsage.update { it.copy(usage = usage,
-                    canRetryCompression = it.canRetryCompression || repository.hasPendingSummaryFailure(conversationId)) }
+                    canRetryCompression = usage.compressionTier != CompressionTier.LT &&
+                        (it.canRetryCompression || repository.hasPendingSummaryFailure(conversationId)),
+                    pendingAutoTier = it.pendingAutoTier.takeUnless { usage.compressionTier == CompressionTier.LT }) }
                 if (evaluateAuto) evaluateAutoCompression()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -756,6 +758,14 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         if (contextOperationJob != null || (targetTier == null && _isGenerating.value)) return
         contextUsageRefreshJob?.cancel()
         val initialUsage = _contextUsage.value.usage
+        val effectiveTier = targetTier ?: initialUsage?.compressionTier
+            ?: CompressionTier.fromLevel(conversation?.compressionTier)
+        val usesDirectTruncation = effectiveTier == CompressionTier.LT
+        if (updateSummaryOnly && usesDirectTruncation) {
+            _contextUsage.update { it.copy(canRetryCompression = false, pendingAutoTier = null,
+                statusMessage = "直接截断档不调用模型生成摘要；已保存摘要仍可审阅，切回摘要档后可更新") }
+            return
+        }
         val saveForNextRequest = targetTier != null && _isGenerating.value
         val tierSave = targetTier?.let { tier ->
             viewModelScope.async(start = CoroutineStart.LAZY) {
@@ -781,6 +791,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 pendingAutoTier = null,
                 statusMessage = when {
                     saveForNextRequest -> "正在保存压缩档位，本轮回复继续使用原上下文…"
+                    usesDirectTruncation -> "正在应用直接截断比例，不调用模型…"
                     targetTier == CompressionTier.L0 || targetTier == CompressionTier.L1 -> "正在应用所选保留策略…"
                     updateSummaryOnly -> "正在连续整理历史摘要，完成前保持原有上下文…"
                     isAuto -> "正在应用压缩档位并整理较早对话…"
@@ -797,7 +808,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 tierSave?.await()
                 val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
                 val usage = when {
-                    saveForNextRequest || targetTier == CompressionTier.L0 || targetTier == CompressionTier.L1 ->
+                    saveForNextRequest || usesDirectTruncation || targetTier == CompressionTier.L0 || targetTier == CompressionTier.L1 ->
                         repository.getConversationContextUsage(conversationId, modelName, maxTokens, contextOverride,
                             apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
                     updateSummaryOnly -> repository.generateRollingSummaryNow(conversationId, modelName, maxTokens, contextOverride,
@@ -811,6 +822,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 val freed = (((initialUsage?.usagePercent ?: 0f) - usage.usagePercent) * 100).coerceAtLeast(0f)
                 val message = when {
                     saveForNextRequest -> "压缩档位已保存为「${targetTier?.displayName}」，将在下一轮请求生效"
+                    usesDirectTruncation -> "直接截断已生效：截断最早 ${usage.compressionCustomPercent}% 的完整轮次，置顶轮次与最近 1 轮保留；后续请求不发送被截断的早期原文和历史摘要，本机聊天记录完整保留"
                     targetTier == CompressionTier.L0 || targetTier == CompressionTier.L1 -> "已应用「${targetTier?.displayName}」；当前原文保留范围已重新计算"
                     updateSummaryOnly -> "历史摘要已保存，请审阅其中的事实与时间"
                     freed > 1f -> "较早原文已由保存的摘要承接，预计释放 ${freed.toInt()}% 输入预算；原始聊天记录完整保留"
@@ -830,13 +842,14 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         val usage = repository.getConversationContextUsage(conversationId, modelName, maxTokens, contextOverride,
                             apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
                         _contextUsage.update { it.copy(usage = usage,
-                            canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
+                            canRetryCompression = !usesDirectTruncation && !updateSummaryOnly && !saveForNextRequest,
                             statusMessage =
-                            if (targetTier != null) "已保存「${targetTier.displayName}」并取消本次摘要整理；下一轮发送将使用所选策略"
+                            if (usesDirectTruncation) "已取消本次用量计算；已确认的直接截断比例会用于下一轮发送，本机聊天与摘要完整保留"
+                            else if (targetTier != null) "已保存「${targetTier.displayName}」并取消本次摘要整理；下一轮发送将使用所选策略"
                             else "已取消整理；原始聊天记录和已保存摘要完整保留") }
                     } catch (failure: Exception) {
                         _contextUsage.update { it.copy(
-                            canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
+                            canRetryCompression = !usesDirectTruncation && !updateSummaryOnly && !saveForNextRequest,
                             statusMessage = failure.message ?: "压缩档位保存失败，请重新确认") }
                     }
                 }
@@ -855,8 +868,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 // report canCompress=false, leaving the dialog's action disabled
                 // until the custom percentage was changed again.
                 _contextUsage.update { it.copy(
-                    canRetryCompression = !updateSummaryOnly && !saveForNextRequest,
-                    statusMessage = error.message ?: "整理失败，原文与上次摘要已保留") }
+                    canRetryCompression = !usesDirectTruncation && !updateSummaryOnly && !saveForNextRequest,
+                    statusMessage = error.message ?: if (usesDirectTruncation) "无法应用直接截断，请重新确认比例；本机聊天与摘要已保留"
+                        else "整理失败，原文与上次摘要已保留") }
             } finally {
                 _contextUsage.update { it.copy(isCompressing = false, isGeneratingSummary = false) }
                 contextOperationJob = null
@@ -881,7 +895,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             repository.updateRollingSummary(conversationId, newSummary)
             conversation = repository.getConversationById(conversationId) ?: conversation
             refreshContextUsage()
-            _contextUsage.update { it.copy(statusMessage = "✅ 滚动摘要已手动更新并保存") }
+            _contextUsage.update { it.copy(statusMessage =
+                if (CompressionTier.fromLevel(conversation?.compressionTier) == CompressionTier.LT)
+                    "历史摘要已手动保存；当前直接截断档不发送摘要"
+                else "✅ 滚动摘要已手动更新并保存") }
         }
     }
 
@@ -893,7 +910,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             repository.clearRollingSummary(conversationId)
             conversation = repository.getConversationById(conversationId) ?: conversation
             refreshContextUsage()
-            _contextUsage.update { it.copy(statusMessage = "✅ 滚动摘要已清除") }
+            _contextUsage.update { it.copy(statusMessage =
+                if (CompressionTier.fromLevel(conversation?.compressionTier) == CompressionTier.LT)
+                    "历史摘要已清除；直接截断比例保持不变"
+                else "✅ 滚动摘要已清除") }
         }
     }
 
@@ -928,14 +948,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 apiConfigIdOverride = _currentModelOption.value?.apiConfigId
             )
             _contextUsage.update { state ->
-                // Preview token estimates are provisional; saved fields remain the UI's
-                // confirmation baseline until the user's policy is actually persisted.
-                val saved = state.usage
-                state.copy(usage = usage.copy(
-                    compressionTier = saved?.compressionTier ?: usage.compressionTier,
-                    compressionRecentRounds = saved?.compressionRecentRounds ?: usage.compressionRecentRounds,
-                    compressionCustomPercent = saved?.compressionCustomPercent ?: usage.compressionCustomPercent
-                ))
+                // Only candidate estimates follow the draft. The current-policy totals
+                // remain the comparison baseline until the selected policy is saved.
+                state.copy(usage = state.usage?.copy(tierPreviews = usage.tierPreviews) ?: usage)
             }
         }
     }
@@ -971,6 +986,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             if (!personalization.autoCompressionTierEnabled) return
 
             val usage = _contextUsage.value.usage ?: return
+            if (usage.compressionTier == CompressionTier.LT) {
+                _contextUsage.update { it.copy(pendingAutoTier = null, canRetryCompression = false) }
+                return
+            }
             val percent = usage.usagePercent
             if (contextOperationJob != null || _isGenerating.value) return
 
