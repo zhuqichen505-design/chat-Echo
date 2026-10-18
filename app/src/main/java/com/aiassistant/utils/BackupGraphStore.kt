@@ -80,7 +80,7 @@ object BackupGraphStore {
     private val references = mapOf(
         "folders" to mapOf("parentId" to "folders"),
         "conversations" to mapOf("apiConfigId" to "api_configs", "folderId" to "folders", "summaryUpdatedMessageId" to "messages"),
-        "messages" to mapOf("conversationId" to "conversations"),
+        "messages" to mapOf("conversationId" to "conversations", "injectionTargetMessageId" to "messages"),
         "world_book_entries" to mapOf("bookId" to "world_books"),
         "roleplay_sessions" to mapOf("conversationId" to "conversations", "characterId" to "character_profiles", "scenarioId" to "roleplay_scenarios"),
         "roleplay_memories" to mapOf("sessionId" to "roleplay_sessions", "sourceMessageId" to "messages"),
@@ -215,6 +215,17 @@ object BackupGraphStore {
                 require(items.map { requireNotNull(it.get("_uuid")).asString }.distinct().size == items.size) { "$table 存在重复身份" }
             }
         }
+        val sourceMessages = rows.getValue("messages").associateBy { id(it)!! }
+        sourceMessages.values.forEach { message ->
+            id(message, "injectionTargetMessageId")?.let { targetId ->
+                val target = sourceMessages[targetId]
+                require(target != null && message.get("role")?.asString == "user" &&
+                    target.get("role")?.asString == "assistant" &&
+                    id(message, "conversationId") == id(target, "conversationId")) {
+                    "备份的输入注入关联无效"
+                }
+            }
+        }
         val db = database.openHelper.writableDatabase
         // Detach sessions before mutation; cancellation must not persist a late partial reply.
         rows.getValue("conversations").forEach { item ->
@@ -254,6 +265,16 @@ object BackupGraphStore {
                 val columns = db.query("PRAGMA table_info(`$table`)").use { cursor -> buildSet { while(cursor.moveToNext()) add(cursor.getString(1)) } }
                 rows.getValue(table).forEach { original ->
                     val item = original.deepCopy()
+                    // Missing fields in pre-feature snapshots restore the old content-only state,
+                    // including when an existing portable identity is being overwritten.
+                    if (table == "conversations") {
+                        if (!item.has("enableInputInjection")) item.addProperty("enableInputInjection", false)
+                        if (!item.has("inputInjectionTrigger")) item.add("inputInjectionTrigger", com.google.gson.JsonNull.INSTANCE)
+                    }
+                    if (table == "messages") {
+                        if (!item.has("modelContent")) item.add("modelContent", com.google.gson.JsonNull.INSTANCE)
+                        if (!item.has("injectionTargetMessageId")) item.add("injectionTargetMessageId", com.google.gson.JsonNull.INSTANCE)
+                    }
                     val local = id(item)?.let { maps.getValue(table).getValue(it) }
                     if (local != null) item.addProperty("id", local)
                     references[table].orEmpty().forEach { (field, target) ->
@@ -319,6 +340,7 @@ object BackupGraphStore {
                             db.execSQL("UPDATE memory_items SET sourceMessageId=NULL WHERE sourceMessageId=?", arrayOf(old))
                             db.execSQL("UPDATE roleplay_memories SET sourceMessageId=NULL WHERE sourceMessageId=?", arrayOf(old))
                             db.execSQL("UPDATE conversations SET summaryUpdatedMessageId=NULL WHERE summaryUpdatedMessageId=?", arrayOf(old))
+                            db.execSQL("UPDATE messages SET injectionTargetMessageId=NULL WHERE injectionTargetMessageId=?", arrayOf(old))
                             db.execSQL("DELETE FROM conversation_branches WHERE branchMessageId=?", arrayOf(old))
                         }
                         db.delete(table, "id=?", arrayOf(old))

@@ -239,10 +239,10 @@ class BackupGraphStoreTest {
             sql.version = 32
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
         try {
             assertEquals("retained", upgraded.messageDao().getMessagesList(id).single().content)
-            assertEquals(36, upgraded.openHelper.readableDatabase.version)
+            assertEquals(37, upgraded.openHelper.readableDatabase.version)
             upgraded.openHelper.readableDatabase.query("SELECT COUNT(*) FROM backup_identities").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
@@ -281,11 +281,11 @@ class BackupGraphStoreTest {
             sql.version = 33
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
         try {
             val conv = upgraded.conversationDao().getConversationById(1)!!
             assertEquals("retained", conv.title); assertFalse(conv.enableReplyDirections); assertEquals(2, conv.replyDirectionCount)
-            assertEquals(36, upgraded.openHelper.readableDatabase.version)
+            assertEquals(37, upgraded.openHelper.readableDatabase.version)
             assertEquals("old message", upgraded.messageDao().getMessagesList(1).single().content)
             assertNull(upgraded.messageDao().getMessagesList(1).single().replyDirection)
         } finally { upgraded.close(); context.deleteDatabase(name) }
@@ -307,7 +307,7 @@ class BackupGraphStoreTest {
             sql.version = 34
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
         try {
             val stat = upgraded.usageStatDao().getStatsListByTimeRange(0, 200).single()
             assertEquals(125, stat.totalTokens)
@@ -316,7 +316,7 @@ class BackupGraphStoreTest {
             assertEquals("legacy", stat.requestKind)
             assertEquals("legacy", stat.completionStatus)
             assertEquals(0L, stat.firstTokenTimeMs)
-            assertEquals(36, upgraded.openHelper.readableDatabase.version)
+            assertEquals(37, upgraded.openHelper.readableDatabase.version)
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 
@@ -335,6 +335,192 @@ class BackupGraphStoreTest {
                 assertTrue(it.moveToFirst()); assertEquals("real reply", it.getString(0)); assertEquals("one-round direction", it.getString(1)); assertFalse(it.moveToNext())
             }
         } }
+    }
+
+    @Test fun inputInjectionMigrationKeepsV36ContentAndSummaryWhileDefaultingOff() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "injection-${java.util.UUID.randomUUID()}.db"
+        val schema = com.google.gson.JsonParser.parseString(java.io.File("schemas/com.aiassistant.data.local.AppDatabase/36.json").readText()).asJsonObject.getAsJsonObject("database")
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { sql ->
+            schema.getAsJsonArray("entities").forEach { entity ->
+                val obj = entity.asJsonObject
+                val table = obj.get("tableName").asString
+                sql.execSQL(obj.get("createSql").asString.replace("\${TABLE_NAME}", table))
+                obj.getAsJsonArray("indices")?.forEach { index -> sql.execSQL(index.asJsonObject.get("createSql").asString.replace("\${TABLE_NAME}", table)) }
+            }
+            schema.getAsJsonArray("setupQueries").forEach { sql.execSQL(it.asString) }
+            fun insert(table: String, model: Any) {
+                val entity = schema.getAsJsonArray("entities").first { it.asJsonObject.get("tableName").asString == table }.asJsonObject
+                val values = com.google.gson.Gson().toJsonTree(model).asJsonObject
+                val cv = android.content.ContentValues()
+                entity.getAsJsonArray("fields").forEach { field ->
+                    val column = field.asJsonObject.get("columnName").asString
+                    val value = values.get(column)
+                    when {
+                        value == null || value.isJsonNull -> cv.putNull(column)
+                        value.asJsonPrimitive.isBoolean -> cv.put(column, if (value.asBoolean) 1 else 0)
+                        else -> cv.put(column, value.asString)
+                    }
+                }
+                sql.insertOrThrow(table, null, cv)
+            }
+            insert("conversations", Conversation(id = 1, title = "legacy", apiConfigId = 1, modelName = "synthetic",
+                rollingSummary = "retained summary", summaryUpdatedMessageId = 1, summaryUpdatedAt = 100))
+            insert("messages", Message(id = 1, conversationId = 1, role = "assistant", content = "retained display", createdAt = 100))
+            sql.version = 36
+        }
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
+            .addMigrations(AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
+        try {
+            val conv = upgraded.conversationDao().getConversationById(1)!!
+            assertFalse(conv.enableInputInjection)
+            assertNull(conv.inputInjectionTrigger)
+            assertEquals("retained summary", conv.rollingSummary)
+            assertEquals(1L, conv.summaryUpdatedMessageId)
+            assertEquals(100L, conv.summaryUpdatedAt)
+            val message = upgraded.messageDao().getMessagesList(1).single()
+            assertEquals("retained display", message.content)
+            assertNull(message.modelContent)
+            assertNull(message.injectionTargetMessageId)
+            assertEquals(37, upgraded.openHelper.readableDatabase.version)
+        } finally { upgraded.close(); context.deleteDatabase(name) }
+    }
+
+    @Test fun inputInjectionPortableBackupRemapsTargetAndRetainsDisplayAndModelBodies() = runBlocking {
+        database().use { source -> database().use { target ->
+            val id = seed(source, "injection")
+            val original = source.conversationDao().getConversationById(id)!!
+            source.conversationDao().updateConversation(original.copy(enableInputInjection = true, inputInjectionTrigger = "custom trigger"))
+            val assistant = source.messageDao().insertMessage(Message(conversationId = id, role = "assistant", content = "visible assistant",
+                modelContent = "visible assistant\n\nvisible input", createdAt = 100))
+            source.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "visible input", modelContent = "custom trigger",
+                injectionTargetMessageId = assistant, createdAt = 200))
+            val unrelated = seed(target, "unrelated")
+            target.messageDao().insertMessage(Message(conversationId = unrelated, role = "assistant", content = "local unrelated"))
+            val output = java.io.StringWriter()
+            BackupGraphStore.writeFullSnapshot(source, output) { it }
+            val snapshot = com.google.gson.JsonParser.parseString(output.toString()).asJsonObject
+            repeat(2) { BackupGraphStore.restore(target, snapshot, { it }, {}) }
+            val restored = target.conversationDao().getAllConversations().first().single { it.title == "injection" }
+            assertTrue(restored.enableInputInjection)
+            assertEquals("custom trigger", restored.inputInjectionTrigger)
+            val messages = target.messageDao().getMessagesList(restored.id)
+            assertEquals(listOf("visible assistant", "visible input"), messages.map { it.content })
+            assertEquals(listOf("visible assistant\n\nvisible input", "custom trigger"), messages.map { it.modelContent })
+            assertNotEquals(assistant, messages.first().id)
+            assertEquals(messages.first().id, messages.last().injectionTargetMessageId)
+            assertEquals("local unrelated", target.messageDao().getMessagesList(unrelated).single().content)
+        } }
+    }
+
+    @Test fun olderSnapshotResetsInjectionMetadataWhenReplacingPortableIdentities() = runBlocking {
+        database().use { source -> database().use { target ->
+            val id = seed(source, "old format")
+            val assistant = source.messageDao().insertMessage(Message(conversationId = id, role = "assistant", content = "base", createdAt = 100))
+            source.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "input", createdAt = 200))
+            val snapshot = BackupGraphStore.export(source, id, { it })
+            snapshot.getAsJsonObject("tables").getAsJsonArray("conversations").forEach {
+                it.asJsonObject.remove("enableInputInjection"); it.asJsonObject.remove("inputInjectionTrigger")
+            }
+            snapshot.getAsJsonObject("tables").getAsJsonArray("messages").forEach {
+                it.asJsonObject.remove("modelContent"); it.asJsonObject.remove("injectionTargetMessageId")
+            }
+            BackupGraphStore.restore(target, snapshot, { it }, {})
+            val conv = target.conversationDao().getAllConversations().first().single()
+            target.conversationDao().updateConversation(conv.copy(enableInputInjection = true, inputInjectionTrigger = "new trigger"))
+            val messages = target.messageDao().getMessagesList(conv.id)
+            target.messageDao().updateMessage(messages.first().copy(modelContent = "base\n\ninput"))
+            target.messageDao().updateMessage(messages.last().copy(modelContent = "new trigger", injectionTargetMessageId = messages.first().id))
+            BackupGraphStore.restore(target, snapshot, { it }, {})
+            assertFalse(target.conversationDao().getConversationById(conv.id)!!.enableInputInjection)
+            assertNull(target.conversationDao().getConversationById(conv.id)!!.inputInjectionTrigger)
+            target.messageDao().getMessagesList(conv.id).forEach { assertNull(it.modelContent); assertNull(it.injectionTargetMessageId) }
+            assertEquals(assistant, messages.first().id)
+        } }
+    }
+
+    @Test fun invalidInputInjectionTargetRejectsSnapshotBeforeMutatingTarget() = runBlocking {
+        database().use { source -> database().use { target ->
+            val id = seed(source, "invalid source")
+            val user = source.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "source"))
+            val snapshot = BackupGraphStore.export(source, id, { it })
+            snapshot.getAsJsonObject("tables").getAsJsonArray("messages")[0].asJsonObject.addProperty("injectionTargetMessageId", user)
+            val unrelated = seed(target, "unrelated")
+            try { BackupGraphStore.restore(target, snapshot, { it }, {}); fail("user cannot be an injection target") }
+            catch (_: IllegalArgumentException) { }
+            assertEquals(listOf("unrelated"), target.conversationDao().getAllConversations().first().map { it.title })
+            assertTrue(target.messageDao().getMessagesList(unrelated).isEmpty())
+        } }
+    }
+
+    @Test fun conversationBundleRemapsInjectionAndSummaryWithoutChangingReadableExport() = runBlocking {
+        database().use { db ->
+            val id = seed(db, "bundle injection")
+            val assistant = db.messageDao().insertMessage(Message(conversationId = id, role = "assistant", content = "base text",
+                modelContent = "base text\n\ninput text", createdAt = 100))
+            val user = db.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "input text", modelContent = "private trigger",
+                injectionTargetMessageId = assistant, createdAt = 200))
+            db.messageDao().insertMessage(Message(conversationId = id, role = "assistant", content = "new response", variantGroupId = "turn_$user", createdAt = 300))
+            val conv = db.conversationDao().getConversationById(id)!!
+            db.conversationDao().updateConversation(conv.copy(enableInputInjection = true, inputInjectionTrigger = "private trigger",
+                rollingSummary = "saved summary", summaryUpdatedMessageId = assistant, summaryUpdatedAt = 100))
+            val converter = com.aiassistant.utils.ConversationConverter(db.conversationDao(), db.messageDao(), db.roleplaySessionDao(),
+                db.characterProfileDao(), db.roleplayScenarioDao(), db.memoryDao(), db.timelineNodeDao())
+            val imported = converter.importBundle(converter.exportBundle(id))
+            val restored = db.messageDao().getMessagesList(imported)
+            assertEquals(restored.first().id, restored[1].injectionTargetMessageId)
+            assertNotEquals(assistant, restored.first().id)
+            assertEquals("turn_${restored[1].id}", restored.last().variantGroupId)
+            assertEquals("base text\n\ninput text", restored.first().modelContent)
+            assertEquals("private trigger", restored[1].modelContent)
+            assertEquals(restored.first().id, db.conversationDao().getConversationById(imported)!!.summaryUpdatedMessageId)
+            assertTrue(db.conversationDao().getConversationById(imported)!!.enableInputInjection)
+            val markdown = converter.exportAsMarkdown(imported)
+            val plain = converter.exportAsPlainText(imported)
+            listOf(markdown, plain).forEach {
+                assertFalse(it.contains("private trigger"))
+                assertEquals(1, Regex("input text").findAll(it).count())
+                assertTrue(it.indexOf("base text") < it.indexOf("input text"))
+            }
+        }
+    }
+
+    @Test fun legacyConversationBundleWithMissingOrZeroMessageIdsImportsEachEntryIndependently() = runBlocking {
+        database().use { db ->
+            val originalId = seed(db, "legacy no message IDs")
+            val original = db.conversationDao().getConversationById(originalId)!!
+            val source = listOf(
+                Message(conversationId = originalId, role = "user", content = "synthetic old input one", createdAt = 100),
+                Message(conversationId = originalId, role = "assistant", content = "synthetic old reply one", createdAt = 200),
+                Message(conversationId = originalId, role = "user", content = "synthetic old input two", variantGroupId = "turn_0_user", createdAt = 300),
+                Message(conversationId = originalId, role = "assistant", content = "synthetic old reply two", variantGroupId = "turn_0_assistant", createdAt = 400)
+            )
+            val gson = com.google.gson.Gson()
+            val json = gson.toJsonTree(com.aiassistant.utils.ConversationExportBundle(
+                conversation = original.copy(rollingSummary = "synthetic legacy summary", summaryUpdatedMessageId = 0),
+                messages = source
+            )).asJsonObject
+            // Exercise both omitted IDs and explicit zero, as accepted before injection metadata existed.
+            json.getAsJsonArray("messages")[0].asJsonObject.remove("id")
+            json.getAsJsonArray("messages")[2].asJsonObject.remove("id")
+            json.getAsJsonObject("conversation").remove("enableInputInjection")
+            json.getAsJsonObject("conversation").remove("inputInjectionTrigger")
+            val converter = com.aiassistant.utils.ConversationConverter(db.conversationDao(), db.messageDao(), db.roleplaySessionDao(),
+                db.characterProfileDao(), db.roleplayScenarioDao(), db.memoryDao(), db.timelineNodeDao())
+            val importedId = converter.importBundle(json.toString())
+            val imported = db.messageDao().getMessagesList(importedId)
+            assertEquals(source.map { it.content }, imported.map { it.content })
+            assertEquals(source.map { it.role }, imported.map { it.role })
+            assertEquals(source.map { it.variantGroupId }, imported.map { it.variantGroupId })
+            assertEquals(4, imported.map { it.id }.distinct().size)
+            assertTrue(imported.all { it.id > 0 && it.conversationId == importedId && it.modelContent == null && it.injectionTargetMessageId == null })
+            val conversation = db.conversationDao().getConversationById(importedId)!!
+            assertFalse(conversation.enableInputInjection)
+            assertNull(conversation.inputInjectionTrigger)
+            assertEquals("synthetic legacy summary", conversation.rollingSummary)
+            assertNull(conversation.summaryUpdatedMessageId)
+            assertTrue(db.messageDao().getMessagesList(originalId).isEmpty())
+        }
     }
 
     @Test fun legacySingleJsonImportsIdempotentlyWithoutOverwritingSameLocalId() = runBlocking {

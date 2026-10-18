@@ -2583,7 +2583,7 @@ class MemoryExtractionRepositoryTest {
         } }
     }
 
-    @Test fun editingAndDeletingCoveredHistoryInvalidatesSummaryAndManualEditKeepsRealCoverage() = runBlocking {
+    @Test fun editingCoveredHistoryPreservesSummaryWhileDeletionInvalidatesItAndManualEditKeepsRealCoverage() = runBlocking {
         Fixture().use { f ->
             val (_, id) = f.conversation("https://model.invalid")
             val first = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "原始合成事实。"))
@@ -2592,9 +2592,14 @@ class MemoryExtractionRepositoryTest {
             summary()
             f.repository.updateRollingSummary(id, "人工更正的摘要。")
             assertEquals(second, f.db.conversationDao().getConversationById(id)!!.summaryUpdatedMessageId)
+            val beforeEdit = f.db.conversationDao().getConversationById(id)!!
             val original = f.db.messageDao().getMessageById(first)!!
             f.repository.updateMessage(original.copy(content = "用户已更正合成事实。"))
-            assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+            val afterEdit = f.db.conversationDao().getConversationById(id)!!
+            assertEquals("人工更正的摘要。", afterEdit.rollingSummary)
+            assertEquals(beforeEdit.summaryUpdatedMessageId, afterEdit.summaryUpdatedMessageId)
+            assertEquals(beforeEdit.summaryUpdatedAt, afterEdit.summaryUpdatedAt)
+            assertEquals("用户已更正合成事实。", f.db.messageDao().getMessageById(first)!!.content)
             summary()
             f.repository.deleteMessage(f.db.messageDao().getMessageById(second)!!)
             assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
@@ -2613,6 +2618,12 @@ class MemoryExtractionRepositoryTest {
             val (_, id) = f.conversation(endpoint.url, "synthetic-model")
             val ids = (1..24).map { index -> f.repository.saveMessage(Message(conversationId = id,
                 role = if (index % 2 == 1) "user" else "assistant", content = "合成旧事实 $index。", createdAt = index.toLong())) }
+            val beforeEdit = f.db.conversationDao().getConversationById(id)!!.copy(
+                rollingSummary = "合成已保存摘要：船队的旧计划是前往北港。",
+                summaryUpdatedMessageId = ids[1],
+                summaryUpdatedAt = 1729L
+            )
+            f.db.conversationDao().updateConversation(beforeEdit)
             val job = async(Dispatchers.IO) { f.repository.compressConversationContext(id) }
             try {
                 assertTrue(entered.await(5, TimeUnit.SECONDS))
@@ -2620,7 +2631,10 @@ class MemoryExtractionRepositoryTest {
                 f.repository.updateMessage(source.copy(content = "更正：船队尚未抵达。"))
                 released.countDown()
                 assertTrue(withTimeout(5000) { job.await() }.isFailure)
-                assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                val afterEdit = f.db.conversationDao().getConversationById(id)!!
+                assertEquals(beforeEdit.rollingSummary, afterEdit.rollingSummary)
+                assertEquals(beforeEdit.summaryUpdatedMessageId, afterEdit.summaryUpdatedMessageId)
+                assertEquals(beforeEdit.summaryUpdatedAt, afterEdit.summaryUpdatedAt)
                 assertEquals("更正：船队尚未抵达。", f.db.messageDao().getMessageById(source.id)!!.content)
             } finally { released.countDown(); job.cancelAndJoin() }
         } }

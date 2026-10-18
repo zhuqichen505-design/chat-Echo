@@ -214,6 +214,9 @@ interface MessageDao {
     @Update
     suspend fun updateMessage(message: Message)
 
+    @Query("UPDATE messages SET variantGroupId = :groupId, variantIndex = :variantIndex WHERE id = :messageId")
+    suspend fun updateMessageVariant(messageId: Long, groupId: String?, variantIndex: Int)
+
     @Delete
     suspend fun deleteMessage(message: Message)
 

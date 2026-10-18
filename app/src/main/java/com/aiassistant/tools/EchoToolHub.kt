@@ -108,7 +108,7 @@ class EchoToolHub(
     ): EnrichedPromptResult = withContext(Dispatchers.IO) {
         val blocks = mutableListOf<String>()
         val toolRecords = mutableListOf<ToolCallRecord>()
-        val trimmed = userMessage.trim()
+        val trimmed = (options.retrievalQuery ?: userMessage).trim()
         val searchCount = getSearchResultCount()
 
         // 1. 联网搜索处理 (主动意图检测或显式开启)

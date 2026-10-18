@@ -300,10 +300,23 @@ class ConversationConverter(
     suspend fun importBundle(json: String): Long = withContext(Dispatchers.IO) {
         val bundle = gson.fromJson(json, ConversationExportBundle::class.java)
             ?: throw IllegalArgumentException("无效的会话导出数据")
+        // Older bundles may omit IDs (Gson reads them as zero). Only positive source
+        // identities can participate in relations; every list entry still gets a new row.
+        val identifiedMessages = bundle.messages.filter { it.id > 0 }
+        val sourceMessages = identifiedMessages.associateBy { it.id }
+        require(sourceMessages.size == identifiedMessages.size) { "会话导出数据存在重复消息 ID" }
+        bundle.messages.forEach { message ->
+            message.injectionTargetMessageId?.let { targetId ->
+                val target = sourceMessages[targetId]
+                require(targetId > 0 && message.role == "user" && target != null && target.role == "assistant" &&
+                    target.conversationId == message.conversationId) { "会话导出数据的输入注入关联无效" }
+            }
+        }
         val now = System.currentTimeMillis()
         val importedConv = bundle.conversation.copy(
             id = 0,
             title = "${bundle.conversation.title} (导入)",
+            summaryUpdatedMessageId = null,
             createdAt = now,
             updatedAt = now
         )
@@ -330,13 +343,38 @@ class ConversationConverter(
             roleplaySessionDao.insertSession(newSession)
         }
 
-        bundle.messages.forEach { msg ->
+        val insertedIds = bundle.messages.map { msg ->
             messageDao.insertMessage(
                 msg.copy(
                     id = 0,
-                    conversationId = newConvId
+                    conversationId = newConvId,
+                    injectionTargetMessageId = null
                 )
             )
+        }
+        val messageIds = bundle.messages.mapIndexedNotNull { index, message ->
+            message.id.takeIf { it > 0 }?.let { it to insertedIds[index] }
+        }.toMap()
+        // Allocate all local IDs before translating message-to-message relations.
+        bundle.messages.forEachIndexed { index, msg ->
+            val group = msg.variantGroupId?.let { original ->
+                val match = Regex("^turn_(\\d+)(.*)$").matchEntire(original)
+                val userId = match?.groupValues?.get(1)?.toLongOrNull()?.let(messageIds::get)
+                if (userId != null) "turn_${userId}${match?.groupValues?.get(2).orEmpty()}" else original
+            }
+            if (msg.injectionTargetMessageId != null || group != msg.variantGroupId) {
+                messageDao.updateMessage(msg.copy(
+                    id = insertedIds[index],
+                    conversationId = newConvId,
+                    injectionTargetMessageId = msg.injectionTargetMessageId?.let(messageIds::get),
+                    variantGroupId = group
+                ))
+            }
+        }
+        bundle.conversation.summaryUpdatedMessageId?.takeIf { it > 0 }?.let { sourceId ->
+            messageIds[sourceId]?.let { localId ->
+                conversationDao.updateConversation(importedConv.copy(id = newConvId, summaryUpdatedMessageId = localId))
+            }
         }
 
         memoryDao?.let { mDao ->

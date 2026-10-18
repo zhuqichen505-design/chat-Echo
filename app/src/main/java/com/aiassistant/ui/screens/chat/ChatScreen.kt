@@ -1173,7 +1173,9 @@ fun ChatScreen(
                                 preserveScrollForBranchGeneration = false
                                 streamingBranchGroupId = null
                                 autoFollowOutput = true
-                                viewModel.sendMessage(finalPrompt, selectedAttachments)
+                                viewModel.sendMessage(finalPrompt, selectedAttachments,
+                                    displayMessages.lastOrNull { it.message.role == "assistant" && !it.message.isExcluded &&
+                                        it.message.content.isNotBlank() && !AiRepository.isErrorPlaceholderMessage(it.message.content) }?.message?.id)
                             }
                             inputText = ""
                             activeQuotedText = null

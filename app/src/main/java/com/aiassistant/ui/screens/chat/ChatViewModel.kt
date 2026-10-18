@@ -390,6 +390,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     enableWebSearch = conv.enableWebSearch ?: false,
                     enableSessionMemory = conv.enableSessionMemory ?: false,
                     enableTimeline = conv.enableTimeline ?: true,
+                    enableInputInjection = conv.enableInputInjection,
+                    inputInjectionTrigger = conv.inputInjectionTrigger.orEmpty(),
                     enableExternalMemory = conv.enableExternalMemory ?: rpSessionForInit?.enableExternalMemory ?: false,
                     enableWorldBook = conv.enableWorldBook ?: rpSessionForInit?.enableWorldBook ?: false,
                     enableReplyDirections = conv.enableReplyDirections,
@@ -597,6 +599,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             enableWebSearch = cfg.enableWebSearch,
                             enableSessionMemory = current.enableSessionMemory,
                             enableTimeline = current.enableTimeline,
+                            enableInputInjection = current.enableInputInjection,
+                            inputInjectionTrigger = current.inputInjectionTrigger,
                             enableExternalMemory = current.enableExternalMemory,
                             enableWorldBook = current.enableWorldBook,
                             enableReplyDirections = current.enableReplyDirections,
@@ -634,6 +638,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             enableWebSearch = cfg.enableWebSearch,
                             enableSessionMemory = current.enableSessionMemory,
                             enableTimeline = current.enableTimeline,
+                            enableInputInjection = current.enableInputInjection,
+                            inputInjectionTrigger = current.inputInjectionTrigger,
                             enableExternalMemory = current.enableExternalMemory,
                             enableWorldBook = current.enableWorldBook,
                             enableReplyDirections = current.enableReplyDirections,
@@ -650,6 +656,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     // 更新临时设置并保存到对话
     fun updateTempSettings(settings: TempChatSettings) {
+        if (settings.enableInputInjection && settings.inputInjectionTrigger.isBlank()) return
         if (ChatGenerationManager.getSession(conversationId)?.directionPhase == true) stopGeneration()
         _tempSettings.value = settings
         _useTempSettings.value = true
@@ -659,6 +666,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun updateChatSettings(settings: TempChatSettings, prompt: String?) {
+        if (settings.enableInputInjection && settings.inputInjectionTrigger.isBlank()) return
         if (ChatGenerationManager.getSession(conversationId)?.directionPhase == true) stopGeneration()
         val normalizedPrompt = normalizeSystemPrompt(prompt)
         _tempSettings.value = settings
@@ -793,9 +801,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         repository.getConversationContextUsage(conversationId, modelName, maxTokens, contextOverride,
                             apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
                     updateSummaryOnly -> repository.generateRollingSummaryNow(conversationId, modelName, maxTokens, contextOverride,
-                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId).getOrThrow()
+                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId, rebuildSummary = true).getOrThrow()
                     else -> repository.compressConversationContext(conversationId, modelName, maxTokens, contextOverride,
-                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId).getOrThrow()
+                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId,
+                        rebuildSummary = !isAuto && targetTier == null).getOrThrow()
                 }
                 conversation = repository.getConversationById(conversationId) ?: conversation
                 contextUsageRefreshJob?.cancel()
@@ -1029,6 +1038,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 enableWebSearch = settings?.enableWebSearch,
                 enableSessionMemory = settings?.enableSessionMemory ?: conv.enableSessionMemory ?: false,
                 enableTimeline = settings?.enableTimeline ?: conv.enableTimeline ?: true,
+                enableInputInjection = settings?.enableInputInjection ?: conv.enableInputInjection,
+                inputInjectionTrigger = settings?.inputInjectionTrigger ?: conv.inputInjectionTrigger,
                 enableExternalMemory = settings?.enableExternalMemory ?: conv.enableExternalMemory ?: false,
                 enableWorldBook = settings?.enableWorldBook ?: conv.enableWorldBook ?: false,
                 enableReplyDirections = settings?.enableReplyDirections ?: conv.enableReplyDirections,
@@ -1046,6 +1057,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     enableThinking = updated.enableThinking, thinkingEffort = updated.thinkingEffort,
                     enableWebSearch = updated.enableWebSearch, enableSessionMemory = updated.enableSessionMemory,
                     enableTimeline = updated.enableTimeline,
+                    enableInputInjection = updated.enableInputInjection, inputInjectionTrigger = updated.inputInjectionTrigger,
                     enableExternalMemory = updated.enableExternalMemory, enableWorldBook = updated.enableWorldBook,
                     enableReplyDirections = updated.enableReplyDirections, replyDirectionCount = updated.replyDirectionCount,
                     activeWorldBookIds = updated.activeWorldBookIds, contextWindowTokens = updated.contextWindowTokens,
@@ -1082,12 +1094,12 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
     }
 
-    fun sendMessage(content: String, attachments: List<Attachment> = emptyList()) {
+    fun sendMessage(content: String, attachments: List<Attachment> = emptyList(), targetAssistantId: Long? = null) {
         if (_isGenerating.value) {
             enqueueMessage(content, attachments)
             return
         }
-        sendMessageInternal(content, attachments, saveUserMessage = true)
+        sendMessageInternal(content, attachments, saveUserMessage = true, injectionTargetAssistantId = targetAssistantId)
     }
 
     fun enqueueMessage(content: String, attachments: List<Attachment> = emptyList()) {
@@ -1161,9 +1173,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             val assistantGroupId = "${turnKey}_assistant"
 
             if (source.variantGroupId == null) {
-                AiAssistantApp.instance.database.messageDao().updateMessage(
-                    source.copy(variantGroupId = userGroupId, variantIndex = 1)
-                )
+                AiAssistantApp.instance.database.messageDao().updateMessageVariant(source.id, userGroupId, 1)
             }
 
             val nextAssistant = allMessages
@@ -1171,9 +1181,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 .takeWhile { it.role != "user" }
                 .firstOrNull { it.role == "assistant" }
             if (nextAssistant != null && nextAssistant.variantGroupId == null) {
-                AiAssistantApp.instance.database.messageDao().updateMessage(
-                    nextAssistant.copy(variantGroupId = assistantGroupId, variantIndex = 1)
-                )
+                AiAssistantApp.instance.database.messageDao().updateMessageVariant(nextAssistant.id, assistantGroupId, 1)
             }
 
             val nextIndex = (allMessages
@@ -1187,7 +1195,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 userVariantGroupId = userGroupId,
                 userVariantIndex = nextIndex,
                 assistantVariantGroupId = assistantGroupId,
-                assistantVariantIndex = nextIndex
+                assistantVariantIndex = nextIndex,
+                injectionTargetAssistantId = source.injectionTargetMessageId,
+                injectionBeforeUserMessageId = source.id
             )
         }
     }
@@ -1201,7 +1211,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         assistantVariantGroupId: String? = null,
         assistantVariantIndex: Int = 1,
         anchorUserMessageId: Long? = null,
-        retryReplyDirection: String? = null
+        retryReplyDirection: String? = null,
+        injectionTargetAssistantId: Long? = null,
+        injectionBeforeUserMessageId: Long? = null,
+        requestContentOverride: String? = null
     ) {
         if ((content.isBlank() && attachments.isEmpty()) || _isGenerating.value) return
 
@@ -1286,8 +1299,16 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
             var currentUserMsgId: Long? = null
             var settingsForMemory: TempChatSettings? = null
+            var modelUserContent = requestContentOverride ?: content
             try {
                 pendingCompressionSettingsSave?.await()
+                val injectionEnabled = saveUserMessage &&
+                    (if (_useTempSettings.value) _tempSettings.value.enableInputInjection else conversation?.enableInputInjection == true)
+                if (injectionEnabled) {
+                    pendingStorySettingsSave?.join()
+                    systemPromptSaveJob?.join()
+                    check(systemPromptSaveJob?.isCancelled != true) { "对话设置保存未完成，请重试" }
+                }
                 if (saveUserMessage) {
                     val userMessage = Message(
                         conversationId = conversationId,
@@ -1297,7 +1318,27 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         variantGroupId = userVariantGroupId,
                         variantIndex = userVariantIndex
                     )
-                    val savedMsgId = repository.saveMessage(userMessage)
+                    val savedMsgId = if (injectionEnabled) {
+                        val trigger = if (_useTempSettings.value) _tempSettings.value.inputInjectionTrigger
+                            else conversation?.inputInjectionTrigger.orEmpty()
+                        val preparedId = try {
+                            repository.prepareInjectedUserMessage(conversationId, content, trigger, attachmentsJson,
+                                userVariantGroupId, userVariantIndex, injectionTargetAssistantId, injectionBeforeUserMessageId)
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) {
+                            // The preparation transaction rolled back. Preserve the original input
+                            // as a normal visible turn before reporting the preparation failure.
+                            val retainedId = repository.saveMessage(userMessage)
+                            currentUserMsgId = retainedId
+                            session.userMessageId = retainedId
+                            applyGeneratingAnchor(retainedId, userVariantGroupId)
+                            session.anchorUserMessageId = retainedId
+                            throw failure
+                        }
+                        preparedId.also { id ->
+                            modelUserContent = AiAssistantApp.instance.database.messageDao().getMessageById(id)?.modelContent ?: content
+                        }
+                    } else repository.saveMessage(userMessage)
                     currentUserMsgId = savedMsgId
                     session.userMessageId = savedMsgId
                     // 普通发送/编辑重发：锚点为刚落库的用户消息（分组 id 直接取本次参数）
@@ -1335,6 +1376,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 }
 
                 var requestOptions = ChatRequestOptions(
+                    retrievalQuery = if (modelUserContent != content) content else null,
                     temperature = settings?.temperature,
                     maxTokens = settings?.maxTokens,
                     topP = settings?.topP,
@@ -1366,8 +1408,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             _reconnectStatus.value = session.reconnectStatus.value
                             withContext(Dispatchers.IO) {
                                 if (prepared == null) prepared = repository.prepareReplyDirectionContext(
-                                    effectiveConfig, conversationId, content, requestOptions, assistantVariantGroupId)
-                                directions = repository.generateReplyDirections(effectiveConfig, conversationId, content,
+                                    effectiveConfig, conversationId, modelUserContent, requestOptions, assistantVariantGroupId)
+                                directions = repository.generateReplyDirections(effectiveConfig, conversationId, modelUserContent,
                                     attachments, requestOptions.copy(preparedDirectionContext = prepared), count,
                                     onStatus = { session.setStatus(it); _reconnectStatus.value = it })
                             }
@@ -1402,7 +1444,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     repository.sendChatMessageWithConfig(
                         config = effectiveConfig,
                         conversationId = conversationId,
-                        userMessage = content,
+                        userMessage = modelUserContent,
                         attachments = attachments,
                         options = requestOptions,
                         assistantVariantGroupId = assistantVariantGroupId,
@@ -1861,9 +1903,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     sorted.forEachIndexed { idx, msg ->
                         val expected = idx + 1
                         if (msg.variantIndex != expected) {
-                            AiAssistantApp.instance.database.messageDao().updateMessage(
-                                msg.copy(variantIndex = expected)
-                            )
+                            AiAssistantApp.instance.database.messageDao().updateMessageVariant(msg.id, msg.variantGroupId, expected)
                         }
                     }
                 }
@@ -1918,9 +1958,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     lastAssistantMessage.variantGroupId ?: "reply_${lastAssistantMessage.id}"
                 }
                 if (!isError && lastAssistantMessage.variantGroupId == null) {
-                    AiAssistantApp.instance.database.messageDao().updateMessage(
-                        lastAssistantMessage.copy(variantGroupId = groupId, variantIndex = 1)
-                    )
+                    AiAssistantApp.instance.database.messageDao().updateMessageVariant(lastAssistantMessage.id, groupId, 1)
                 }
 
                 // 计算下一个 variantIndex：必须严格自增，杜绝序号冲突
@@ -1941,7 +1979,12 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     assistantVariantGroupId = groupId,
                     assistantVariantIndex = nextIndex,
                     anchorUserMessageId = lastUserMessage.id,
-                    retryReplyDirection = if (isError) lastAssistantMessage.replyDirection else null
+                    retryReplyDirection = if (isError) lastAssistantMessage.replyDirection else null,
+                    requestContentOverride = lastUserMessage.modelContent.takeIf {
+                        lastUserMessage.injectionTargetMessageId == null || messages.any { target ->
+                            target.id == lastUserMessage.injectionTargetMessageId && !target.isExcluded
+                        }
+                    }
                 )
             }
         }
@@ -3303,6 +3346,8 @@ data class TempChatSettings(
     val enableWebSearch: Boolean = false,
     val enableSessionMemory: Boolean = false,
     val enableTimeline: Boolean = true,
+    val enableInputInjection: Boolean = false,
+    val inputInjectionTrigger: String = "",
     val enableExternalMemory: Boolean = false,
     val enableWorldBook: Boolean = false,
     val enableReplyDirections: Boolean = false,

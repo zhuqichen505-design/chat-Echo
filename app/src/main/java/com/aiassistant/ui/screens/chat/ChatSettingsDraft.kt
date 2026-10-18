@@ -18,6 +18,8 @@ internal fun mergeChatSettingsDraft(
     enableWorldBook = if (local.enableWorldBook == previous.enableWorldBook) incoming.enableWorldBook else local.enableWorldBook,
     enableReplyDirections = if (local.enableReplyDirections == previous.enableReplyDirections) incoming.enableReplyDirections else local.enableReplyDirections,
     replyDirectionCount = if (local.replyDirectionCount == previous.replyDirectionCount) incoming.replyDirectionCount else local.replyDirectionCount,
+    enableInputInjection = if (local.enableInputInjection == previous.enableInputInjection) incoming.enableInputInjection else local.enableInputInjection,
+    inputInjectionTrigger = if (local.inputInjectionTrigger == previous.inputInjectionTrigger) incoming.inputInjectionTrigger else local.inputInjectionTrigger,
     activeWorldBookIds = if (local.activeWorldBookIds == previous.activeWorldBookIds) incoming.activeWorldBookIds else local.activeWorldBookIds,
     contextWindowTokens = if (local.contextWindowTokens == previous.contextWindowTokens) incoming.contextWindowTokens else local.contextWindowTokens
 )

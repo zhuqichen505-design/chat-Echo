@@ -4,13 +4,13 @@
 
 Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
 
-**当前源码版本**: v2.8.11（versionCode 197）
-**本次更新**: 摘要双协议共用模型参数构造，修正输出限制字段、支持档位选择和推理完成预算；统一 API 路径，支持结构化正文与跨块思考标签。新增首轮摘要成功后超出保存预算时的紧凑二次语义缩短，避免小窗口在发送第二次请求前本地失败。撤除双空响应后的本地抽取成功路径，失败保留原文、旧摘要、更新时间与覆盖水位。此前 bot/状态符号放大、时间线开关、凝练提取与紧凑展示继续保留，详见 UPDATE_LOG.md。
-**数据库版本**: 36（20 个实体）
-**本版范围（2026-10-18）**: 当前为 v2.8.11/197 发布后的源码改进，未升版、未构建或发布 APK。Room v36/20 实体来自上一轮 nullable `Conversation.enableTimeline` 与显式迁移，本轮不再改变数据库；旧消息、摘要、时间线与备份保留。最新验收记录 `20261018-160515-005`：86 套件/840 项单测全通过，Lint 0 Error/95 Warning，输入哈希一致；设备与真实模型仍待验收。
-**最新源码验证**: 当前未发版源码的编译、完整单测、Lint、输入哈希与退出码见 [walkthrough.md](walkthrough.md) 顶部源码记录。已发布安装包与历史源码的验证结果不代替本轮最终验收。
-**已发布安装包状态**: `Echo-v2.8.11.apk` 使用发布时的 Room v35 源码，未包含上述两轮后续改动。该包的构建、大小、签名连续性、SHA256 与公开下载核验见 [最新发布说明](release-notes/latest.md)。采用非正式生产签名；设备安装、启动、触控和真实厂商接口尚未验收。
-**远端发布核验**: v2.8.11 的 main/版本标签推送、Release 唯一 APK 附件及匿名公开下载 SHA256 已核验通过，已按既定策略撤下远端 v2.8.10 Release/版本标签。实际结果见 [walkthrough.md](walkthrough.md) 与 [最新发布说明](release-notes/latest.md)。本机历史 APK 和本机标签继续保留；对外仅保留最新版的操作须在新包发布核验后进行。
+**当前源码版本**: v2.8.12（versionCode 198）
+**本次更新**: 新增默认关闭的会话级“输入注入回复”：前台保留用户输入与原模型正文，后台追加两个换行和输入原文，再发送用户自定义触发语。显示与模型正文、注入关联分别持久保存，重试、版本、分支与备份映射一并兼容。编辑正文保留已有滚动摘要，用户主动重新压缩或生成摘要才重建。纳入此前 bot/状态放大、时间线开关/凝练提取/紧凑展示，以及摘要参数、推理预算、正文解析和紧凑二次语义缩短修复，详见 UPDATE_LOG.md。
+**数据库版本**: 37（20 个实体）
+**本版范围（2026-10-18）**: 更新直接来自 chat-Echo，不从旧项目同步。Room v36→v37 显式迁移增加会话注入配置和消息模型正文/关联字段，保留原始消息、摘要、时间线、设定和备份；旧会话默认关闭新功能。本轮最终冻结验收、Release 构建与本机 APK 核验已通过，Git/公开发布待完成。
+**最新源码验证**: 记录 `20261018-184947-493`：`pwsh -File scripts/verify.ps1` 显式使用本机可写缓存，脚本/Gradle 退出 0，总 417.623 秒；编译与 88 套件/878 项完整单测实际执行，失败/错误/跳过 0，测试任务 108.55 秒；Lint 0 Error/95 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。首轮回归发现的检索、摘要增量边界及夹具问题修正后重新冻结验收，详见 [walkthrough.md](walkthrough.md)。
+**安装包状态**: `assembleRelease --no-daemon --build-cache` 退出 0，277.624 秒。`Echo-v2.8.12.apk` 为 25,357,813 字节、446 个 ZIP 条目；com.aiassistant、2.8.12/198、min26/target34/compile34、arm64-v8a、非 debuggable，SHA256 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`。v2 签名与上版及实际项目证书一致，Android Debug **非正式生产签名**。包内容隐私核验与指定目录排他复制退出 0，旧 208 个文件（207 个 APK）名字/大小/哈希不变，源副本一致；公开下载待核验。设备安装、启动、触控和真实厂商接口尚未验收，详见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md)。
+**远端发布核验**: v2.8.12 的 main/版本标签推送、Release 唯一 APK 附件及公开下载 SHA256 尚待完成；新包核验成功后才按既定策略撤下远端旧版本 Release/标签。本机历史 APK 和本机标签继续保留，实际结果见 [walkthrough.md](walkthrough.md) 与 [最新发布说明](release-notes/latest.md)。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 
@@ -43,13 +43,13 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 ---
 
-## 数据库结构（v36，实体清单以 `data/local/AppDatabase.kt` 为准）
+## 数据库结构（v37，实体清单以 `data/local/AppDatabase.kt` 为准）
 
 | 实体（表） | 说明 |
 |------|------|
 | Folder | 文件夹 |
 | ApiConfig | API 配置 |
-| Conversation / Message | 对话与消息（会话 enableSessionMemory/enableTimeline/enableReplyDirections/replyDirectionCount；消息 modelName/replyDirection 本轮元数据） |
+| Conversation / Message | 对话与消息（会话 enableSessionMemory/enableTimeline/enableReplyDirections/replyDirectionCount，以及 enableInputInjection/inputInjectionTrigger；消息 modelName/replyDirection、模型正文 modelContent 和 injectionTargetMessageId） |
 | ApiUsageStat | 使用统计；请求用途、Token 来源、完成状态与首段等待 |
 | EnvironmentVariable | 环境变量（加密存储） |
 | PromptTemplate | 提示词模板 |
@@ -61,7 +61,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 | TimelineNode | 剧情时间线 |
 | BackupIdentity | 跨设备实体稳定身份（backup_identities） |
 
-迁移链至 `MIGRATION_35_36`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 36。v35→v36 为 `conversations.enableTimeline` nullable 列，旧会话由领域层按默认开启处理；迁移测试同步覆盖 v35→v36 链。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
+迁移链至 `MIGRATION_36_37`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 37。v35→v36 增加 `conversations.enableTimeline` nullable 列，旧会话按默认开启处理；v36→v37 增加会话 `enableInputInjection`（默认 0）/`inputInjectionTrigger` 与消息 `modelContent`/`injectionTargetMessageId` nullable 列。迁移保留旧数据，新功能默认关闭，迁移与备份回归列入本轮验收。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
 
 ---
 
@@ -70,6 +70,8 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 1. **API配置管理** - 支持OpenAI兼容格式 + Anthropic格式
    - **HTTP 访问权限**：设置独立入口；默认关闭、名单空，添加不自动开启、关闭保留。按精确主机/IP/端口/路径段匹配，可省略 http://，拒绝通配符/账号/查询参数。network_security_config 静态开启传输，HttpAccessPolicy 动态默认拒绝，新增自有客户端必须 guard；不关闭 TLS 校验。权限保存在 http_access_permissions，不随便携聊天备份迁移。HTTP 不加密消息/Key，仅可信网络使用；组网仍需手机可达。
 2. **对话功能** - 流式响应、思考模式、文件上传、Markdown渲染；思考能力以接口显式字段优先、具体型号资料补充，按接口/协议/模型隔离缓存，设置/胶囊/请求共享原始档位。模型名仅展示层格式化；普通对话的记忆与世界书位于提示与记忆分区，故事工作区可直接切换会话设定、时间线与世界书；连接生成保持稳定挂载、按实际底部溢出距离跟随。
+   - **输入注入回复**：对话设置 → 提示与记忆，默认关闭。界面显示原输入 P 与原模型回复 A，后台保存 A + 两个换行 + P，再以用户自定义触发语 T 发出请求；不添加标题、标签或固定模板。触发语不能仅为空白，失败重试不重复注入，分支/备份按本地消息 ID 映射关联，关闭后新消息恢复普通流程。
+   - **编辑与滚动摘要**：手动编辑正文、自动追加输入均保留摘要正文、覆盖水位和时间戳；主动重新压缩/生成摘要才依据编辑后的原文重建，失败和取消保留上次摘要，迟到结果不能覆盖并发修改。
    - **后台记忆提炼**：消息保存不调用模型，主聊天结束后一次提炼；辅助模型优先、不同会话活动模型备用、本地规则兜底，保存与候选复用。两类记忆关闭不请求，取消不兜底写入，返回后校验源消息/开关/恢复 epoch；原有思考内容清理、分类、冲突处理和角色隔离保留。
    - **思考 wire 兼容**：没有接口证据时不猜测 OpenAI-compatible thinking 扩展和显式 none；Anthropic 4.6 兼容回退保留 enabled/budget_tokens，有明确证据或仅支持 adaptive 的型号使用 adaptive/output_config，不给后者发送已移除的预算字段。显示、强度和原始模型 ID 保留。
     - **连接重试**：设置 → 模型失败与重试，总开关与默认展开的 19 类规则、0–20 次额外尝试、备用 Key 开关；每次失败立即提示原因，恢复输出后清除。无输出才重试、取消不重发；普通/角色回复与辅助模型共用分类规则，主请求首有效正文/思考等待 120 秒，正常输出后沿用 600 秒空闲读取。
@@ -102,7 +104,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 | 版本 | 数据库 | 主要更新 |
 |------|--------|----------|
-| 未发版源码（版本号保持 2.8.11/197） | 36 | 摘要请求参数/推理预算、API 路径与正文解析；bot/状态放大、时间线开关、凝练提取和紧凑展示 |
+| 2.8.12（源码与本机 APK 核验通过，Git/发布待完成） | 37 | 输入注入回复、编辑保留摘要与主动重建；纳入摘要请求参数/推理预算/紧凑二次缩短、API 路径与正文解析，以及 bot/状态放大、时间线开关、凝练提取和紧凑展示 |
 | 2.8.11（已发布） | 35 | 同参数压缩重试、摘要短请求和流式兼容、失败后正常聊天与事件提炼 |
 | 2.8.10 | 35 | 剧情过程与自然时间跨度、设定增量维护、分支改名、创作流程完善及长会话压缩实际应用 |
 | 2.8.6 | 35 | 作品工作区重写、历史删除与主题可见性、连续压缩/提取、实际请求计量 |

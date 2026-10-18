@@ -1067,7 +1067,8 @@ class AiRepository(
         modelNameOverride: String? = null,
         maxOutputTokens: Int? = null,
         contextWindowOverrideTokens: Int? = null,
-        apiConfigIdOverride: Long? = null
+        apiConfigIdOverride: Long? = null,
+        rebuildSummary: Boolean = false
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
         runCatching {
             var conversation = getConversationById(conversationId)?.let {
@@ -1098,7 +1099,7 @@ class AiRepository(
             }
             buildContextBundle(conversation, config, messages, model, maxOutputTokens,
                 contextWindowOverrideTokens, currentUserMessage = "", options = savedContextOptions(conversation),
-                forceCompression = true)
+                forceCompression = true, rebuildSummary = rebuildSummary)
             getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens,
                 apiConfigIdOverride = apiConfigIdOverride)
         }.onFailure { if (it is CancellationException) throw it }
@@ -1110,7 +1111,8 @@ class AiRepository(
         modelNameOverride: String? = null,
         maxOutputTokens: Int? = null,
         contextWindowOverrideTokens: Int? = null,
-        apiConfigIdOverride: Long? = null
+        apiConfigIdOverride: Long? = null,
+        rebuildSummary: Boolean = false
     ): Result<ConversationContextUsage> = withContext(Dispatchers.IO) {
         runCatching {
             val conversation = getConversationById(conversationId)?.let {
@@ -1126,7 +1128,7 @@ class AiRepository(
             val window = resolveContextWindow(conversation, model, contextWindowOverrideTokens)
             val budget = estimatePromptBudgetTokens(model, maxOutputTokens ?: conversation.maxTokens ?: config.maxTokens, window)
             ensureRollingSummary(conversation.copy(contextWindowTokens = window), config, model, messages,
-                (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400))
+                (budget * SUMMARY_BUDGET_RATIO).toInt().coerceIn(300, 2400), rebuildFromSource = rebuildSummary)
             getConversationContextUsage(conversationId, model, maxOutputTokens, contextWindowOverrideTokens,
                 apiConfigIdOverride = apiConfigIdOverride)
         }.onFailure { if (it is CancellationException) throw it }
@@ -1183,6 +1185,11 @@ class AiRepository(
             if (expectedMutationEpoch != null && expectedMutationEpoch != ChatGenerationManager.mutationEpoch(message.conversationId)) throw CancellationException("对话已删除或恢复，丢弃旧轮次回复")
             check(conversationDao.getConversationById(message.conversationId) != null) { "对话已删除，停止保存回复" }
             val inserted = messageDao.insertMessage(message)
+            if (message.role == "user" && message.variantGroupId != null) {
+                getMessagesList(message.conversationId).filter { it.variantGroupId == message.variantGroupId }
+                    .mapNotNull { it.injectionTargetMessageId }.distinct()
+                    .forEach { rebuildInjectedAssistant(message.conversationId, it) }
+            }
             updateConversationStats(message.conversationId)
             inserted
         }
@@ -1194,8 +1201,18 @@ class AiRepository(
     suspend fun updateMessage(message: Message) {
         com.aiassistant.AiAssistantApp.instance.database.withTransaction {
             val previous = messageDao.getMessageById(message.id)
-            messageDao.updateMessage(message)
-            if (previous?.content != message.content || previous.isExcluded != message.isExcluded) clearRollingSummary(message.conversationId)
+                ?: return@withTransaction
+            val saved = message.copy(modelContent = previous.modelContent,
+                injectionTargetMessageId = previous.injectionTargetMessageId)
+            messageDao.updateMessage(saved)
+            // Text edits deliberately preserve the user's existing rolling summary.
+            // Rebuild only the hidden injection projection, never the visible text.
+            if (previous?.content != message.content || previous.isExcluded != message.isExcluded) {
+                val targetId = saved.injectionTargetMessageId
+                if (targetId != null) rebuildInjectedAssistant(message.conversationId, targetId)
+                if (message.role == "assistant") rebuildInjectedAssistant(message.conversationId, message.id)
+            }
+            if (previous != null && previous.isExcluded != message.isExcluded) clearRollingSummary(message.conversationId)
             updateConversationStats(message.conversationId)
         }
     }
@@ -1209,15 +1226,95 @@ class AiRepository(
     }
 
     suspend fun deleteMessage(message: Message) {
-        messageDao.deleteMessage(message)
-        clearRollingSummary(message.conversationId)
-        updateConversationStats(message.conversationId)
+        com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+            messageDao.deleteMessage(message)
+            if (message.role == "assistant") detachInjectionInputs(message.conversationId, message.id)
+            message.injectionTargetMessageId?.let { rebuildInjectedAssistant(message.conversationId, it) }
+            clearRollingSummary(message.conversationId)
+            updateConversationStats(message.conversationId)
+        }
     }
 
     suspend fun deleteMessagesFrom(conversationId: Long, createdAt: Long) {
-        messageDao.deleteMessagesFrom(conversationId, createdAt)
-        clearRollingSummary(conversationId)
+        com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+            val targets = getMessagesList(conversationId).filter { it.createdAt >= createdAt }
+                .mapNotNull { it.injectionTargetMessageId }.distinct()
+            messageDao.deleteMessagesFrom(conversationId, createdAt)
+            detachMissingInjectionInputs(conversationId)
+            targets.forEach { rebuildInjectedAssistant(conversationId, it) }
+            clearRollingSummary(conversationId)
+            updateConversationStats(conversationId)
+        }
+    }
+
+    /** Atomically prepare a turn while keeping its visible messages unchanged. */
+    suspend fun prepareInjectedUserMessage(
+        conversationId: Long,
+        content: String,
+        trigger: String,
+        attachmentsJson: String?,
+        userVariantGroupId: String? = null,
+        userVariantIndex: Int = 1,
+        targetAssistantId: Long? = null,
+        beforeUserMessageId: Long? = null
+    ): Long = com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+        require(trigger.isNotBlank()) { "请先在对话设置中填写输入注入回复的触发语" }
+        check(getConversationById(conversationId) != null) { "当前会话已不存在" }
+        val history = getMessagesList(conversationId)
+        val sourceHistory = if (beforeUserMessageId != null) history.take(history.indexOfFirst { it.id == beforeUserMessageId }
+            .also { check(it >= 0) { "原消息已不存在" } }) else history
+        val candidates = sourceHistory.filter { it.role == "assistant" && !it.isExcluded &&
+            it.content.isNotBlank() && !isErrorPlaceholderMessage(it.content) }
+        val target = if (targetAssistantId != null) candidates.firstOrNull { it.id == targetAssistantId }
+            ?: error("选中的模型回复已变化，请重新发送") else candidates.lastOrNull()
+        val id = messageDao.insertMessage(Message(
+            conversationId = conversationId, role = "user", content = content,
+            attachments = attachmentsJson, variantGroupId = userVariantGroupId,
+            variantIndex = userVariantIndex,
+            modelContent = if (target != null && content.isNotBlank()) trigger else null,
+            injectionTargetMessageId = if (content.isNotBlank()) target?.id else null
+        ))
+        if (target != null && content.isNotBlank()) rebuildInjectedAssistant(conversationId, target.id)
         updateConversationStats(conversationId)
+        id
+    }
+
+    private suspend fun rebuildInjectedAssistant(conversationId: Long, assistantId: Long) {
+        val target = messageDao.getMessageById(assistantId) ?: return
+        if (target.conversationId != conversationId || target.role != "assistant") return
+        val inputs = getMessagesList(conversationId).selectHistoryVariants()
+            .filter { it.injectionTargetMessageId == assistantId && !it.isExcluded }
+        val actual = inputs.fold(target.content) { text, input -> text + "\n\n" + input.content }
+        messageDao.updateMessage(target.copy(modelContent = actual.takeIf { inputs.isNotEmpty() }))
+    }
+
+    private suspend fun detachInjectionInputs(conversationId: Long, assistantId: Long) {
+        getMessagesList(conversationId).filter { it.injectionTargetMessageId == assistantId }.forEach {
+            messageDao.updateMessage(it.copy(modelContent = null, injectionTargetMessageId = null))
+        }
+    }
+
+    private suspend fun detachMissingInjectionInputs(conversationId: Long) {
+        val messages = getMessagesList(conversationId)
+        val targets = messages.filter { it.role == "assistant" }.mapTo(mutableSetOf()) { it.id }
+        messages.filter { it.injectionTargetMessageId != null && it.injectionTargetMessageId !in targets }.forEach {
+            messageDao.updateMessage(it.copy(modelContent = null, injectionTargetMessageId = null))
+        }
+    }
+
+    private suspend fun remapCopiedInjection(originals: List<Message>, copies: List<Message>, ids: List<Long>, conversationId: Long) {
+        val idMap = originals.mapIndexed { index, message -> message.id to ids[index] }.toMap()
+        copies.forEachIndexed { index, message ->
+            val target = message.injectionTargetMessageId?.let(idMap::get)
+            if (message.injectionTargetMessageId != null) messageDao.updateMessage(message.copy(
+                id = ids[index], injectionTargetMessageId = target,
+                modelContent = message.modelContent.takeIf { target != null }
+            ))
+        }
+        // A branch ending at an assistant must not carry hidden inputs from later turns.
+        copies.forEachIndexed { index, message ->
+            if (message.role == "assistant" && message.modelContent != null) rebuildInjectedAssistant(conversationId, ids[index])
+        }
     }
 
     private suspend fun updateConversationStats(conversationId: Long) {
@@ -1277,7 +1374,7 @@ class AiRepository(
         val prompt = resolveSystemPromptWithPriority(conversation, effective, roleplay)
         val lore = if (effective.enableWorldBook == true) {
             val ids = effective.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            matchWorldBookEntries(WorldBookActivation.scanText(userMessage, history), ids).takeIf { it.isNotEmpty() }?.let {
+            matchWorldBookEntries(WorldBookActivation.scanText(effective.retrievalQuery ?: userMessage, history), ids).takeIf { it.isNotEmpty() }?.let {
                 "<world_book_lore>\n${formatWorldBookPrompt(it)}\n</world_book_lore>"
             }
         } else null
@@ -1676,7 +1773,7 @@ class AiRepository(
 
         val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true) {
             val bookIds = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(userMessage, contextMessages), bookIds)
+            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(effectiveOptions.retrievalQuery ?: userMessage, contextMessages), bookIds)
             if (matchedEntries.isNotEmpty()) {
                 "<world_book_lore>\n${formatWorldBookPrompt(matchedEntries)}\n</world_book_lore>"
             } else null
@@ -2088,7 +2185,7 @@ class AiRepository(
 
         val worldBookBlock = if (effectiveOptions.preparedDirectionContext == null && effectiveOptions.enableWorldBook == true) {
             val bookIds = effectiveOptions.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(userMessage, contextMessages), bookIds)
+            val matchedEntries = matchWorldBookEntries(WorldBookActivation.scanText(effectiveOptions.retrievalQuery ?: userMessage, contextMessages), bookIds)
             if (matchedEntries.isNotEmpty()) {
                 "<world_book_lore>\n${formatWorldBookPrompt(matchedEntries)}\n</world_book_lore>"
             } else null
@@ -2425,7 +2522,8 @@ class AiRepository(
             contextWindowOverrideTokens = overrides?.contextWindowOverrideTokens,
             preparedDirectionContext = overrides?.preparedDirectionContext,
             directionPlanningCount = overrides?.directionPlanningCount,
-            replyDirection = overrides?.replyDirection
+            replyDirection = overrides?.replyDirection,
+            retrievalQuery = overrides?.retrievalQuery
         )
     }
 
@@ -2622,13 +2720,13 @@ class AiRepository(
     ): ContextBudget {
         val window = resolveContextWindow(conversation, modelName, contextWindowOverrideTokens, apiConfigIdOverride).coerceIn(4000, 2000000)
         val prompt = estimatePromptBudgetTokens(modelName, maxOutputTokens, window)
-        val retrievalText = currentUserMessage.ifBlank { messages.lastOrNull { it.role == "user" }?.content.orEmpty() }
+        val retrievalText = options.retrievalQuery ?: currentUserMessage.ifBlank { messages.lastOrNull { it.role == "user" }?.content.orEmpty() }
         val memory = conversation?.let { buildRelevantMemoryBlock(it, retrievalText,
             (prompt * MEMORY_BUDGET_RATIO).toInt().coerceIn(200, 2400), options) }
         val custom = resolveSystemPromptWithPriority(conversation, options)
         val lore = if (options.enableWorldBook == true) {
             val ids = options.activeWorldBookIds?.split(",")?.mapNotNull { it.trim().toLongOrNull() }
-            matchWorldBookEntries(WorldBookActivation.scanText(currentUserMessage, messages), ids)
+            matchWorldBookEntries(WorldBookActivation.scanText(retrievalText, messages), ids)
                 .takeIf { it.isNotEmpty() }?.let { "<world_book_lore>\n${formatWorldBookPrompt(it)}\n</world_book_lore>" }
         } else null
         val fixed = estimateTokenCount(buildEffectiveSystemPrompt(custom.first, null, memory, options,
@@ -2704,7 +2802,8 @@ class AiRepository(
         contextWindowOverrideTokens: Int? = null,
         currentUserMessage: String,
         options: ChatRequestOptions? = null,
-        forceCompression: Boolean = false
+        forceCompression: Boolean = false,
+        rebuildSummary: Boolean = false
     ): ContextBundle {
         val usable = messages.filter { it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
             !it.isExcluded && !isErrorPlaceholderMessage(it.content) }
@@ -2715,7 +2814,7 @@ class AiRepository(
         val plan = ContextCompressionPlanner.plan(usable, tier, budget.history, conversation?.rollingSummary,
             conversation?.summaryUpdatedMessageId, conversation?.compressionRecentRounds ?: 8, conversation?.compressionCustomPercent ?: 30,
             forceCompression)
-        val needsSummary = plan.needsSummary || (plan.summarySource.isNotEmpty() &&
+        val needsSummary = plan.needsSummary || (rebuildSummary && plan.summarySource.isNotEmpty()) || (plan.summarySource.isNotEmpty() &&
             estimateTokenCount(conversation?.rollingSummary.orEmpty()) > budget.summary)
         check(budget.fixed + plan.estimatedHistoryTokens + (if (needsSummary) budget.summary else estimateTokenCount(conversation?.rollingSummary.orEmpty())) <= budget.prompt) {
             "当前输入、置顶内容或设定超过上下文预算。请缩短内容或提高上下文上限后继续；尚未发起额外摘要请求。"
@@ -2730,7 +2829,8 @@ class AiRepository(
                 }
             }
             try {
-                ensureRollingSummary(conversation?.copy(contextWindowTokens = budget.window), config, modelName, plan.summarySource, budget.summary)
+                ensureRollingSummary(conversation?.copy(contextWindowTokens = budget.window), config, modelName, plan.summarySource, budget.summary,
+                    rebuildFromSource = rebuildSummary)
             } catch (failure: SummaryRequestFailure) {
                 if (forceCompression) throw failure
                 return buildSummaryFailureContinuation(conversation, usable, plan, budget, failure)
@@ -2904,7 +3004,8 @@ class AiRepository(
         config: ApiConfig,
         modelName: String,
         olderMessages: List<Message>,
-        tokenBudget: Int
+        tokenBudget: Int,
+        rebuildFromSource: Boolean = false
     ): String? {
         if (conversation == null || olderMessages.isEmpty()) return conversation?.rollingSummary
         return summaryLocks.getOrPut(conversation.id) { Mutex() }.withLock {
@@ -2916,7 +3017,7 @@ class AiRepository(
                 }
                 check(selectedHistory.take(olderMessages.size).map { Triple(it.id, it.role, it.content) } ==
                     olderMessages.map { Triple(it.id, it.role, it.content) }) { "等待压缩期间原文或回复选择已变化，请重新整理" }
-                val latestCoveredIndex = if (latest.rollingSummary.isNullOrBlank()) -1
+                val latestCoveredIndex = if (rebuildFromSource || latest.rollingSummary.isNullOrBlank()) -1
                     else selectedHistory.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
                 // Another operation may have advanced farther while this request waited for
                 // the lock. Reuse that checkpoint; never overwrite it with an older prefix.
@@ -2927,7 +3028,7 @@ class AiRepository(
                 }
                 val sourceMessages = if (latestCoveredIndex >= olderMessages.size) selectedHistory.take(latestCoveredIndex + 1)
                     else olderMessages
-                val coveredIndex = if (latest.rollingSummary.isNullOrBlank() ||
+                val coveredIndex = if (rebuildFromSource || latest.rollingSummary.isNullOrBlank() ||
                     ContextCompressionPlanner.summaryInputTokens(latest.rollingSummary.orEmpty()) > summaryBudget) -1
                     else sourceMessages.indexOfFirst { it.id == latest.summaryUpdatedMessageId }
                 val pending = sourceMessages.drop(coveredIndex + 1)
@@ -3357,7 +3458,7 @@ class AiRepository(
             }
             EnrichedPromptResult(prompt, emptyList())
         } else {
-            tavilySearchManager.search(userMessage).fold(
+            tavilySearchManager.search(options.retrievalQuery ?: userMessage).fold(
                 onSuccess = { bundle ->
                     val prompt = buildString {
                         append(bundle.toPromptBlock())
@@ -5039,10 +5140,22 @@ class AiRepository(
     }
 
     private fun List<Message>.collapseVariantsForHistory(): List<Message> {
+        val selected = selectHistoryVariants()
+        val validTargets = selected.filter { it.role == "assistant" && !it.isExcluded }.mapTo(mutableSetOf()) { it.id }
+        return selected.map { message ->
+            if (message.injectionTargetMessageId != null && message.injectionTargetMessageId !in validTargets) message
+            else message.modelContent?.let { message.copy(content = it) } ?: message
+        }
+    }
+
+    private fun List<Message>.selectHistoryVariants(): List<Message> {
         val groups = filter { !it.variantGroupId.isNullOrBlank() }
             .groupBy { it.variantGroupId!! }
         val consumedGroups = mutableSetOf<String>()
         val result = mutableListOf<Message>()
+        val selectedUsers = filter { it.role == "user" }.groupBy { it.variantGroupId ?: "message_${it.id}" }
+            .values.mapNotNull { variants -> variants.maxWithOrNull(compareBy<Message> { it.variantIndex }.thenBy { it.createdAt }) }
+        val preferredTargets = selectedUsers.filter { !it.isExcluded }.mapNotNull { it.injectionTargetMessageId }
 
         forEach { message ->
             val groupId = message.variantGroupId
@@ -5052,7 +5165,9 @@ class AiRepository(
             }
             if (!consumedGroups.add(groupId)) return@forEach
 
-            val selected = groups[groupId]
+            val variants = groups[groupId].orEmpty()
+            val preferred = if (message.role == "assistant") preferredTargets.lastOrNull { id -> variants.any { it.id == id } } else null
+            val selected = variants.firstOrNull { it.id == preferred } ?: groups[groupId]
                 .orEmpty()
                 .maxWithOrNull(compareBy<Message> { it.variantIndex }.thenBy { it.createdAt })
                 ?: message
@@ -5607,6 +5722,8 @@ class AiRepository(
                 enableWebSearch = originalConv.enableWebSearch,
                 enableSessionMemory = originalConv.enableSessionMemory,
                 enableTimeline = originalConv.enableTimeline,
+                enableInputInjection = originalConv.enableInputInjection,
+                inputInjectionTrigger = originalConv.inputInjectionTrigger,
                 enableReplyDirections = originalConv.enableReplyDirections,
                 replyDirectionCount = originalConv.replyDirectionCount,
                 contextWindowTokens = originalConv.contextWindowTokens,
@@ -5669,7 +5786,8 @@ class AiRepository(
 
             // 批量一次性原子落库
             if (preparedMessages.isNotEmpty()) {
-                messageDao.insertMessages(preparedMessages)
+                val copiedIds = messageDao.insertMessages(preparedMessages)
+                remapCopiedInjection(messagesToCopy, preparedMessages, copiedIds, newId)
                 val totalTokens = preparedMessages.sumOf { it.tokenCount }
                 conversationDao.updateStats(newId, preparedMessages.size, totalTokens)
             }
@@ -5800,6 +5918,7 @@ class AiRepository(
                     )
                 }
                 val copiedMessageIds = messageDao.insertMessages(preparedMessages)
+                remapCopiedInjection(originalMessages, preparedMessages, copiedMessageIds, newId)
                 val validCoveredId = originalConv.summaryUpdatedMessageId?.takeIf { coveredId ->
                     !originalConv.rollingSummary.isNullOrBlank() && originalMessages.collapseVariantsForHistory().any {
                         it.id == coveredId && it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
@@ -5809,8 +5928,7 @@ class AiRepository(
                 val copiedCoveredId = validCoveredId?.let { coveredId ->
                     originalMessages.indexOfFirst { it.id == coveredId }.takeIf { it >= 0 }?.let(copiedMessageIds::get)
                 }?.takeIf { coveredId ->
-                    preparedMessages.mapIndexed { index, message -> message.copy(id = copiedMessageIds[index]) }
-                        .collapseVariantsForHistory().any {
+                    getMessagesList(newId).collapseVariantsForHistory().any {
                             it.id == coveredId && it.role in listOf("user", "assistant") && it.content.isNotBlank() &&
                                 !it.isExcluded && !isErrorPlaceholderMessage(it.content)
                         }

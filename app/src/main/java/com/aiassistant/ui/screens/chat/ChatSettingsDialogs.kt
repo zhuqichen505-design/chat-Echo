@@ -212,6 +212,8 @@ fun ChatSettingsDialog(
     var activeWorldBookIds by remember { mutableStateOf(tempSettings.activeWorldBookIds) }
     var enableReplyDirections by remember { mutableStateOf(tempSettings.enableReplyDirections) }
     var replyDirectionCount by remember { mutableIntStateOf(tempSettings.replyDirectionCount.coerceIn(2, 4)) }
+    var enableInputInjection by remember { mutableStateOf(tempSettings.enableInputInjection) }
+    var inputInjectionTrigger by remember { mutableStateOf(tempSettings.inputInjectionTrigger) }
     // 这些面板的数据会在后台提炼、保存记忆时刷新。状态放在弹窗根部，
     // 避免 LazyColumn item 重组后折叠面板意外恢复为展开。
     var timelineSectionExpanded by rememberSaveable { mutableStateOf(false) }
@@ -272,6 +274,8 @@ fun ChatSettingsDialog(
             enableWorldBook = enableWorldBook,
             enableReplyDirections = enableReplyDirections,
             replyDirectionCount = replyDirectionCount,
+            enableInputInjection = enableInputInjection,
+            inputInjectionTrigger = inputInjectionTrigger,
             activeWorldBookIds = activeWorldBookIds,
             contextWindowTokens = contextWindowTokens
         )
@@ -290,11 +294,15 @@ fun ChatSettingsDialog(
         activeWorldBookIds = merged.activeWorldBookIds
         enableReplyDirections = merged.enableReplyDirections
         replyDirectionCount = merged.replyDirectionCount.coerceIn(2, 4)
+        enableInputInjection = merged.enableInputInjection
+        inputInjectionTrigger = merged.inputInjectionTrigger
         contextWindowTokens = merged.contextWindowTokens
         lastIncomingSettings = tempSettings
     }
 
     fun notifyTempSettingsChange() {
+        // 未填完的触发语只保留在本地草稿，不能通过实时保存启用无效配置。
+        if (enableInputInjection && inputInjectionTrigger.isBlank()) return
         val updated = TempChatSettings(
             temperature = temperature.coerceIn(0f, tuningProfile.temperatureMax),
             maxTokens = maxTokens.toIntOrNull() ?: 4096,
@@ -308,6 +316,8 @@ fun ChatSettingsDialog(
             enableWorldBook = enableWorldBook,
             enableReplyDirections = enableReplyDirections,
             replyDirectionCount = replyDirectionCount,
+            enableInputInjection = enableInputInjection,
+            inputInjectionTrigger = inputInjectionTrigger,
             activeWorldBookIds = activeWorldBookIds,
             contextWindowTokens = contextWindowTokens
         )
@@ -765,6 +775,56 @@ fun ChatSettingsDialog(
 
                 if (settingsTab == 1) {
                     item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    "输入注入回复",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = dialogContentColor
+                                )
+                                Switch(
+                                    checked = enableInputInjection,
+                                    onCheckedChange = {
+                                        enableInputInjection = it
+                                        notifyTempSettingsChange()
+                                    },
+                                    colors = echoSwitchColors()
+                                )
+                            }
+                            Text(
+                                "输入仍显示为你的消息；后台将原文隔两个换行追加到上一条模型回复，再发送自定义触发语。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = dialogSecondaryColor
+                            )
+                            if (enableInputInjection) {
+                                OutlinedTextField(
+                                    value = inputInjectionTrigger,
+                                    onValueChange = {
+                                        inputInjectionTrigger = it
+                                        notifyTempSettingsChange()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("自定义触发语") },
+                                    placeholder = { Text("输入实际发送给模型的文字") },
+                                    minLines = 3,
+                                    maxLines = 8,
+                                    isError = inputInjectionTrigger.isBlank(),
+                                    supportingText = {
+                                        Text(if (inputInjectionTrigger.isBlank()) "请填写触发语后保存，不能仅为空格或换行。" else "仅当前对话生效，触发语不会替换界面中显示的输入。")
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = glassTextFieldColors(dialogContentColor, dialogSecondaryColor, dialogContainerColor)
+                                )
+                            }
+                        }
+                    }
+
+                    item {
                         ChatSettingsSystemPromptSection(
                             promptTextFieldValue = promptTextFieldValue,
                             onPromptChange = { promptTextFieldValue = it },
@@ -969,6 +1029,7 @@ fun ChatSettingsDialog(
                     Text("取消")
                 }
                 Button(
+                    enabled = !enableInputInjection || inputInjectionTrigger.isNotBlank(),
                     onClick = {
                         val settings = TempChatSettings(
                             temperature = temperature.coerceIn(0f, tuningProfile.temperatureMax),
@@ -983,6 +1044,8 @@ fun ChatSettingsDialog(
                             enableWorldBook = enableWorldBook,
                             enableReplyDirections = enableReplyDirections,
                             replyDirectionCount = replyDirectionCount,
+                            enableInputInjection = enableInputInjection,
+                            inputInjectionTrigger = inputInjectionTrigger,
                             activeWorldBookIds = activeWorldBookIds,
                             contextWindowTokens = contextWindowTokens
                         )

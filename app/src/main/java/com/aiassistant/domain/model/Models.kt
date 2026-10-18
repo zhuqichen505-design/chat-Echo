@@ -105,7 +105,10 @@ data class Conversation(
     val compressionRecentRounds: Int = 8, // L2 滚动摘要档保留的最近轮数 N (4~32)
     val compressionCustomPercent: Int = 30, // LC 自定义比例档保留原文的百分比 (10~90)
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** Off by default; only new sends use the configured trigger. */
+    @ColumnInfo(defaultValue = "0") val enableInputInjection: Boolean = false,
+    val inputInjectionTrigger: String? = null
 )
 
 // 消息
@@ -132,7 +135,11 @@ data class Message(
     val isExcluded: Boolean = false,
     val modelName: String? = null,
     val replyDirection: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** Persisted model-facing body. Null preserves the ordinary content-only path. */
+    val modelContent: String? = null,
+    /** For injected user turns, identifies the assistant whose model body contains this input. */
+    val injectionTargetMessageId: Long? = null
 )
 
 // 智能工具调用留痕记录
@@ -386,7 +393,9 @@ data class ChatRequestOptions(
     val activeWorldBookIds: String? = null,
     val preparedDirectionContext: PreparedDirectionContext? = null,
     val directionPlanningCount: Int? = null,
-    val replyDirection: String? = null
+    val replyDirection: String? = null,
+    /** Original input for contextual retrieval when the model-facing user body is a trigger. */
+    val retrievalQuery: String? = null
 )
 
 data class ConversationContextUsage(

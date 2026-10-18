@@ -532,6 +532,16 @@ object AppDatabaseMigrations {
             }
         }
 
+        /** Display content stays unchanged; model-facing injection metadata is opt-in. */
+        val MIGRATION_36_37 = object : Migration(36, 37) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                addColumnIfMissing(database, "conversations", "enableInputInjection", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(database, "conversations", "inputInjectionTrigger", "TEXT")
+                addColumnIfMissing(database, "messages", "modelContent", "TEXT")
+                addColumnIfMissing(database, "messages", "injectionTargetMessageId", "INTEGER")
+            }
+        }
+
         val LEGACY_REPAIR_MIGRATIONS: Array<Migration> = ((1..22)
             .map { startVersion ->
                 object : Migration(startVersion, 23) {
@@ -539,7 +549,7 @@ object AppDatabaseMigrations {
                         repairSchema(database)
                     }
                 }
-            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35 + MIGRATION_35_36).toTypedArray()
+            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35 + MIGRATION_35_36 + MIGRATION_36_37).toTypedArray()
 
         private fun repairSchema(database: SupportSQLiteDatabase) {
             database.execSQL("PRAGMA foreign_keys=OFF;")
