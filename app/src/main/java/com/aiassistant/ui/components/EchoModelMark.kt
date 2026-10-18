@@ -147,7 +147,12 @@ internal fun EchoModelMark(
             label = "modelMarkPhase"
         )
     } else null
-    Canvas(modifier.size(26.dp).semantics {
+    // Bot identities carry a second status-symbol layer above the body.  Give the
+    // default bot canvas a little more room so the body and that symbol stay legible
+    // even when a caller does not provide an explicit avatar size.  An incoming
+    // fixed size still wins through Compose constraints (the message row and the
+    // appearance preview both provide one), while geometric marks retain 26 dp.
+    Canvas(modifier.size(if (isBot) 30.dp else 26.dp).semantics {
         description?.let { contentDescription = it }
     }) {
         if (isExpressiveBot) {

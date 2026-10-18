@@ -146,6 +146,7 @@ import com.aiassistant.ui.components.EchoPrimaryButton
 import com.aiassistant.ui.components.EchoGlassButton
 import com.aiassistant.ui.screens.roleplay.ConflictAction
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.components.EchoSwitch
 
 
 @Composable
@@ -155,6 +156,7 @@ fun ChatSettingsTimelineSection(
     contentColor: Color,
     secondaryColor: Color,
     enableTimeline: Boolean = true,
+    onEnableTimelineChange: (Boolean) -> Unit = {},
     hazeState: dev.chrisbanes.haze.HazeState? = null,
     isReconcilingTimeline: Boolean = false,
     reconcileTimelineProgress: String? = null,
@@ -223,12 +225,13 @@ fun ChatSettingsTimelineSection(
                     Text("时间线", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = contentColor)
                     Text(
                         "${sortedNodes.size} 个节点 · ${currentStoryTime?.takeIf { it.isNotBlank() } ?: "未设置故事时间"}" +
-                            if (isReconcilingTimeline) " · 梳理中" else if (hasSavedTimelineDraft) " · 有待确认草稿" else "",
+                            if (!enableTimeline) " · 已停用" else if (isReconcilingTimeline) " · 梳理中" else if (hasSavedTimelineDraft) " · 有待确认草稿" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = secondaryColor,
                         maxLines = 2
                     )
                 }
+                EchoSwitch(checked = enableTimeline, onCheckedChange = onEnableTimelineChange)
                 Icon(
                     if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (isExpanded) "收起时间线" else "展开时间线",
@@ -276,6 +279,7 @@ fun ChatSettingsTimelineSection(
                             storyTimeInput = currentStoryTime.orEmpty()
                             showStoryTimeEditDialog = true
                         },
+                        enabled = enableTimeline,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -323,6 +327,7 @@ fun ChatSettingsTimelineSection(
                             }
                             TextButton(
                                 onClick = onClearTimelineDraft,
+                                enabled = enableTimeline,
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                             ) {
                                 Text("丢弃", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
@@ -339,6 +344,7 @@ fun ChatSettingsTimelineSection(
                         ) {
                             OutlinedButton(
                                 onClick = onOpenTimelineDraft,
+                                enabled = enableTimeline,
                                 modifier = Modifier.weight(1f),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(8.dp)
@@ -347,6 +353,7 @@ fun ChatSettingsTimelineSection(
                             }
                             Button(
                                 onClick = onContinueTimelineReconciliation,
+                                enabled = enableTimeline,
                                 modifier = Modifier.weight(1.2f),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(8.dp)
@@ -578,19 +585,19 @@ fun ChatSettingsTimelineSection(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    // 顶部行：序号、时间点与事件性质（上下排布）、编辑与删除键放在同一行
+                                    // 紧凑时间线卡片：时间标签与分类并排，事件内容紧随其后，
+                                    // 避免旧版上下堆叠标签造成大量空白。
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.Top
                                     ) {
-                                        // 1. 左侧序号
                                         Surface(
                                             shape = CircleShape,
                                             color = primaryColor.copy(alpha = 0.2f),
-                                            modifier = Modifier.size(22.dp)
+                                            modifier = Modifier.size(20.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Text(
@@ -602,44 +609,63 @@ fun ChatSettingsTimelineSection(
                                             }
                                         }
 
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
 
-                                        // 2. 时间点与事件性质上下排布
                                         Column(
                                             modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            verticalArrangement = Arrangement.spacedBy(3.dp)
                                         ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = primaryColor.copy(alpha = 0.15f),
-                                                border = BorderStroke(0.8.dp, primaryColor.copy(alpha = 0.35f))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                Text(
-                                                    text = node.timeTag.ifBlank { "未知时段" },
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = primaryColor,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                                                )
+                                                Surface(
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = primaryColor.copy(alpha = 0.15f),
+                                                    border = BorderStroke(0.8.dp, primaryColor.copy(alpha = 0.35f))
+                                                ) {
+                                                    Text(
+                                                        text = node.timeTag.ifBlank { "未知时段" },
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = primaryColor,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                                                    border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f))
+                                                ) {
+                                                    Text(
+                                                        text = "${cat.emoji} ${cat.displayName}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                        fontWeight = FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                                    )
+                                                }
                                             }
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
-                                                border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f))
-                                            ) {
-                                                Text(
-                                                    text = "${cat.emoji} ${cat.displayName}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.tertiary,
-                                                    fontWeight = FontWeight.Medium,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                                                )
-                                            }
+
+                                            Text(
+                                                text = node.event,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (enableTimeline) contentColor else secondaryColor,
+                                                maxLines = 3,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
                                         }
 
-                                        // 3. 右侧编辑与删除按键在同一行
                                         Row(
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            modifier = Modifier.padding(start = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(0.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             IconButton(
@@ -673,14 +699,6 @@ fun ChatSettingsTimelineSection(
                                             }
                                         }
                                     }
-
-                                    // 下方展示完整的事件描述
-                                    Text(
-                                        text = node.event,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (enableTimeline) contentColor else secondaryColor,
-                                        modifier = Modifier.fillMaxWidth().padding(start = 2.dp)
-                                    )
                                 }
                             }
                         }

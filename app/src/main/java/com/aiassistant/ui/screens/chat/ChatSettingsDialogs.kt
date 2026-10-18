@@ -206,6 +206,7 @@ fun ChatSettingsDialog(
     var thinkingEffort by remember { mutableStateOf(tempSettings.thinkingEffort) }
     var enableWebSearch by remember { mutableStateOf(tempSettings.enableWebSearch) }
     var enableSessionMemory by remember { mutableStateOf(tempSettings.enableSessionMemory) }
+    var enableTimeline by remember { mutableStateOf(tempSettings.enableTimeline) }
     var enableExternalMemory by remember { mutableStateOf(tempSettings.enableExternalMemory) }
     var enableWorldBook by remember { mutableStateOf(tempSettings.enableWorldBook) }
     var activeWorldBookIds by remember { mutableStateOf(tempSettings.activeWorldBookIds) }
@@ -266,6 +267,7 @@ fun ChatSettingsDialog(
             thinkingEffort = thinkingEffort,
             enableWebSearch = enableWebSearch,
             enableSessionMemory = enableSessionMemory,
+            enableTimeline = enableTimeline,
             enableExternalMemory = enableExternalMemory,
             enableWorldBook = enableWorldBook,
             enableReplyDirections = enableReplyDirections,
@@ -282,6 +284,7 @@ fun ChatSettingsDialog(
         thinkingEffort = merged.thinkingEffort
         enableWebSearch = merged.enableWebSearch
         enableSessionMemory = merged.enableSessionMemory
+        enableTimeline = merged.enableTimeline
         enableExternalMemory = merged.enableExternalMemory
         enableWorldBook = merged.enableWorldBook
         activeWorldBookIds = merged.activeWorldBookIds
@@ -300,6 +303,7 @@ fun ChatSettingsDialog(
             thinkingEffort = thinkingEffort,
             enableWebSearch = enableWebSearch,
             enableSessionMemory = enableSessionMemory,
+            enableTimeline = enableTimeline,
             enableExternalMemory = enableExternalMemory,
             enableWorldBook = enableWorldBook,
             enableReplyDirections = enableReplyDirections,
@@ -799,7 +803,11 @@ fun ChatSettingsDialog(
                             currentStoryTime = currentStoryTime,
                             contentColor = dialogContentColor,
                             secondaryColor = dialogSecondaryColor,
-                            enableTimeline = true,
+                            enableTimeline = enableTimeline,
+                            onEnableTimelineChange = {
+                                enableTimeline = it
+                                notifyTempSettingsChange()
+                            },
                             hazeState = hazeState,
                             isReconcilingTimeline = isReconcilingTimeline,
                             reconcileTimelineProgress = reconcileTimelineProgress,
@@ -970,6 +978,7 @@ fun ChatSettingsDialog(
                             thinkingEffort = thinkingEffort,
                             enableWebSearch = enableWebSearch,
                             enableSessionMemory = enableSessionMemory,
+                            enableTimeline = enableTimeline,
                             enableExternalMemory = enableExternalMemory,
                             enableWorldBook = enableWorldBook,
                             enableReplyDirections = enableReplyDirections,

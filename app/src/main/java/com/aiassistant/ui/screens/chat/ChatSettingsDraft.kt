@@ -13,6 +13,7 @@ internal fun mergeChatSettingsDraft(
     thinkingEffort = if (local.thinkingEffort == previous.thinkingEffort) incoming.thinkingEffort else local.thinkingEffort,
     enableWebSearch = if (local.enableWebSearch == previous.enableWebSearch) incoming.enableWebSearch else local.enableWebSearch,
     enableSessionMemory = if (local.enableSessionMemory == previous.enableSessionMemory) incoming.enableSessionMemory else local.enableSessionMemory,
+    enableTimeline = if (local.enableTimeline == previous.enableTimeline) incoming.enableTimeline else local.enableTimeline,
     enableExternalMemory = if (local.enableExternalMemory == previous.enableExternalMemory) incoming.enableExternalMemory else local.enableExternalMemory,
     enableWorldBook = if (local.enableWorldBook == previous.enableWorldBook) incoming.enableWorldBook else local.enableWorldBook,
     enableReplyDirections = if (local.enableReplyDirections == previous.enableReplyDirections) incoming.enableReplyDirections else local.enableReplyDirections,

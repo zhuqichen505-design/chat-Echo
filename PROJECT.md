@@ -5,9 +5,9 @@
 Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
 
 **当前源码版本**: v2.8.11（versionCode 197）
-**本次更新**: 压缩失败后可按相同档位和比例重试；摘要使用连接 10 秒、读写各 30 秒、单次 HTTP 调用 45 秒的独立短通道，连接失败不叠加通用重试和备用 Key。长历史按包含模板、旧摘要及输出预留的保守预算分块，仅明确容量错误触发失败分块缩小。HTTP 500/502 且错误正文明确为 `empty response detected` 时尝试一次流式兼容；空正文、仅思考、无效摘要和截断分别报错，失败保留原文和上次有效摘要。发送可在预算内使用有效旧摘要和完整未覆盖原文继续，同一配置的摘要故障不在每次发送时重试；超预算明确失败，不静默丢原文。滚动摘要及全量/增量时间线共用凝练事件规则：保留完整事件与必要因果、时间锚和约束，过滤无关细节，时间线不设固定字数、句数或节点数上限；滚动摘要仍需适配当前上下文 Token 预算。普通对话与创作共用，详细行为见 UPDATE_LOG.md。
-**数据库版本**: 35（20 个实体）
-**本版范围（2026-10-18）**: 用户要求修复上下文压缩、模拟对话基本功能全流程并构建 APK。2.8.11/197 包含本轮摘要请求、失败恢复和事件提炼修改；Room v35/20 实体不变，无数据库迁移，旧消息、摘要、时间线与备份保持兼容。整次压缩可以包含多个短请求，45 秒为单次 HTTP 调用上限。
+**本次更新**: 在既有摘要失败恢复基础上，bot 及状态符号尺寸增大；时间线和常驻设定提取统一按完整句收敛，删除无效描写并限制事件 160 字、设定 96 字；新增会话级时间线开关并接入普通聊天、故事工作台、分支与请求链，关闭后不注入时间线或启动后台提案；时间线卡片改为时间/分类/内容紧凑排列。非流式和流式摘要均明确返回 `empty response detected` 时，使用预算内本地结构化摘要兜底并保存覆盖水位，普通服务器、认证和权限错误仍保留原错误路径。详细行为见 UPDATE_LOG.md。
+**数据库版本**: 36（20 个实体）
+**本版范围（2026-10-18）**: 本次为 v2.8.11/197 发布后的源码改进，未修改 versionName/versionCode，未构建或发布 APK。Room v35→v36 新增 nullable `Conversation.enableTimeline` 及显式迁移；旧会话空值按历史行为默认启用时间线，旧消息、摘要、时间线与备份内容保留。最终验收记录 `20261018-143656-949`：86 套件/818 项单测全通过，Lint 0 Error/95 Warning，输入哈希一致；设备安装/启动和真实厂商模型语义仍待人工验收。
 **最新源码验证**: 本轮最终冻结验收的编译、全量单测、Lint、输入哈希与命令退出码见 [walkthrough.md](walkthrough.md) 和 [最新发布说明](release-notes/latest.md)。历史版本或开发阶段的验证结果不代替最终源码验收。
 **本次安装包状态**: 安装包定名 `Echo-v2.8.11.apk`，最终构建、包内容、大小、签名连续性及 SHA256 结果见 [最新发布说明](release-notes/latest.md)。项目使用非正式生产签名；设备安装、启动、触控和真实厂商接口尚未验收。
 **远端发布核验**: v2.8.11 的 main/版本标签推送、Release 唯一 APK 附件及匿名公开下载 SHA256 已核验通过，已按既定策略撤下远端 v2.8.10 Release/版本标签。实际结果见 [walkthrough.md](walkthrough.md) 与 [最新发布说明](release-notes/latest.md)。本机历史 APK 和本机标签继续保留；对外仅保留最新版的操作须在新包发布核验后进行。
@@ -43,13 +43,13 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 ---
 
-## 数据库结构（v35，实体清单以 `data/local/AppDatabase.kt` 为准）
+## 数据库结构（v36，实体清单以 `data/local/AppDatabase.kt` 为准）
 
 | 实体（表） | 说明 |
 |------|------|
 | Folder | 文件夹 |
 | ApiConfig | API 配置 |
-| Conversation / Message | 对话与消息（会话 enableReplyDirections/replyDirectionCount；消息 modelName/replyDirection 本轮元数据） |
+| Conversation / Message | 对话与消息（会话 enableSessionMemory/enableTimeline/enableReplyDirections/replyDirectionCount；消息 modelName/replyDirection 本轮元数据） |
 | ApiUsageStat | 使用统计；请求用途、Token 来源、完成状态与首段等待 |
 | EnvironmentVariable | 环境变量（加密存储） |
 | PromptTemplate | 提示词模板 |
@@ -61,7 +61,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 | TimelineNode | 剧情时间线 |
 | BackupIdentity | 跨设备实体稳定身份（backup_identities） |
 
-迁移链至 `MIGRATION_34_35`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 35。真实 v34→v35 保留旧统计与消息的迁移测试覆盖新列默认值，v32/v33 迁移链同步验证。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
+迁移链至 `MIGRATION_35_36`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 36。v35→v36 为 `conversations.enableTimeline` nullable 列，旧会话由领域层按默认开启处理；迁移测试同步覆盖 v35→v36 链。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
 
 ---
 
@@ -102,7 +102,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 | 版本 | 数据库 | 主要更新 |
 |------|--------|----------|
-| 2.8.11 | 35 | 同参数压缩重试、摘要短请求及流式兼容、故障后预算内完整原文继续、保守分块与凝练完整事件摘要 |
+| 2.8.11 | 36 | 同参数压缩重试、摘要短请求及流式兼容、空响应本地兜底、时间线/设定凝练、会话级时间线开关与紧凑展示 |
 | 2.8.10 | 35 | 剧情过程与自然时间跨度、设定增量维护、分支改名、创作流程完善及长会话压缩实际应用 |
 | 2.8.6 | 35 | 作品工作区重写、历史删除与主题可见性、连续压缩/提取、实际请求计量 |
 | v1.3.0 | v5 | 基础稳定版本 |

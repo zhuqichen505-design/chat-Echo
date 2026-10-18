@@ -243,6 +243,23 @@ class AiRepository(
         return listOf("模型窗口", "上下文窗口", "prompt 太长", "prompt过长", "input 太大", "请求过大").any(message::contains)
     }
 
+    /**
+     * Some OpenAI-compatible gateways return HTTP 500 when their non-streaming
+     * adapter receives an empty upstream completion, then repeat the same
+     * failure for the streaming compatibility request.  This is a provider
+     * transport defect rather than a context or authentication failure.  Keep
+     * the check deliberately narrow so an ordinary 500 still reaches the retry
+     * and error UI paths.
+     */
+    private fun isEmptySummaryResponseFailure(error: Throwable): Boolean =
+        generateSequence(error) { it.cause }
+            .take(16)
+            .mapNotNull { it.message }
+            .any { message ->
+                message.contains("empty response detected", ignoreCase = true) ||
+                    message.contains("流式摘要没有返回完整有效正文")
+            }
+
     // ============ 文件夹相关 ============
 
     fun getAllFolders(): Flow<List<Folder>> = folderDao.getAllFolders()
@@ -2491,6 +2508,7 @@ class AiRepository(
             thinkingEffort = normalizeThinkingEffort(overrides?.thinkingEffort ?: config.thinkingEffort, config),
             enableWebSearch = overrides?.enableWebSearch ?: config.enableWebSearch,
             enableSessionMemory = overrides?.enableSessionMemory,
+            enableTimeline = overrides?.enableTimeline,
             enableExternalMemory = overrides?.enableExternalMemory,
             enableWorldBook = overrides?.enableWorldBook,
             activeWorldBookIds = overrides?.activeWorldBookIds,
@@ -2671,6 +2689,7 @@ class AiRepository(
 
     private fun savedContextOptions(conversation: Conversation) = ChatRequestOptions(
         enableSessionMemory = conversation.enableSessionMemory,
+        enableTimeline = conversation.enableTimeline,
         enableExternalMemory = conversation.enableExternalMemory,
         enableWorldBook = conversation.enableWorldBook,
         activeWorldBookIds = conversation.activeWorldBookIds
@@ -3244,6 +3263,30 @@ class AiRepository(
                     }
                     throw Exception("模型未返回有效的完整摘要")
                 } catch (e: Exception) {
+                    // A few OpenAI-compatible gateways report `empty response detected`
+                    // for both protocol variants even though the model can still be
+                    // represented by the deterministic local extractor.  Use that
+                    // extractor only after the gateway has explicitly produced this
+                    // paired empty-response failure; ordinary server/auth failures
+                    // must remain visible and retryable.
+                    // The fallback is intentionally delayed until the non-streaming
+                    // request has also been followed by a streaming attempt.  A
+                    // gateway may reject only one protocol; using a local summary
+                    // after the first failure would skip the compatible protocol.
+                    val bothSummaryProtocolsRejected = summaryStreamAttempted &&
+                        (emptyResponseGatewayError != null || usingCachedSummaryStream)
+                    if (bothSummaryProtocolsRejected && isEmptySummaryResponseFailure(e)) {
+                        val local = buildLocalRollingSummaryFallback(
+                            existingSummary = existingSummary,
+                            pendingMessages = pendingMessages,
+                            tokenBudget = tokenBudget,
+                            existingPreferencesAndConstraints = existingPreferencesAndConstraints
+                        )
+                        if (!local.isNullOrBlank() && isUsableSummaryCompletion(local)) {
+                            Log.w(tag, "摘要网关返回 empty response，使用本地结构化摘要兜底")
+                            return local
+                        }
+                    }
                     lastException = if (emptyResponseGatewayError != null)
                         IllegalStateException("非流式摘要返回 $emptyResponseGatewayError；流式兼容请求失败：${e.message}", e) else e
                     Log.w(tag, "generateRollingSummary Key报错或请求异常 (attempt $attempt): ${e.message}")
@@ -3302,6 +3345,75 @@ class AiRepository(
         val block = structured.toPromptBlock()
         if (block.isBlank()) return null
         return compactTextToTokenBudget(block, tokenBudget)
+    }
+
+    /**
+     * Merge a locally extracted continuation with the already committed rolling
+     * summary.  The provider has already rejected both wire protocols here, so
+     * preserving a bounded, complete local summary is preferable to leaving the
+     * conversation permanently unable to compress.  Allocate room to both sides
+     * before applying the sentence-safe budget clamp; this avoids dropping all
+     * previously covered facts when the continuation is large.
+     */
+    private fun buildLocalRollingSummaryFallback(
+        existingSummary: String?,
+        pendingMessages: List<Message>,
+        tokenBudget: Int,
+        existingPreferencesAndConstraints: List<String>? = null
+    ): String? {
+        val extracted = pendingMessages
+            .chunked(30)
+            .mapNotNull { slice ->
+                buildExtractiveConversationSummary(slice, tokenBudget, existingPreferencesAndConstraints)
+            }
+            .joinToString("\n")
+            .let { compactSummaryToTokenBudget(it, tokenBudget) }
+        val previous = existingSummary?.trim().orEmpty()
+        val addition = extracted.trim()
+        if (previous.isBlank()) return compactSummaryToTokenBudget(addition, tokenBudget).takeIf { it.isNotBlank() }
+        if (addition.isBlank()) return compactSummaryToTokenBudget(previous, tokenBudget).takeIf { it.isNotBlank() }
+
+        val merged = "$previous\n$addition"
+        if (ContextCompressionPlanner.summaryInputTokens(merged) <= tokenBudget) return merged
+
+        // Keep both the old checkpoint and the newly covered range.  The final
+        // clamp is sentence-safe and uses the exact summary token estimator.
+        val previousBudget = (tokenBudget * 0.58f).toInt().coerceAtLeast(96)
+        val additionBudget = (tokenBudget - previousBudget).coerceAtLeast(96)
+        val boundedPrevious = compactSummaryToTokenBudget(previous, previousBudget)
+        val boundedAddition = compactSummaryToTokenBudget(addition, additionBudget)
+        return compactSummaryToTokenBudget(
+            listOf(boundedPrevious, boundedAddition).filter { it.isNotBlank() }.joinToString("\n"),
+            tokenBudget
+        ).takeIf { it.isNotBlank() }
+    }
+
+    /** Sentence-safe summary clamp that honours small (300-token) budgets. */
+    private fun compactSummaryToTokenBudget(text: String, tokenBudget: Int): String {
+        val normalized = text.trim()
+        if (normalized.isBlank()) return ""
+        if (ContextCompressionPlanner.summaryInputTokens(normalized) <= tokenBudget) return normalized
+
+        val lines = normalized.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
+        val kept = StringBuilder()
+        for (line in lines) {
+            val candidate = if (kept.isEmpty()) line else "$kept\n$line"
+            if (ContextCompressionPlanner.summaryInputTokens(candidate) > tokenBudget) break
+            kept.clear()
+            kept.append(candidate)
+        }
+        if (kept.isNotBlank()) return kept.toString()
+
+        // A single long line still needs a complete sentence rather than a hard
+        // character cut.  Estimate a character window and shrink it until the
+        // conservative UTF-8 token estimator accepts the result.
+        var limit = (tokenBudget * 2.4f).toInt().coerceAtLeast(160)
+        while (limit >= 32) {
+            val sentence = AdvancedMemoryEngine.extractCompleteSentence(normalized, limit)
+            if (ContextCompressionPlanner.summaryInputTokens(sentence) <= tokenBudget) return sentence
+            limit = (limit * 0.85f).toInt()
+        }
+        return AdvancedMemoryEngine.extractCompleteSentence(normalized, 32)
     }
 
     /** Transport completed but the structured validator rejected the model text. */
@@ -3711,13 +3823,14 @@ class AiRepository(
         }
         val rawDistilled = validLines.firstOrNull()?.trim() ?: return@withContext ModelMemoryExtraction()
         val (finalContent, category) = SmartMemoryExtractor.refineMemoryContent(rawDistilled)
-        if (finalContent.isBlank()) return@withContext ModelMemoryExtraction()
-        if (sessionScoped && existingSettings.any { SessionSettingReconciler.sameFact(it.content, finalContent) }) {
+        val compactContent = TimelineMemoryHelper.compactSettingFact(finalContent)
+        if (compactContent.isBlank()) return@withContext ModelMemoryExtraction()
+        if (sessionScoped && existingSettings.any { SessionSettingReconciler.sameFact(it.content, compactContent) }) {
             return@withContext ModelMemoryExtraction(authoritative = true)
         }
 
         ModelMemoryExtraction(PendingMemoryCandidate(
-            distilledContent = finalContent,
+            distilledContent = compactContent,
             originalSnippet = content.take(80),
             suggestedScope = if (sessionScoped) "conversation" else "user",
             conversationId = conversationId,
@@ -4034,10 +4147,11 @@ class AiRepository(
             ${precedingEvents.takeLast(3).joinToString("\n") { "[${it.timeTag}] ${it.content}" }}
 
             【剧情覆盖与详略】
-            - 按原文叙事顺序检查开头、中段和结尾，保持人物、地点、行动、冲突/选择、原因、结果、关系变化与未解决线索。
+            - 按原文叙事顺序检查开头、中段和结尾，只保留人物、地点、行动、冲突/选择、原因、结果、关系变化与未解决线索等可复用事实。
             ${AdvancedMemoryEngine.EVENT_SUMMARY_GUIDANCE}
-            - 不逐句抄写动作流水账，也不以收尾取代过程。例如十轮购物包含挑选礼物、预算争执、妥协、遗失物品、返家，不能只留下“两人购物后回家”。
-            - 同场景的事实按先后保留；重复叙述只记一次，有剧情作用的新事实融入已有经过，反转须同时保留先前状态及变化原因。
+            - 不逐句抄写动作流水账、感官描写、神态衣着或重复心理，也不堆砌对话原句；同场景只合并为一条高信息密度事件，保留转折与结果。
+            - 每条 timelineEvents.content 用 1 句（必要时 2 个短分句），建议 20~120 字、最多 160 字；超出部分删除修辞和重复细节，不能用省略号代替事实。
+            - 每条 atemporalSettings.content 用 1 句可执行设定，建议 12~72 字、最多 96 字；只写长期属性/规则及适用条件，不写证据解释、过程描写或临时动作。
 
             【时间语义】
             - 区分叙事顺序与故事发生时间。timeTag 使用原文可支持的日期、自然跨度或事件锚点，不强制改写为第几天，不填补未描写的早晚。
@@ -4067,8 +4181,8 @@ class AiRepository(
             {
               "sourceCoverage": [{"messageId":123,"eventIndices":[0],"settingIndices":[],"noFactReason":""}],
               "currentStoryTime": "片段结束时的主线时间或未确定",
-              "timelineEvents": [{"timeTag":"有参照的故事时间","category":"PLOT_EVENT","content":"保留独立事件和必要因果、删去无作用细节的完整经过"}],
-              "atemporalSettings": [{"category":"世界规则","content":"新的规则或已有设定的补充","action":"ADD","targetMemoryId":null,"evidence":"原文依据","targetScope":"session"}]
+              "timelineEvents": [{"timeTag":"有参照的故事时间","category":"PLOT_EVENT","content":"20~120字的一句高密度事件，最多160字"}],
+              "atemporalSettings": [{"category":"世界规则","content":"12~72字的一句长期设定，最多96字","action":"ADD","targetMemoryId":null,"evidence":"不超过20字的原文依据","targetScope":"session"}]
             }
 
             【历史对话记录】
@@ -4358,6 +4472,8 @@ class AiRepository(
         if (userMessage.isBlank() && assistantReply.isBlank()) return@withContext null
 
         val conversation = conversationDao.getConversationById(conversationId) ?: return@withContext null
+        // The per-conversation switch is authoritative for both background proposals and context injection.
+        if (conversation.enableTimeline == false) return@withContext null
 
         val isRoleplay = hasConversationTag(conversation, "roleplay") || hasConversationTag(conversation, "story")
         val currentTimelineNodes = timelineNodeDao?.getTimelineNodes(conversationId) ?: emptyList()
@@ -4845,7 +4961,8 @@ class AiRepository(
             ?: normalSessionMemories.firstOrNull { it.content.trim().startsWith("【当前故事时间】：") || it.content.trim().startsWith("当前故事时间：") }
                 ?.content?.substringAfter("：")?.trim()
 
-        val shouldInjectTimelineContext = isRoleplay || (currentStoryTime != null) || timelineNodes.isNotEmpty()
+        val timelineEnabled = options?.enableTimeline ?: conversation.enableTimeline ?: true
+        val shouldInjectTimelineContext = timelineEnabled && (isRoleplay || (currentStoryTime != null) || timelineNodes.isNotEmpty())
         if (shouldInjectTimelineContext && (currentStoryTime != null || timelineNodes.isNotEmpty())) {
             val timelineBudget = ((tokenBudget - usedTokens) * 0.55f).toInt()
             val selected = TimelineMemoryHelper.selectTimelineNodesForContext(timelineNodes, currentUserMessage, timelineBudget)
@@ -5644,6 +5761,7 @@ class AiRepository(
                 thinkingEffort = originalConv.thinkingEffort,
                 enableWebSearch = originalConv.enableWebSearch,
                 enableSessionMemory = originalConv.enableSessionMemory,
+                enableTimeline = originalConv.enableTimeline,
                 enableReplyDirections = originalConv.enableReplyDirections,
                 replyDirectionCount = originalConv.replyDirectionCount,
                 contextWindowTokens = originalConv.contextWindowTokens,

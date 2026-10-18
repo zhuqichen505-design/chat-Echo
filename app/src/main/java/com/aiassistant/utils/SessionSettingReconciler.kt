@@ -20,7 +20,7 @@ object SessionSettingReconciler {
         - REVISE：正文明确纠正旧设定时才用，必须引用真实 ID，content 为修订后的完整设定，changeReason 说明明确纠正的依据；交给用户单独确认。
         - NOOP：已有相同含义或无新增信息；直接省略该项，全部无变化时 atemporalSettings 为 []。
         evidence 引用本次正文的短片段；不把推测、临时动作、导演指令记成长期设定。故事事实只属于当前会话，targetScope 始终为 session。
-        正文长度由新增事实的复杂程度决定，不受旧模板的固定字数上限限制；保留适用条件、例外和互补信息，避免压成一句导致歧义。
+        content 只写可长期复用的事实本身：默认一句 12~72 字，最多 96 字；删除修辞、感官、动作过程、证据解释和重复背景。仅在适用条件/例外会改变含义时保留它们，禁止为了“完整”扩写成段落。
         不因同一人物或共享几个词就合并不同事实；不同人物、否定/肯定、现实用户和虚构人物必须分开。
     """.trimIndent()
 
@@ -66,7 +66,8 @@ object SessionSettingReconciler {
     fun reconcileCandidates(candidates: List<AtemporalSettingItem>, existingSettings: List<MemoryItem>): List<AtemporalSettingItem> {
         val existing = existingSettings.filter { it.scope == "conversation" }
         val result = mutableListOf<AtemporalSettingItem>()
-        for (proposal in candidates) {
+        for (rawProposal in candidates) {
+            val proposal = rawProposal.copy(content = TimelineMemoryHelper.compactSettingFact(rawProposal.content))
             val action = proposal.action.uppercase(Locale.ROOT)
             if (action in setOf("NOOP", "NO_UPDATE", "IGNORE") || proposal.content.isBlank()) continue
             val target = proposal.targetMemoryId?.let { id -> existing.firstOrNull { it.id == id } }

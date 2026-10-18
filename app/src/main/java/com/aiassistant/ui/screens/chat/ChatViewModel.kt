@@ -389,6 +389,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     thinkingEffort = conv.thinkingEffort ?: apiConfig?.thinkingEffort ?: "high",
                     enableWebSearch = conv.enableWebSearch ?: false,
                     enableSessionMemory = conv.enableSessionMemory ?: false,
+                    enableTimeline = conv.enableTimeline ?: true,
                     enableExternalMemory = conv.enableExternalMemory ?: rpSessionForInit?.enableExternalMemory ?: false,
                     enableWorldBook = conv.enableWorldBook ?: rpSessionForInit?.enableWorldBook ?: false,
                     enableReplyDirections = conv.enableReplyDirections,
@@ -595,6 +596,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             thinkingEffort = cfg.thinkingEffort,
                             enableWebSearch = cfg.enableWebSearch,
                             enableSessionMemory = current.enableSessionMemory,
+                            enableTimeline = current.enableTimeline,
                             enableExternalMemory = current.enableExternalMemory,
                             enableWorldBook = current.enableWorldBook,
                             enableReplyDirections = current.enableReplyDirections,
@@ -631,6 +633,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             thinkingEffort = cfg.thinkingEffort,
                             enableWebSearch = cfg.enableWebSearch,
                             enableSessionMemory = current.enableSessionMemory,
+                            enableTimeline = current.enableTimeline,
                             enableExternalMemory = current.enableExternalMemory,
                             enableWorldBook = current.enableWorldBook,
                             enableReplyDirections = current.enableReplyDirections,
@@ -1025,6 +1028,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 thinkingEffort = settings?.thinkingEffort,
                 enableWebSearch = settings?.enableWebSearch,
                 enableSessionMemory = settings?.enableSessionMemory ?: conv.enableSessionMemory ?: false,
+                enableTimeline = settings?.enableTimeline ?: conv.enableTimeline ?: true,
                 enableExternalMemory = settings?.enableExternalMemory ?: conv.enableExternalMemory ?: false,
                 enableWorldBook = settings?.enableWorldBook ?: conv.enableWorldBook ?: false,
                 enableReplyDirections = settings?.enableReplyDirections ?: conv.enableReplyDirections,
@@ -1041,6 +1045,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     temperature = updated.temperature, maxTokens = updated.maxTokens, topP = updated.topP,
                     enableThinking = updated.enableThinking, thinkingEffort = updated.thinkingEffort,
                     enableWebSearch = updated.enableWebSearch, enableSessionMemory = updated.enableSessionMemory,
+                    enableTimeline = updated.enableTimeline,
                     enableExternalMemory = updated.enableExternalMemory, enableWorldBook = updated.enableWorldBook,
                     enableReplyDirections = updated.enableReplyDirections, replyDirectionCount = updated.replyDirectionCount,
                     activeWorldBookIds = updated.activeWorldBookIds, contextWindowTokens = updated.contextWindowTokens,
@@ -1337,6 +1342,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     thinkingEffort = settings?.thinkingEffort ?: conversation?.thinkingEffort ?: effectiveConfig.thinkingEffort,
                     enableWebSearch = settings?.enableWebSearch,
                     enableSessionMemory = settings?.enableSessionMemory ?: conversation?.enableSessionMemory ?: true,
+                    enableTimeline = settings?.enableTimeline ?: conversation?.enableTimeline ?: true,
                     enableExternalMemory = settings?.enableExternalMemory ?: conversation?.enableExternalMemory ?: false,
                     enableWorldBook = settings?.enableWorldBook ?: currentRoleplaySession?.enableWorldBook ?: conversation?.enableWorldBook ?: false,
                     activeWorldBookIds = if (settings != null) settings.activeWorldBookIds
@@ -1477,7 +1483,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                                 // 重新同步会话状态与上下文使用情况（后台降级自动同步）
                                 refreshContextUsage(evaluateAuto = true)
                                 evaluateAutoTimelineUpdate(content, savedReply, selectedOption,
-                                    settings?.enableSessionMemory ?: conversation?.enableSessionMemory)
+                                    settings?.enableSessionMemory ?: conversation?.enableSessionMemory,
+                                    settings?.enableTimeline ?: conversation?.enableTimeline ?: true)
                                 checkAndDispatchQueue()
                             }
                         },
@@ -2214,8 +2221,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     private fun evaluateAutoTimelineUpdate(
-        userMsg: String, assistantReply: String, selectedOption: ChatModelOption, sessionMemoryEnabled: Boolean?
+        userMsg: String, assistantReply: String, selectedOption: ChatModelOption, sessionMemoryEnabled: Boolean?,
+        timelineEnabled: Boolean
     ) {
+        if (!timelineEnabled) return
         val epoch = ChatGenerationManager.mutationEpoch(conversationId)
         ChatGenerationManager.beginTimelineExtraction(conversationId)
         AiAssistantApp.instance.applicationScope.launch(Dispatchers.IO) {
@@ -3293,6 +3302,7 @@ data class TempChatSettings(
     val thinkingEffort: String = "high",
     val enableWebSearch: Boolean = false,
     val enableSessionMemory: Boolean = false,
+    val enableTimeline: Boolean = true,
     val enableExternalMemory: Boolean = false,
     val enableWorldBook: Boolean = false,
     val enableReplyDirections: Boolean = false,

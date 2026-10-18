@@ -250,6 +250,8 @@ fun StoryUnifiedSettingsDialog(
                             ChatSettingsTimelineSection(
                                 timelineNodes = knowledge.timeline, currentStoryTime = knowledge.currentTime,
                                 contentColor = MaterialTheme.colorScheme.onSurface, secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                enableTimeline = draft.settings.enableTimeline,
+                                onEnableTimelineChange = { draft = draft.copy(settings = draft.settings.copy(enableTimeline = it)) },
                                 hazeState = hazeState, isReconcilingTimeline = knowledge.isExtracting,
                                 reconcileTimelineProgress = knowledge.extractionProgress, hasSavedTimelineDraft = knowledge.hasDraft,
                                 checkpoint = knowledge.checkpoint, newMessagesCountSinceCheckpoint = knowledge.newMessageCount,

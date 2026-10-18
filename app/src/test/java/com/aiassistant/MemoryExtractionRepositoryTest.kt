@@ -1898,7 +1898,7 @@ class MemoryExtractionRepositoryTest {
             Endpoint { socket, payload ->
                 if (isSummaryPayload(payload)) {
                     if (serviceRecovered.get()) completedSummaryReply(socket, recovered, protocol)
-                    else reply(socket, "{\"error\":{\"message\":\"empty response detected\",\"type\":\"internal_server_error\"}}", "500 Internal Server Error")
+                    else reply(socket, "{\"error\":{\"message\":\"method not allowed\",\"type\":\"invalid_request_error\"}}", "405 Method Not Allowed")
                 } else if (protocol == "openai") streamReply(socket) else reply(socket,
                     "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
                         "data: {\"type\":\"message_stop\"}\n\n", type = "text/event-stream")

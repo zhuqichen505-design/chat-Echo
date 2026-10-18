@@ -91,6 +91,8 @@ data class Conversation(
     val thinkingEffort: String? = null,
     val enableWebSearch: Boolean? = null,
     val enableSessionMemory: Boolean? = null,
+    /** Whether this conversation injects its story timeline into model context. Null keeps legacy default (enabled). */
+    val enableTimeline: Boolean? = null,
     val enableExternalMemory: Boolean? = null,
     val enableWorldBook: Boolean? = null,
     @ColumnInfo(defaultValue = "0") val enableReplyDirections: Boolean = false,
@@ -378,6 +380,7 @@ data class ChatRequestOptions(
     val systemPromptOverride: String? = null,
     val contextWindowOverrideTokens: Int? = null,
     val enableSessionMemory: Boolean? = null,
+    val enableTimeline: Boolean? = null,
     val enableExternalMemory: Boolean? = null,
     val enableWorldBook: Boolean? = null,
     val activeWorldBookIds: String? = null,

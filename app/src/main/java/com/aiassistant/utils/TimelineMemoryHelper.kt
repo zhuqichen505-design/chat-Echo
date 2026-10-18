@@ -159,6 +159,35 @@ data class TimelineReconcileResult(
  */
 object TimelineMemoryHelper {
 
+    /**
+     * 提取结果只承载可复用事实，不承载小说式修辞。模型偶尔仍会把一整段描写放进字段，
+     * 因此在入库前按完整句边界收敛长度；优先保留开头的事实句，绝不在半个词中间截断。
+     */
+    private const val MAX_EVENT_FACT_CHARS = 160
+    private const val MAX_SETTING_FACT_CHARS = 96
+
+    fun compactExtractedFact(raw: String, maxChars: Int = MAX_EVENT_FACT_CHARS): String {
+        val cleaned = raw.replace(Regex("\\s+"), " ").trim()
+        if (cleaned.length <= maxChars) return cleaned
+        val sentences = cleaned.split(Regex("(?<=[。！？；.!?])\\s*"))
+            .map { it.trim() }.filter { it.isNotBlank() }
+        val complete = buildString {
+            for (sentence in sentences) {
+                if (isNotEmpty() && length + sentence.length > maxChars) break
+                if (isEmpty() && sentence.length > maxChars) break
+                if (isNotEmpty()) append(' ')
+                append(sentence)
+            }
+        }.trim()
+        if (complete.length >= 12) return complete
+        val boundary = cleaned.take(maxChars).indexOfLast { it in "，、；：,;:" }
+        return if (boundary >= 12) cleaned.take(boundary).trim() else cleaned.take(maxChars).trimEnd()
+    }
+
+    fun compactEventFact(raw: String): String = compactExtractedFact(raw, MAX_EVENT_FACT_CHARS)
+
+    fun compactSettingFact(raw: String): String = compactExtractedFact(raw, MAX_SETTING_FACT_CHARS)
+
     /** Chinese bigrams and Latin words let an old named event compete with recent events. */
     fun contextTerms(text: String): Set<String> {
         val result = Regex("[a-zA-Z0-9_]{2,}").findAll(text.lowercase()).map { it.value }.toMutableSet()
@@ -508,7 +537,7 @@ object TimelineMemoryHelper {
                                 val catKey = itemObj.get("category")?.asString?.trim()
                                 val cat = TimelineCategory.fromKey(catKey)
                                 if (text.isNotBlank()) {
-                                    eventsList.add(TimelineEventItem(timeTag = tag, content = text, category = cat))
+                                    eventsList.add(TimelineEventItem(timeTag = tag, content = compactEventFact(text), category = cat))
                                 }
                             } else if (item.isJsonPrimitive) {
                                 val text = item.asString.trim()
@@ -533,7 +562,7 @@ object TimelineMemoryHelper {
                                     atemporalList.add(
                                         AtemporalSettingItem(
                                             category = "角色核心特质",
-                                            content = text,
+                                            content = compactSettingFact(text),
                                             isSelected = true
                                         )
                                     )
@@ -647,7 +676,7 @@ object TimelineMemoryHelper {
             require(element.isJsonObject)
             val item = element.asJsonObject
             val content = optionalJsonString(item, "content").also { require(it.isNotBlank()) }
-            TimelineEventItem(timeTag = optionalJsonString(item, "timeTag"), content = content,
+            TimelineEventItem(timeTag = optionalJsonString(item, "timeTag"), content = compactEventFact(content),
                 category = TimelineCategory.fromKey(optionalJsonString(item, "category")))
         }
         val knownTargets = existingSettingIds.toSet()
@@ -1123,7 +1152,7 @@ object TimelineMemoryHelper {
         })
         val result = mutableListOf<TimelineEventItem>()
         for (item in normalized) {
-            val content = item.content.trim()
+            val content = compactEventFact(item.content)
             if (result.none { isSameTimelineEventTime(it.timeTag, item.timeTag) && isSameTimelineFact(it.content, content) }) {
                 result.add(item.copy(content = content))
             }
@@ -1137,7 +1166,7 @@ object TimelineMemoryHelper {
      */
     fun consolidateFinalAtemporalSettings(settings: List<AtemporalSettingItem>): List<AtemporalSettingItem> {
         return settings.filter { it.content.isNotBlank() && !isPureDirectorInstruction(it.content) }
-            .map { it.copy(content = it.content.trim()) }
+            .map { it.copy(content = compactSettingFact(it.content)) }
             .distinctBy { Triple(it.targetScope, it.targetMemoryId, normalizedFact(it.content)) }
     }
 

@@ -524,6 +524,14 @@ object AppDatabaseMigrations {
             }
         }
 
+        /** Per-conversation timeline context toggle. Null is intentionally allowed so old rows
+         * retain the historical enabled behavior through the domain fallback. */
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                addColumnIfMissing(database, "conversations", "enableTimeline", "INTEGER")
+            }
+        }
+
         val LEGACY_REPAIR_MIGRATIONS: Array<Migration> = ((1..22)
             .map { startVersion ->
                 object : Migration(startVersion, 23) {
@@ -531,8 +539,7 @@ object AppDatabaseMigrations {
                         repairSchema(database)
                     }
                 }
-            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35)
-            .toTypedArray()
+            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35 + MIGRATION_35_36).toTypedArray()
 
         private fun repairSchema(database: SupportSQLiteDatabase) {
             database.execSQL("PRAGMA foreign_keys=OFF;")
@@ -608,6 +615,7 @@ object AppDatabaseMigrations {
                     ColumnSpec("thinkingEffort", "TEXT", "NULL", nullable = true),
                     ColumnSpec("enableWebSearch", "INTEGER", "NULL", nullable = true),
                     ColumnSpec("enableSessionMemory", "INTEGER", "NULL", nullable = true),
+                    ColumnSpec("enableTimeline", "INTEGER", "NULL", nullable = true),
                     ColumnSpec("enableExternalMemory", "INTEGER", "NULL", nullable = true),
                     ColumnSpec("enableWorldBook", "INTEGER", "NULL", nullable = true),
                     ColumnSpec("activeWorldBookIds", "TEXT", "NULL", nullable = true),

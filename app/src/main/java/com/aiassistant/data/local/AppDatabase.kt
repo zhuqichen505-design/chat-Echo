@@ -31,7 +31,7 @@ import com.aiassistant.domain.model.*
         TimelineNode::class,
         BackupIdentity::class
     ],
-    version = 35,
+    version = 36,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -70,6 +70,7 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_29_30: Migration get() = AppDatabaseMigrations.MIGRATION_29_30
         val MIGRATION_30_31: Migration get() = AppDatabaseMigrations.MIGRATION_30_31
         val MIGRATION_31_32: Migration get() = AppDatabaseMigrations.MIGRATION_31_32
+        val MIGRATION_35_36: Migration get() = AppDatabaseMigrations.MIGRATION_35_36
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {

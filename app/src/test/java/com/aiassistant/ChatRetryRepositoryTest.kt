@@ -1155,6 +1155,47 @@ class ChatRetryRepositoryTest {
         }
     }
 
+    @Test fun manualCompressionUsesLocalSummaryWhenGatewayReturnsEmptyResponseForBothProtocols() = runBlocking {
+        val summaryCalls = java.util.concurrent.atomic.AtomicInteger()
+        lateinit var endpoint: Endpoint
+        endpoint = Endpoint { socket, index ->
+            val request = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+            if (request["stream"]?.asBoolean == true) {
+                summaryCalls.incrementAndGet()
+                socket.response("500 Internal Server Error", "{\"error\":{\"message\":\"failed to stream request: empty response detected\"}}")
+            } else {
+                summaryCalls.incrementAndGet()
+                socket.response("500 Internal Server Error", "{\"error\":{\"message\":\"empty response detected\"}}")
+            }
+        }
+        endpoint.use { Fixture().use { f ->
+            f.settings.setModelRetryEnabled(true)
+            f.settings.saveRetryRule(RetryErrorType.BAD_REQUEST, RetryRule(false, 0))
+            f.settings.saveRetryRule(RetryErrorType.SERVER, RetryRule(false, 0))
+            val (config, id) = f.config(endpoint.url)
+            // Leave enough room for the structured summary prompt so the test
+            // reaches the gateway and exercises the paired protocol failures.
+            f.db.conversationDao().updateContextWindowTokens(id, 16000, System.currentTimeMillis())
+            f.db.messageDao().insertMessages((0 until 20).map { index ->
+                Message(conversationId = id, role = if (index % 2 == 0) "user" else "assistant",
+                    content = "合成空响应兜底事实 $index。", createdAt = index.toLong())
+            })
+            val result = f.repository.generateRollingSummaryNow(
+                conversationId = id,
+                modelNameOverride = config.modelName,
+                maxOutputTokens = 512,
+                contextWindowOverrideTokens = 16000,
+                apiConfigIdOverride = config.id
+            )
+            assertTrue("empty response 网关错误应由本地摘要兜底: ${result.exceptionOrNull()?.message}", result.isSuccess)
+            assertEquals("摘要非流式与流式兼容各请求一次", 2, summaryCalls.get())
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertFalse("本地兜底必须保存摘要覆盖水线", saved.rollingSummary.isNullOrBlank())
+            assertTrue("本地摘要应包含未压缩历史中的事实", saved.rollingSummary!!.contains("合成空响应兜底事实"))
+            assertNotNull(saved.summaryUpdatedMessageId)
+        } }
+    }
+
     @Test fun contextFallbackSummaryFailureCannotCompleteOrResendUncompressedHistoryInEitherProtocol() = runBlocking {
         for (protocol in listOf("openai", "anthropic")) {
             val chatCalls = java.util.concurrent.atomic.AtomicInteger()

@@ -239,10 +239,10 @@ class BackupGraphStoreTest {
             sql.version = 32
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
         try {
             assertEquals("retained", upgraded.messageDao().getMessagesList(id).single().content)
-            assertEquals(35, upgraded.openHelper.readableDatabase.version)
+            assertEquals(36, upgraded.openHelper.readableDatabase.version)
             upgraded.openHelper.readableDatabase.query("SELECT COUNT(*) FROM backup_identities").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
@@ -281,11 +281,11 @@ class BackupGraphStoreTest {
             sql.version = 33
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
         try {
             val conv = upgraded.conversationDao().getConversationById(1)!!
             assertEquals("retained", conv.title); assertFalse(conv.enableReplyDirections); assertEquals(2, conv.replyDirectionCount)
-            assertEquals(35, upgraded.openHelper.readableDatabase.version)
+            assertEquals(36, upgraded.openHelper.readableDatabase.version)
             assertEquals("old message", upgraded.messageDao().getMessagesList(1).single().content)
             assertNull(upgraded.messageDao().getMessagesList(1).single().replyDirection)
         } finally { upgraded.close(); context.deleteDatabase(name) }
@@ -307,7 +307,7 @@ class BackupGraphStoreTest {
             sql.version = 34
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36).allowMainThreadQueries().build()
         try {
             val stat = upgraded.usageStatDao().getStatsListByTimeRange(0, 200).single()
             assertEquals(125, stat.totalTokens)
@@ -316,7 +316,7 @@ class BackupGraphStoreTest {
             assertEquals("legacy", stat.requestKind)
             assertEquals("legacy", stat.completionStatus)
             assertEquals(0L, stat.firstTokenTimeMs)
-            assertEquals(35, upgraded.openHelper.readableDatabase.version)
+            assertEquals(36, upgraded.openHelper.readableDatabase.version)
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 

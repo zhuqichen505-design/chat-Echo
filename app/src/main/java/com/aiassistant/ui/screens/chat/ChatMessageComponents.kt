@@ -964,7 +964,9 @@ internal fun MessageBubble(
                                 completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                 completionOwner = modelMarkCompletionOwner,
                                 idleEffects = modelMarkIdleEffects,
-                                modifier = Modifier.padding(top = 3.dp).size(28.dp),
+                                // Keep the bot and its upper-right status symbol readable beside
+                                // the taller thinking/status capsule.
+                                modifier = Modifier.padding(top = 3.dp).size(34.dp),
                                 reducedMotion = reducedMotion,
                                 description = "模型标识"
                             )
@@ -1166,7 +1168,7 @@ internal fun MessageBubble(
                                     completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                     completionOwner = modelMarkCompletionOwner,
                                     idleEffects = modelMarkIdleEffects,
-                                    modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 26.dp else 22.dp),
+                                    modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 32.dp else 22.dp),
                                     reducedMotion = reducedMotion
                                 )
                             }
