@@ -3075,13 +3075,22 @@ class AiRepository(
     ): String? {
         val transcript = if (pendingMessages.isEmpty()) "没有新增原文。请仅缩短既有摘要，合并重复表述并保留事实、约束、未决事项和关键标识。"
             else buildSummaryTranscript(pendingMessages, maxMessages = SUMMARY_TRANSCRIPT_MESSAGE_LIMIT)
-        val prompt = AdvancedMemoryEngine.buildStructuredSummaryPrompt(
-            existingSummary = existingSummary,
-            transcript = transcript,
-            tokenBudget = tokenBudget.coerceIn(SUMMARY_PROMPT_MIN_TOKENS, SUMMARY_PROMPT_MAX_TOKENS),
-            latestTimelineAnchor = latestTimelineAnchor,
-            existingPreferencesAndConstraints = existingPreferencesAndConstraints
-        )
+        val prompt = if (pendingMessages.isEmpty() && !existingSummary.isNullOrBlank()) {
+            // A semantic rewrite has no new transcript. Repeating the large extraction
+            // template here can crowd a complete existing summary out of a small window.
+            AdvancedMemoryEngine.buildCompactSummaryRewritePrompt(
+                existingSummary = existingSummary,
+                tokenBudget = tokenBudget.coerceIn(SUMMARY_PROMPT_MIN_TOKENS, SUMMARY_PROMPT_MAX_TOKENS)
+            )
+        } else {
+            AdvancedMemoryEngine.buildStructuredSummaryPrompt(
+                existingSummary = existingSummary,
+                transcript = transcript,
+                tokenBudget = tokenBudget.coerceIn(SUMMARY_PROMPT_MIN_TOKENS, SUMMARY_PROMPT_MAX_TOKENS),
+                latestTimelineAnchor = latestTimelineAnchor,
+                existingPreferencesAndConstraints = existingPreferencesAndConstraints
+            )
+        }
         val summaryWindow = contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
         val headroom = summaryWindow - ContextCompressionPlanner.summaryInputTokens(prompt) - 512
         require(headroom >= tokenBudget) { "摘要提示与输出预算超过模型窗口，请减少设定或提高上下文上限" }

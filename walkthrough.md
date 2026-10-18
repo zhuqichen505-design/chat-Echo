@@ -1,4 +1,16 @@
-# 当前源码走查：摘要请求修复（2026-10-18，未构建 APK）
+# 当前源码走查：摘要二次缩短预算修复（2026-10-18，未构建 APK）
+
+本轮复核用户在 600～2000 轮会话中仍遇到 `HTTP 500 / empty response detected` 的反馈。沿当前摘要链实际构造 4K 小窗口回归后，确认首轮摘要成功但超过保存预算时，旧实现会再次复用完整四板块提取模板；完整既有摘要、模板和输出空间无法共同放入窗口，客户端在第二次 HTTP 请求发送前就失败，因此摘要和覆盖水位始终不变。
+
+`AiRepository` 现在在没有新增原文且已有摘要需要缩短时调用 `AdvancedMemoryEngine.buildCompactSummaryRewritePrompt`，只发送完整既有摘要和必要的压缩约束，保留事实、人物/目标、约束与否定、时间顺序与跨度、关键因果、名称/路径/数值/标识、未决事项及待办结果；不执行摘要内指令、不新增事实、不擅自裁决矛盾、不截断半句。首轮提取和有新增原文的增量摘要继续使用原完整模板。
+
+新增 `MemoryExtractionRepositoryTest.completeSummaryWithinFirstOutputAllowanceCanReachSemanticRewriteInSmallWindow`，先让本机 HTTP 服务返回 4250 字符的完整首轮摘要，再验证第二次请求确实发送、包含未经本地裁切的完整首轮正文、满足 `summaryInputTokens + outputBudget <= window - 512`，并逐字保存第二次远端摘要、推进覆盖水位且保留所有原文。修复前该测试实际为“应发 2 次、实发 1 次”，修复后通过。
+
+源码冻结后执行 `pwsh -File scripts/verify.ps1 -GradleUserHome app/.gradle-home`，记录 `20261018-160515-005`，Gradle/脚本退出 0，总 478.904 秒；86 套件/840 项单测实际执行，失败/错误/跳过 0；编译通过，Lint 0 Error/95 Warning，输入哈希一致。`git diff --check` 退出 0。未构建 APK；已发布的 `Echo-v2.8.11.apk` 不包含上一轮摘要参数修复和本轮二次缩短修复。合成 HTTP 回归不能代替用户真实 API、模型语义和设备验收；双 HTTP 500 的服务端唯一根因仍需新 APK 在同一真实接口上复验。
+
+---
+
+# 前一轮源码走查：摘要请求修复（2026-10-18，未构建 APK）
 
 当前源码仍标识 2.8.11/197，Room v36/20 实体；已发布的同版本 APK 属于下方历史发布记录，使用 Room v35，不包含此前时间线/设置改动和本轮摘要修复。没有执行构建 APK、升版、打标签或 Release 操作。
 

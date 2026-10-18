@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.AiRepository
 import com.aiassistant.data.repository.RoleplayRepository
+import com.aiassistant.data.repository.helpers.ContextCompressionPlanner
 import com.aiassistant.domain.model.*
 import com.aiassistant.utils.CryptoManager
 import com.aiassistant.utils.PersonalizationManager
@@ -2316,6 +2317,61 @@ class MemoryExtractionRepositoryTest {
                 assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
             } }
         }
+    }
+
+    @Test fun completeSummaryWithinFirstOutputAllowanceCanReachSemanticRewriteInSmallWindow() = runBlocking {
+        val oversized = (0 until 250).joinToString("") { "record-${it.toString().padStart(3, '0')} done. " }
+        val shortened = "Records 000 through 249 are verified complete. Pending: check synthetic-headroom-manifest.json."
+        // Synthetic endpoint usage is an independent wire value, not a claim about any provider's tokenizer.
+        val firstCompletionTokens = 1063
+        val attempts = AtomicInteger()
+        Endpoint { socket, _ ->
+            if (attempts.incrementAndGet() == 1) {
+                reply(socket, Gson().toJson(mapOf(
+                    "choices" to listOf(mapOf("finish_reason" to "stop", "message" to mapOf("content" to oversized))),
+                    "usage" to mapOf("completion_tokens" to firstCompletionTokens)
+                )))
+            } else {
+                completedSummaryReply(socket, shortened)
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            f.settings.setBackupKeyFallbackEnabled(false)
+            val (_, id) = f.conversation(endpoint.url, "synthetic-small-window-rewrite-model", enabled = false)
+            val ids = (1..4).map { index -> f.db.messageDao().insertMessage(Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成缩短预算回归原文 $index。", createdAt = index.toLong())) }
+            val previous = "上次已经确认的合成背景。"
+            val window = 4000
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = window, rollingSummary = previous, summaryUpdatedMessageId = ids[1]))
+            val originals = f.db.messageDao().getMessagesList(id)
+
+            val result = f.repository.generateRollingSummaryNow(id)
+
+            assertTrue("首轮完整请求必须确实到达 HTTP 服务", endpoint.payloads.isNotEmpty())
+            val firstRequest = endpoint.payloads.first()
+            val firstOutputAllowance = (firstRequest.get("max_tokens") ?: firstRequest.get("max_completion_tokens")).asInt
+            assertTrue("首轮完整响应的合成 usage 不得超过实际请求的输出额度", firstCompletionTokens <= firstOutputAllowance)
+            val firstPrompt = firstRequest.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            assertTrue(firstPrompt.contains(previous))
+            assertEquals(ids.drop(2), sourceFragmentsFromSummaryPrompt(firstPrompt).map { it.first })
+            assertEquals("首轮完整成功后，超保存预算的摘要应能进入一次真正的远端语义缩短；${result.exceptionOrNull()?.message}",
+                2, endpoint.payloads.size)
+            val rewritePrompt = endpoint.payloads[1].getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            assertTrue("缩短请求必须包含首轮的完整正文，不能先在本地裁切", rewritePrompt.contains(oversized.trim()))
+            for (payload in endpoint.payloads) {
+                val prompt = payload.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                val outputTokens = (payload.get("max_tokens") ?: payload.get("max_completion_tokens")).asInt
+                assertTrue("实际发出的提示、安全余量与输出预算必须适配会话窗口",
+                    ContextCompressionPlanner.summaryInputTokens(prompt) + outputTokens <= window - 512)
+            }
+            result.getOrThrow()
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals("必须精确保存第二次 HTTP 返回的摘要", shortened, saved.rollingSummary)
+            assertEquals("全部待处理原文成功后才推进覆盖水线", ids.last(), saved.summaryUpdatedMessageId)
+            assertEquals("语义缩短不能改写或删除任何原文", originals, f.db.messageDao().getMessagesList(id))
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
     }
 
     @Test fun fullHistorySummaryReusesCoverageWhileRawRetentionFollowsSelectedTier() = runBlocking {
