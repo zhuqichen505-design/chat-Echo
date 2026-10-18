@@ -7,10 +7,10 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 **当前源码版本**: v2.8.12（versionCode 198）
 **本次更新**: 新增默认关闭的会话级“输入注入回复”：前台保留用户输入与原模型正文，后台追加两个换行和输入原文，再发送用户自定义触发语。显示与模型正文、注入关联分别持久保存，重试、版本、分支与备份映射一并兼容。编辑正文保留已有滚动摘要，用户主动重新压缩或生成摘要才重建。纳入此前 bot/状态放大、时间线开关/凝练提取/紧凑展示，以及摘要参数、推理预算、正文解析和紧凑二次语义缩短修复，详见 UPDATE_LOG.md。
 **数据库版本**: 37（20 个实体）
-**本版范围（2026-10-18）**: 更新直接来自 chat-Echo，不从旧项目同步。Room v36→v37 显式迁移增加会话注入配置和消息模型正文/关联字段，保留原始消息、摘要、时间线、设定和备份；旧会话默认关闭新功能。本轮最终冻结验收、Release 构建与本机 APK 核验已通过，Git/公开发布待完成。
+**本版范围（2026-10-18）**: 更新直接来自 chat-Echo，不从旧项目同步。Room v36→v37 显式迁移增加会话注入配置和消息模型正文/关联字段，保留原始消息、摘要、时间线、设定和备份；旧会话默认关闭新功能。本轮最终冻结验收、Release 构建、本机 APK、Git 推送与公开发布核验均已通过。
 **最新源码验证**: 记录 `20261018-184947-493`：`pwsh -File scripts/verify.ps1` 显式使用本机可写缓存，脚本/Gradle 退出 0，总 417.623 秒；编译与 88 套件/878 项完整单测实际执行，失败/错误/跳过 0，测试任务 108.55 秒；Lint 0 Error/95 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。首轮回归发现的检索、摘要增量边界及夹具问题修正后重新冻结验收，详见 [walkthrough.md](walkthrough.md)。
-**安装包状态**: `assembleRelease --no-daemon --build-cache` 退出 0，277.624 秒。`Echo-v2.8.12.apk` 为 25,357,813 字节、446 个 ZIP 条目；com.aiassistant、2.8.12/198、min26/target34/compile34、arm64-v8a、非 debuggable，SHA256 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`。v2 签名与上版及实际项目证书一致，Android Debug **非正式生产签名**。包内容隐私核验与指定目录排他复制退出 0，旧 208 个文件（207 个 APK）名字/大小/哈希不变，源副本一致；公开下载待核验。设备安装、启动、触控和真实厂商接口尚未验收，详见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md)。
-**远端发布核验**: v2.8.12 的 main/版本标签推送、Release 唯一 APK 附件及公开下载 SHA256 尚待完成；新包核验成功后才按既定策略撤下远端旧版本 Release/标签。本机历史 APK 和本机标签继续保留，实际结果见 [walkthrough.md](walkthrough.md) 与 [最新发布说明](release-notes/latest.md)。
+**安装包状态**: `assembleRelease --no-daemon --build-cache` 退出 0，277.624 秒。`Echo-v2.8.12.apk` 为 25,357,813 字节、446 个 ZIP 条目；com.aiassistant、2.8.12/198、min26/target34/compile34、arm64-v8a、非 debuggable，SHA256 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`。v2 签名与上版及实际项目证书一致，Android Debug **非正式生产签名**。包内容隐私核验与指定目录排他复制退出 0，旧 208 个文件（207 个 APK）名字/大小/哈希不变，源副本一致；GitHub 资产与匿名公开下载 SHA256 均与本机一致。设备安装、启动、触控和真实厂商接口尚未验收，详见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md)。
+**远端发布核验**: 版本提交 `feee7ed59e173172e4db81540ee2042b455450c0` 与 annotated `v2.8.12` 推送退出 0，标签对象 `053d66562692d6bd14920cccd1ae67f237726a98`，`git ls-remote` 一致。[v2.8.12 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.12) 发布退出 0，仅含 `Echo-v2.8.12.apk`，GitHub 资产与匿名下载 SHA256 均与本机一致。旧版处理及随后下载复验通过，仅撤下新仓库远端 v2.8.11 Release/版本标签，当前仅保留 v2.8.12；本机旧标签和历史 APK 保留。发布后维护文档另行审核提交，不移动版本标签，最终 main 文档提交在交付时报告。完整隐私范围与实际结果见 [walkthrough.md](walkthrough.md)。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 
@@ -104,7 +104,7 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 | 版本 | 数据库 | 主要更新 |
 |------|--------|----------|
-| 2.8.12（源码与本机 APK 核验通过，Git/发布待完成） | 37 | 输入注入回复、编辑保留摘要与主动重建；纳入摘要请求参数/推理预算/紧凑二次缩短、API 路径与正文解析，以及 bot/状态放大、时间线开关、凝练提取和紧凑展示 |
+| 2.8.12（已发布） | 37 | 输入注入回复、编辑保留摘要与主动重建；纳入摘要请求参数/推理预算/紧凑二次缩短、API 路径与正文解析，以及 bot/状态放大、时间线开关、凝练提取和紧凑展示 |
 | 2.8.11（已发布） | 35 | 同参数压缩重试、摘要短请求和流式兼容、失败后正常聊天与事件提炼 |
 | 2.8.10 | 35 | 剧情过程与自然时间跨度、设定增量维护、分支改名、创作流程完善及长会话压缩实际应用 |
 | 2.8.6 | 35 | 作品工作区重写、历史删除与主题可见性、连续压缩/提取、实际请求计量 |
