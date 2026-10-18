@@ -42,10 +42,9 @@ object ConversationTitleHelper {
      */
     fun sanitizeSummaryCompletion(rawText: String?, preserveCompleteText: Boolean = false): String? {
         if (rawText.isNullOrBlank()) return null
-        var text = rawText.trim()
-        if (text.contains("<think>")) {
-            text = text.substringAfterLast("</think>", text.substringBefore("<think>")).trim()
-        }
+        val thinkParser = ThinkTagStreamParser()
+        val parsed = thinkParser.feed(rawText)
+        val text = (parsed.contentDelta + thinkParser.finish().contentDelta).trim()
         if (text.isBlank()) return null
 
         // A successful transport completion is stronger evidence than punctuation. Lists,

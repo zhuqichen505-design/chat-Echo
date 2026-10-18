@@ -183,7 +183,7 @@ object RetrofitClient {
         onCallCreated: ((Call) -> Unit)? = null,
         client: OkHttpClient = streamHttpClient
     ): okhttp3.Response {
-        val url = normalizeBaseUrl(baseUrl).trimEnd('/') + "/" + path.trimStart('/')
+        val url = com.aiassistant.data.repository.helpers.ApiEndpointHelper.resolveOperationUrl(baseUrl, path)
         val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
         val requestBuilder = Request.Builder()
             .url(url)
@@ -201,7 +201,7 @@ object RetrofitClient {
     }
 
     fun getJson(baseUrl: String, path: String, headers: Map<String, String>): okhttp3.Response {
-        val url = normalizeBaseUrl(baseUrl).trimEnd('/') + "/" + path.trimStart('/')
+        val url = com.aiassistant.data.repository.helpers.ApiEndpointHelper.resolveOperationUrl(baseUrl, path)
         val requestBuilder = Request.Builder()
             .url(url)
             .get()
@@ -215,26 +215,8 @@ object RetrofitClient {
         return restHttpClient.newCall(requestBuilder.build()).execute()
     }
 
-    private fun normalizeBaseUrl(url: String): String {
-        var normalized = url.trim()
-
-        // 确保以http://或https://开头
-        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-            normalized = "https://$normalized"
-        }
-
-        // 移除末尾的斜杠
-        if (normalized.endsWith("/")) {
-            normalized = normalized.dropLast(1)
-        }
-
-        // 确保最终以斜杠结尾（Retrofit要求）
-        if (!normalized.endsWith("/")) {
-            normalized = "$normalized/"
-        }
-
-        return normalized
-    }
+    private fun normalizeBaseUrl(url: String): String =
+        com.aiassistant.data.repository.helpers.ApiEndpointHelper.requestBaseUrl(url)
 
     fun formatApiKey(apiKey: String): String {
         return if (apiKey.startsWith("Bearer ")) apiKey else "Bearer $apiKey"

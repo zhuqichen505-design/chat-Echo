@@ -1,6 +1,8 @@
 package com.aiassistant
 
 import com.aiassistant.data.repository.AiRepository
+import com.aiassistant.domain.model.ChatCompletionResponse
+import com.google.gson.Gson
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -61,6 +63,91 @@ class OpenAiStreamRobustnessTest {
         val res = AiRepository.parseOpenAiStreamLine(line)
         assertNotNull(res)
         assertEquals("Gateway non-standard content", res?.contentDelta)
+    }
+
+    @Test
+    fun structuredContentPreservesTextValuesAndKeepsReasoningSeparate() {
+        val result = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"content":[
+              {"type":"text","text":"合成正文一。"},
+              {"type":"text","text":{"value":"合成正文二。"}},
+              {"type":"output_text","text":"合成正文三。"},
+              {"type":"thinking","thinking":"合成内部推理"},
+              {"type":"image_url","image_url":{"url":"https://example.invalid/image.png"}}
+            ]},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}
+        """.trimIndent())
+
+        assertEquals("合成正文一。合成正文二。合成正文三。", result?.contentDelta)
+        assertEquals("合成内部推理", result?.thinkingDelta)
+        assertEquals("stop", result?.finishReason)
+        assertEquals(19, result?.usage?.total_tokens)
+    }
+
+    @Test
+    fun gatewayMessageTextIsNotHiddenByDeltaReasoning() {
+        val result = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"content":"","reasoning_content":"合成推理"},
+              "message":{"content":[{"type":"output_text","text":{"value":"真实合成正文。"}}]},
+              "finish_reason":"stop"}]}
+        """.trimIndent())
+
+        assertEquals("真实合成正文。", result?.contentDelta)
+        assertEquals("合成推理", result?.thinkingDelta)
+    }
+
+    @Test
+    fun unsupportedContentFieldDoesNotEraseUsageOrFinishReason() {
+        val result = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"content":{"type":"future_non_text","text":"不得误当正文"}},
+              "finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
+        """.trimIndent())
+
+        assertNotNull(result)
+        assertNull(result?.contentDelta)
+        assertEquals("length", result?.finishReason)
+        assertEquals(15, result?.usage?.total_tokens)
+    }
+
+    @Test
+    fun invalidReasoningShapeCannotEraseValidBodyAndUsage() {
+        val result = AiRepository.parseOpenAiStreamLine("""
+            data: {"choices":[{"delta":{"content":"合成有效正文。","reasoning_content":{"unsupported":true}},
+              "finish_reason":"stop"}],"usage":{"completion_tokens":4}}
+        """.trimIndent())
+
+        assertEquals("合成有效正文。", result?.contentDelta)
+        assertNull(result?.thinkingDelta)
+        assertEquals(4, result?.usage?.completion_tokens)
+    }
+
+    @Test
+    fun nonStreamingCompletionDecodesStructuredBodyWithoutChangingStringDto() {
+        val response = Gson().fromJson("""
+            {"choices":[{"message":{"role":"assistant","content":[
+              {"type":"text","text":{"value":"合成早期约束。"}},
+              {"type":"output_text","text":"合成事件结果。"},
+              {"type":"reasoning","text":"不得保存为摘要的内部推理"}
+            ],"reasoning_content":[{"type":"thinking","thinking":"单独的合成推理"}]},
+            "finish_reason":"stop"}],"usage":{"prompt_tokens":18,"completion_tokens":6,"total_tokens":24}}
+        """.trimIndent(), ChatCompletionResponse::class.java)
+
+        assertEquals("合成早期约束。合成事件结果。", response.choices?.single()?.message?.content)
+        assertEquals("单独的合成推理", response.choices?.single()?.message?.reasoning_content)
+        assertEquals("stop", response.choices?.single()?.finish_reason)
+        assertEquals(24, response.usage?.total_tokens)
+    }
+
+    @Test
+    fun nonStreamingUnknownContentShapeKeepsCompletionMetadata() {
+        val response = Gson().fromJson("""
+            {"choices":[{"message":{"role":"assistant","content":{"future_payload":true},
+              "reasoning_content":{"future_payload":true}},"finish_reason":"stop"}],"usage":{"total_tokens":13}}
+        """.trimIndent(), ChatCompletionResponse::class.java)
+
+        assertNull(response.choices?.single()?.message?.content)
+        assertNull(response.choices?.single()?.message?.reasoning_content)
+        assertEquals("stop", response.choices?.single()?.finish_reason)
+        assertEquals(13, response.usage?.total_tokens)
     }
 
     @Test

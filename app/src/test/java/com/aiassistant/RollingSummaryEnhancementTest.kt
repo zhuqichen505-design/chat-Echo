@@ -1,10 +1,12 @@
 package com.aiassistant
 
 import com.aiassistant.domain.model.Message
+import com.aiassistant.data.repository.helpers.ConversationTitleHelper
 import com.aiassistant.utils.AdvancedMemoryEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -259,6 +261,42 @@ class RollingSummaryEnhancementTest {
         assertFalse("末尾孤立的章节标题必须被彻底剔除", cleanedDangling!!.contains("【历史关键里程碑与决策推进】"))
         assertTrue("前面的有效板块必须完整保留", cleanedDangling.contains("【核心背景与用户固定约束】"))
         assertTrue("必须以合法标点闭合", cleanedDangling.endsWith("。"))
+    }
+
+    @Test
+    fun summaryThinkRemovalKeepsBodyBeforeBetweenAndAfterMultipleThinkingBlocks() {
+        val raw = "合成早期约束。<think>合成推理一</think>合成事件结果。<ThInK>合成推理二</tHiNk>合成未决事项。"
+        val expected = "合成早期约束。合成事件结果。合成未决事项。"
+
+        assertEquals(expected, ConversationTitleHelper.sanitizeSummaryCompletion(raw))
+        assertEquals(expected, ConversationTitleHelper.sanitizeSummaryCompletion(raw, preserveCompleteText = true))
+    }
+
+    @Test
+    fun unclosedThinkingNeverLeaksIntoSummaryAndDoesNotEraseEarlierBody() {
+        val raw = "合成约束仍然有效。<THINK>尚未结束的合成推理</Thi"
+
+        assertEquals("合成约束仍然有效。", ConversationTitleHelper.sanitizeSummaryCompletion(raw))
+        assertEquals("合成约束仍然有效。", ConversationTitleHelper.sanitizeSummaryCompletion(raw, preserveCompleteText = true))
+        assertNull(ConversationTitleHelper.sanitizeSummaryCompletion("<ThInK>只有合成推理"))
+        assertNull(ConversationTitleHelper.sanitizeSummaryCompletion("<THINK>只有合成推理</THINK>", preserveCompleteText = true))
+    }
+
+    @Test
+    fun completedSummaryKeepsUnpunctuatedIdentifiersWhenRemovingThinking() {
+        val raw = "合成约束。<THINK>合成推理</think>\nCONFIG_ID=synthetic_config"
+
+        assertEquals("合成约束。\nCONFIG_ID=synthetic_config",
+            ConversationTitleHelper.sanitizeSummaryCompletion(raw, preserveCompleteText = true))
+    }
+
+    @Test
+    fun unknownCompletionStillRemovesDanglingHeaderAfterThinking() {
+        val raw = "合成约束。\n<think>合成推理</THINK>\n【合成待办】"
+
+        assertEquals("合成约束。", ConversationTitleHelper.sanitizeSummaryCompletion(raw))
+        assertEquals("合成约束。\n\n【合成待办】",
+            ConversationTitleHelper.sanitizeSummaryCompletion(raw, preserveCompleteText = true))
     }
 
     @Test

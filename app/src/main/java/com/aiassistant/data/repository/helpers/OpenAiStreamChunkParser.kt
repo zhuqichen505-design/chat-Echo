@@ -1,8 +1,10 @@
 package com.aiassistant.data.repository.helpers
 
-import com.aiassistant.domain.model.ChatCompletionChunk
+import com.aiassistant.domain.model.ApiResponseText
 import com.aiassistant.domain.model.Usage
 import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
 /**
@@ -74,45 +76,39 @@ object OpenAiStreamChunkParser {
             } catch (_: Exception) {}
         }
 
-        return try {
-            val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
-            val choice = chunk.choices?.firstOrNull()
-            val finishReason = choice?.finish_reason
+        val root = runCatching { JsonParser.parseString(data) }.getOrNull()?.objectOrNull() ?: return null
+        val choice = root.get("choices")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.firstOrNull()?.objectOrNull()
+        val delta = choice?.get("delta")?.objectOrNull()
+        val message = choice?.get("message")?.objectOrNull()
 
-            var contentDelta = choice?.delta?.content
-            var thinkingDelta = choice?.delta?.reasoning_content
-                ?: choice?.delta?.reasoning_content_camel
-                ?: choice?.delta?.reasoningContent
-                ?: choice?.delta?.reasoning
-                ?: choice?.delta?.thinking
-                ?: choice?.delta?.thinking_content
-                ?: choice?.delta?.thought
-
-            // 兼容非标准将输出置于 choices[0].message 的中转网关
-            if (contentDelta == null && thinkingDelta == null && data.contains("\"message\"")) {
-                try {
-                    val jsonObj = JsonParser.parseString(data).asJsonObject
-                    val firstChoice = jsonObj.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
-                    val msgObj = firstChoice?.getAsJsonObject("message")
-                    if (msgObj != null) {
-                        if (msgObj.has("content") && !msgObj.get("content").isJsonNull) {
-                            contentDelta = msgObj.get("content").asString
-                        }
-                        if (msgObj.has("reasoning_content") && !msgObj.get("reasoning_content").isJsonNull) {
-                            thinkingDelta = msgObj.get("reasoning_content").asString
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-
-            OpenAiStreamChunkResult(
-                contentDelta = contentDelta,
-                thinkingDelta = thinkingDelta,
-                finishReason = finishReason,
-                usage = chunk.usage
-            )
-        } catch (_: Exception) {
-            null
+        // Decode fields independently. A structured/unknown content block must not erase
+        // a valid finish reason or usage, and reasoning in delta must not hide message text.
+        val contentDelta = ApiResponseText.content(delta?.get("content"))?.takeIf { it.isNotEmpty() }
+            ?: ApiResponseText.content(message?.get("content"))
+        val thinkingDelta = reasoningFrom(delta) ?: reasoningFrom(message)
+        val usage = root.get("usage")?.takeUnless { it.isJsonNull }?.let {
+            runCatching { gson.fromJson(it, Usage::class.java) }.getOrNull()
         }
+        return OpenAiStreamChunkResult(
+            contentDelta = contentDelta,
+            thinkingDelta = thinkingDelta,
+            finishReason = choice?.get("finish_reason").stringOrNull(),
+            usage = usage
+        )
     }
+
+    private fun reasoningFrom(message: JsonObject?): String? {
+        if (message == null) return null
+        return listOf("reasoning_content", "reasoning_content_camel", "reasoningContent", "reasoning", "thinking", "thinking_content", "thought")
+            .asSequence()
+            .mapNotNull { ApiResponseText.reasoning(message.get(it))?.takeIf(String::isNotEmpty) }
+            .firstOrNull()
+            ?: ApiResponseText.embeddedReasoning(message.get("content"))
+    }
+
+    private fun JsonElement?.objectOrNull(): JsonObject? = this?.takeIf { it.isJsonObject }?.asJsonObject
+
+    private fun JsonElement?.stringOrNull(): String? =
+        this?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
 }

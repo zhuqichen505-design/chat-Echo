@@ -26,6 +26,92 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class NetworkAndKeyStabilityTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
+    @Test fun apiAddressesPreserveExplicitServiceRootsAndRepairKnownExtraVersionSuffixes() {
+        val helper = com.aiassistant.data.repository.helpers.ApiEndpointHelper
+        val cases = listOf(
+            " proxy.example.test " to "https://proxy.example.test/v1",
+            "https://proxy.example.test/" to "https://proxy.example.test/v1",
+            "https://proxy.example.test/v1///" to "https://proxy.example.test/v1",
+            "https://proxy.example.test/v1beta/openai" to "https://proxy.example.test/v1beta/openai",
+            "https://proxy.example.test/v1beta/openai/v1" to "https://proxy.example.test/v1beta/openai",
+            "https://proxy.example.test/api/paas/v4" to "https://proxy.example.test/api/paas/v4",
+            "https://proxy.example.test/api/paas/v4/v1" to "https://proxy.example.test/api/paas/v4",
+            "https://proxy.example.test/gateway/custom" to "https://proxy.example.test/gateway/custom",
+            "https://proxy.example.test/gateway/v1" to "https://proxy.example.test/gateway/v1",
+            "https://proxy.example.test/v1/v1" to "https://proxy.example.test/v1",
+            "https://proxy.example.test/v1/chat/completions/v1" to "https://proxy.example.test/v1/chat/completions",
+            "https://proxy.example.test/chat/completions" to "https://proxy.example.test/chat/completions"
+        )
+        for ((input, expected) in cases) {
+            val actual = helper.normalizeBaseUrl(input)
+            assertEquals(input, expected, actual)
+            assertEquals("重复保存或读取配置不能继续改变地址", actual, helper.normalizeBaseUrl(actual))
+        }
+    }
+
+    @Test fun fullApiOperationAddressesResolveToOneTransportOperation() {
+        val helper = com.aiassistant.data.repository.helpers.ApiEndpointHelper
+        val cases = listOf(
+            "https://proxy.example.test/chat/completions" to "https://proxy.example.test/",
+            "https://proxy.example.test/v1/chat/completions" to "https://proxy.example.test/v1/",
+            "https://proxy.example.test/v1/chat/completions/v1" to "https://proxy.example.test/v1/",
+            "https://proxy.example.test/v1beta/openai/chat/completions" to "https://proxy.example.test/v1beta/openai/",
+            "https://proxy.example.test/api/paas/v4/chat/completions" to "https://proxy.example.test/api/paas/v4/",
+            "https://proxy.example.test/anthropic/messages" to "https://proxy.example.test/anthropic/",
+            "https://proxy.example.test/v1/messages/v1" to "https://proxy.example.test/v1/",
+            "http://[::1]:8080/v1/models" to "http://[::1]:8080/v1/"
+        )
+        for ((input, expected) in cases) {
+            for (protocol in listOf("openai", "anthropic")) {
+                assertEquals(input, expected, helper.requestBaseUrl(input, protocol))
+                assertEquals(input, expected, helper.requestBaseUrl(helper.normalizeBaseUrl(input, protocol), protocol))
+            }
+        }
+    }
+
+    @Test fun allRetrofitTransportsUseTheConfiguredCustomRootAndStripFullOperationUrls() {
+        val cases = listOf(
+            "https://proxy.example.test/v1beta/openai" to "https://proxy.example.test/v1beta/openai/chat/completions",
+            "https://proxy.example.test/api/paas/v4/v1" to "https://proxy.example.test/api/paas/v4/chat/completions",
+            "https://proxy.example.test/v1/chat/completions" to "https://proxy.example.test/v1/chat/completions",
+            "https://proxy.example.test/chat/completions" to "https://proxy.example.test/chat/completions"
+        )
+        for ((input, expected) in cases) {
+            val configured = com.aiassistant.data.repository.helpers.ApiEndpointHelper.normalizeBaseUrl(input)
+            for (service in listOf(RetrofitClient.getService(configured), RetrofitClient.getAnalysisService(configured),
+                RetrofitClient.getSummaryService(configured))) {
+                val request = service.chatCompletion("Bearer synthetic", com.aiassistant.domain.model.ChatCompletionRequest(
+                    model = "synthetic-model", messages = emptyList()
+                )).request()
+                assertEquals(input, expected, request.url.toString())
+            }
+        }
+    }
+
+    @Test fun genericSearchPostKeepsItsRootWhileAiOperationsUseTheirOwnVersionedAddress() {
+        LocalEndpoint { it.reply(body = "synthetic response") }.use { server ->
+            val host = "http://127.0.0.1:${server.port}"
+            val cases = listOf(
+                Triple(host, "search", "/search"),
+                Triple("$host/", "search", "/search"),
+                Triple("$host/gateway/", "/search", "/gateway/search"),
+                Triple(host, "chat/completions", "/v1/chat/completions"),
+                Triple("$host/chat/completions", "chat/completions", "/chat/completions"),
+                Triple("$host/v1beta/openai/v1", "chat/completions", "/v1beta/openai/chat/completions"),
+                Triple("$host/v1/messages", "messages", "/v1/messages")
+            )
+            for ((base, operation, expectedPath) in cases) {
+                RetrofitClient.postJson(base, operation, mapOf("Authorization" to "Bearer synthetic"), "{}").use {
+                    assertEquals("synthetic response", it.body!!.string())
+                }
+                assertEquals("通用搜索不能被 AI /v1 默认规则改写", "POST $expectedPath HTTP/1.1", server.requestLines.last())
+            }
+            RetrofitClient.getJson(host, "models", emptyMap()).use { assertEquals(200, it.code) }
+            assertEquals("GET /v1/models HTTP/1.1", server.requestLines.last())
+            assertEquals(cases.size + 1, server.requests.get())
+        }
+    }
+
     @Test fun httpAddressRulesMatchExactOriginAndPathBoundaries() {
         val policy = com.aiassistant.data.remote.HttpAccessPolicy
         val rules = com.aiassistant.data.remote.HttpAccessRules(true, listOf("http://192.0.2.1:8080/v1"))

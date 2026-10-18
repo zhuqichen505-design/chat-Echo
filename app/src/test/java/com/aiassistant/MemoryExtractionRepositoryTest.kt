@@ -187,6 +187,140 @@ class MemoryExtractionRepositoryTest {
         payload.getAsJsonArray("messages").singleOrNull()?.asJsonObject?.get("content")
             ?.takeIf { it.isJsonPrimitive }?.asString?.contains("新增对话历史：\n") == true
 
+    private fun summaryWireViolations(payload: JsonObject, model: String, completionLimit: Boolean,
+        expectedEffort: String = "low"): List<String> = buildList {
+        if (payload.get("model")?.asString != model) add("wrong model")
+        val requiredLimit = if (completionLimit) "max_completion_tokens" else "max_tokens"
+        val forbiddenLimit = if (completionLimit) "max_tokens" else "max_completion_tokens"
+        val limit = payload.get(requiredLimit)?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+        if (payload.has(forbiddenLimit)) add("unexpected $forbiddenLimit")
+        if (limit !in 8192..(32768 / 3)) add("insufficient or excessive reasoning completion budget")
+        if (payload.get("reasoning_effort")?.asString != expectedEffort) add("summary must use $expectedEffort reasoning effort")
+        if (payload.has("thinking_budget")) add("unsupported fixed thinking budget")
+        if (payload.has("temperature")) add("unexpected summary sampling override")
+    }
+
+    @Test fun summaryProviderWireMatrixRequiresCorrectLimitsAndEffortBeforeSavingAndUsingRemoteText() = runBlocking {
+        val metadataModel = "synthetic-metadata-summary-model"
+        val models = listOf(
+            Triple("glm-5.3", false, "low"), Triple("minimax-m3.1", false, "low"), Triple("gpt-5.2", true, "low"),
+            Triple("glm-5.2", false, "high"), Triple(metadataModel, false, "medium")
+        )
+        for ((model, completionLimit, expectedEffort) in models) for (streamOnly in listOf(false, true)) {
+            val summary = "合成远端参数校验标识[$model/$streamOnly]：北港领航员已经核对蓝印凭证，铜钥匙仍在资料柜，下一步等待航线确认。"
+            val violations = CopyOnWriteArrayList<String>()
+            val summaryRequests = AtomicInteger()
+            val chatRequests = AtomicInteger()
+            Endpoint { socket, payload ->
+                if (isSummaryPayload(payload)) {
+                    summaryRequests.incrementAndGet()
+                    val errors = summaryWireViolations(payload, model, completionLimit, expectedEffort)
+                    when {
+                        errors.isNotEmpty() -> {
+                            violations.addAll(errors)
+                            reply(socket, "{\"error\":{\"message\":\"synthetic summary parameter rejection\"}}", "500 Internal Server Error")
+                        }
+                        streamOnly && payload.get("stream")?.asBoolean != true ->
+                            reply(socket, "{\"error\":{\"message\":\"synthetic endpoint requires streaming\"}}", "405 Method Not Allowed")
+                        payload.get("stream")?.asBoolean == true -> reply(socket,
+                            "data: {\"choices\":[{\"delta\":{\"content\":${Gson().toJson(summary)}},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                            type = "text/event-stream")
+                        else -> completedSummaryReply(socket, summary)
+                    }
+                } else {
+                    chatRequests.incrementAndGet()
+                    val system = payload.getAsJsonArray("messages").firstOrNull()?.asJsonObject
+                        ?.takeIf { it.get("role")?.asString == "system" }?.get("content")?.asString.orEmpty()
+                    if (payload.get("stream")?.asBoolean == true && system.contains(summary)) streamReply(socket)
+                    else reply(socket, "{\"error\":{\"message\":\"synthetic next chat is missing the accepted remote summary\"}}", "500 Internal Server Error")
+                }
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setModelRetryEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(false)
+                val (config, id) = f.conversation(endpoint.url, model, enabled = false)
+                val previousEvidence = ReasoningCapabilityCatalog.get(endpoint.url, "openai", model)
+                try {
+                if (model == metadataModel) {
+                    val evidence = ReasoningCapabilityEvidence(supportsThinking = true,
+                        efforts = listOf("medium", "high"), defaultEffort = "high")
+                    ReasoningCapabilityCatalog.put(endpoint.url, "openai", model, evidence)
+                    assertEquals(evidence, ReasoningCapabilityCatalog.get(endpoint.url, "openai", model))
+                }
+                val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 1) "user" else "assistant", content = "合成参数矩阵原文[$index]：核对蓝印凭证。", createdAt = index.toLong()) })
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                    contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+                val originals = f.db.messageDao().getMessagesList(id)
+                val result = withTimeout(10_000) { f.repository.compressConversationContext(id) }
+                assertTrue("$model/$streamOnly: ${violations.joinToString()} ${result.exceptionOrNull()?.message}", result.isSuccess)
+                assertTrue("服务端必须按实际 JSON 校验摘要参数", violations.isEmpty())
+                assertEquals(if (streamOnly) 2 else 1, summaryRequests.get())
+                val summaryPayloads = endpoint.payloads.filter(::isSummaryPayload)
+                assertFalse(summaryPayloads.first().get("stream").asBoolean)
+                if (streamOnly) {
+                    assertTrue(summaryPayloads.last().get("stream").asBoolean)
+                    assertEquals("协议兼容重试不能更换原文", summaryPayloads.first().get("messages"), summaryPayloads.last().get("messages"))
+                    val limitField = if (completionLimit) "max_completion_tokens" else "max_tokens"
+                    assertEquals("两条通道必须保留相同输出预算", summaryPayloads.first().get(limitField), summaryPayloads.last().get(limitField))
+                }
+                val saved = f.db.conversationDao().getConversationById(id)!!
+                assertEquals("必须保存模型返回的唯一标识，不能由本地摘要冒充成功", summary, saved.rollingSummary)
+                assertEquals(ids[21], saved.summaryUpdatedMessageId)
+                assertEquals(originals, f.db.messageDao().getMessagesList(id))
+                chat(f, config, id)
+                assertEquals("下一次正式聊天必须接收已保存的远端摘要", 1, chatRequests.get())
+                assertEquals("正式聊天不应再次请求相同范围的摘要", if (streamOnly) 2 else 1, summaryRequests.get())
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+                } finally {
+                    if (model == metadataModel) ReasoningCapabilityCatalog.put(endpoint.url, "openai", model, previousEvidence)
+                }
+            } }
+        }
+    }
+
+    @Test fun structuredNonStreamingSummaryTextIsSavedExactlyAndInjectedWithoutEmbeddedThinking() = runBlocking {
+        val summary = "【合成远端结构化摘要】\n北港领航员仍保管蓝印凭证，铜钥匙没有转交他人，下一步需要确认合成航线。"
+        val hidden = "这段合成内部思考不得出现在摘要或下次聊天中"
+        val violations = CopyOnWriteArrayList<String>()
+        Endpoint { socket, payload ->
+            if (isSummaryPayload(payload)) {
+                val errors = summaryWireViolations(payload, "gpt-5.2", completionLimit = true)
+                if (payload.get("stream")?.asBoolean == true) violations += "structured summary must use non-streaming response"
+                violations.addAll(errors)
+                if (violations.isNotEmpty()) reply(socket,
+                    "{\"error\":{\"message\":\"synthetic structured summary parameter rejection\"}}", "500 Internal Server Error")
+                else reply(socket, Gson().toJson(mapOf("choices" to listOf(mapOf("finish_reason" to "stop", "message" to mapOf(
+                    "content" to listOf(
+                        mapOf("type" to "thinking", "thinking" to hidden),
+                        mapOf("type" to "text", "text" to "【合成远端结构化摘要】\n"),
+                        mapOf("type" to "output_text", "text" to mapOf("value" to summary.substringAfter('\n')))
+                    )))))))
+            } else {
+                val system = payload.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                if (system.contains(summary) && !system.contains(hidden)) streamReply(socket)
+                else reply(socket, "{\"error\":{\"message\":\"synthetic structured summary injection mismatch\"}}", "500 Internal Server Error")
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            f.settings.setBackupKeyFallbackEnabled(false)
+            val (config, id) = f.conversation(endpoint.url, "gpt-5.2", enabled = false)
+            val ids = f.db.messageDao().insertMessages((1..24).map { index -> Message(conversationId = id,
+                role = if (index % 2 == 1) "user" else "assistant", content = "合成结构化摘要原文[$index]：凭证仍在北港。", createdAt = index.toLong()) })
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(
+                contextWindowTokens = 32768, compressionTier = CompressionTier.L4.level))
+            val result = withTimeout(10_000) { f.repository.compressConversationContext(id) }
+            assertTrue("${violations.joinToString()} ${result.exceptionOrNull()?.message}", result.isSuccess)
+            val saved = f.db.conversationDao().getConversationById(id)!!
+            assertEquals(summary, saved.rollingSummary)
+            assertEquals(ids[21], saved.summaryUpdatedMessageId)
+            assertFalse(saved.rollingSummary!!.contains(hidden))
+            assertEquals(1, endpoint.payloads.size)
+            chat(f, config, id)
+            assertEquals("一次非流式摘要和一次正式聊天", 2, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
     /** Match the UI: persist the current user first, then let the repository save its reply. */
     private suspend fun chatWithSavedUser(f: Fixture, config: ApiConfig, id: Long, content: String): String? {
         f.db.messageDao().insertMessage(Message(conversationId = id, role = "user", content = content))

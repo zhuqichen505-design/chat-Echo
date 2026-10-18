@@ -512,7 +512,9 @@ data class Choice(
 
 data class MessageData(
     val role: String?,
+    @field:com.google.gson.annotations.JsonAdapter(ResponseTextAdapter::class)
     val content: String?,
+    @field:com.google.gson.annotations.JsonAdapter(ResponseReasoningTextAdapter::class)
     val reasoning_content: String? = null
 )
 
@@ -561,6 +563,7 @@ data class ChunkChoice(
 
 data class Delta(
     val role: String?,
+    @field:com.google.gson.annotations.JsonAdapter(ResponseTextAdapter::class)
     val content: String?,
     val reasoning_content: String? = null,
     val reasoning_content_camel: String? = null,

@@ -243,23 +243,6 @@ class AiRepository(
         return listOf("模型窗口", "上下文窗口", "prompt 太长", "prompt过长", "input 太大", "请求过大").any(message::contains)
     }
 
-    /**
-     * Some OpenAI-compatible gateways return HTTP 500 when their non-streaming
-     * adapter receives an empty upstream completion, then repeat the same
-     * failure for the streaming compatibility request.  This is a provider
-     * transport defect rather than a context or authentication failure.  Keep
-     * the check deliberately narrow so an ordinary 500 still reaches the retry
-     * and error UI paths.
-     */
-    private fun isEmptySummaryResponseFailure(error: Throwable): Boolean =
-        generateSequence(error) { it.cause }
-            .take(16)
-            .mapNotNull { it.message }
-            .any { message ->
-                message.contains("empty response detected", ignoreCase = true) ||
-                    message.contains("流式摘要没有返回完整有效正文")
-            }
-
     // ============ 文件夹相关 ============
 
     fun getAllFolders(): Flow<List<Folder>> = folderDao.getAllFolders()
@@ -383,38 +366,9 @@ class AiRepository(
         }
     }
 
-    // 自动补全URL
-    private fun normalizeUrl(config: ApiConfig): ApiConfig {
-        var baseUrl = config.baseUrl.trim()
-
-        // 确保以http://或https://开头
-        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-            baseUrl = "https://$baseUrl"
-        }
-
-        // 移除末尾的斜杠
-        if (baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.dropLast(1)
-        }
-
-        // 根据API类型自动补全路径
-        when (config.apiType) {
-            "anthropic" -> {
-                // Anthropic API
-                if (!baseUrl.endsWith("/v1") && !baseUrl.endsWith("/anthropic")) {
-                    baseUrl = "$baseUrl/v1"
-                }
-            }
-            "openai" -> {
-                // OpenAI兼容格式
-                if (!baseUrl.endsWith("/v1")) {
-                    baseUrl = "$baseUrl/v1"
-                }
-            }
-        }
-
-        return config.copy(baseUrl = baseUrl)
-    }
+    // 保存和发送共用地址规则，显式服务路径不能再次追加 /v1。
+    private fun normalizeUrl(config: ApiConfig): ApiConfig =
+        config.copy(baseUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType))
 
     // 检查是否已经加密
     private fun isAlreadyEncrypted(value: String): Boolean {
@@ -500,23 +454,8 @@ class AiRepository(
         }
     }
 
-    private fun normalizeApiBaseUrl(rawBaseUrl: String, apiType: String): String {
-        var baseUrl = rawBaseUrl.trim()
-        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-            baseUrl = "https://$baseUrl"
-        }
-        while (baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.dropLast(1)
-        }
-        return when (apiType) {
-            "anthropic" -> {
-                if (baseUrl.endsWith("/v1") || baseUrl.endsWith("/anthropic")) baseUrl else "$baseUrl/v1"
-            }
-            else -> {
-                if (baseUrl.endsWith("/v1")) baseUrl else "$baseUrl/v1"
-            }
-        }
-    }
+    private fun normalizeApiBaseUrl(rawBaseUrl: String, apiType: String): String =
+        com.aiassistant.data.repository.helpers.ApiEndpointHelper.normalizeBaseUrl(rawBaseUrl, apiType)
 
     private fun fetchModelsFromEndpoint(baseUrl: String, apiKey: String, apiType: String): List<String> {
         val headers = if (apiType == "anthropic") {
@@ -1876,7 +1815,7 @@ class AiRepository(
 
                 val contentBuilder = StringBuilder()
                 val thinkingBuilder = StringBuilder()
-                var isInThinkTag = false
+                val thinkTagParser = com.aiassistant.data.repository.helpers.ThinkTagStreamParser()
                 var totalTokens = 0
                 var inputTokens = 0
                 var hasInputUsage = false
@@ -1952,55 +1891,14 @@ class AiRepository(
                             }
 
                             chunkResult.contentDelta?.let { content ->
-                                if (isInThinkTag) {
-                                    if (content.contains("</think>")) {
-                                        val parts = content.split("</think>", limit = 2)
-                                        val inside = parts[0]
-                                        val after = parts.getOrNull(1).orEmpty()
-                                        if (inside.isNotEmpty()) {
-                                            thinkingBuilder.append(inside)
-                                            onThinkingToken(inside)
-                                        }
-                                        isInThinkTag = false
-                                        if (after.isNotEmpty()) {
-                                            contentBuilder.append(after)
-                                            onToken(after)
-                                        }
-                                    } else {
-                                        thinkingBuilder.append(content)
-                                        onThinkingToken(content)
-                                    }
-                                } else if (content.contains("<think>")) {
-                                    val parts = content.split("<think>", limit = 2)
-                                    val before = parts[0]
-                                    val insideAndAfter = parts.getOrNull(1).orEmpty()
-                                    if (before.isNotEmpty()) {
-                                        contentBuilder.append(before)
-                                        onToken(before)
-                                    }
-                                    if (insideAndAfter.contains("</think>")) {
-                                        val subParts = insideAndAfter.split("</think>", limit = 2)
-                                        val inside = subParts[0]
-                                        val after = subParts.getOrNull(1).orEmpty()
-                                        if (inside.isNotEmpty()) {
-                                            thinkingBuilder.append(inside)
-                                            onThinkingToken(inside)
-                                        }
-                                        isInThinkTag = false
-                                        if (after.isNotEmpty()) {
-                                            contentBuilder.append(after)
-                                            onToken(after)
-                                        }
-                                    } else {
-                                        isInThinkTag = true
-                                        if (insideAndAfter.isNotEmpty()) {
-                                            thinkingBuilder.append(insideAndAfter)
-                                            onThinkingToken(insideAndAfter)
-                                        }
-                                    }
-                                } else {
-                                    contentBuilder.append(content)
-                                    onToken(content)
+                                val separated = thinkTagParser.feed(content)
+                                if (separated.contentDelta.isNotEmpty()) {
+                                    contentBuilder.append(separated.contentDelta)
+                                    onToken(separated.contentDelta)
+                                }
+                                if (separated.thinkingDelta.isNotEmpty()) {
+                                    thinkingBuilder.append(separated.thinkingDelta)
+                                    onThinkingToken(separated.thinkingDelta)
                                 }
                             }
 
@@ -2023,6 +1921,16 @@ class AiRepository(
                     if (isRequestCancellation(streamEx)) throw streamEx
                     streamReadException = streamEx
                     Log.w(tag, "流式解析外层异常: ${streamEx.javaClass.simpleName}: ${streamEx.message}")
+                }
+
+                val remaining = thinkTagParser.finish()
+                if (remaining.contentDelta.isNotEmpty()) {
+                    contentBuilder.append(remaining.contentDelta)
+                    onToken(remaining.contentDelta)
+                }
+                if (remaining.thinkingDelta.isNotEmpty()) {
+                    thinkingBuilder.append(remaining.thinkingDelta)
+                    onThinkingToken(remaining.thinkingDelta)
                 }
 
                 val responseTime = firstTokenDeadline.elapsedMillis
@@ -2639,7 +2547,7 @@ class AiRepository(
                 else -> errorBody
             }
             if (rawMsg.contains("empty response detected", ignoreCase = true)) {
-                "$rawMsg (上游模型未返回有效流式内容，通常由敏感词拦截、思考预算耗尽截断或网关格式校验引起)"
+                "$rawMsg（接口未返回有效内容；若普通聊天和摘要均失败，请检查同一接口的最小请求与服务状态）"
             } else {
                 rawMsg
             }
@@ -3041,7 +2949,7 @@ class AiRepository(
                 // does not send a prompt that only appears to fit the configured window.
                 val chunkBudget = minOf(12000, contextWindow - ContextCompressionPlanner.summaryInputTokens(emptyPrompt) -
                     maxOf(summaryBudget, ContextCompressionPlanner.summaryInputTokens(summary.orEmpty())) -
-                    summaryCompletionReserve(contextWindow, summaryBudget) - 576)
+                    summaryCompletionReserve(contextWindow, summaryBudget, config, modelName) - 576)
                 require(chunkBudget >= 256) { "摘要模板与已有设定占满模型窗口，请减少设定或提高上下文上限；原文与上次摘要已保留" }
                 val summaryChunks = java.util.ArrayDeque(
                     ContextCompressionPlanner.chunks(
@@ -3115,8 +3023,44 @@ class AiRepository(
         }
     }
 
-    private fun summaryCompletionReserve(window: Int, summaryBudget: Int): Int =
-        minOf((summaryBudget + 2048).coerceIn(1536, 8192), window / 3)
+    private fun summaryCompletionReserve(window: Int, summaryBudget: Int, config: ApiConfig, modelName: String): Int {
+        val evidence = ReasoningCapabilityCatalog.get(config.baseUrl, config.apiType, modelName)
+        val policy = ReasoningControls.policy(modelName, evidence)
+        // The saved summary budget counts visible text. Reasoning models share their
+        // completion limit with hidden thinking, so reserve that space separately.
+        val needsReasoningRoom = policy.alwaysThinking || policy.usesReasoningEffort || evidence?.supportsThinking == true
+        val requested = if (needsReasoningRoom) maxOf(8192, summaryBudget + 2048) else summaryBudget + 2048
+        return minOf(requested.coerceIn(1536, 16384), window / 3)
+    }
+
+    /** Both summary protocols must serialize the same provider parameters. */
+    private fun buildSummaryCompletionRequest(
+        config: ApiConfig, modelName: String, prompt: String, maxTokens: Int, stream: Boolean
+    ): ChatCompletionRequest {
+        val evidence = ReasoningCapabilityCatalog.get(config.baseUrl, config.apiType, modelName)
+        val policy = ReasoningControls.policy(modelName, evidence)
+        // Auxiliary summarization uses the lowest supported reasoning effort instead
+        // of inheriting an expensive chat setting or leaving a forced model at max.
+        val enabled = policy.alwaysThinking || policy.usesReasoningEffort
+        val lowestEffort = listOf("minimal", "low", "medium", "high", "xhigh", "max")
+            .firstOrNull { it in policy.thinkingGears } ?: policy.defaultThinkingGear
+        val selection = ReasoningControls.selected(modelName, "openai", enabled, lowestEffort, evidence)
+        val toggles = buildOpenAiProviderToggles(config.copy(modelName = modelName),
+            ChatRequestOptions(enableThinking = selection.enabled, enableWebSearch = false), allowNativeWebSearch = false)
+        return ChatCompletionRequest(
+            model = modelName,
+            messages = listOf(ChatMessage(role = "user", content = prompt)),
+            temperature = null,
+            max_tokens = if (policy.usesMaxCompletionTokens) null else maxTokens,
+            max_completion_tokens = if (policy.usesMaxCompletionTokens) maxTokens else null,
+            stream = stream,
+            stream_options = if (stream) StreamOptions(include_usage = true) else null,
+            enable_thinking = if (toggles.includeEnableThinking && evidence?.supportsThinking != false) selection.enabled else null,
+            reasoning_effort = if (policy.usesReasoningEffort)
+                ReasoningControls.wireChatEffort(modelName, "openai", selection.enabled, selection.value, evidence) else null,
+            thinking = ReasoningControls.wireThinkingType(modelName, "openai", selection.enabled, evidence)?.let { AnthropicThinking(type = it) }
+        )
+    }
 
     private suspend fun generateRollingSummary(
         config: ApiConfig,
@@ -3141,22 +3085,13 @@ class AiRepository(
         val summaryWindow = contextWindowTokens ?: estimateModelContextWindowTokens(modelName)
         val headroom = summaryWindow - ContextCompressionPlanner.summaryInputTokens(prompt) - 512
         require(headroom >= tokenBudget) { "摘要提示与输出预算超过模型窗口，请减少设定或提高上下文上限" }
-        val completionTokens = minOf(summaryCompletionReserve(summaryWindow, tokenBudget), headroom)
+        val completionTokens = minOf(summaryCompletionReserve(summaryWindow, tokenBudget, config, modelName), headroom)
 
         val normalizedUrl = normalizeApiBaseUrl(config.baseUrl, config.apiType)
         val allKeys = parseApiKeys(config.apiKey).ifEmpty { listOf(config.apiKey) }.let {
             if (personalizationManager.isBackupKeyFallbackEnabled()) it else it.take(1)
         }
         var lastException: Exception? = null
-        val isModernOpenAiStyle = com.aiassistant.domain.model.ModelCapabilityEngine
-            .isModernOpenAiReasoningStyle(modelName) ||
-            com.aiassistant.domain.model.ModelVendorProfiles.detectVendor(modelName).let {
-                it == com.aiassistant.domain.model.ModelVendor.KIMI ||
-                    it == com.aiassistant.domain.model.ModelVendor.GLM ||
-                    it == com.aiassistant.domain.model.ModelVendor.GPT ||
-                    it == com.aiassistant.domain.model.ModelVendor.MINIMAX
-            }
-
         var stopAfterConnectivityFailure = false
         keysLoop@ for (key in allKeys) {
             val cleanKey = key.removePrefix("Bearer ").trim()
@@ -3200,14 +3135,7 @@ class AiRepository(
                             error("流式摘要没有返回完整有效正文；原文与上次摘要已保留")
                         }
                         // 优先尝试标准非流式请求
-                        val request = ChatCompletionRequest(
-                            model = modelName,
-                            messages = listOf(ChatMessage(role = "user", content = prompt)),
-                            temperature = null,
-                            max_tokens = if (isModernOpenAiStyle) null else completionTokens,
-                            max_completion_tokens = if (isModernOpenAiStyle) completionTokens else null,
-                            stream = false
-                        )
+                        val request = buildSummaryCompletionRequest(config.copy(baseUrl = normalizedUrl), modelName, prompt, completionTokens, stream = false)
                         val response = awaitMemoryCall(RetrofitClient.getSummaryService(normalizedUrl)
                             .chatCompletion(RetrofitClient.formatApiKey(cleanKey), request), conversationId, config.copy(modelName = modelName), "summary", prompt)
                         if (response.isSuccessful) {
@@ -3263,30 +3191,6 @@ class AiRepository(
                     }
                     throw Exception("模型未返回有效的完整摘要")
                 } catch (e: Exception) {
-                    // A few OpenAI-compatible gateways report `empty response detected`
-                    // for both protocol variants even though the model can still be
-                    // represented by the deterministic local extractor.  Use that
-                    // extractor only after the gateway has explicitly produced this
-                    // paired empty-response failure; ordinary server/auth failures
-                    // must remain visible and retryable.
-                    // The fallback is intentionally delayed until the non-streaming
-                    // request has also been followed by a streaming attempt.  A
-                    // gateway may reject only one protocol; using a local summary
-                    // after the first failure would skip the compatible protocol.
-                    val bothSummaryProtocolsRejected = summaryStreamAttempted &&
-                        (emptyResponseGatewayError != null || usingCachedSummaryStream)
-                    if (bothSummaryProtocolsRejected && isEmptySummaryResponseFailure(e)) {
-                        val local = buildLocalRollingSummaryFallback(
-                            existingSummary = existingSummary,
-                            pendingMessages = pendingMessages,
-                            tokenBudget = tokenBudget,
-                            existingPreferencesAndConstraints = existingPreferencesAndConstraints
-                        )
-                        if (!local.isNullOrBlank() && isUsableSummaryCompletion(local)) {
-                            Log.w(tag, "摘要网关返回 empty response，使用本地结构化摘要兜底")
-                            return local
-                        }
-                    }
                     lastException = if (emptyResponseGatewayError != null)
                         IllegalStateException("非流式摘要返回 $emptyResponseGatewayError；流式兼容请求失败：${e.message}", e) else e
                     Log.w(tag, "generateRollingSummary Key报错或请求异常 (attempt $attempt): ${e.message}")
@@ -3345,75 +3249,6 @@ class AiRepository(
         val block = structured.toPromptBlock()
         if (block.isBlank()) return null
         return compactTextToTokenBudget(block, tokenBudget)
-    }
-
-    /**
-     * Merge a locally extracted continuation with the already committed rolling
-     * summary.  The provider has already rejected both wire protocols here, so
-     * preserving a bounded, complete local summary is preferable to leaving the
-     * conversation permanently unable to compress.  Allocate room to both sides
-     * before applying the sentence-safe budget clamp; this avoids dropping all
-     * previously covered facts when the continuation is large.
-     */
-    private fun buildLocalRollingSummaryFallback(
-        existingSummary: String?,
-        pendingMessages: List<Message>,
-        tokenBudget: Int,
-        existingPreferencesAndConstraints: List<String>? = null
-    ): String? {
-        val extracted = pendingMessages
-            .chunked(30)
-            .mapNotNull { slice ->
-                buildExtractiveConversationSummary(slice, tokenBudget, existingPreferencesAndConstraints)
-            }
-            .joinToString("\n")
-            .let { compactSummaryToTokenBudget(it, tokenBudget) }
-        val previous = existingSummary?.trim().orEmpty()
-        val addition = extracted.trim()
-        if (previous.isBlank()) return compactSummaryToTokenBudget(addition, tokenBudget).takeIf { it.isNotBlank() }
-        if (addition.isBlank()) return compactSummaryToTokenBudget(previous, tokenBudget).takeIf { it.isNotBlank() }
-
-        val merged = "$previous\n$addition"
-        if (ContextCompressionPlanner.summaryInputTokens(merged) <= tokenBudget) return merged
-
-        // Keep both the old checkpoint and the newly covered range.  The final
-        // clamp is sentence-safe and uses the exact summary token estimator.
-        val previousBudget = (tokenBudget * 0.58f).toInt().coerceAtLeast(96)
-        val additionBudget = (tokenBudget - previousBudget).coerceAtLeast(96)
-        val boundedPrevious = compactSummaryToTokenBudget(previous, previousBudget)
-        val boundedAddition = compactSummaryToTokenBudget(addition, additionBudget)
-        return compactSummaryToTokenBudget(
-            listOf(boundedPrevious, boundedAddition).filter { it.isNotBlank() }.joinToString("\n"),
-            tokenBudget
-        ).takeIf { it.isNotBlank() }
-    }
-
-    /** Sentence-safe summary clamp that honours small (300-token) budgets. */
-    private fun compactSummaryToTokenBudget(text: String, tokenBudget: Int): String {
-        val normalized = text.trim()
-        if (normalized.isBlank()) return ""
-        if (ContextCompressionPlanner.summaryInputTokens(normalized) <= tokenBudget) return normalized
-
-        val lines = normalized.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
-        val kept = StringBuilder()
-        for (line in lines) {
-            val candidate = if (kept.isEmpty()) line else "$kept\n$line"
-            if (ContextCompressionPlanner.summaryInputTokens(candidate) > tokenBudget) break
-            kept.clear()
-            kept.append(candidate)
-        }
-        if (kept.isNotBlank()) return kept.toString()
-
-        // A single long line still needs a complete sentence rather than a hard
-        // character cut.  Estimate a character window and shrink it until the
-        // conservative UTF-8 token estimator accepts the result.
-        var limit = (tokenBudget * 2.4f).toInt().coerceAtLeast(160)
-        while (limit >= 32) {
-            val sentence = AdvancedMemoryEngine.extractCompleteSentence(normalized, limit)
-            if (ContextCompressionPlanner.summaryInputTokens(sentence) <= tokenBudget) return sentence
-            limit = (limit * 0.85f).toInt()
-        }
-        return AdvancedMemoryEngine.extractCompleteSentence(normalized, 32)
     }
 
     /** Transport completed but the structured validator rejected the model text. */
@@ -5354,7 +5189,8 @@ class AiRepository(
         try {
             val completionLimit = ReasoningControls.policy(config.modelName,
                 ReasoningCapabilityCatalog.get(config.baseUrl, config.apiType, config.modelName)).usesMaxCompletionTokens
-            val request = ChatCompletionRequest(model = config.modelName,
+            val request = if (kind == "summary") buildSummaryCompletionRequest(config, config.modelName, prompt, maxTokens, stream = true)
+            else ChatCompletionRequest(model = config.modelName,
                 messages = listOf(ChatMessage(role = "user", content = prompt)), temperature = null,
                 max_tokens = if (completionLimit) null else maxTokens,
                 max_completion_tokens = if (completionLimit) maxTokens else null,

@@ -61,6 +61,7 @@ class ChatRetryRepositoryTest {
         private val server = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
         private val worker = Executors.newCachedThreadPool()
         val payloads = CopyOnWriteArrayList<String>()
+        val requestLines = CopyOnWriteArrayList<String>()
         val url = "http://127.0.0.1:${server.localPort}/v1"
         init {
             HttpTestAccess.allow(url)
@@ -81,7 +82,7 @@ class ChatRetryRepositoryTest {
                                 }
                                 return bytes.toString("UTF-8")
                             }
-                            line()
+                            val requestLine = line()
                             var length = 0
                             while (true) {
                                 val header = line()
@@ -96,6 +97,7 @@ class ChatRetryRepositoryTest {
                                 read += count
                             }
                             val requestIndex = synchronized(payloads) {
+                                requestLines.add(requestLine)
                                 payloads.add(String(body, Charsets.UTF_8))
                                 payloads.size
                             }
@@ -1155,7 +1157,7 @@ class ChatRetryRepositoryTest {
         }
     }
 
-    @Test fun manualCompressionUsesLocalSummaryWhenGatewayReturnsEmptyResponseForBothProtocols() = runBlocking {
+    @Test fun manualCompressionPreservesCheckpointWhenBothProtocolsReturnEmptyResponse() = runBlocking {
         val summaryCalls = java.util.concurrent.atomic.AtomicInteger()
         lateinit var endpoint: Endpoint
         endpoint = Endpoint { socket, index ->
@@ -1180,6 +1182,10 @@ class ChatRetryRepositoryTest {
                 Message(conversationId = id, role = if (index % 2 == 0) "user" else "assistant",
                     content = "合成空响应兜底事实 $index。", createdAt = index.toLong())
             })
+            val previous = "合成旧摘要：队伍必须保留蓝印凭证，铜钥匙尚未转交。"
+            val checkpoint = f.db.messageDao().getMessagesList(id)[1].id
+            f.db.conversationDao().updateRollingSummary(id, previous, checkpoint, 123L)
+            val originals = f.db.messageDao().getMessagesList(id)
             val result = f.repository.generateRollingSummaryNow(
                 conversationId = id,
                 modelNameOverride = config.modelName,
@@ -1187,12 +1193,14 @@ class ChatRetryRepositoryTest {
                 contextWindowOverrideTokens = 16000,
                 apiConfigIdOverride = config.id
             )
-            assertTrue("empty response 网关错误应由本地摘要兜底: ${result.exceptionOrNull()?.message}", result.isSuccess)
+            assertTrue("模型未生成正文时不能用本地抽取冒充成功", result.isFailure)
+            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("empty response detected"))
             assertEquals("摘要非流式与流式兼容各请求一次", 2, summaryCalls.get())
             val saved = f.db.conversationDao().getConversationById(id)!!
-            assertFalse("本地兜底必须保存摘要覆盖水线", saved.rollingSummary.isNullOrBlank())
-            assertTrue("本地摘要应包含未压缩历史中的事实", saved.rollingSummary!!.contains("合成空响应兜底事实"))
-            assertNotNull(saved.summaryUpdatedMessageId)
+            assertEquals(previous, saved.rollingSummary)
+            assertEquals(checkpoint, saved.summaryUpdatedMessageId)
+            assertEquals(123L, saved.summaryUpdatedAt)
+            assertEquals(originals, f.db.messageDao().getMessagesList(id))
         } }
     }
 
@@ -1382,5 +1390,75 @@ class ChatRetryRepositoryTest {
                 if (protocol == "anthropic") assertEquals("thought", thinking.toString())
             } }
         }
+    }
+
+    @Test fun customOpenAiPrefixesAndCompleteChatEndpointsReachTheConfiguredHttpPath() = runBlocking {
+        for ((configuredPath, expectedPath) in listOf(
+            "/v1beta/openai" to "/v1beta/openai/chat/completions",
+            "/v1/chat/completions" to "/v1/chat/completions"
+        )) {
+            val remoteText = "REMOTE_CUSTOM_PATH_REPLY_529"
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val path = endpoint.requestLines[index - 1].split(' ')[1]
+                if (path == expectedPath) {
+                    socket.response("200 OK", syntheticStreamResponse("openai", remoteText), "text/event-stream")
+                } else {
+                    socket.response("404 Not Found", "{\"error\":{\"message\":\"synthetic incorrect request path\"}}")
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                val configuredUrl = endpoint.url.removeSuffix("/v1") + configuredPath
+                HttpTestAccess.allow(configuredUrl)
+                val (config, id) = f.config(configuredUrl)
+                val emitted = StringBuilder()
+                var completed: String? = null
+                var error: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成自定义路径请求",
+                    onToken = { emitted.append(it) }, onComplete = { text, _, _ -> completed = text },
+                    onError = { error = it })
+                assertNull("自定义路径不能请求到其他端点：$configuredPath", error)
+                assertEquals(listOf("POST $expectedPath HTTP/1.1"), endpoint.requestLines.toList())
+                assertEquals("必须输出 HTTP 响应中的合成标识", remoteText, emitted.toString())
+                assertEquals(remoteText, completed)
+                assertEquals(remoteText, f.db.messageDao().getMessagesList(id).single().content)
+            } }
+        }
+    }
+
+    @Test fun structuredHttpStreamWithSplitThinkTagsSavesOnlyTheRemoteAnswerAsBody() = runBlocking {
+        val remoteText = "REMOTE_STRUCTURED_RESPONSE_731"
+        val remoteThinking = "远端合成思考阶段"
+        val response = """
+            data: {"choices":[{"delta":{"content":[{"type":"text","text":"<Th"}]}}]}
+
+            data: {"choices":[{"delta":{"content":[{"type":"text","text":"InK>$remoteThinking</thi"}]}}]}
+
+            data: {"choices":[{"delta":{"content":[{"type":"image_url","image_url":{"url":"https://example.invalid/synthetic.png"}},{"type":"output_text","text":"nk>$remoteText"}]},"finish_reason":"stop"}]}
+
+            data: [DONE]
+
+        """.trimIndent()
+        Endpoint { socket, _ -> socket.response("200 OK", response, "text/event-stream") }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.config(endpoint.url)
+            val emitted = StringBuilder()
+            val thinking = StringBuilder()
+            var completed: String? = null
+            var completedThinking: String? = null
+            var error: String? = null
+            f.repository.sendChatMessageWithConfig(config, id, "合成结构化响应请求",
+                onToken = { emitted.append(it) }, onThinkingToken = { thinking.append(it) },
+                onComplete = { text, thought, _ -> completed = text; completedThinking = thought },
+                onError = { error = it })
+            assertNull(error)
+            assertEquals("只能请求一次，不允许靠重试碰到另一响应", 1, endpoint.payloads.size)
+            assertEquals("回调正文必须精确来自远端，不含标签、思考或补救提示", remoteText, emitted.toString())
+            assertEquals(remoteText, completed)
+            assertEquals(remoteThinking, thinking.toString())
+            assertEquals(remoteThinking, completedThinking)
+            val saved = f.db.messageDao().getMessagesList(id).single()
+            assertEquals(remoteText, saved.content)
+            assertEquals(remoteThinking, saved.thinkingContent)
+        } }
     }
 }

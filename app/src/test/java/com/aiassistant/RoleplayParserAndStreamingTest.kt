@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.withTransaction
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.RoleplayRepository
+import com.aiassistant.data.repository.helpers.ThinkTagStreamParser
 import com.aiassistant.domain.model.CharacterProfile
 import com.aiassistant.domain.model.RoleplayScenario
 import com.aiassistant.domain.model.WorldBook
@@ -344,6 +345,44 @@ class RoleplayParserAndStreamingTest {
         val reasoning = delta.get("reasoning_content")?.asString
         assertNotNull(reasoning)
         assertEquals("正在思考剧情发展...", reasoning)
+    }
+
+    @Test
+    fun thinkTagsAreSeparatedAtEveryPossibleChunkBoundary() {
+        val raw = "开头<ThInK>思考甲</tHiNk>中段<think>思考乙</think>结尾"
+        val partitions = (0..raw.length).map { split -> listOf(raw.take(split), raw.drop(split)) } +
+            listOf(raw.map(Char::toString))
+        partitions.forEach { chunks ->
+            val parser = ThinkTagStreamParser()
+            val deltas = chunks.map(parser::feed) + parser.finish()
+            assertEquals("正文不得包含标签或思考，chunk 长度=${chunks.map(String::length)}",
+                "开头中段结尾", deltas.joinToString("") { it.contentDelta })
+            assertEquals("思考不得遗漏或混入正文，chunk 长度=${chunks.map(String::length)}",
+                "思考甲思考乙", deltas.joinToString("") { it.thinkingDelta })
+        }
+    }
+
+    @Test
+    fun ordinaryLessThanTextIsEmittedAndPartialTagsAreFlushedWithoutLoss() {
+        val parser = ThinkTagStreamParser()
+        val ordinary = "2 < 3，<em>普通文本</em>，</think>。"
+        assertEquals(ordinary, parser.feed(ordinary).contentDelta)
+        assertEquals("", parser.feed("<thi").contentDelta)
+        assertEquals("<thing>文字", parser.feed("ng>文字").contentDelta)
+        assertEquals("末尾 ", parser.feed("末尾 <").contentDelta)
+        assertEquals("<", parser.finish().contentDelta)
+        assertEquals("", parser.finish().contentDelta)
+    }
+
+    @Test
+    fun unfinishedThinkingAndPartialClosingTagStayInThinkingAtEndOfStream() {
+        val parser = ThinkTagStreamParser()
+        val first = parser.feed("<think>只有思考</thi")
+        assertEquals("", first.contentDelta)
+        assertEquals("只有思考", first.thinkingDelta)
+        val tail = parser.finish()
+        assertEquals("", tail.contentDelta)
+        assertEquals("</thi", tail.thinkingDelta)
     }
 
     @Test
