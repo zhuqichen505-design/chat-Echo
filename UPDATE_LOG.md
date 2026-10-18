@@ -1,13 +1,14 @@
 # 维护记录
 
-## 2026-10-18：v2.8.13/199 构建与发布准备
+## 2026-10-18：v2.8.13/199 构建与发布完成
 
 用户明确要求构建 APK。本轮在已完成的摘要拒绝保护与 LT 直接截断源码基础上递增版本至 2.8.13/199；Room v37、20 个实体不变。按发布铁律保留 `app/releases` 中全部历史文件，新增唯一 `Echo-v2.8.13.apk`，没有覆盖或删除旧包。
 
 - 标准源码验收 `20261018-223236-977`：脚本/Gradle 退出 0，总 469.287 秒；88 套件/907 项测试实际执行，失败/错误/跳过 0；Lint 0 Error/95 Warning，输入哈希一致。
 - Release 构建 `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 458 秒。APK 版本 2.8.13/199、arm64-v8a、25,374,197 字节、446 个 ZIP 条目，CRC 全通过；SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。
 - 签名使用项目 `keystore/echo-release.jks`（`ECHO_RELEASE_KEYSTORE` 未设置），v2 校验通过；证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 内容已知模式扫描 156 个候选、全部继承上一版，新增 0；186 张图片与上一版逐字节一致。
-- 本机发布目录复制退出 0，源包与 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk` SHA256 一致。远端推送、标签、GitHub Release 和匿名下载核验将在发布流程完成后补记；设备安装、启动和真实接口仍需验收。
+- 本机发布目录复制退出 0，源包与 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk` SHA256 一致。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、`main` 与 annotated `v2.8.13` 标签推送退出 0，`git ls-remote` 核验一致；[v2.8.13 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.13) 创建退出 0，唯一附件和匿名下载 SHA256 均与本机一致；旧 v2.8.12 Release/标签已撤下，本机历史包和旧标签保留。设备安装、启动和真实接口仍需验收。
+- 最终文档候选隐私核查：7 个完整暂存 blob、28 个已知模式候选，新增 6 个均为本次公开 GitHub Release 链接，人工复核为公共地址；未发现新增私钥、凭据、用户路径、手机号或个人邮箱。提交后继续核对完整 blob、公共维护者元数据和待推提交；`.playwright-cli/`、`deepseek.png`、APK、缓存、配置和报告均排除。
 
 ## 2026-10-18：摘要拒绝识别与按比例直接截断（源码更新，未构建 APK）
 

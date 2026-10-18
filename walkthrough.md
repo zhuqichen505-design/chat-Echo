@@ -1,4 +1,4 @@
-# Echo 2.8.13 发布走查（2026-10-18，构建与发布准备）
+# Echo 2.8.13 发布走查（2026-10-18，构建与发布核验完成）
 
 本轮按用户明确要求，将已完成的摘要拒绝保护与 LT 直接截断源码构建为 2.8.13/199。来源为当前 chat-Echo，没有旧目录同步，不读取 APP改进；Room v37/20 实体不变。`app/releases` 中的历史安装包保留，新增唯一 `Echo-v2.8.13.apk`，未覆盖或删除任何旧文件。
 
@@ -8,7 +8,7 @@
 
 本机构建与产物：`assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 458 秒。`Echo-v2.8.13.apk` 为 25,374,197 字节、446 个 ZIP 条目，全量 CRC 通过；com.aiassistant、2.8.13/199、min26/target34/compile34、arm64-v8a、无 `application-debuggable` 标志。SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。v2 签名退出 0，项目 `keystore/echo-release.jks` 与 APK 证书一致，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`；Android Debug **非正式生产签名**。
 
-APK 内容核查：已知隐私模式扫描 156 个候选，全部精确继承上一版，新增 0；186 张图片与上一版逐字节一致；没有私钥、凭据、手机号或新增地址候选。扫描不保证发现未知或加密私人值。源 APK 已排他复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk`，源/副本 SHA256 一致，历史安装包未覆盖或删除。Git 提交、v2.8.13 标签、GitHub Release、匿名下载和旧远端最新版清理待发布流程完成后补记。
+APK 内容核查：已知隐私模式扫描 156 个候选，全部精确继承上一版，新增 0；186 张图片与上一版逐字节一致；没有私钥、凭据、手机号或新增地址候选。扫描不保证发现未知或加密私人值。源 APK 已排他复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk`，源/副本 SHA256 一致，历史安装包未覆盖或删除。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、main 与 annotated `v2.8.13` 标签推送退出 0，`git ls-remote` 一致；[v2.8.13 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.13) 创建退出 0，唯一附件与匿名下载 SHA256 均为 `24dc15ed08b5128da37ead56822544fc00b3f4eab8208da38547214566fa3405`；旧 v2.8.12 Release/标签已撤下，本机历史包和旧标签保留。
 
 设备与真实接口待验收：当前没有真机/模拟器安装、启动、触控或用户实际 Gemini 配置请求；不能把合成回归和本机构建说成真实模型现场问题已解决。升级前请先备份聊天数据。
 
