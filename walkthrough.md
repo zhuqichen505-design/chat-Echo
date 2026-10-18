@@ -1,3 +1,19 @@
+# Echo 2.8.13 发布走查（2026-10-18，构建与发布准备）
+
+本轮按用户明确要求，将已完成的摘要拒绝保护与 LT 直接截断源码构建为 2.8.13/199。来源为当前 chat-Echo，没有旧目录同步，不读取 APP改进；Room v37/20 实体不变。`app/releases` 中的历史安装包保留，新增唯一 `Echo-v2.8.13.apk`，未覆盖或删除任何旧文件。
+
+临时实施方案：保留摘要拒绝、纯标题和空结构保护；在上下文面板增加 10%～90%/步长 5% 的直接截断档，按完整轮次从最早处截去并保留置顶轮次和最近一轮，不调用摘要模型、不修改本机聊天；版本递增后执行完整源码验收、Release 构建、签名/内容/隐私/哈希核验，再提交、打标签、推送和上传唯一最新版附件。
+
+源码验收：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 记录 `20261018-223236-977`，脚本/Gradle 退出 0，总 469.287 秒；88 套件/907 项测试实际执行，失败/错误/跳过 0；Lint 0 Error/95 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。
+
+本机构建与产物：`assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 458 秒。`Echo-v2.8.13.apk` 为 25,374,197 字节、446 个 ZIP 条目，全量 CRC 通过；com.aiassistant、2.8.13/199、min26/target34/compile34、arm64-v8a、无 `application-debuggable` 标志。SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。v2 签名退出 0，项目 `keystore/echo-release.jks` 与 APK 证书一致，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`；Android Debug **非正式生产签名**。
+
+APK 内容核查：已知隐私模式扫描 156 个候选，全部精确继承上一版，新增 0；186 张图片与上一版逐字节一致；没有私钥、凭据、手机号或新增地址候选。扫描不保证发现未知或加密私人值。源 APK 已排他复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk`，源/副本 SHA256 一致，历史安装包未覆盖或删除。Git 提交、v2.8.13 标签、GitHub Release、匿名下载和旧远端最新版清理待发布流程完成后补记。
+
+设备与真实接口待验收：当前没有真机/模拟器安装、启动、触控或用户实际 Gemini 配置请求；不能把合成回归和本机构建说成真实模型现场问题已解决。升级前请先备份聊天数据。
+
+---
+
 # 摘要拒绝保护与直接截断走查（2026-10-18，源码更新，未构建 APK）
 
 本轮仅修改当前仓库，版本仍为 2.8.12/198、Room v37/20 实体。临时方案与文件范围见 UPDATE_LOG.md 本轮条目；没有旧项目同步、历史归档读取、APK 构建或 Release 操作。

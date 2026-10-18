@@ -4,12 +4,12 @@
 
 Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
 
-**当前源码版本**: v2.8.12（versionCode 198）
-**本次更新**: 发布后源码修复模型拒绝说明误存为摘要，补齐拒绝字段/结束原因/正文识别与旧坏摘要恢复；新增 LT 直接截断档，按用户选择的 10%～90% 比例截去最早完整轮次，保留置顶轮次和最近一轮，不调用或注入摘要，不删除本机聊天。比例预览与已确认用量分开，超预算不擅自增加截断量。此前输入注入回复与其余 v2.8.12 功能继续保留，详见 UPDATE_LOG.md。
+**当前源码版本**: v2.8.13（versionCode 199）
+**本次更新**: 已将摘要拒绝保护与 LT 直接截断功能构建为 v2.8.13/199。摘要拒绝说明、纯标题和空结构不会再被当成成功摘要；直接截断按用户选择的 10%～90% 比例截去最早完整轮次，保留置顶轮次和最近一轮，不调用或注入摘要，不删除本机聊天。比例预览与已确认用量分开，超预算不擅自增加截断量。此前输入注入回复与其余 v2.8.12 功能继续保留，详见 UPDATE_LOG.md。
 **数据库版本**: 37（20 个实体）
-**本版范围（2026-10-18）**: 本轮更新直接来自 chat-Echo，不从旧项目同步。复用既有档位整数和比例字段，无实体或数据库结构变更，Room v37/20 实体保持。未构建 APK、升版、打标签或操作 Release，已发布 v2.8.12 安装包不含本轮源码改动；此前发布验收属于历史结果。
-**最新源码验证**: 发布后摘要拒绝保护与 LT 直接截断最终冻结记录 `20261018-213324-277`：`pwsh -File scripts/verify.ps1` 显式使用本机可写缓存，脚本/Gradle 退出 0，总 381.218 秒；编译与 88 套件/907 项完整单测实际执行，失败/错误/跳过 0，测试任务 102.90 秒；Lint 0 Error/95 Warning，`inputsChangedDuringRun=false`，工作区/暂存 `git diff --check` 退出 0。含纯标题/空结构、预览统计及分支策略继承补修，通过后仅文档和 Git 收尾；本轮未构建 APK，详见 [walkthrough.md](walkthrough.md)。
-**安装包状态**: `assembleRelease --no-daemon --build-cache` 退出 0，277.624 秒。`Echo-v2.8.12.apk` 为 25,357,813 字节、446 个 ZIP 条目；com.aiassistant、2.8.12/198、min26/target34/compile34、arm64-v8a、非 debuggable，SHA256 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`。v2 签名与上版及实际项目证书一致，Android Debug **非正式生产签名**。包内容隐私核验与指定目录排他复制退出 0，旧 208 个文件（207 个 APK）名字/大小/哈希不变，源副本一致；GitHub 资产与匿名公开下载 SHA256 均与本机一致。设备安装、启动、触控和真实厂商接口尚未验收，详见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md)。
+**本版范围（2026-10-18）**: 本轮更新直接来自 chat-Echo，不从旧项目同步。复用既有档位整数和比例字段，无实体或数据库结构变更，Room v37/20 实体保持。已按用户要求递增版本并构建 v2.8.13 APK；现有 v2.8.12 历史安装包保留不覆盖，远端标签与 Release 待本次上传流程完成后补记。
+**最新源码验证**: 记录 `20261018-223236-977`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 脚本/Gradle 退出 0，总 469.287 秒；编译与 88 套件/907 项完整单测实际执行，失败/错误/跳过 0，Lint 0 Error/95 Warning，`inputsChangedDuringRun=false`，工作区 `git diff --check` 退出 0。版本递增后重新冻结验收，详见 [walkthrough.md](walkthrough.md)。
+**安装包状态**: `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 458 秒。`Echo-v2.8.13.apk` 为 25,374,197 字节、446 个 ZIP 条目；com.aiassistant、2.8.13/199、min26/target34/compile34、arm64-v8a、无 `application-debuggable` 标志，SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。v2 签名与上版及项目签名证书一致，Android Debug **非正式生产签名**。446 条目 CRC 全通过，已知隐私模式新增候选 0，186 张图片与上一版逐字节一致；源包已排他复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk` 并核对副本哈希。GitHub 资产、远端标签与 Release 待上传流程完成后补记，设备安装、启动、触控和真实厂商接口尚未验收。
 **远端发布核验**: 版本提交 `feee7ed59e173172e4db81540ee2042b455450c0` 与 annotated `v2.8.12` 推送退出 0，标签对象 `053d66562692d6bd14920cccd1ae67f237726a98`，`git ls-remote` 一致。[v2.8.12 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.12) 发布退出 0，仅含 `Echo-v2.8.12.apk`，GitHub 资产与匿名下载 SHA256 均与本机一致。旧版处理及随后下载复验通过，仅撤下新仓库远端 v2.8.11 Release/版本标签，当前仅保留 v2.8.12；本机旧标签和历史 APK 保留。发布后维护文档另行审核提交，不移动版本标签，最终 main 文档提交在交付时报告。完整隐私范围与实际结果见 [walkthrough.md](walkthrough.md)。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0

@@ -4,11 +4,11 @@ Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上�
 
 ## 版本与安装包
 
-- 已发布版本：**2.8.12**（198），包名 `com.aiassistant`；源码验收、Release 构建、本机安装包、Git 推送与公开下载核验均已通过。
+- 已发布版本：**2.8.13**（199），包名 `com.aiassistant`；源码验收、Release 构建和本机安装包核验均已通过，Git 推送与公开下载核验将在本次上传流程完成后补记。
 - Android 8.0（API 26）及以上，当前安装包仅支持 `arm64-v8a`。
 - 最新版下载：[GitHub Releases](../../releases/latest)。
-- 本版安装包名称：`Echo-v2.8.12.apk`，25,357,813 字节；已完成内容隐私、签名连续性和指定目录排他复制核验，本机历史安装包未覆盖或删除。只手动上传最新版 APK，不上传源码压缩包、历史 APK、日志或用户数据。
-- APK SHA256：`d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`。
+- 本版安装包名称：`Echo-v2.8.13.apk`，25,374,197 字节；已完成内容隐私、签名连续性和指定目录排他复制核验，本机历史安装包未覆盖或删除。只手动上传最新版 APK，不上传源码压缩包、历史 APK、日志或用户数据。
+- APK SHA256：`24dc15ed08b5128da37ead56822544fc00b3f4eab8208da38547214566fa3405`。
 - 最新版元数据与验收边界见 [release-notes/latest.md](release-notes/latest.md)；该目录仅保存公开脱敏说明。
 - GitHub 自动提供的 Source code zip/tar.gz 链接无法关闭；它们不是本项目手动上传的附件。
 - 当前安装包使用 Android Debug 证书，**非正式生产签名**。未完成真机安装、启动与真实接口验收；升级前请备份数据。
