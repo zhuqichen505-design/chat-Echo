@@ -2,16 +2,17 @@
 
 Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上下文管理和本地备份。
 
-**v2.8.15/201 启动闪退修复**：修复 v2.8.14 的多 Key 管理器在启动时无法编译 Android ICU 正则的问题，保留时间线精简、多 Key 自定义轮询/冷却，以及删除上下文、备用 Key 恢复和暂停状态等功能。Room 保持 v37（20 个实体）。本版完整源码验收、Release、内容隐私、DEX ICU 与指定目录复制均已通过，公开发布环节待执行。
+**v2.8.15/201 启动闪退修复**：修复 v2.8.14 的多 Key 管理器在启动时无法编译 Android ICU 正则的问题，保留时间线精简、多 Key 自定义轮询/冷却，以及删除上下文、备用 Key 恢复和暂停状态等功能。Room 保持 v37（20 个实体）。完整源码验收、Release、内容隐私、DEX ICU、指定目录复制、Git 推送及公开发布均已核验。
 
 ## 版本与安装包
 
-- 当前源码及本机构建版本：**2.8.15**（201），包名 `com.aiassistant`。版本提交/标签、GitHub Release 唯一附件与匿名下载尚待核验，本机完成不代表已公开发布。
+- 当前发布版本：**2.8.15**（201），包名 `com.aiassistant`。[Echo v2.8.15 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.15) 唯一手动附件为 `Echo-v2.8.15.apk`，GitHub 摘要与匿名公开下载 SHA256 均与本机一致。
 - Android 8.0（API 26）及以上，安装包仅支持 `arm64-v8a`。
 - 本版安装包：`Echo-v2.8.15.apk`，25,406,965 字节、446 个 ZIP 条目且 CRC 全通过，不可 debug；Release 构建退出 0，268.984 秒，元数据/CRC/apksigner 核验脚本退出 0。
 - APK SHA256：`7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。
 - v2 签名通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 和项目 JKS 一致，Android Debug **非正式生产签名**。applicationId/签名一致且 versionCode 更高，满足保留数据覆盖升级条件，无需卸载或清除应用数据；设备安装启动尚未现场验收。
 - 完整 APK 内容隐私扫描与人工差异复核、DEX ICU 专项、指定目录排他复制均退出 0；源/副本 SHA256 一致，原有 211 个文件（210 APK）的名称、大小与哈希未变，现 212 个文件（211 APK）。本机历史安装包永久保留，不覆盖或删除旧包。
+- 版本提交 `1ae2cd4e787114910eabbf63762910145d0debc5` 与 annotated `v2.8.15` 已推送，`git ls-remote` 核验一致。新版下载复核成功后，仅撤下新仓库远端 v2.8.14 Release/版本标签；清理后独立核验通过，远端仅保留 v2.8.15，本机历史 APK 与旧标签保留。
 - 本版验收、元数据与交付边界见 [最新发布说明](release-notes/latest.md)、[UPDATE_LOG.md](UPDATE_LOG.md) 与 [walkthrough.md](walkthrough.md) 顶部，旧版本验收不替代本版结果。
 - 只手动上传最新版 APK，不上传源码压缩包、历史包、日志或用户数据；GitHub 自动提供的 Source code zip/tar.gz 链接无法关闭。
 
