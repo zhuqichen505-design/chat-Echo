@@ -12,6 +12,9 @@ import com.aiassistant.domain.model.ChatRequestOptions
 import com.aiassistant.domain.model.Conversation
 import com.aiassistant.domain.model.CompressionTier
 import com.aiassistant.domain.model.Message
+import com.aiassistant.domain.model.MemoryItem
+import com.aiassistant.domain.model.RoleplayMemory
+import com.aiassistant.domain.model.RoleplaySession
 import com.aiassistant.domain.model.WorldBook
 import com.aiassistant.domain.model.WorldBookEntry
 import com.aiassistant.ui.screens.chat.ChatViewModel
@@ -454,24 +457,179 @@ class InputInjectionRepositoryTest {
         }
     }
 
+    @Test fun staleInputDeletionAndLegacyProjectionCannotSendDeletedTextOrSummaryInEitherProtocol() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint(protocol).use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol)
+                f.message(id, "user", "合成应保留的首轮输入", 1L)
+                val assistantId = f.message(id, "assistant", "合成应保留的模型正文", 2L)
+                val deletedText = "合成已删除输入唯一标识A7"
+                val inputId = f.repository.prepareInjectedUserMessage(id, deletedText, "合成旧触发语", null)
+                val input = f.db.messageDao().getMessageById(inputId)!!
+                val oldProjection = f.db.messageDao().getMessageById(assistantId)!!.modelContent
+                assertTrue(oldProjection!!.contains(deletedText))
+                f.db.conversationDao().updateRollingSummary(id, "合成待清除摘要唯一标识B8", inputId)
+                // The displayed snapshot can be older than the persisted injection metadata.
+                f.repository.deleteMessage(input.copy(modelContent = null, injectionTargetMessageId = null))
+                assertNull(f.db.messageDao().getMessageById(inputId))
+                val remaining = f.db.messageDao().getMessageById(assistantId)!!
+                assertNull("删除必须修复落库的隐藏投影", remaining.modelContent)
+                assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                // Also protect upgraded databases that already contain an orphan cached suffix.
+                f.db.messageDao().updateMessage(remaining.copy(modelContent = oldProjection))
+                val currentId = f.message(id, "user", "合成删除后继续", input.createdAt + 1)
+                request(f, config, id, f.db.messageDao().getMessageById(currentId)!!)
+                val payload = endpoint.payloads.single()
+                assertFalse(payload.toString().contains(deletedText))
+                assertFalse(payload.toString().contains("合成待清除摘要唯一标识B8"))
+                assertEquals(listOf("合成应保留的模型正文"), payload.messageTexts("assistant"))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun deletedUserAndAssistantVariantsAreAbsentWhileSurvivingVisibleVariantsRemainInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (role in listOf("user", "assistant")) {
+            Endpoint(protocol).use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol)
+                f.message(id, "user", "合成首轮基础输入", 1L)
+                val group = "synthetic-delete-$role"
+                val keptText = "合成可见存活${role}版本"
+                val deletedText = "合成删除${role}版本唯一标识C9"
+                val keptId = f.db.messageDao().insertMessage(Message(conversationId = id, role = role,
+                    content = keptText, variantGroupId = group, variantIndex = 1, createdAt = 2L))
+                val deletedId = f.db.messageDao().insertMessage(Message(conversationId = id, role = role,
+                    content = deletedText, variantGroupId = group, variantIndex = 2, createdAt = 3L))
+                f.db.conversationDao().updateRollingSummary(id, "合成删除版本的旧摘要D1", deletedId)
+                f.repository.deleteMessage(f.db.messageDao().getMessageById(deletedId)!!)
+                assertNotNull("单个版本删除不能移除其它版本", f.db.messageDao().getMessageById(keptId))
+                assertNull(f.db.messageDao().getMessageById(deletedId))
+                val currentId = f.message(id, "user", "合成删除版本后继续", 4L)
+                request(f, config, id, f.db.messageDao().getMessageById(currentId)!!)
+                val payload = endpoint.payloads.single().toString()
+                assertFalse(payload.contains(deletedText))
+                assertFalse(payload.contains("合成删除版本的旧摘要D1"))
+                assertTrue(payload.contains(keptText))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun deletingFollowingMessagesRemovesAllInjectedSuffixesBeforeTheNextRequestInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint(protocol).use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol)
+                val firstUserId = f.message(id, "user", "合成保留的前轮输入", 1L)
+                val assistantId = f.message(id, "assistant", "合成保留的前轮回复", 2L)
+                val firstId = f.repository.prepareInjectedUserMessage(id, "合成批量删除提示E2", "合成批量触发语", null)
+                f.repository.prepareInjectedUserMessage(id, "合成批量删除提示F3", "合成批量触发语", null)
+                val cutoff = f.db.messageDao().getMessageById(firstId)!!.createdAt
+                f.db.conversationDao().updateRollingSummary(id, "合成批量删除旧摘要G4", firstId)
+                f.repository.deleteMessagesFrom(id, cutoff)
+                assertEquals(listOf(firstUserId, assistantId), f.db.messageDao().getMessagesList(id).map { it.id })
+                assertNull(f.db.messageDao().getMessageById(assistantId)!!.modelContent)
+                assertNull(f.db.conversationDao().getConversationById(id)!!.rollingSummary)
+                val currentId = f.message(id, "user", "合成批量删除后继续", cutoff + 1)
+                request(f, config, id, f.db.messageDao().getMessageById(currentId)!!)
+                val payload = endpoint.payloads.single().toString()
+                for (deleted in listOf("合成批量删除提示E2", "合成批量删除提示F3", "合成批量删除旧摘要G4")) {
+                    assertFalse(payload.contains(deleted))
+                }
+                assertTrue(payload.contains("合成保留的前轮回复"))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun deletionRemovesOnlyExactSourceMemoriesAndOrphanRowsCannotEnterEitherProtocol() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (bulk in listOf(false, true)) {
+            Endpoint(protocol).use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol)
+                val (_, otherId) = f.conversation()
+                val otherSource = f.message(otherId, "user", "合成其它会话原文", 1L)
+                f.message(id, "user", "合成保留的会话原文", 1L)
+                val source = f.message(id, "user", "合成应删除记忆来源H5", 2L)
+                val output = f.message(id, "assistant", "合成应删除输出I6", 3L)
+                val session = f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id))
+                val sessionDerived = f.db.memoryDao().insertMemory(MemoryItem(scope = "conversation", conversationId = id,
+                    content = "用户规则：合成来源记忆J7", sourceMessageId = source))
+                val globalDerived = f.db.memoryDao().insertMemory(MemoryItem(scope = "user",
+                    content = "用户偏好：合成来源全局记忆K8", sourceMessageId = source))
+                val manual = f.db.memoryDao().insertMemory(MemoryItem(scope = "conversation", conversationId = id,
+                    content = "用户规则：合成独立手工记忆L9"))
+                val otherGlobal = f.db.memoryDao().insertMemory(MemoryItem(scope = "user",
+                    content = "用户偏好：合成其它会话记忆M1", sourceMessageId = otherSource))
+                val rpDerived = f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成来源角色事实N2", sourceMessageId = source, isPinned = true))
+                val rpSummary = f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成来源角色摘要P3", sourceMessageId = output, memoryType = "summary"))
+                val rpManual = f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成独立角色事实Q4", isPinned = true))
+                if (bulk) f.repository.deleteMessagesFrom(id, 2L)
+                else {
+                    f.repository.deleteMessage(f.db.messageDao().getMessageById(source)!!)
+                    assertNotNull("其它来源仍在时不能误删它的角色摘要", f.db.roleplayMemoryDao().getMemoryById(rpSummary))
+                    f.repository.deleteMessage(f.db.messageDao().getMessageById(output)!!)
+                }
+                for (memoryId in listOf(sessionDerived, globalDerived)) assertNull(f.db.memoryDao().getMemoryById(memoryId))
+                for (memoryId in listOf(rpDerived, rpSummary)) assertNull(f.db.roleplayMemoryDao().getMemoryById(memoryId))
+                assertNotNull(f.db.memoryDao().getMemoryById(manual))
+                assertNotNull(f.db.memoryDao().getMemoryById(otherGlobal))
+                assertNotNull(f.db.roleplayMemoryDao().getMemoryById(rpManual))
+                val staleConfirmation = runCatching {
+                    f.repository.saveConfirmedMemory("合成过期候选U8", "conversation", id, sourceMessageId = source)
+                }
+                assertTrue("删除后确认旧候选也不能复活来源事实", staleConfirmation.isFailure)
+                assertTrue(staleConfirmation.exceptionOrNull()?.message.orEmpty().contains("来源消息已删除"))
+                // Read-side protection covers orphan source links left by older versions too.
+                f.db.memoryDao().insertMemory(MemoryItem(scope = "conversation", conversationId = id,
+                    content = "用户规则：合成旧版孤立记忆R5", sourceMessageId = source))
+                f.db.memoryDao().insertMemory(MemoryItem(scope = "user",
+                    content = "用户偏好：合成旧版孤立全局记忆V9", sourceMessageId = source))
+                f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成旧版孤立角色事实S6", sourceMessageId = source, isPinned = true))
+                f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成旧版孤立角色摘要T7", sourceMessageId = output, memoryType = "summary"))
+                assertEquals(listOf("合成独立角色事实Q4"), f.db.roleplayMemoryDao().getPinnedFacts(session).map { it.content })
+                assertNull(f.db.roleplayMemoryDao().getLatestSummary(session))
+                assertEquals(listOf("用户规则：合成独立手工记忆L9"),
+                    f.db.memoryDao().getContextConversationMemories(id).map { it.content })
+                assertEquals(listOf("用户偏好：合成其它会话记忆M1"),
+                    f.db.memoryDao().getContextGlobalMemories().map { it.content })
+                val currentId = f.message(id, "user", "合成删除来源后继续", 4L)
+                request(f, config, id, f.db.messageDao().getMessageById(currentId)!!,
+                    ChatRequestOptions(enableSessionMemory = true, enableExternalMemory = true))
+                val payload = endpoint.payloads.single().toString()
+                for (deleted in listOf("合成应删除记忆来源H5", "合成应删除输出I6", "合成来源记忆J7", "合成来源全局记忆K8", "合成旧版孤立记忆R5", "合成旧版孤立全局记忆V9")) {
+                    assertFalse(payload.contains(deleted))
+                }
+                assertTrue(payload.contains("合成独立手工记忆L9"))
+                assertTrue(payload.contains("合成其它会话记忆M1"))
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
     @Test fun deletingInjectionTargetRestoresRemainingUserToItsOriginalPrompt() = runBlocking {
-        Endpoint("openai").use { endpoint -> Fixture().use { f ->
-            val (config, id) = f.conversation(endpoint.url)
-            f.message(id, "user", "合成旧输入", 1L)
-            val assistantId = f.message(id, "assistant", "合成待删除回复", 2L)
-            val userId = f.repository.prepareInjectedUserMessage(id, "合成应保留原提示", "合成隐藏触发语", null)
-            f.repository.deleteMessage(f.db.messageDao().getMessageById(assistantId)!!)
-            val user = f.db.messageDao().getMessageById(userId)!!
-            assertEquals("合成应保留原提示", user.content)
-            assertNull(user.modelContent)
-            assertNull(user.injectionTargetMessageId)
-            request(f, config, id, user)
-            val users = endpoint.payloads.single().messageTexts("user").joinToString("\n")
-            assertTrue(users.contains("合成应保留原提示"))
-            assertFalse(users.contains("合成隐藏触发语"))
-            assertTrue(endpoint.payloads.single().messageTexts("assistant").isEmpty())
-            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
-        } }
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint(protocol).use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol)
+                f.message(id, "user", "合成旧输入", 1L)
+                val assistantId = f.message(id, "assistant", "合成待删除回复", 2L)
+                val userId = f.repository.prepareInjectedUserMessage(id, "合成应保留原提示", "合成隐藏触发语", null)
+                f.repository.deleteMessage(f.db.messageDao().getMessageById(assistantId)!!)
+                val user = f.db.messageDao().getMessageById(userId)!!
+                assertEquals("合成应保留原提示", user.content)
+                assertNull(user.modelContent)
+                assertNull(user.injectionTargetMessageId)
+                request(f, config, id, user)
+                val users = endpoint.payloads.single().messageTexts("user").joinToString("\n")
+                assertTrue(users.contains("合成应保留原提示"))
+                assertFalse(users.contains("合成隐藏触发语"))
+                assertTrue(endpoint.payloads.single().messageTexts("assistant").isEmpty())
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
     }
 
     @Test fun summaryAlreadyCoveringTargetCannotHideNewInjectedPromptFromTheRealRequest() = runBlocking {
@@ -558,6 +716,59 @@ class InputInjectionRepositoryTest {
             assertNotNull("跨会话目标不能静默注入到其他会话", failure)
             assertEquals(before, f.db.messageDao().getMessagesList(id))
             assertEquals(otherBefore, f.db.messageDao().getMessagesList(otherId))
+        }
+    }
+
+    @Test fun copiedAndBranchedMemoriesOwnCopiedSourcesAndSurviveOriginalSourceDeletion() = runBlocking {
+        for (branchOnly in listOf(false, true)) Fixture().use { f ->
+            f.enableViewModel()
+            val (_, id) = f.conversation()
+            val (_, otherId) = f.conversation()
+            val source = f.message(id, "user", "合成复制前段来源A1", 1L)
+            val cutoff = f.message(id, "assistant", "合成分支截止来源B2", 2L)
+            val future = f.message(id, "user", "合成分支后续来源C3", 3L)
+            val foreign = f.message(otherId, "user", "合成未纳入副本来源D4", 1L)
+            val originalMessages = f.db.messageDao().getMessagesList(id)
+            val session = f.db.roleplaySessionDao().insertSession(RoleplaySession(conversationId = id))
+            val sources = linkedMapOf("前段" to source, "截止" to cutoff, "手工" to null,
+                "后续" to future, "未复制" to foreign)
+            for ((label, sourceId) in sources) {
+                f.db.memoryDao().insertMemory(MemoryItem(scope = "conversation", conversationId = id,
+                    content = "合成普通复制记忆$label", sourceMessageId = sourceId))
+                f.db.roleplayMemoryDao().insertMemory(RoleplayMemory(sessionId = session,
+                    content = "合成角色复制记忆$label", sourceMessageId = sourceId, isPinned = true))
+            }
+
+            val copiedConversationId = if (branchOnly) {
+                f.repository.createBranchConversation(id, cutoff, originalMessages).first
+            } else {
+                f.repository.duplicateConversation(id)
+            }
+            val copiedMessages = f.db.messageDao().getMessagesList(copiedConversationId)
+            assertEquals(if (branchOnly) 2 else 3, copiedMessages.size)
+            val expectedSources = linkedMapOf<String, Long?>(
+                "前段" to copiedMessages.single { it.content == "合成复制前段来源A1" }.id,
+                "截止" to copiedMessages.single { it.content == "合成分支截止来源B2" }.id,
+                "手工" to null)
+            if (!branchOnly) expectedSources["后续"] = copiedMessages.single { it.content == "合成分支后续来源C3" }.id
+            val expectedOrdinary = expectedSources.mapKeys { (label, _) -> "合成普通复制记忆$label" }
+            val expectedRoleplay = expectedSources.mapKeys { (label, _) -> "合成角色复制记忆$label" }
+            val copiedSession = f.db.roleplaySessionDao().getSessionByConversationId(copiedConversationId)!!
+            val ordinary = f.db.memoryDao().getConversationMemories(copiedConversationId)
+            val roleplay = f.db.roleplayMemoryDao().getMemoriesListBySession(copiedSession.id)
+            assertEquals(expectedOrdinary, ordinary.associate { it.content to it.sourceMessageId })
+            assertEquals(expectedRoleplay, roleplay.associate { it.content to it.sourceMessageId })
+            assertTrue("显式来源必须映射到副本消息", ordinary.filter { it.sourceMessageId != null }
+                .all { memory -> copiedMessages.any { it.id == memory.sourceMessageId } })
+            assertEquals(originalMessages, f.db.messageDao().getMessagesList(id))
+
+            f.repository.deleteMessagesFrom(id, 1L)
+            assertTrue(f.db.messageDao().getMessagesList(id).isEmpty())
+            assertEquals(expectedOrdinary, f.db.memoryDao().getConversationMemories(copiedConversationId)
+                .associate { it.content to it.sourceMessageId })
+            assertEquals(expectedRoleplay, f.db.roleplayMemoryDao().getMemoriesListBySession(copiedSession.id)
+                .associate { it.content to it.sourceMessageId })
+            assertEquals(copiedMessages, f.db.messageDao().getMessagesList(copiedConversationId))
         }
     }
 

@@ -1036,10 +1036,12 @@ fun PromptsMemoryTab(
             },
             onConfirm = { content, _, keywords ->
                 coroutineScope.launch {
-                    val target = memoryToEdit?.copy(
+                    val original = memoryToEdit
+                    val target = original?.copy(
                         content = content,
                         scope = "user",
                         keywords = keywords,
+                        sourceMessageId = original.sourceMessageId.takeIf { original.content == content },
                         updatedAt = System.currentTimeMillis()
                     ) ?: MemoryItem(
                         content = content,

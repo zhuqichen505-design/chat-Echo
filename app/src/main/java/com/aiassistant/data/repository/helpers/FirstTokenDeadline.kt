@@ -13,6 +13,9 @@ internal class FirstTokenDeadline(private val timeoutMillis: Long) : AutoCloseab
     private var expired = false
     private var startedNanos = 0L
     private var firstNanos = 0L
+    var usageRecorded: Boolean = false
+        private set
+    fun markUsageRecorded() { usageRecorded = true }
     val hasStarted: Boolean get() = startedNanos != 0L
     val elapsedMillis: Long get() = if (!hasStarted) 0 else ((System.nanoTime() - startedNanos) / 1_000_000).coerceAtLeast(1)
     val firstTokenTimeMs: Long get() = if (firstNanos == 0L || !hasStarted) 0 else ((firstNanos - startedNanos) / 1_000_000).coerceAtLeast(1)

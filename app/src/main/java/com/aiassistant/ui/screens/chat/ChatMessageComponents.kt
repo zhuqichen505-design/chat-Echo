@@ -374,6 +374,7 @@ internal fun isGeneratingAnchorHostItem(
 
 internal fun isErrorMessage(content: String): Boolean {
     val trimmed = content.trim()
+    if (GenerationUiStateRules.isStoppedContent(trimmed)) return false
     return trimmed.startsWith("请求失败") ||
            trimmed.startsWith("[请求失败]") ||
            trimmed.startsWith("【请求失败】") ||
@@ -499,6 +500,13 @@ internal fun MessageBubble(
         reconnectStatus = reconnectStatus,
         contentIsError = contentIsErrorMessage
     )
+    val displayContent = remember(message.content, isUser, generationState) {
+        if (!isUser && generationState == GenerationUiState.Cancelled) {
+            GenerationUiStateRules.stoppedReplyDisplayBody(message.content)
+        } else {
+            message.content
+        }
+    }
     // 光标生命周期：流式期间可见；生成结束后保留 300ms 供淡出，再摘除；
     // settleSignal（审核 A3）：常规路径下流式气泡随 isGenerating=false 同帧卸载（ViewModel 同帧清空
     // currentResponse），落库后的持久化气泡以 settleSignal=true 入场，播放同一段收尾序列
@@ -595,7 +603,8 @@ internal fun MessageBubble(
     fun MessageContent(contentColor: Color) {
         // v2.7.7 需求 3：无正文生成期（连接/思考）内容区不渲染空白占位——动画已上移至
         // 胶囊下方与提醒同行，此处的 8dp 纵向空距只会拉大动画与底部时间戳的距离
-        if (!isUser && isGenerating && message.content.isBlank()) {
+        if (!isUser && displayContent.isBlank() &&
+            (isGenerating || generationState == GenerationUiState.Cancelled)) {
             return
         }
         StoryReadingTypography(readingStyle, readingFont) {
@@ -611,7 +620,7 @@ internal fun MessageBubble(
                         .padding(horizontal = 4.dp, vertical = 4.dp)
                 }
             ) {
-                if (message.content.isNotBlank()) {
+                if (displayContent.isNotBlank()) {
                     if (isUser) {
                         val parsedQuote = remember(message.content) { parseQuotedMessage(message.content) }
                         if (parsedQuote != null) {
@@ -692,7 +701,7 @@ internal fun MessageBubble(
                         }
                     } else {
                         MarkdownText(
-                            content = message.content,
+                            content = displayContent,
                             color = contentColor,
                             onCitationClick = { id ->
                                 activeCitation = citations.find { it.index == id }
@@ -871,6 +880,7 @@ internal fun MessageBubble(
                             val rawModel = assistantModelName.ifBlank { "AI" }
                             val model = rawModel.displayModelShortName()
                             when {
+                                generationState == GenerationUiState.Cancelled -> "生成已停止"
                                 generationState == GenerationUiState.ChoosingDirection -> reconnectStatus ?: "等待选择回复方向"
                                 isConnecting -> {
                                     if (!reconnectStatus.isNullOrBlank()) {
@@ -899,14 +909,9 @@ internal fun MessageBubble(
                         }
                     }
 
-                    val isStatusError = isConnectionFailed || (!reconnectStatus.isNullOrBlank() && (
-                        capsuleText.contains("异常") ||
-                        capsuleText.contains("报错") ||
-                        capsuleText.contains("失败") ||
-                        capsuleText.contains("错误") ||
-                        capsuleText.contains("Error", ignoreCase = true) ||
-                        capsuleText.contains("HTTP", ignoreCase = true)
-                    ))
+                    val isStatusError = isConnectionFailed ||
+                        ((generationState == GenerationUiState.Connecting || generationState == GenerationUiState.Reconnecting) &&
+                            !reconnectStatus.isNullOrBlank() && GenerationUiStateRules.isErrorText(capsuleText))
                     // 连接/重连等待期（尚无正文）携带重试原因：默认多行展示，保证重试原因完整可读（不横向滚动截断）
                     val isWaitingWithReason = isConnecting && !reconnectStatus.isNullOrBlank()
                     // v2.6.8 需求 6：展开态改为「默认策略 + 用户显式覆盖」两级。

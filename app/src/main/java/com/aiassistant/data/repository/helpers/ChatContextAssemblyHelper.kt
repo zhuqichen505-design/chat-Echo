@@ -34,7 +34,12 @@ object ChatContextAssemblyHelper {
     fun isErrorPlaceholderMessage(content: String?): Boolean {
         if (content.isNullOrBlank()) return false
         val trimmed = content.trim()
-        return trimmed.startsWith("请求失败\n\n") ||
+        return trimmed == "生成已停止" ||
+            trimmed == "回复已停止 (用户已暂停)" ||
+            trimmed.startsWith("回复已停止 (用户已暂停)\n\n【连接异常信息记录】") ||
+            trimmed == "*(思考已停止，回复已暂停)*" ||
+            trimmed.startsWith("*(思考已停止，回复已暂停)*\n\n【连接异常信息记录】") ||
+            trimmed.startsWith("请求失败\n\n") ||
             trimmed.startsWith("请求失败\n") ||
             trimmed.startsWith("[输出已被中断:") ||
             trimmed.contains("[输出已被中断:") ||

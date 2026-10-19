@@ -454,7 +454,11 @@ private fun EditMemoryDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(memory.copy(content = content, updatedAt = System.currentTimeMillis()))
+                    onSave(memory.copy(
+                        content = content,
+                        sourceMessageId = memory.sourceMessageId.takeIf { memory.content == content },
+                        updatedAt = System.currentTimeMillis()
+                    ))
                 },
                 enabled = content.isNotBlank()
             ) {

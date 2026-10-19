@@ -395,7 +395,10 @@ data class ChatRequestOptions(
     val directionPlanningCount: Int? = null,
     val replyDirection: String? = null,
     /** Original input for contextual retrieval when the model-facing user body is a trigger. */
-    val retrievalQuery: String? = null
+    val retrievalQuery: String? = null,
+    /** In-memory save ownership shared by normal completion and user pause. Never sent to the API. */
+    val onBeforeAssistantSave: (() -> Boolean)? = null,
+    val onAssistantSaveFailure: (() -> Unit)? = null
 )
 
 data class ConversationContextUsage(

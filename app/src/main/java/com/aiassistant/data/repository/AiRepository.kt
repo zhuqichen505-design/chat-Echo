@@ -851,7 +851,7 @@ class AiRepository(
         val now = System.currentTimeMillis()
         val trimmed = content.trim()
         require(trimmed.isNotBlank()) { "设定内容不能为空" }
-        memoryDao.getConversationMemories(conversationId).firstOrNull {
+        memoryDao.getContextConversationMemories(conversationId).firstOrNull {
             it.scope == "conversation" && SessionSettingReconciler.sameFact(it.content, trimmed)
         }?.let { return it.id }
         val item = MemoryItem(
@@ -871,7 +871,7 @@ class AiRepository(
         val now = System.currentTimeMillis()
         val trimmed = content.trim()
         require(trimmed.isNotBlank()) { "记忆内容不能为空" }
-        memoryDao.getGlobalMemoriesFlow().first().firstOrNull {
+        memoryDao.getContextGlobalMemories().firstOrNull {
             SessionSettingReconciler.sameFact(it.content, trimmed)
         }?.let { return it.id }
         val item = MemoryItem(
@@ -928,6 +928,9 @@ class AiRepository(
     ): Long {
         require(content.isNotBlank()) { "记忆内容不能为空" }
         return com.aiassistant.AiAssistantApp.instance.database.withTransaction {
+            check(sourceMessageId == null || messageDao.getMessageById(sourceMessageId) != null) {
+                "记忆来源消息已删除，请重新提取或手动添加独立记忆"
+            }
             if (targetMemoryId != null) {
                 val target = memoryDao.getMemoryById(targetMemoryId) ?: error("原设定已被删除，请重新提取")
                 check(target.scope == scope && target.conversationId == (if (scope == "conversation") conversationId else null)) {
@@ -938,8 +941,8 @@ class AiRepository(
                     sourceMessageId = sourceMessageId ?: target.sourceMessageId, confidence = 1f))
                 return@withTransaction target.id
             }
-            val existing = if (scope == "conversation" && conversationId != null) memoryDao.getConversationMemories(conversationId)
-                else memoryDao.getGlobalMemoriesFlow().first()
+            val existing = if (scope == "conversation" && conversationId != null) memoryDao.getContextConversationMemories(conversationId)
+                else memoryDao.getContextGlobalMemories()
             existing.firstOrNull { it.scope == scope && SessionSettingReconciler.sameFact(it.content, content) }?.let { return@withTransaction it.id }
             val now = System.currentTimeMillis()
             memoryDao.insertMemory(MemoryItem(
@@ -966,7 +969,7 @@ class AiRepository(
                 val action = setting.action.uppercase()
                 if (action in setOf("NOOP", "NO_UPDATE", "IGNORE")) continue
                 check(action in setOf("ADD", "SUPPLEMENT", "REVISE")) { "无法识别的设定操作，请重新提取" }
-                val existing = memoryDao.getConversationMemories(conversationId).filter { it.scope == "conversation" }
+                val existing = memoryDao.getContextConversationMemories(conversationId).filter { it.scope == "conversation" }
                 val target = setting.targetMemoryId?.let { id -> existing.firstOrNull { it.id == id } }
                 if (action in setOf("SUPPLEMENT", "REVISE")) check(target != null && setting.previousContent != null) {
                     "原设定已不存在或缺少校对基线，请重新提取"
@@ -1272,23 +1275,48 @@ class AiRepository(
 
     suspend fun deleteMessage(message: Message) {
         com.aiassistant.AiAssistantApp.instance.database.withTransaction {
-            messageDao.deleteMessage(message)
-            if (message.role == "assistant") detachInjectionInputs(message.conversationId, message.id)
-            message.injectionTargetMessageId?.let { rebuildInjectedAssistant(message.conversationId, it) }
-            clearRollingSummary(message.conversationId)
-            updateConversationStats(message.conversationId)
+            // UI snapshots may predate injection or edits. Only the persisted row owns its links.
+            val current = messageDao.getMessageById(message.id)
+                ?.takeIf { it.conversationId == message.conversationId } ?: return@withTransaction
+            deleteSourceMemories(listOf(current.id))
+            messageDao.deleteMessage(current)
+            if (current.role == "assistant") detachInjectionInputs(current.conversationId, current.id)
+            rebuildInjectionProjections(current.conversationId)
+            clearRollingSummary(current.conversationId)
+            updateConversationStats(current.conversationId)
         }
     }
 
     suspend fun deleteMessagesFrom(conversationId: Long, createdAt: Long) {
         com.aiassistant.AiAssistantApp.instance.database.withTransaction {
-            val targets = getMessagesList(conversationId).filter { it.createdAt >= createdAt }
-                .mapNotNull { it.injectionTargetMessageId }.distinct()
+            val deletedIds = getMessagesList(conversationId).filter { it.createdAt >= createdAt }.map { it.id }
+            deleteSourceMemories(deletedIds)
             messageDao.deleteMessagesFrom(conversationId, createdAt)
             detachMissingInjectionInputs(conversationId)
-            targets.forEach { rebuildInjectedAssistant(conversationId, it) }
+            rebuildInjectionProjections(conversationId)
             clearRollingSummary(conversationId)
             updateConversationStats(conversationId)
+        }
+    }
+
+    private suspend fun deleteSourceMemories(messageIds: List<Long>) {
+        val db = com.aiassistant.AiAssistantApp.instance.database
+        messageIds.chunked(500).forEach { ids ->
+            memoryDao.deleteMemoriesBySourceMessageIds(ids)
+            db.roleplayMemoryDao().deleteMemoriesBySourceMessageIds(ids)
+        }
+    }
+
+    /** Rebuild cached bodies from surviving selected inputs after any deletion/variant fallback. */
+    private suspend fun rebuildInjectionProjections(conversationId: Long) {
+        val messages = getMessagesList(conversationId)
+        val inputs = messages.selectHistoryVariants().filter { it.role == "user" && !it.isExcluded }
+            .groupBy { it.injectionTargetMessageId }
+        messages.filter { it.role == "assistant" }.forEach { target ->
+            val suffix = inputs[target.id].orEmpty()
+            val actual = suffix.fold(target.content) { text, input -> text + "\n\n" + input.content }
+                .takeIf { suffix.isNotEmpty() }
+            if (target.modelContent != actual) messageDao.updateMessage(target.copy(modelContent = actual))
         }
     }
 
@@ -1410,7 +1438,8 @@ class AiRepository(
     ): PreparedDirectionContext {
         val conversation = getConversationById(conversationId)
         val effective = resolveChatRequestOptions(config, options)
-        val history = getMessagesList(conversationId)
+        val sourceMessages = getMessagesList(conversationId)
+        val history = sourceMessages
             .filter { assistantVariantGroupId.isNullOrBlank() || it.variantGroupId != assistantVariantGroupId }
             .dropLastCurrentUserMessage(userMessage)
         val bundle = buildContextBundle(conversation, config, history, resolveRequestModel(config, effective),
@@ -1426,7 +1455,9 @@ class AiRepository(
         val system = buildEffectiveSystemPrompt(prompt.first, bundle.summary, bundle.memoryBlock,
             effective, prompt.second, roleplay, lore)
         val enriched = enrichUserMessageWithWebSearch(userMessage, effective)
-        return PreparedDirectionContext(system, bundle.recentMessages, enriched.enrichedPrompt, enriched.toolCalls)
+        ensureContextSourcesCurrent(conversationId, sourceMessages)
+        return PreparedDirectionContext(system, bundle.recentMessages, enriched.enrichedPrompt, enriched.toolCalls,
+            sourceConversationId = conversationId, sourceMessages = sourceMessages)
     }
 
     suspend fun generateReplyDirections(
@@ -1542,8 +1573,42 @@ class AiRepository(
         }
     }
 
-    private suspend fun recordUsage(stat: ApiUsageStat) = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-        try { usageStatDao.insertStat(stat) } catch (error: Exception) { Log.w(tag, "统计写入失败", error) }
+    private suspend fun recordUsage(stat: ApiUsageStat, deadline: FirstTokenDeadline? = null) = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+        try {
+            usageStatDao.insertStat(stat)
+            deadline?.markUsageRecorded()
+        } catch (error: Exception) { Log.w(tag, "统计写入失败", error) }
+    }
+
+    private suspend fun saveCompletedAssistant(message: Message, options: ChatRequestOptions) {
+        if (options.directionPlanningCount != null) return
+        currentCoroutineContext().ensureActive()
+        withContext(kotlinx.coroutines.NonCancellable) {
+            if (options.onBeforeAssistantSave?.invoke() == false) throw CancellationException("回复已由暂停操作保存")
+            try {
+                saveMessage(message)
+            } catch (error: Exception) {
+                options.onAssistantSaveFailure?.invoke()
+                throw error
+            }
+        }
+    }
+
+    private class ContextSourcesChanged : IllegalStateException("对话内容已变化，请重新发送以使用最新上下文")
+
+    private suspend fun ensureContextSourcesCurrent(conversationId: Long, sources: List<Message>) {
+        if (getMessagesList(conversationId) != sources) throw ContextSourcesChanged()
+    }
+
+    private fun ensurePreparedContextCurrent(
+        conversationId: Long,
+        sources: List<Message>,
+        prepared: PreparedDirectionContext?
+    ) {
+        if (prepared?.sourceMessages != null &&
+            (prepared.sourceConversationId != conversationId || prepared.sourceMessages != sources)) {
+            throw ContextSourcesChanged()
+        }
     }
 
     private suspend fun dispatchChatMessageWithConfig(
@@ -1565,6 +1630,7 @@ class AiRepository(
             throw Exception("当前 API 配置已关闭，请在设置中开启后重试")
         }
         val historyMessages = getMessagesList(conversationId)
+        ensurePreparedContextCurrent(conversationId, historyMessages, options?.preparedDirectionContext)
         val allKeys = scheduledApiKeys(config)
         if (allKeys.isEmpty()) {
             throw Exception("当前 API 未配置已启用的 Key，请在 API 配置中开启至少一个 Key")
@@ -1592,6 +1658,7 @@ class AiRepository(
             while (true) {
                 val deadline = FirstTokenDeadline(firstTokenTimeoutMillis)
                 try {
+                    ensureContextSourcesCurrent(conversationId, historyMessages)
                     when (keyConfig.apiType) {
                         "anthropic" -> sendAnthropicMessage(
                             keyConfig, conversationId, historyMessages, userMessage, attachments,
@@ -1609,15 +1676,16 @@ class AiRepository(
                 } catch (rawError: Exception) {
                     val e = deadline.failure(rawError)
                     deadline.close()
-                    if (deadline.hasStarted) recordUsage(ApiUsageStat(
+                    val requestCancelled = !currentCoroutineContext().isActive || isRequestCancellation(e)
+                    if (deadline.hasStarted && !deadline.usageRecorded) recordUsage(ApiUsageStat(
                         apiConfigId = config.id, provider = config.provider,
                         modelName = resolveRequestModel(config, resolveChatRequestOptions(config, options)),
                         responseTime = deadline.elapsedMillis, firstTokenTimeMs = deadline.firstTokenTimeMs,
-                        success = false, errorMessage = if (isRequestCancellation(e)) "用户取消" else RetryErrorType.classify(e).label,
+                        success = false, errorMessage = if (requestCancelled) "用户取消" else RetryErrorType.classify(e).label,
                         requestKind = if (options?.directionPlanningCount != null) "reply_direction" else "chat",
-                        tokenSource = "unknown", completionStatus = if (isRequestCancellation(e)) "cancelled" else "failed"))
+                        tokenSource = "unknown", completionStatus = if (requestCancelled) "cancelled" else "failed"))
                     currentCoroutineContext().ensureActive()
-                    if (isRequestCancellation(e)) throw e
+                    if (requestCancelled || e is ContextSourcesChanged) throw e
                     lastException = e
                     if (e is com.aiassistant.data.remote.HttpAccessDeniedException) throw e
                     // No chat request has started. Replaying a local summary failure
@@ -1936,6 +2004,9 @@ class AiRepository(
 
         val auth = RetrofitClient.formatApiKey(config.apiKey)
 
+        // Context building can suspend for summaries or search. Do not send a
+        // payload assembled before a message was edited or deleted meanwhile.
+        ensureContextSourcesCurrent(conversationId, historyMessages)
         // 发送流式请求
         val startTime = System.currentTimeMillis()
         var activeCall: Call? = null
@@ -2161,7 +2232,7 @@ class AiRepository(
                     modelName = requestModel,
                     replyDirection = effectiveOptions.replyDirection
                 )
-                if (effectiveOptions.directionPlanningCount == null) saveMessage(assistantMsg)
+                saveCompletedAssistant(assistantMsg, effectiveOptions)
 
                 // 记录使用统计
                 val stat = ApiUsageStat(
@@ -2181,7 +2252,7 @@ class AiRepository(
                     completionStatus = if (!isFinished) "interrupted" else if (isTruncatedByLength) "length_limited" else "completed",
                     firstTokenTimeMs = firstTokenDeadline.firstTokenTimeMs
                 )
-                recordUsage(stat)
+                recordUsage(stat, firstTokenDeadline)
 
                 onComplete(fullContent, fullThinking, toolCalls)
             } else {
@@ -2310,6 +2381,7 @@ class AiRepository(
             thinking = thinkingType?.let { AnthropicThinking(type = it, budget_tokens = thinkingBudget) }
         )
 
+        ensureContextSourcesCurrent(conversationId, historyMessages)
         // 发送流式请求
         val startTime = System.currentTimeMillis()
         var activeCall: Call? = null
@@ -2507,7 +2579,7 @@ class AiRepository(
                     modelName = requestModel,
                     replyDirection = effectiveOptions.replyDirection
                 )
-                if (effectiveOptions.directionPlanningCount == null) saveMessage(assistantMsg)
+                saveCompletedAssistant(assistantMsg, effectiveOptions)
 
                 // 记录使用统计
                 val stat = ApiUsageStat(
@@ -2527,7 +2599,7 @@ class AiRepository(
                     completionStatus = if (isFinished) "completed" else "interrupted",
                     firstTokenTimeMs = firstTokenDeadline.firstTokenTimeMs
                 )
-                recordUsage(stat)
+                recordUsage(stat, firstTokenDeadline)
 
                 onComplete(fullContent, fullThinking, toolCalls)
             } else {
@@ -2574,7 +2646,9 @@ class AiRepository(
             preparedDirectionContext = overrides?.preparedDirectionContext,
             directionPlanningCount = overrides?.directionPlanningCount,
             replyDirection = overrides?.replyDirection,
-            retrievalQuery = overrides?.retrievalQuery
+            retrievalQuery = overrides?.retrievalQuery,
+            onBeforeAssistantSave = overrides?.onBeforeAssistantSave,
+            onAssistantSaveFailure = overrides?.onAssistantSaveFailure
         )
     }
 
@@ -3641,8 +3715,8 @@ class AiRepository(
             val canReview = (sessionMemoryEnabled ?: latestConversation.enableSessionMemory) != false && !switchedOffDuringExtraction
             if (scope in listOf("user", "global") && !personalizationManager.getSettings().autoMemoryEnabled) return@withTransaction canReview
             if (scope == "conversation" && !canReview) return@withTransaction false
-            val scopeCandidates = if (scope == "conversation") memoryDao.getConversationMemories(message.conversationId)
-                else memoryDao.getGlobalMemoriesFlow().first()
+            val scopeCandidates = if (scope == "conversation") memoryDao.getContextConversationMemories(message.conversationId)
+                else memoryDao.getContextGlobalMemories()
             val existing = scopeCandidates.firstOrNull { it.scope == scope &&
                 SessionSettingReconciler.sameFact(it.content, memoryContent) }
             val now = System.currentTimeMillis()
@@ -3766,7 +3840,7 @@ class AiRepository(
             conversationId = conversationId,
             messageId = messageId
         )
-        if (fallback?.suggestedScope == "conversation" && memoryDao.getConversationMemories(conversationId).any {
+        if (fallback?.suggestedScope == "conversation" && memoryDao.getContextConversationMemories(conversationId).any {
                 it.scope == "conversation" && SessionSettingReconciler.sameFact(it.content, fallback.distilledContent)
             }) null else fallback
     }
@@ -3790,7 +3864,7 @@ class AiRepository(
             PersonalizationManager.DEFAULT_AUXILIARY_MEMORY_PROMPT
         }
         val sessionScoped = SmartMemoryExtractor.isConversationScoped(content)
-        val existingSettings = if (sessionScoped && conversationId > 0L) memoryDao.getConversationMemories(conversationId)
+        val existingSettings = if (sessionScoped && conversationId > 0L) memoryDao.getContextConversationMemories(conversationId)
             .filter { it.scope == "conversation" } else emptyList()
         val settingContract = if (sessionScoped) SessionSettingReconciler.contract(existingSettings) + "\n" +
             "本次为单条设定提取接口：只输出一个 JSON 对象（不是数组），字段 action/targetMemoryId/category/content/evidence/changeReason。没有变化时输出 {\"action\":\"NOOP\"}。" else ""
@@ -4296,7 +4370,7 @@ class AiRepository(
         // 按真实会话顺序续梳，重生成的回复可能拥有更大 ID，不能以数值大小判断前后。
         val messages = if (resumeIndex != null) allMessages.drop(resumeIndex + 1) else allMessages
 
-        val existingSettings = memoryDao.getConversationMemories(conversationId)
+        val existingSettings = memoryDao.getContextConversationMemories(conversationId)
         val conversation = conversationDao.getConversationById(conversationId)
         val existingStoryTime = conversation?.currentStoryTime?.takeIf { it.isNotBlank() && it != "未确定" }
             ?: memoryDao.getCandidateMemories(conversationId)
@@ -4546,7 +4620,7 @@ class AiRepository(
         var newSettings = emptyList<AtemporalSettingItem>()
         var extractionError: String? = if (configPair == null) "未找到可用的提取模型配置" else null
         var timelineAnalysisWindow = 32000
-        val existingSettings = memoryDao.getConversationMemories(conversationId)
+        val existingSettings = memoryDao.getContextConversationMemories(conversationId)
 
         if (configPair != null) {
             val (config, targetModel) = configPair
@@ -5302,8 +5376,14 @@ class AiRepository(
     private fun List<Message>.collapseVariantsForHistory(): List<Message> {
         val selected = selectHistoryVariants()
         val validTargets = selected.filter { it.role == "assistant" && !it.isExcluded }.mapTo(mutableSetOf()) { it.id }
+        val inputs = selected.filter { it.role == "user" && !it.isExcluded && it.injectionTargetMessageId in validTargets }
+            .groupBy { it.injectionTargetMessageId }
         return selected.map { message ->
-            if (message.injectionTargetMessageId != null && message.injectionTargetMessageId !in validTargets) message
+            // Stored assistant modelContent is a cache, never an independent source of history.
+            // Older versions or stale deletion snapshots may leave a removed input in that cache.
+            if (message.role == "assistant") message.copy(content = inputs[message.id].orEmpty()
+                .fold(message.content) { text, input -> text + "\n\n" + input.content })
+            else if (message.injectionTargetMessageId != null && message.injectionTargetMessageId !in validTargets) message
             else message.modelContent?.let { message.copy(content = it) } ?: message
         }
     }
@@ -5984,8 +6064,11 @@ class AiRepository(
             }
 
             // 批量一次性原子落库
+            // 记忆来源只继承本次复制的消息，不能指回父对话或泄漏分支截止后的事实。
+            val copiedMessageIdMapping = mutableMapOf<Long, Long>()
             if (preparedMessages.isNotEmpty()) {
                 val copiedIds = messageDao.insertMessages(preparedMessages)
+                copiedMessageIdMapping.putAll(messagesToCopy.zip(copiedIds) { source, copiedId -> source.id to copiedId })
                 remapCopiedInjection(messagesToCopy, preparedMessages, copiedIds, newId)
                 val totalTokens = preparedMessages.sumOf { it.tokenCount }
                 conversationDao.updateStats(newId, preparedMessages.size, totalTokens)
@@ -6011,10 +6094,12 @@ class AiRepository(
                     )
                     val sessionMemories = roleplayRepo.getMemoriesListBySession(rpSession.id)
                     sessionMemories.forEach { mem ->
+                        val copiedSourceId = mem.sourceMessageId?.let { copiedMessageIdMapping[it] ?: return@forEach }
                         roleplayRepo.insertMemory(
                             mem.copy(
                                 id = 0,
-                                sessionId = clonedSessionId
+                                sessionId = clonedSessionId,
+                                sourceMessageId = copiedSourceId
                             )
                         )
                     }
@@ -6027,10 +6112,12 @@ class AiRepository(
             try {
                 val convMemories = memoryDao.getConversationMemories(parentId)
                 convMemories.forEach { mem ->
+                    val copiedSourceId = mem.sourceMessageId?.let { copiedMessageIdMapping[it] ?: return@forEach }
                     memoryDao.insertMemory(
                         mem.copy(
                             id = 0,
-                            conversationId = newId
+                            conversationId = newId,
+                            sourceMessageId = copiedSourceId
                         )
                     )
                 }
@@ -6107,6 +6194,8 @@ class AiRepository(
             )
             val newId = conversationDao.insertConversation(newConversation)
 
+            // 显式来源必须属于副本消息；无来源的手工记忆仍保持独立。
+            val copiedMessageIdMapping = mutableMapOf<Long, Long>()
             if (originalMessages.isNotEmpty()) {
                 val baseTime = now - (originalMessages.size * 1000L)
                 val preparedMessages = originalMessages.mapIndexed { index, msg ->
@@ -6117,6 +6206,7 @@ class AiRepository(
                     )
                 }
                 val copiedMessageIds = messageDao.insertMessages(preparedMessages)
+                copiedMessageIdMapping.putAll(originalMessages.zip(copiedMessageIds) { source, copiedId -> source.id to copiedId })
                 remapCopiedInjection(originalMessages, preparedMessages, copiedMessageIds, newId)
                 val validCoveredId = originalConv.summaryUpdatedMessageId?.takeIf { coveredId ->
                     !originalConv.rollingSummary.isNullOrBlank() && originalMessages.collapseVariantsForHistory().any {
@@ -6158,10 +6248,12 @@ class AiRepository(
                     )
                     val sessionMemories = roleplayRepo.getMemoriesListBySession(rpSession.id)
                     sessionMemories.forEach { mem ->
+                        val copiedSourceId = mem.sourceMessageId?.let { copiedMessageIdMapping[it] ?: return@forEach }
                         roleplayRepo.insertMemory(
                             mem.copy(
                                 id = 0L,
                                 sessionId = clonedSessionId,
+                                sourceMessageId = copiedSourceId,
                                 createdAt = now,
                                 updatedAt = now
                             )
@@ -6176,10 +6268,12 @@ class AiRepository(
             try {
                 val convMemories = memoryDao.getConversationMemories(conversationId)
                 convMemories.forEach { mem ->
+                    val copiedSourceId = mem.sourceMessageId?.let { copiedMessageIdMapping[it] ?: return@forEach }
                     memoryDao.insertMemory(
                         mem.copy(
                             id = 0L,
                             conversationId = newId,
+                            sourceMessageId = copiedSourceId,
                             createdAt = now,
                             updatedAt = now
                         )

@@ -84,6 +84,36 @@ class GenerationLifecycleTest {
             assertFalse(restored.isGenerating.value)
         } finally { ChatGenerationManager.removeSession(id, session) }
     }
+    @Test fun thinkingAndBodyRecoveryClearImmediateErrorsWhileKeepingIndependentAttemptHistory() {
+        for (thinkingFirst in listOf(true, false)) {
+            val id = if (thinkingFirst) 908075L else 908076L
+            val session = ChatGenerationManager.startSession(id, "model")
+            try {
+                val failure = "Key #1：合成认证错误"
+                session.recordAttemptError(failure, "合成认证错误")
+                session.setStatus("当前 Key 异常，正在自动尝试备用 Key")
+                session.appendThinking("")
+                session.appendResponse("")
+                assertEquals(listOf(failure), session.keyAttemptErrors.value)
+                assertNotNull(session.reconnectStatus.value)
+                if (thinkingFirst) session.appendThinking("合成思考") else session.appendResponse("合成正文")
+                val restored = ChatGenerationManager.getSession(id)!!
+                assertNull(restored.error.value)
+                assertNull(restored.reconnectStatus.value)
+                assertTrue(restored.keyAttemptErrors.value.isEmpty())
+                assertEquals(listOf(failure), restored.keyAttemptHistory.value)
+                assertTrue(restored.isGenerating.value)
+                assertFalse(restored.isConnecting.value)
+                assertEquals(if (thinkingFirst) "合成思考" else "", restored.currentThinking.value)
+                assertEquals(if (thinkingFirst) "" else "合成正文", restored.currentResponse.value)
+                restored.markFinished()
+                restored.appendThinking("过期思考")
+                restored.appendResponse("过期正文")
+                assertEquals(if (thinkingFirst) "合成思考" else "", restored.currentThinking.value)
+                assertEquals(if (thinkingFirst) "" else "合成正文", restored.currentResponse.value)
+            } finally { ChatGenerationManager.removeSession(id, session) }
+        }
+    }
     @Test fun navigationReattachesSameBuffersAndCancellationPreventsLateSave() {
         val id = 908070L
         val session = ChatGenerationManager.startSession(id, "model")

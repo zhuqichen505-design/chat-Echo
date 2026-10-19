@@ -406,6 +406,7 @@ interface MemoryDao {
     @Query("""
         SELECT * FROM memory_items
         WHERE isEnabled = 1
+          AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId))
           AND (
               scope IN ('user', 'global')
               OR conversationId = :conversationId
@@ -449,6 +450,9 @@ interface MemoryDao {
     @Query("DELETE FROM memory_items WHERE id = :id")
     suspend fun deleteMemoryById(id: Long)
 
+    @Query("DELETE FROM memory_items WHERE sourceMessageId IN (:messageIds)")
+    suspend fun deleteMemoriesBySourceMessageIds(messageIds: List<Long>)
+
     @Query("DELETE FROM memory_items")
     suspend fun deleteAllMemories()
 
@@ -464,11 +468,17 @@ interface MemoryDao {
     @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId ORDER BY isEnabled DESC, updatedAt DESC")
     suspend fun getConversationMemories(conversationId: Long): List<MemoryItem>
 
+    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isEnabled DESC, updatedAt DESC")
+    suspend fun getContextConversationMemories(conversationId: Long): List<MemoryItem>
+
     @Query("DELETE FROM memory_items WHERE conversationId = :conversationId")
     suspend fun deleteConversationMemories(conversationId: Long)
 
     @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') ORDER BY isEnabled DESC, updatedAt DESC")
     fun getGlobalMemoriesFlow(): Flow<List<MemoryItem>>
+
+    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isEnabled DESC, updatedAt DESC")
+    suspend fun getContextGlobalMemories(): List<MemoryItem>
 
     @Query("""
         SELECT * FROM memory_items

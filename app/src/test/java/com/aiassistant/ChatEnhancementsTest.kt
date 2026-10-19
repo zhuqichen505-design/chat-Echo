@@ -1,6 +1,7 @@
 package com.aiassistant
 
 import com.aiassistant.domain.model.ApiConfig
+import com.aiassistant.ui.screens.chat.isErrorMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -158,6 +159,38 @@ class ChatEnhancementsTest {
     }
 
     @Test
+    fun stoppedRepliesAreNeutralAndDoNotAnimateSuccessfulCompletion() {
+        val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
+        for (content in listOf(rules.stoppedReplyContent(""), rules.stoppedReplyContent("合成部分正文"),
+            "*(思考已停止，回复已暂停)*", "合成部分正文\n\n*(回复已被暂停)*")) {
+            assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.Cancelled,
+                rules.derive(false, content, true, "旧 Key 请求报错", contentIsError = true))
+            assertFalse(rules.modelMarkHasSuccessfulBody(content))
+        }
+        assertEquals("生成已停止", rules.stoppedReplyContent(""))
+        assertFalse(rules.isStoppedContent("她问：生成已停止是什么意思？"))
+        assertFalse(rules.isStoppedContent("设定里写着 *(生成已停止)*，故事仍在继续。"))
+    }
+
+    @Test
+    fun stoppedReplyDisplayKeepsRealBodyAndRemovesOnlyGeneratedStopMetadata() {
+        val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
+        val oldReport = "\n\n【连接异常信息记录】：\n• 当前状态: 合成旧 Key 错误"
+        for (placeholder in listOf("生成已停止", "回复已停止 (用户已暂停)",
+            "回复已停止 (用户已暂停)$oldReport", "*(思考已停止，回复已暂停)*$oldReport")) {
+            assertEquals("", rules.stoppedReplyDisplayBody(placeholder))
+        }
+        for (marker in listOf("*(生成已停止)*", "*(回复已被暂停)*")) {
+            assertEquals("合成部分正文", rules.stoppedReplyDisplayBody("合成部分正文\n\n$marker"))
+            assertEquals("合成部分正文", rules.stoppedReplyDisplayBody("合成部分正文\n\n$marker$oldReport"))
+        }
+        for (normal in listOf("她问：生成已停止是什么意思？", "正文提到 *(回复已被暂停)*，随后继续。",
+            "合成段落\n\n【连接异常信息记录】：这是原文引用")) {
+            assertEquals(normal, rules.stoppedReplyDisplayBody(normal))
+        }
+    }
+
+    @Test
     fun testDefaultMaxTokensIs4096() {
         val config = ApiConfig(
             id = 1L,
@@ -172,23 +205,26 @@ class ChatEnhancementsTest {
 
     @Test
     fun testErrorMessageDetection() {
-        fun isErrorMessage(content: String): Boolean {
-            val trimmed = content.trim()
-            return trimmed.startsWith("请求失败") ||
-                   trimmed.startsWith("[请求失败]") ||
-                   trimmed.startsWith("Error:") ||
-                   trimmed.startsWith("error:") ||
-                   trimmed.contains("[输出已被中断:")
-        }
+        val detectError = ::isErrorMessage
+        assertTrue(detectError("请求失败\n\n网络超时，请检查网络设置"))
+        assertTrue(detectError("[请求失败] 401 Unauthorized"))
+        assertTrue(detectError("Error: connection refused"))
+        assertTrue(detectError("error: 500 internal server error"))
+        assertTrue(detectError("合成部分正文\n\n[输出已被中断: HTTP 500]"))
+        assertTrue(detectError("请求失败\n\n【连接异常信息记录】合成连接失败"))
 
-        assertTrue(isErrorMessage("请求失败\n\n网络超时，请检查网络设置"))
-        assertTrue(isErrorMessage("[请求失败] 401 Unauthorized"))
-        assertTrue(isErrorMessage("Error: connection refused"))
-        assertTrue(isErrorMessage("error: 500 internal server error"))
-        assertTrue(isErrorMessage("这是部分内容...\n\n[输出已被中断: 用户取消]"))
-        
-        assertFalse(isErrorMessage("你好！我是你的 AI 助手，有什么我可以帮你的？"))
-        assertFalse(isErrorMessage("```kotlin\nval error = 1\n```"))
+        for (content in listOf(
+            "生成已停止",
+            "合成正文\n\n*(生成已停止)*",
+            "回复已停止 (用户已暂停)\n\n报错详情：合成失败\n【连接异常信息记录】合成记录",
+            "合成正文\n\n*(回复已被暂停)*",
+            "*(思考已停止，回复已暂停)*"
+        )) {
+            assertFalse("用户停止应为中性状态", detectError(content))
+        }
+        assertFalse(detectError("你好！我是你的 AI 助手，有什么我可以帮你的？"))
+        assertFalse(detectError("```kotlin\nval error = 1\n```"))
+        assertFalse(detectError("她问：生成已停止是什么意思？"))
     }
 
     @Test

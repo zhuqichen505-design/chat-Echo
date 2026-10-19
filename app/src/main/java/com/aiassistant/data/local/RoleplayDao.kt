@@ -167,16 +167,19 @@ interface RoleplayMemoryDao {
     @Query("DELETE FROM roleplay_memories WHERE id = :id")
     suspend fun deleteMemoryById(id: Long)
 
+    @Query("DELETE FROM roleplay_memories WHERE sourceMessageId IN (:messageIds)")
+    suspend fun deleteMemoriesBySourceMessageIds(messageIds: List<Long>)
+
     @Query("DELETE FROM roleplay_memories WHERE sessionId = :sessionId")
     suspend fun deleteAllMemories(sessionId: Long)
 
     @Query("UPDATE roleplay_memories SET isPinned = :isPinned, updatedAt = :timestamp WHERE id = :id")
     suspend fun setPinned(id: Long, isPinned: Boolean, timestamp: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM roleplay_memories WHERE sessionId = :sessionId AND isPinned = 1 AND memoryType = 'fact' ORDER BY updatedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM roleplay_memories WHERE sessionId = :sessionId AND isPinned = 1 AND memoryType = 'fact' AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = roleplay_memories.sourceMessageId)) ORDER BY updatedAt DESC LIMIT :limit")
     suspend fun getPinnedFacts(sessionId: Long, limit: Int = 20): List<RoleplayMemory>
 
-    @Query("SELECT * FROM roleplay_memories WHERE sessionId = :sessionId AND memoryType = 'summary' ORDER BY updatedAt DESC LIMIT 1")
+    @Query("SELECT * FROM roleplay_memories WHERE sessionId = :sessionId AND memoryType = 'summary' AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = roleplay_memories.sourceMessageId)) ORDER BY updatedAt DESC LIMIT 1")
     suspend fun getLatestSummary(sessionId: Long): RoleplayMemory?
 }
 

@@ -1514,20 +1514,29 @@ class MemoryExtractionRepositoryTest {
     }
 
     @Test fun deletingSourceWhileExtractionRunsCannotResurrectMemory() = runBlocking {
-        val entered = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        Endpoint { socket, _ -> entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); memoryReply(socket, "用户偏好：长期使用Kotlin开发Android应用") }.use { endpoint -> Fixture().use { f ->
-            val (config, id) = f.conversation(endpoint.url)
-            val msg = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "我长期使用Kotlin开发Android应用"))
-            val extraction = async(Dispatchers.IO) { f.repository.processSavedMessageMemory(msg, config.id, config.modelName) }
-            try {
-                assertTrue(entered.await(5, TimeUnit.SECONDS))
-                f.db.messageDao().deleteMessagesByConversation(id)
-                release.countDown()
-                assertNull(withTimeout(5000) { extraction.await() })
-                assertTrue(f.db.memoryDao().getCandidateMemories(id).isEmpty())
-            } finally { release.countDown(); extraction.cancelAndJoin() }
-        } }
+        for (protocol in listOf("openai", "anthropic")) for (bulk in listOf(false, true)) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            Endpoint { socket, _ ->
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                completedSummaryReply(socket, "用户偏好：长期使用Kotlin开发Android应用", protocol)
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, protocol = protocol)
+                val msg = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "我长期使用Kotlin开发Android应用"))
+                val source = f.db.messageDao().getMessageById(msg)!!
+                val extraction = async(Dispatchers.IO) { f.repository.processSavedMessageMemory(msg, config.id, config.modelName) }
+                try {
+                    assertTrue(entered.await(5, TimeUnit.SECONDS))
+                    if (bulk) f.repository.deleteMessagesFrom(id, source.createdAt) else f.repository.deleteMessage(source)
+                    release.countDown()
+                    assertNull(withTimeout(5000) { extraction.await() })
+                    assertTrue(f.db.memoryDao().getCandidateMemories(id).isEmpty())
+                    assertNull(f.db.memoryDao().getBySourceMessage(msg))
+                    assertEquals(1, endpoint.payloads.size)
+                    assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+                } finally { release.countDown(); extraction.cancelAndJoin() }
+            } }
+        }
     }
 
     @Test fun mainWireOmitsGuessedExtensionsAndNativeThinkingRetainsBudget() = runBlocking {

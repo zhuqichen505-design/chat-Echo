@@ -23,18 +23,38 @@ enum class GenerationUiState {
     Streaming,   // 正文流式输出中
     Settling,    // 落定过渡（UI 一次性动画态，由落定动画本地驱动，派生函数不产出）
     Failed,      // 错误（重连文案命中错误词，或消息内容为错误报告）
-    Cancelled    // 手动取消（需数据层结构化信号，当前派生不可达，占位）
+    Cancelled    // 手动停止，保留已生成正文与思考
 }
 
 object GenerationUiStateRules {
 
+    fun stoppedReplyContent(content: String): String = content.trim().let { body ->
+        if (body.isEmpty()) "生成已停止" else "$body\n\n*(生成已停止)*"
+    }
+
+    /** 仅识别生成器写入的独立停止正文或尾标，兼容旧版保存格式。 */
+    fun isStoppedContent(content: String): Boolean {
+        val body = content.trim()
+        if (body == "生成已停止" || body == "回复已停止 (用户已暂停)" ||
+            body.startsWith("回复已停止 (用户已暂停)\n\n")) return true
+        return body.substringBefore("\n\n【连接异常信息记录】").trimEnd().substringAfterLast("\n\n") in setOf(
+            "*(生成已停止)*", "*(回复已被暂停)*", "*(思考已停止，回复已暂停)*")
+    }
+
+    /** 胶囊统一展示停止状态；正文仅保留真实部分回复，兼容旧版追加的连接记录。 */
+    fun stoppedReplyDisplayBody(content: String): String {
+        if (!isStoppedContent(content)) return content
+        val body = content.trim()
+        if (body == "生成已停止" || body == "回复已停止 (用户已暂停)" ||
+            body.startsWith("回复已停止 (用户已暂停)\n\n")) return ""
+        val reply = body.substringBefore("\n\n【连接异常信息记录】").trimEnd()
+        return reply.substringBeforeLast("\n\n", missingDelimiterValue = "").trimEnd()
+    }
+
     /** 只识别生成器写入的独立终止尾标，不因正文提到“暂停”就误判。 */
     fun modelMarkHasSuccessfulBody(content: String): Boolean {
         val body = content.trim()
-        if (body.isEmpty() || isErrorMessage(body)) return false
-        if (body == "回复已停止 (用户已暂停)" || body.startsWith("回复已停止 (用户已暂停)\n\n")) return false
-        val finalBlock = body.substringAfterLast("\n\n")
-        if (finalBlock in setOf("*(回复已被暂停)*", "*(思考已停止，回复已暂停)*")) return false
+        if (body.isEmpty() || isStoppedContent(body) || isErrorMessage(body)) return false
         return !(body.endsWith(")*") &&
             (body.startsWith("*(思考已输出，回复已被中断: ") || body.contains("\n\n*(输出已被中断: ")))
     }
@@ -109,6 +129,7 @@ object GenerationUiStateRules {
         reconnectStatus: String?,
         contentIsError: Boolean = false
     ): GenerationUiState = when {
+        !isGenerating && isStoppedContent(content) -> GenerationUiState.Cancelled
         contentIsError -> GenerationUiState.Failed
         isGenerating && reconnectStatus in listOf("等待选择回复方向", "回复方向生成失败，等待处理") -> GenerationUiState.ChoosingDirection
         isGenerating && content.isBlank() && !hasThinking -> {

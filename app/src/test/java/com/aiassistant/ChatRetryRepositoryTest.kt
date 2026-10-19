@@ -36,6 +36,246 @@ import java.util.concurrent.TimeUnit
 class ChatRetryRepositoryTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun manuallyEditedSessionMemorySurvivesSourceDeletionWhileUnchangedAndToggledMemoriesKeepTheirSources() = runBlocking {
+        newSingleThreadContext("manual-memory-source-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Fixture().use { f ->
+                    f.enableViewModel()
+                    val (config, id) = f.config("https://example.invalid/v1")
+                    f.db.apiConfigDao().updateConfig(config.copy(apiKey = ""))
+                    val sources = List(3) { index ->
+                        val message = Message(conversationId = id, role = "user", content = "合成来源 $index")
+                        message.copy(id = f.db.messageDao().insertMessage(message))
+                    }
+                    val memories = sources.mapIndexed { index, source ->
+                        val memory = MemoryItem(content = "合成自动记忆 $index", scope = "conversation",
+                            conversationId = id, sourceMessageId = source.id)
+                        memory.copy(id = f.repository.insertMemory(memory))
+                    }
+                    val vm = ChatViewModel(id)
+                    try {
+                        withContext(Dispatchers.Main) {
+                            vm.updateSessionMemory(memories[0].copy(content = "人工改写的合成记忆"))
+                            vm.updateSessionMemory(memories[1])
+                            vm.toggleSessionMemory(memories[2].id, false)
+                        }
+                        withTimeout(5000) {
+                            while (f.repository.getMemoryById(memories[0].id)?.content != "人工改写的合成记忆" ||
+                                f.repository.getMemoryById(memories[2].id)?.isEnabled != false) delay(10)
+                        }
+                        withContext(Dispatchers.Main) { /* Drain the unchanged save as well. */ }
+                        assertNull(f.repository.getMemoryById(memories[0].id)!!.sourceMessageId)
+                        assertEquals(sources[1].id, f.repository.getMemoryById(memories[1].id)!!.sourceMessageId)
+                        assertEquals(sources[2].id, f.repository.getMemoryById(memories[2].id)!!.sourceMessageId)
+                        sources.forEach { f.repository.deleteMessage(it) }
+                        assertEquals("人工改写的合成记忆", f.repository.getMemoryById(memories[0].id)!!.content)
+                        assertNull(f.repository.getMemoryById(memories[1].id))
+                        assertNull(f.repository.getMemoryById(memories[2].id))
+                    } finally {
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun recoveredBackupOutputSurvivesNavigationAndPauseWithoutOldKeyErrorsOrDuplicateUsage() = runBlocking {
+        newSingleThreadContext("backup-recovery-pause-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (protocol in listOf("openai", "anthropic")) for (thinkingFirst in listOf(true, false)) {
+                    val allowSecondToken = CountDownLatch(1)
+                    val release = CountDownLatch(1)
+                    lateinit var endpoint: Endpoint
+                    endpoint = Endpoint { socket, index ->
+                        val headers = endpoint.requestHeaders[index - 1]
+                        val key = (headers["authorization"] ?: headers["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                        if (key == "synthetic-unavailable") {
+                            socket.response("401 Unauthorized", "{\"error\":{\"message\":\"synthetic invalid credential\"}}")
+                        } else {
+                            socket.streamHeaders()
+                            fun delta(thinking: Boolean): String {
+                                val text = if (thinking) "合成思考" else "合成正文"
+                                return if (protocol == "openai")
+                                    "data: {\"choices\":[{\"delta\":{\"${if (thinking) "reasoning_content" else "content"}\":\"$text\"}}]}\n\n"
+                                else "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"${if (thinking) "thinking_delta" else "text_delta"}\",\"${if (thinking) "thinking" else "text"}\":\"$text\"}}\n\n"
+                            }
+                            socket.delta(delta(thinkingFirst))
+                            allowSecondToken.await(10, TimeUnit.SECONDS)
+                            socket.delta(delta(!thinkingFirst))
+                            release.await(10, TimeUnit.SECONDS)
+                        }
+                    }
+                    endpoint.use { Fixture(timeout = 10_000).use { f ->
+                        f.enableViewModel()
+                        f.settings.setBackupKeyFallbackEnabled(true)
+                        val (_, id) = f.config(endpoint.url, protocol, "synthetic-unavailable\nsynthetic-healthy")
+                        val original = ChatViewModel(id)
+                        var restored: ChatViewModel? = null
+                        try {
+                            withTimeout(5000) { while (original.currentModelOption.value == null || original.contextUsage.value.usage == null) delay(10) }
+                            withContext(Dispatchers.Main) { original.sendMessage("合成暂停测试") }
+                            withTimeout(5000) {
+                                while ((if (thinkingFirst) original.currentThinking.value != "合成思考" else original.currentResponse.value != "合成正文") ||
+                                    original.error.value != null || original.reconnectStatus.value != null || original.keyAttemptErrors.value.isNotEmpty()) delay(10)
+                            }
+                            val session = ChatGenerationManager.getSession(id)!!
+                            val generation = session.generationJob!!
+                            assertEquals(1, session.keyAttemptHistory.value.size)
+                            assertTrue(original.keyAttemptErrors.value.isEmpty())
+                            assertNull(original.error.value)
+                            assertNull(original.reconnectStatus.value)
+                            assertEquals(if (thinkingFirst) com.aiassistant.ui.screens.chat.GenerationUiState.Thinking
+                                else com.aiassistant.ui.screens.chat.GenerationUiState.Streaming,
+                                com.aiassistant.ui.screens.chat.GenerationUiStateRules.derive(true, original.currentResponse.value,
+                                    original.currentThinking.value.isNotBlank(), original.reconnectStatus.value))
+                            original.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            val attached = ChatViewModel(id).also { restored = it }
+                            withTimeout(5000) { while (!attached.isGenerating.value ||
+                                (if (thinkingFirst) attached.currentThinking.value != "合成思考" else attached.currentResponse.value != "合成正文")) delay(10) }
+                            assertNull(attached.reconnectStatus.value)
+                            assertNull(attached.error.value)
+                            assertTrue(attached.keyAttemptErrors.value.isEmpty())
+                            assertSame(session, ChatGenerationManager.getSession(id))
+                            allowSecondToken.countDown()
+                            withTimeout(5000) { while (attached.currentThinking.value != "合成思考" || attached.currentResponse.value != "合成正文") delay(10) }
+                            withContext(Dispatchers.Main) { attached.stopGeneration() }
+                            withTimeout(5000) { generation.join() }
+                            withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.role == "assistant" }) delay(10) }
+                            val reply = f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }
+                            assertEquals("合成正文\n\n*(生成已停止)*", reply.content)
+                            assertEquals("合成思考", reply.thinkingContent)
+                            assertFalse(com.aiassistant.ui.screens.chat.isErrorMessage(reply.content))
+                            assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.Cancelled,
+                                com.aiassistant.ui.screens.chat.GenerationUiStateRules.derive(false, reply.content, true, null))
+                            assertNull(attached.error.value)
+                            assertNull(attached.reconnectStatus.value)
+                            assertTrue(attached.keyAttemptErrors.value.isEmpty())
+                            assertEquals(2, endpoint.payloads.size)
+                            val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+                            assertEquals("失败请求和暂停请求各记一次，不能按旧错误再补一条", 2, stats.size)
+                            assertEquals(1, stats.count { it.completionStatus == "cancelled" })
+                            assertTrue(stats.none { it.errorMessage.orEmpty().contains("此前连接报错") })
+                        } finally {
+                            allowSecondToken.countDown()
+                            release.countDown()
+                            restored?.stopGeneration()
+                            restored?.viewModelScope?.coroutineContext?.get(Job)?.cancelAndJoin()
+                            original.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            ChatGenerationManager.cancelSession(id)
+                        }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun pausingConnectingBackupSavesOnlyShortStoppedPlaceholderAndActualRequestUsage() = runBlocking {
+        newSingleThreadContext("backup-connecting-pause-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (protocol in listOf("openai", "anthropic")) {
+                    val entered = CountDownLatch(1)
+                    val release = CountDownLatch(1)
+                    lateinit var endpoint: Endpoint
+                    endpoint = Endpoint { socket, index ->
+                        val headers = endpoint.requestHeaders[index - 1]
+                        val key = (headers["authorization"] ?: headers["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                        if (key == "synthetic-unavailable") {
+                            socket.response("401 Unauthorized", "{\"error\":{\"message\":\"synthetic invalid credential\"}}")
+                        } else {
+                            socket.streamHeaders()
+                            entered.countDown()
+                            release.await(10, TimeUnit.SECONDS)
+                        }
+                    }
+                    endpoint.use { Fixture(timeout = 10_000).use { f ->
+                        f.enableViewModel()
+                        f.settings.setBackupKeyFallbackEnabled(true)
+                        val (_, id) = f.config(endpoint.url, protocol, "synthetic-unavailable\nsynthetic-healthy")
+                        val vm = ChatViewModel(id)
+                        try {
+                            withTimeout(5000) { while (vm.currentModelOption.value == null || vm.contextUsage.value.usage == null) delay(10) }
+                            withContext(Dispatchers.Main) { vm.sendMessage("合成连接暂停") }
+                            assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                            val session = ChatGenerationManager.getSession(id)!!
+                            val generation = session.generationJob!!
+                            assertEquals(1, session.keyAttemptHistory.value.size)
+                            withContext(Dispatchers.Main) { vm.stopGeneration() }
+                            withTimeout(5000) { generation.join() }
+                            withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.role == "assistant" }) delay(10) }
+                            val reply = f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }
+                            assertEquals("生成已停止", reply.content)
+                            assertNull(reply.thinkingContent)
+                            assertFalse(com.aiassistant.ui.screens.chat.isErrorMessage(reply.content))
+                            assertTrue(AiRepository.isErrorPlaceholderMessage(reply.content))
+                            val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+                            assertEquals("连接暂停不得伪造额外失败调用", 2, stats.size)
+                            assertEquals(1, stats.count { it.completionStatus == "cancelled" })
+                            assertNull(vm.error.value)
+                            assertNull(vm.reconnectStatus.value)
+                            assertTrue(vm.keyAttemptErrors.value.isEmpty())
+                        } finally {
+                            release.countDown()
+                            vm.stopGeneration()
+                            vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            ChatGenerationManager.cancelSession(id)
+                        }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun queuedOldGenerationUiUpdateCannotRestoreBuffersAfterPause() = runBlocking {
+        newSingleThreadContext("queued-generation-state-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config("https://example.invalid/v1")
+                    val session = ChatGenerationManager.startSession(id, "synthetic-model")
+                    session.generationJob = Job()
+                    session.appendResponse("合成部分正文")
+                    session.appendThinking("合成思考")
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (!vm.isGenerating.value || vm.currentResponse.value != "合成部分正文") delay(10) }
+                        val publish = ChatViewModel::class.java.getDeclaredMethod("publishGenerationState",
+                            ChatGenerationManager.ActiveSession::class.java).apply { isAccessible = true }
+                        withContext(Dispatchers.Main) {
+                            // Main 暂不让出：IO 回调先排队，然后用户在同一帧停止。
+                            val worker = Thread { publish.invoke(vm, session) }
+                            worker.start()
+                            worker.join(3000)
+                            assertFalse(worker.isAlive)
+                            vm.stopGeneration()
+                        }
+                        withContext(Dispatchers.Main) { /* Drain the earlier queued publication. */ }
+                        withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.role == "assistant" }) delay(10) }
+                        assertEquals("", vm.currentResponse.value)
+                        assertEquals("", vm.currentThinking.value)
+                        assertNull(vm.error.value)
+                        assertNull(vm.reconnectStatus.value)
+                        val reply = f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }
+                        assertEquals("合成部分正文\n\n*(生成已停止)*", reply.content)
+                        assertEquals("合成思考", reply.thinkingContent)
+                    } finally {
+                        vm.stopGeneration()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                        ChatGenerationManager.cancelSession(id)
+                    }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
     @Test fun modelCatalogueHttpDeniedReportsPermissionRatherThanPresetOrKeyFallback() = runBlocking {
         Endpoint { socket, _ -> socket.response("200 OK", "{\"data\":[{\"id\":\"vendor/Exact-ID\"}]}") }.use { endpoint -> Fixture().use { f ->
             com.aiassistant.data.remote.HttpAccessPolicy.initialize { com.aiassistant.data.remote.HttpAccessRules() }
@@ -321,7 +561,10 @@ class ChatRetryRepositoryTest {
         getOutputStream().flush()
     }
 
-    private class Fixture(timeout: Long = 2000) : AutoCloseable {
+    private class Fixture(
+        timeout: Long = 2000,
+        afterUsageInsert: (suspend (ApiUsageStat) -> Unit)? = null
+    ) : AutoCloseable {
         val context = RuntimeEnvironment.getApplication()
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
         val settings = PersonalizationManager(context)
@@ -339,7 +582,14 @@ class ChatRetryRepositoryTest {
             val unsafeClass = Class.forName("sun.misc.Unsafe")
             val unsafe = unsafeClass.getDeclaredField("theUnsafe").let { it.isAccessible = true; it.get(null) }
             val crypto = unsafeClass.getMethod("allocateInstance", Class::class.java).invoke(unsafe, CryptoManager::class.java) as CryptoManager
-            repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), db.messageDao(), db.usageStatDao(),
+            val actualUsageDao = db.usageStatDao()
+            val usageDao = if (afterUsageInsert == null) actualUsageDao else object : com.aiassistant.data.local.UsageStatDao by actualUsageDao {
+                override suspend fun insertStat(stat: ApiUsageStat) {
+                    actualUsageDao.insertStat(stat)
+                    afterUsageInsert?.invoke(stat)
+                }
+            }
+            repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), db.messageDao(), usageDao,
                 db.environmentVariableDao(), db.promptTemplateDao(), db.memoryDao(), db.conversationBranchDao(), db.selectedModelDao(),
                 crypto, settings, TavilySearchManager(context, crypto), worldBookDao = db.worldBookDao(),
                 timelineNodeDao = db.timelineNodeDao(), firstTokenTimeoutMillis = timeout)
@@ -1740,5 +1990,151 @@ class ChatRetryRepositoryTest {
             assertEquals(remoteText, saved.content)
             assertEquals(remoteThinking, saved.thinkingContent)
         } }
+    }
+
+    @Test fun directionSnapshotsRejectDeletedRecentAndSummarizedSourcesInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (summarized in listOf(false, true)) {
+            Endpoint { socket, _ ->
+                socket.response("200 OK", syntheticStreamResponse(protocol, "合成新上下文回复"), "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.config(endpoint.url, protocol)
+                f.db.messageDao().insertMessages((0 until 12).map { index -> Message(conversationId = id,
+                    role = if (index % 2 == 0) "user" else "assistant",
+                    content = "合成来源事实编号$index。", createdAt = index.toLong()) })
+                val sources = f.db.messageDao().getMessagesList(id)
+                val conversation = f.db.conversationDao().getConversationById(id)!!
+                f.db.conversationDao().updateConversation(conversation.copy(compressionTier = 2,
+                    compressionRecentRounds = 4, rollingSummary = "合成摘要：测试队伍保管蓝色凭证，尚未交付。",
+                    summaryUpdatedMessageId = sources[3].id, summaryUpdatedAt = 123L))
+                val options = ChatRequestOptions(enableSessionMemory = false, enableExternalMemory = false)
+                val prepared = f.repository.prepareReplyDirectionContext(config, id, "合成继续请求", options)
+                val deleted = if (summarized) sources.first() else sources.last()
+                assertEquals(!summarized, prepared.recentMessages.any { it.id == deleted.id })
+                assertTrue(prepared.systemPrompt.orEmpty().contains("测试队伍保管蓝色凭证"))
+                f.repository.deleteMessage(deleted)
+                var planningError: Exception? = null
+                try {
+                    f.repository.generateReplyDirections(config, id, "合成继续请求", emptyList(),
+                        options.copy(preparedDirectionContext = prepared), 2)
+                } catch (error: Exception) { planningError = error }
+                assertTrue(planningError?.message.orEmpty().contains("对话内容已变化"))
+                var finalError: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成继续请求",
+                    options = options.copy(preparedDirectionContext = prepared), onToken = { fail(it) },
+                    onComplete = { _, _, _ -> fail("不能发送删除前的快照") }, onError = { finalError = it })
+                assertTrue(finalError.orEmpty().contains("对话内容已变化"))
+                assertTrue("失效快照应在HTTP前拒绝", endpoint.payloads.isEmpty())
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(compressionTier = 0))
+                val refreshed = f.repository.prepareReplyDirectionContext(config, id, "合成继续请求", options)
+                var completed: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成继续请求",
+                    options = options.copy(preparedDirectionContext = refreshed), onToken = {},
+                    onComplete = { text, _, _ -> completed = text }, onError = { fail(it) })
+                assertEquals("合成新上下文回复", completed)
+                assertEquals(1, endpoint.payloads.size)
+                assertFalse(endpoint.payloads.single().contains(deleted.content))
+                assertFalse(endpoint.payloads.single().contains("测试队伍保管蓝色凭证"))
+            } }
+        }
+    }
+
+    @Test fun deletingContextBetweenKeyAttemptsCannotReplayTheOldPayloadInEitherProtocol() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, index ->
+                if (index == 1) socket.response("401 Unauthorized", "{\"error\":\"synthetic key failure\"}")
+                else socket.response("200 OK", syntheticStreamResponse(protocol, "不应触发旧上下文重试"), "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.config(endpoint.url, protocol, "test-first\ntest-second")
+                val sourceId = f.repository.saveMessage(Message(conversationId = id, role = "user", content = "合成待删除的来源事实。"))
+                val source = f.db.messageDao().getMessageById(sourceId)!!
+                var failure: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成继续请求", onToken = { fail(it) },
+                    onKeyAttemptError = { _, _, _ -> runBlocking { f.repository.deleteMessage(source) } },
+                    onComplete = { _, _, _ -> fail("不得继续发送旧上下文") }, onError = { failure = it })
+                assertTrue(failure.orEmpty().contains("对话内容已变化"))
+                assertEquals(1, endpoint.payloads.size)
+                assertTrue(endpoint.payloads.single().contains(source.content))
+                assertNull(f.db.messageDao().getMessageById(sourceId))
+                var completed: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成新的继续请求", onToken = {},
+                    onComplete = { text, _, _ -> completed = text }, onError = { fail(it) })
+                assertEquals("不应触发旧上下文重试", completed)
+                assertEquals(2, endpoint.payloads.size)
+                assertFalse(endpoint.payloads.last().contains(source.content))
+            } }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun pausingAfterCompletedReplyAndUsageInsertCannotDuplicateEitherRecordInBothProtocols() = runBlocking {
+        newSingleThreadContext("completed-save-pause-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                for (protocol in listOf("openai", "anthropic")) {
+                    val usageInserted = CompletableDeferred<Unit>()
+                    val releaseUsageReturn = CompletableDeferred<Unit>()
+                    val completeReply = "合成完整回复唯一标识Q31"
+                    Endpoint { socket, _ ->
+                        socket.response("200 OK", syntheticStreamResponse(protocol, completeReply), "text/event-stream")
+                    }.use { endpoint -> Fixture(afterUsageInsert = { stat ->
+                        if (stat.requestKind == "chat" && stat.success && stat.completionStatus == "completed") {
+                            // The actual Room insert has returned, so reads remain available while
+                            // the repository is still between successful persistence and onComplete.
+                            usageInserted.complete(Unit)
+                            releaseUsageReturn.await()
+                        }
+                    }).use { f ->
+                        f.enableViewModel()
+                        val (_, id) = f.config(endpoint.url, protocol)
+                        val vm = ChatViewModel(id)
+                        var generation: Job? = null
+                        try {
+                            withTimeout(5000) {
+                                while (vm.currentModelOption.value == null || vm.contextUsage.value.usage == null) delay(10)
+                            }
+                            withContext(Dispatchers.Main) { vm.sendMessage("合成成功保存后暂停竞态") }
+                            withTimeout(5000) { usageInserted.await() }
+                            val session = ChatGenerationManager.getSession(id)!!
+                            val runningGeneration = session.generationJob!!
+                            generation = runningGeneration
+                            assertTrue("成功入库前必须已领取会话唯一保存权", session.isMessageSaved.get())
+                            assertTrue("门闩必须位于完成回调前，确保暂停窗口稳定存在", session.isGenerating.value)
+                            assertEquals(completeReply, f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }.content)
+                            assertEquals(1, f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).size)
+
+                            withContext(Dispatchers.Main) { vm.stopGeneration() }
+                            assertNull(ChatGenerationManager.getSession(id))
+                            assertFalse(vm.isGenerating.value)
+                            // Pause cannot claim another save while the successful callback is held.
+                            assertEquals(listOf(completeReply), f.db.messageDao().getMessagesList(id)
+                                .filter { it.role == "assistant" }.map { it.content })
+                            releaseUsageReturn.complete(Unit)
+                            withTimeout(5000) { runningGeneration.join() }
+
+                            val replies = f.db.messageDao().getMessagesList(id).filter { it.role == "assistant" }
+                            assertEquals("正常完成与暂停竞争时只能保留一条完整回复", listOf(completeReply), replies.map { it.content })
+                            assertFalse(replies.single().content.contains("生成已停止"))
+                            assertEquals("实际请求只能发出一次", 1, endpoint.payloads.size)
+                            val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+                            assertEquals("已完成统计返回时取消也不能再补记一次取消调用", 1, stats.size)
+                            assertTrue(stats.single().success)
+                            assertEquals("chat", stats.single().requestKind)
+                            assertEquals("completed", stats.single().completionStatus)
+                            assertEquals("", vm.currentResponse.value)
+                            assertEquals("", vm.currentThinking.value)
+                            assertNull(vm.error.value)
+                            assertNull(vm.reconnectStatus.value)
+                        } finally {
+                            releaseUsageReturn.complete(Unit)
+                            withContext(Dispatchers.Main) { vm.stopGeneration() }
+                            generation?.cancelAndJoin()
+                            vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                            ChatGenerationManager.cancelSession(id)
+                        }
+                    } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
     }
 }

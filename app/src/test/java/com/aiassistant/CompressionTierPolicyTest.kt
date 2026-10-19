@@ -11,6 +11,17 @@ import org.junit.Test
 class CompressionTierPolicyTest {
 
     @Test
+    fun stoppedPlaceholderIsExcludedButPartialReplyAndQuotedStatusRemainContext() {
+        for (placeholder in listOf("生成已停止", "回复已停止 (用户已暂停)", "*(思考已停止，回复已暂停)*",
+            "回复已停止 (用户已暂停)\n\n【连接异常信息记录】：\n• 合成旧错误")) {
+            assertTrue(ChatContextAssemblyHelper.isErrorPlaceholderMessage(placeholder))
+        }
+        assertFalse(ChatContextAssemblyHelper.isErrorPlaceholderMessage("合成正文\n\n*(生成已停止)*"))
+        assertFalse(ChatContextAssemblyHelper.isErrorPlaceholderMessage("她问：生成已停止是什么意思？"))
+        assertFalse(ChatContextAssemblyHelper.isErrorPlaceholderMessage("生成已停止以后，记录仍保留。"))
+    }
+
+    @Test
     fun testEvaluateAutoUpgrade_whenDisabled_returnsNull() {
         val res = CompressionTierPolicy.evaluateAutoUpgrade(
             currentTier = CompressionTier.L0,

@@ -55,6 +55,7 @@ import com.aiassistant.utils.AtemporalSettingItem
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -1750,199 +1751,135 @@ fun ChatScreen(
                     }
                 }
 
-                error?.let { errorMsg ->
-                    Spacer(modifier = Modifier.height(6.dp))
-                    // P1-2③ 横幅登场：MutableTransitionState 初值 false→true，首次组合即播滑入+淡入
-                    AnimatedVisibility(
-                        visibleState = remember {
-                            androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true }
-                        },
-                        // A5：reduced motion 时横幅直接呈现（功能信息保留，装饰动画短路）
-                        enter = if (com.aiassistant.ui.theme.rememberReducedMotion()) {
-                            androidx.compose.animation.EnterTransition.None
-                        } else {
-                            slideInVertically(
-                                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec<androidx.compose.ui.unit.IntOffset>(com.aiassistant.ui.theme.EchoMotion.Duration.standard),
-                                initialOffsetY = { -it }
-                            ) + fadeIn(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.standard))
-                        },
-                        exit = if (com.aiassistant.ui.theme.rememberReducedMotion()) {
-                            androidx.compose.animation.ExitTransition.None
-                        } else {
-                            shrinkVertically(
-                                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)
-                            ) + fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
-                        }
-                    ) {
-                        val errorShape = RoundedCornerShape(22.dp)
-                        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                        val errorSemantic = rememberEchoSemanticColors().error
-                        val errorTint = errorSemantic.container.copy(alpha = if (isDark) 0.88f else 0.92f)
-                        val errorBorder = errorSemantic.border.copy(alpha = if (isDark) 0.35f else 0.65f)
-                        val errorContentColor = errorSemantic.onContainer
+                TransientChatBanner(bannerKey = "error", message = error) { errorMsg ->
+                    val errorShape = RoundedCornerShape(22.dp)
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    val errorSemantic = rememberEchoSemanticColors().error
+                    val errorTint = errorSemantic.container.copy(alpha = if (isDark) 0.88f else 0.92f)
+                    val errorBorder = errorSemantic.border.copy(alpha = if (isDark) 0.35f else 0.65f)
+                    val errorContentColor = errorSemantic.onContainer
 
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .echoHazePanel(
-                                    hazeState = hazeState,
-                                    shape = errorShape,
-                                    tint = errorTint,
-                                    blurRadius = 16.dp,
-                                    highlightAlpha = 0.025f
-                                ),
-                            shape = errorShape,
-                            color = Color.Transparent,
-                            contentColor = errorContentColor,
-                            border = BorderStroke(1.dp, errorBorder),
-                            tonalElevation = 0.dp,
-                            shadowElevation = 0.dp
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = errorShape,
+                        color = errorTint,
+                        contentColor = errorContentColor,
+                        border = BorderStroke(1.dp, errorBorder),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Icon(
+                                Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = errorSemantic.main,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = errorMsg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = errorContentColor,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.clearError() },
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.ErrorOutline,
-                                    contentDescription = null,
-                                    tint = errorSemantic.main,
-                                    modifier = Modifier.size(20.dp)
+                                    Icons.Default.Close,
+                                    contentDescription = "关闭",
+                                    tint = errorContentColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = errorMsg,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = errorContentColor,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = { viewModel.clearError() },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "关闭",
-                                        tint = errorContentColor.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
                             }
                         }
                     }
                 }
 
-                contextUsage.statusMessage?.let { statusMsg ->
-                    Spacer(modifier = Modifier.height(6.dp))
-                    // P1-2③ 横幅登场：MutableTransitionState 初值 false→true，首次组合即播滑入+淡入
-                    AnimatedVisibility(
-                        visibleState = remember {
-                            androidx.compose.animation.core.MutableTransitionState(false).apply { targetState = true }
-                        },
-                        // A5：reduced motion 时横幅直接呈现（功能信息保留，装饰动画短路）
-                        enter = if (com.aiassistant.ui.theme.rememberReducedMotion()) {
-                            androidx.compose.animation.EnterTransition.None
-                        } else {
-                            slideInVertically(
-                                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec<androidx.compose.ui.unit.IntOffset>(com.aiassistant.ui.theme.EchoMotion.Duration.standard),
-                                initialOffsetY = { -it }
-                            ) + fadeIn(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.standard))
-                        },
-                        exit = if (com.aiassistant.ui.theme.rememberReducedMotion()) {
-                            androidx.compose.animation.ExitTransition.None
-                        } else {
-                            shrinkVertically(
-                                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)
-                            ) + fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
-                        }
-                    ) {
-                        val isWarning = statusMsg.startsWith("⚠️")
-                        val isSuccess = statusMsg.startsWith("✅")
-                        val infoShape = RoundedCornerShape(22.dp)
-                        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                        val semantic = rememberEchoSemanticColors()
-                        val statusGroup = when {
-                            isWarning -> semantic.warning
-                            isSuccess -> semantic.success
-                            else -> semantic.info
-                        }
-                        val tintColor = statusGroup.container.copy(alpha = if (isDark) 0.89f else 0.92f)
-                        val borderColor = statusGroup.border.copy(alpha = if (isDark) 0.40f else 0.70f)
-                        val bannerContentColor = statusGroup.onContainer
+                TransientChatBanner(bannerKey = "context_status", message = contextUsage.statusMessage) { statusMsg ->
+                    val isWarning = statusMsg.startsWith("⚠️")
+                    val isSuccess = statusMsg.startsWith("✅")
+                    val infoShape = RoundedCornerShape(22.dp)
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    val semantic = rememberEchoSemanticColors()
+                    val statusGroup = when {
+                        isWarning -> semantic.warning
+                        isSuccess -> semantic.success
+                        else -> semantic.info
+                    }
+                    val tintColor = statusGroup.container.copy(alpha = if (isDark) 0.89f else 0.92f)
+                    val borderColor = statusGroup.border.copy(alpha = if (isDark) 0.40f else 0.70f)
+                    val bannerContentColor = statusGroup.onContainer
 
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .echoHazePanel(
-                                    hazeState = hazeState,
-                                    shape = infoShape,
-                                    tint = tintColor,
-                                    blurRadius = 16.dp,
-                                    highlightAlpha = 0.025f
-                                ),
-                            shape = infoShape,
-                            color = Color.Transparent,
-                            contentColor = bannerContentColor,
-                            border = BorderStroke(1.dp, borderColor),
-                            tonalElevation = 0.dp,
-                            shadowElevation = 0.dp
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = infoShape,
+                        color = tintColor,
+                        contentColor = bannerContentColor,
+                        border = BorderStroke(1.dp, borderColor),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (contextUsage.isCompressing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = bannerContentColor
-                                    )
-                                } else {
-                                    Icon(
-                                        if (isWarning) Icons.Default.Warning else if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = bannerContentColor,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = statusMsg,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = bannerContentColor,
-                                    modifier = Modifier.weight(1f)
+                            if (contextUsage.isCompressing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = bannerContentColor
                                 )
-                                if (contextUsage.pendingAutoTier != null) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = { viewModel.applyPendingAutoCompression() },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.heightIn(min = 36.dp)
-                                    ) {
-                                        Text("立即压缩", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    TextButton(
-                                        onClick = { viewModel.dismissPendingAutoCompression() },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        modifier = Modifier.heightIn(min = 36.dp)
-                                    ) {
-                                        Text("忽略", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                }
-                                IconButton(
-                                    onClick = { viewModel.clearContextStatusMessage() },
-                                    modifier = Modifier.size(36.dp)
+                            } else {
+                                Icon(
+                                    if (isWarning) Icons.Default.Warning else if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = bannerContentColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = statusMsg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = bannerContentColor,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (contextUsage.pendingAutoTier != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { viewModel.applyPendingAutoCompression() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.heightIn(min = 36.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "关闭",
-                                        tint = bannerContentColor.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Text("立即压缩", style = MaterialTheme.typography.labelSmall)
                                 }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                TextButton(
+                                    onClick = { viewModel.dismissPendingAutoCompression() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.heightIn(min = 36.dp)
+                                ) {
+                                    Text("忽略", style = MaterialTheme.typography.labelSmall)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            IconButton(
+                                onClick = { viewModel.clearContextStatusMessage() },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "关闭",
+                                    tint = bannerContentColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }
@@ -2845,5 +2782,48 @@ fun ChatScreen(
                 }
             }
         )
+    }
+}
+
+/** 提示的底色与文字一起进退；保留退场文本，避免消息置空时直接卸载退出动画。 */
+@Composable
+private fun TransientChatBanner(
+    bannerKey: String,
+    message: String?,
+    content: @Composable (String) -> Unit
+) {
+    val currentMessage = message?.takeIf { it.isNotBlank() }
+    val visibleState = remember(bannerKey) { MutableTransitionState(false) }
+    visibleState.targetState = currentMessage != null
+    var retainedMessage by remember(bannerKey) { mutableStateOf<String?>(null) }
+    if (currentMessage != null) {
+        SideEffect { retainedMessage = currentMessage }
+    }
+    val displayedMessage = currentMessage ?: retainedMessage
+    val reducedMotion = com.aiassistant.ui.theme.rememberReducedMotion()
+
+    AnimatedVisibility(
+        visibleState = visibleState,
+        modifier = Modifier.clipToBounds(),
+        enter = if (reducedMotion) {
+            EnterTransition.None
+        } else {
+            slideInVertically(
+                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.standard),
+                initialOffsetY = { -it }
+            ) + fadeIn(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.standard))
+        },
+        exit = if (reducedMotion) {
+            ExitTransition.None
+        } else {
+            shrinkVertically(
+                animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)
+            ) + fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
+        }
+    ) {
+        Column {
+            Spacer(modifier = Modifier.height(6.dp))
+            displayedMessage?.let { content(it) }
+        }
     }
 }

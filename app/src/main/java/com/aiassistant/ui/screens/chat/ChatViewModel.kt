@@ -247,7 +247,6 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val storySettingsSaveMutex = Mutex()
     private var isMessageSaved = false
     @Volatile private var isUserStopping = false
-    private val currentKeyAttemptErrors = mutableListOf<String>()
     private var isPrivateConversation = false
     private var privateExitHandled = false
 
@@ -289,47 +288,55 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             applyGeneratingAnchor(activeSession.anchorUserMessageId, activeSession.anchorUserGroupId)
             // v2.6.8 需求 4：恢复会话级的实时 Key 报错明细与上下文回退待确认提示
             // （提示挂在会话上，用户离开后重进仍能应答，等待中的请求不会被永久挂起）
-            currentKeyAttemptErrors.clear()
-            currentKeyAttemptErrors.addAll(activeSession.keyAttemptErrors.value)
             _keyAttemptErrors.value = activeSession.keyAttemptErrors.value
 
             viewModelScope.launch {
                 activeSession.currentResponse.collect { res ->
-                    _currentResponse.value = res
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _currentResponse.value = res
                 }
             }
             viewModelScope.launch {
                 activeSession.currentThinking.collect { thk ->
-                    _currentThinking.value = thk
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _currentThinking.value = thk
                 }
             }
             viewModelScope.launch {
                 activeSession.reconnectStatus.collect { st ->
-                    _reconnectStatus.value = st
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _reconnectStatus.value = st
                 }
             }
             viewModelScope.launch {
                 activeSession.error.collect { err ->
-                    _error.value = err
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _error.value = err
                 }
             }
             viewModelScope.launch {
                 activeSession.keyAttemptErrors.collect { errs ->
-                    _keyAttemptErrors.value = errs
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _keyAttemptErrors.value = errs
                 }
             }
             viewModelScope.launch {
-                activeSession.pendingReplyDirection.collect { _pendingReplyDirection.value = it }
+                activeSession.pendingReplyDirection.collect {
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _pendingReplyDirection.value = it
+                }
             }
             viewModelScope.launch {
                 activeSession.pendingContextFallbackPrompt.collect { prompt ->
-                    _pendingContextFallbackPrompt.value = prompt
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession)) _pendingContextFallbackPrompt.value = prompt
                 }
             }
             viewModelScope.launch {
                 activeSession.isGenerating.collect { gen ->
-                    _isGenerating.value = gen
-                    if (!gen) {
+                    if (ChatGenerationManager.isCurrentSession(conversationId, activeSession) ||
+                        (!gen && ChatGenerationManager.getSession(conversationId) == null)) {
+                        _isGenerating.value = gen
+                    }
+                    if (!gen && ChatGenerationManager.getSession(conversationId) == null) {
+                        _currentResponse.value = ""
+                        _currentThinking.value = ""
+                        _reconnectStatus.value = null
+                        _error.value = null
+                        _keyAttemptErrors.value = emptyList()
                         loadConversation()
                     }
                 }
@@ -1300,7 +1307,6 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             _currentThinking.value = ""
             _error.value = null
             _reconnectStatus.value = null
-            currentKeyAttemptErrors.clear()
             _keyAttemptErrors.value = emptyList()
             session._keyAttemptErrors.value = emptyList()
             val currentCallingModel = selectedOption.modelName
@@ -1410,7 +1416,16 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         else if (currentRoleplaySession != null) currentRoleplaySession.activeWorldBookIds else conversation?.activeWorldBookIds,
                     overrideSystemPrompt = true,
                     systemPromptOverride = effectiveSystemPrompt,
-                    contextWindowOverrideTokens = settings?.contextWindowTokens ?: conversation?.contextWindowTokens
+                    contextWindowOverrideTokens = settings?.contextWindowTokens ?: conversation?.contextWindowTokens,
+                    onBeforeAssistantSave = {
+                        ChatGenerationManager.isCurrentSession(conversationId, session) &&
+                            session.isMessageSaved.compareAndSet(false, true)
+                    },
+                    onAssistantSaveFailure = {
+                        if (ChatGenerationManager.isCurrentSession(conversationId, session) && session.isGenerating.value) {
+                            session.isMessageSaved.compareAndSet(true, false)
+                        }
+                    }
                 )
 
                 val directionEnabled = settings?.enableReplyDirections ?: conversation?.enableReplyDirections ?: false
@@ -1430,7 +1445,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                                     effectiveConfig, conversationId, modelUserContent, requestOptions, assistantVariantGroupId)
                                 directions = repository.generateReplyDirections(effectiveConfig, conversationId, modelUserContent,
                                     attachments, requestOptions.copy(preparedDirectionContext = prepared), count,
-                                    onStatus = { session.setStatus(it); _reconnectStatus.value = it })
+                                    onStatus = { session.setStatus(it); publishGenerationState(session) })
                             }
                         } catch (e: Exception) {
                             if (e is CancellationException) throw e
@@ -1469,135 +1484,111 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         assistantVariantGroupId = assistantVariantGroupId,
                         assistantVariantIndex = assistantVariantIndex,
                         onToken = { token ->
-                            // 上一轮已由新一轮取代时（isCurrentSession=false），其残留回调不得回写 ViewModel 状态，
-                            // 否则旧轮次的报错/内容会污染新一轮显示（v2.6.8 需求 4 同款守卫，覆盖流式全程）
-                            if (ChatGenerationManager.isCurrentSession(conversationId, session)) {
-                                // 连接已恢复（首个正文 token 到达）：清掉过期的实时失败明细，避免成功流式后残留
-                                if (token.isNotEmpty() && session.currentResponse.value.isBlank() && _keyAttemptErrors.value.isNotEmpty()) {
-                                    _keyAttemptErrors.value = emptyList()
-                                    session._keyAttemptErrors.value = emptyList()
-                                    session.setAttemptError(null)
-                                    _error.value = null
-                                }
-                                session.appendResponse(token)
-                                _currentResponse.value = session.currentResponse.value
-                            }
+                            session.appendResponse(token)
+                            publishGenerationState(session)
                         },
                         onThinkingToken = { token ->
-                            if (ChatGenerationManager.isCurrentSession(conversationId, session)) {
-                                // 思考 token 同样代表连接已建立
-                                if (token.isNotEmpty() && session.currentThinking.value.isBlank() && _keyAttemptErrors.value.isNotEmpty()) {
-                                    _keyAttemptErrors.value = emptyList()
-                                    session._keyAttemptErrors.value = emptyList()
-                                    session.setAttemptError(null)
-                                    _error.value = null
-                                }
-                                session.appendThinking(token)
-                                _currentThinking.value = session.currentThinking.value
-                            }
+                            session.appendThinking(token)
+                            publishGenerationState(session)
                         },
                         onStatusUpdate = { status ->
-                            if (ChatGenerationManager.isCurrentSession(conversationId, session)) {
-                                session.setStatus(status)
-                                _reconnectStatus.value = status
-                            }
+                            session.setStatus(status)
+                            publishGenerationState(session)
                         },
                         onKeyAttemptError = { keyIndex, keyMasked, errorMsg ->
-                            // v2.6.8 需求 4：明细同时写入 Application 级会话，重进会话后仍可恢复显示
-                            // （用户暂停时也能完整写进回复正文）
-                            if (ChatGenerationManager.isCurrentSession(conversationId, session)) {
-                                val line = "Key #$keyIndex ($keyMasked)：$errorMsg"
-                                currentKeyAttemptErrors.add(line)
-                                session._keyAttemptErrors.update { it + line }
-                                _keyAttemptErrors.value = session.keyAttemptErrors.value
-                                session.setAttemptError(errorMsg)
-                                _error.value = errorMsg
-                            }
+                            // 即时提示与本轮尝试历史归属会话，均不混入模型正文。
+                            val line = "Key #$keyIndex ($keyMasked)：$errorMsg"
+                            session.recordAttemptError(line, errorMsg)
+                            publishGenerationState(session)
                         },
                         onResetBuffer = {
-                            if (ChatGenerationManager.isCurrentSession(conversationId, session)) {
-                                session.resetBuffer()
-                                _currentResponse.value = ""
-                                _currentThinking.value = ""
-                            }
+                            session.resetBuffer()
+                            publishGenerationState(session)
                         },
                         onComplete = { replyContent, _, _ ->
-                            slowTimeoutJob.cancel()
-                            session.isMessageSaved.compareAndSet(false, true)
-                            session.markFinished()
-                            // v2.6.8 需求 4：按会话身份移除并判定"这一轮是否仍是活跃轮次"——
-                            // 用户停止后立刻重发、或同一会话存在两个页面实例时，上一轮的收尾
-                            // 不得清空新一轮的流式状态与生成锚点，也不得把新会话从表中误删
-                            val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
-                            ChatGenerationManager.removeSession(conversationId, session)
-                            if (isStillCurrentRound) {
-                                isMessageSaved = true
-                                _isGenerating.value = false
-                                _generatingAnchor.value = null
-                                activeAssistantVariantGroupId = null
-                                activeAssistantVariantIndex = 1
-                                val savedReply = replyContent.ifBlank { session.currentResponse.value.ifBlank { _currentResponse.value } }
-                                _currentResponse.value = ""
-                                _currentThinking.value = ""
-                                _reconnectStatus.value = null
-                                autoNameIfNeeded()
-                                // 重新同步会话状态与上下文使用情况（后台降级自动同步）
-                                refreshContextUsage(evaluateAuto = true)
-                                evaluateAutoTimelineUpdate(content, savedReply, selectedOption,
-                                    settings?.enableSessionMemory ?: conversation?.enableSessionMemory,
-                                    settings?.enableTimeline ?: conversation?.enableTimeline ?: true)
-                                checkAndDispatchQueue()
+                            AiAssistantApp.instance.applicationScope.launch(Dispatchers.Main.immediate) {
+                                slowTimeoutJob.cancel()
+                                session.isMessageSaved.compareAndSet(false, true)
+                                session.clearAttemptStatus()
+                                session.markFinished()
+                                // v2.6.8 需求 4：按会话身份移除并判定"这一轮是否仍是活跃轮次"——
+                                // 用户停止后立刻重发、或同一会话存在两个页面实例时，上一轮的收尾
+                                // 不得清空新一轮的流式状态与生成锚点，也不得把新会话从表中误删
+                                val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
+                                ChatGenerationManager.removeSession(conversationId, session)
+                                if (isStillCurrentRound) {
+                                    isMessageSaved = true
+                                    _isGenerating.value = false
+                                    _generatingAnchor.value = null
+                                    activeAssistantVariantGroupId = null
+                                    activeAssistantVariantIndex = 1
+                                    val savedReply = replyContent.ifBlank { session.currentResponse.value.ifBlank { _currentResponse.value } }
+                                    _currentResponse.value = ""
+                                    _currentThinking.value = ""
+                                    _reconnectStatus.value = null
+                                    _error.value = null
+                                    _keyAttemptErrors.value = emptyList()
+                                    autoNameIfNeeded()
+                                    // 重新同步会话状态与上下文使用情况（后台降级自动同步）
+                                    refreshContextUsage(evaluateAuto = true)
+                                    evaluateAutoTimelineUpdate(content, savedReply, selectedOption,
+                                        settings?.enableSessionMemory ?: conversation?.enableSessionMemory,
+                                        settings?.enableTimeline ?: conversation?.enableTimeline ?: true)
+                                    checkAndDispatchQueue()
+                                }
                             }
                         },
                         onError = { errorMsg ->
-                            slowTimeoutJob.cancel()
-                            val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
-                            if (isStillCurrentRound) {
-                                _reconnectStatus.value = null
-                                refreshContextUsage()
-                            }
-                            val partialResponse = session.currentResponse.value.trim()
-                            val partialThinking = session.currentThinking.value.trim().ifEmpty { null }
-                            val hasPartialContent = partialResponse.isNotBlank() || partialThinking != null
+                            AiAssistantApp.instance.applicationScope.launch(Dispatchers.Main.immediate) {
+                                slowTimeoutJob.cancel()
+                                val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
+                                if (isStillCurrentRound) {
+                                    _reconnectStatus.value = null
+                                    refreshContextUsage()
+                                }
+                                val partialResponse = session.currentResponse.value.trim()
+                                val partialThinking = session.currentThinking.value.trim().ifEmpty { null }
+                                val hasPartialContent = partialResponse.isNotBlank() || partialThinking != null
 
-                            if (hasPartialContent) {
-                                // 需求 3：只要模型已经输出思考或部分回复，不管是否中断/取消/关闭连接，必须 100% 入库保存
-                                // （仅限当前轮次：被新一轮取代的旧轮次，其报错/残文不得再写进会话，
-                                // 否则表现为"重新生成后旧报错直接弹出"）
-                                if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
+                                if (hasPartialContent) {
+                                    // 需求 3：只要模型已经输出思考或部分回复，不管是否中断/取消/关闭连接，必须 100% 入库保存
+                                    // （仅限当前轮次：被新一轮取代的旧轮次，其报错/残文不得再写进会话，
+                                    // 否则表现为"重新生成后旧报错直接弹出"）
+                                    if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
+                                        isMessageSaved = true
+                                        session.setError(errorMsg)
+                                        saveErrorReply(errorMsg, session, isUserStopping)
+                                    }
+                                    session.markFinished()
+                                    ChatGenerationManager.removeSession(conversationId, session)
+                                    if (isStillCurrentRound) {
+                                        _isGenerating.value = false
+                                        _generatingAnchor.value = null
+                                        _currentResponse.value = ""
+                                        _currentThinking.value = ""
+                                    }
+                                } else if (isUserStopping || errorMsg.contains("Socket closed", ignoreCase = true) || errorMsg.contains("Canceled", ignoreCase = true)) {
+                                    session.markFinished()
+                                    ChatGenerationManager.removeSession(conversationId, session)
+                                    if (isStillCurrentRound) {
+                                        _isGenerating.value = false
+                                        _generatingAnchor.value = null
+                                        _currentResponse.value = ""
+                                        _currentThinking.value = ""
+                                    }
+                                } else if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
                                     isMessageSaved = true
                                     session.setError(errorMsg)
-                                    saveErrorReply(errorMsg, session, isUserStopping)
-                                }
-                                session.markFinished()
-                                ChatGenerationManager.removeSession(conversationId, session)
-                                if (isStillCurrentRound) {
-                                    _isGenerating.value = false
-                                    _generatingAnchor.value = null
-                                    _currentResponse.value = ""
-                                    _currentThinking.value = ""
-                                }
-                            } else if (isUserStopping || errorMsg.contains("Socket closed", ignoreCase = true) || errorMsg.contains("Canceled", ignoreCase = true)) {
-                                session.markFinished()
-                                ChatGenerationManager.removeSession(conversationId, session)
-                                if (isStillCurrentRound) {
-                                    _isGenerating.value = false
-                                    _generatingAnchor.value = null
-                                    _currentResponse.value = ""
-                                    _currentThinking.value = ""
-                                }
-                            } else if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
-                                isMessageSaved = true
-                                session.setError(errorMsg)
-                                saveErrorReply(errorMsg, session, false)
-                                session.markFinished()
-                                ChatGenerationManager.removeSession(conversationId, session)
-                                if (isStillCurrentRound) {
-                                    _isGenerating.value = false
-                                    _generatingAnchor.value = null
-                                    _error.value = errorMsg
-                                    _currentResponse.value = ""
-                                    _currentThinking.value = ""
+                                    saveErrorReply(errorMsg, session, false)
+                                    session.markFinished()
+                                    ChatGenerationManager.removeSession(conversationId, session)
+                                    if (isStillCurrentRound) {
+                                        _isGenerating.value = false
+                                        _generatingAnchor.value = null
+                                        _error.value = errorMsg
+                                        _currentResponse.value = ""
+                                        _currentThinking.value = ""
+                                    }
                                 }
                             }
                         },
@@ -1627,59 +1618,61 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     )
                 }
             } catch (e: Exception) {
-                slowTimeoutJob.cancel()
-                val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
-                if (isStillCurrentRound) {
-                    _reconnectStatus.value = null
-                }
-                val partialResponse = session.currentResponse.value.trim()
-                val partialThinking = session.currentThinking.value.trim().ifEmpty { null }
-                val hasPartialContent = partialResponse.isNotBlank() || partialThinking != null
-                val errorMsg = e.message ?: "未知错误"
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    slowTimeoutJob.cancel()
+                    val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
+                    if (isStillCurrentRound) {
+                        _reconnectStatus.value = null
+                    }
+                    val partialResponse = session.currentResponse.value.trim()
+                    val partialThinking = session.currentThinking.value.trim().ifEmpty { null }
+                    val hasPartialContent = partialResponse.isNotBlank() || partialThinking != null
+                    val errorMsg = e.message ?: "未知错误"
 
-                if (hasPartialContent) {
-                    // 需求 3：异常分支同样 100% 抢救保存思考与正文（仅限当前轮次，旧轮次残文不得写回会话）
+                    if (hasPartialContent) {
+                        // 需求 3：异常分支同样 100% 抢救保存思考与正文（仅限当前轮次，旧轮次残文不得写回会话）
+                        if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
+                            isMessageSaved = true
+                            session.setError(errorMsg)
+                            saveErrorReply(errorMsg, session, isUserStopping)
+                        }
+                        session.markFinished()
+                        ChatGenerationManager.removeSession(conversationId, session)
+                        if (isStillCurrentRound) {
+                            _isGenerating.value = false
+                            _generatingAnchor.value = null
+                            _currentResponse.value = ""
+                            _currentThinking.value = ""
+                        }
+                        return@withContext
+                    }
+
+                    if (isUserStopping || e is CancellationException || e.message?.contains("Socket closed", ignoreCase = true) == true || e.message?.contains("Canceled", ignoreCase = true) == true) {
+                        session.markFinished()
+                        ChatGenerationManager.removeSession(conversationId, session)
+                        if (isStillCurrentRound) {
+                            _isGenerating.value = false
+                            _generatingAnchor.value = null
+                            _currentResponse.value = ""
+                            _currentThinking.value = ""
+                        }
+                        return@withContext
+                    }
+                    if (isStillCurrentRound) {
+                        _isGenerating.value = false
+                        _generatingAnchor.value = null
+                    }
                     if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
                         isMessageSaved = true
                         session.setError(errorMsg)
-                        saveErrorReply(errorMsg, session, isUserStopping)
-                    }
-                    session.markFinished()
-                    ChatGenerationManager.removeSession(conversationId, session)
-                    if (isStillCurrentRound) {
-                        _isGenerating.value = false
-                        _generatingAnchor.value = null
-                        _currentResponse.value = ""
-                        _currentThinking.value = ""
-                    }
-                    return@launch
-                }
-
-                if (isUserStopping || e is CancellationException || e.message?.contains("Socket closed", ignoreCase = true) == true || e.message?.contains("Canceled", ignoreCase = true) == true) {
-                    session.markFinished()
-                    ChatGenerationManager.removeSession(conversationId, session)
-                    if (isStillCurrentRound) {
-                        _isGenerating.value = false
-                        _generatingAnchor.value = null
-                        _currentResponse.value = ""
-                        _currentThinking.value = ""
-                    }
-                    return@launch
-                }
-                if (isStillCurrentRound) {
-                    _isGenerating.value = false
-                    _generatingAnchor.value = null
-                }
-                if (isStillCurrentRound && session.isMessageSaved.compareAndSet(false, true)) {
-                    isMessageSaved = true
-                    session.setError(errorMsg)
-                    saveErrorReply(errorMsg, session, false)
-                    session.markFinished()
-                    ChatGenerationManager.removeSession(conversationId, session)
-                    if (isStillCurrentRound) {
-                        _error.value = errorMsg
-                        _currentResponse.value = ""
-                        _currentThinking.value = ""
+                        saveErrorReply(errorMsg, session, false)
+                        session.markFinished()
+                        ChatGenerationManager.removeSession(conversationId, session)
+                        if (isStillCurrentRound) {
+                            _error.value = errorMsg
+                            _currentResponse.value = ""
+                            _currentThinking.value = ""
+                        }
                     }
                 }
             } finally {
@@ -1695,6 +1688,22 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 }
             }
         }
+    }
+
+    private fun publishGenerationState(session: ChatGenerationManager.ActiveSession) {
+        // Session 先保存真实输出，UI 回写在主线程重新核验身份，避免暂停/重发后旧回调复活缓冲。
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            if (!ChatGenerationManager.isCurrentSession(conversationId, session) || !session.isGenerating.value) return@launch
+            _currentResponse.value = session.currentResponse.value
+            _currentThinking.value = session.currentThinking.value
+            syncGenerationAttemptStatus(session)
+        }
+    }
+
+    private fun syncGenerationAttemptStatus(session: ChatGenerationManager.ActiveSession) {
+        _error.value = session.error.value
+        _reconnectStatus.value = session.reconnectStatus.value
+        _keyAttemptErrors.value = session.keyAttemptErrors.value
     }
 
     private fun saveErrorReply(
@@ -1714,19 +1723,12 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         val expectedMutationEpoch = ChatGenerationManager.mutationEpoch(conversationId)
         AiAssistantApp.instance.applicationScope.launch {
             val content = when {
+                isUserStopping -> GenerationUiStateRules.stoppedReplyContent(partialResponse)
                 partialResponse.isNotBlank() -> {
-                    if (isUserStopping) {
-                        "$partialResponse\n\n*(回复已被暂停)*"
-                    } else {
-                        "$partialResponse\n\n*(输出已被中断: $errorMsg)*"
-                    }
+                    "$partialResponse\n\n*(输出已被中断: $errorMsg)*"
                 }
                 !partialThinking.isNullOrBlank() -> {
-                    if (isUserStopping) {
-                        "*(思考已停止，回复已暂停)*"
-                    } else {
-                        "*(思考已输出，回复已被中断: $errorMsg)*"
-                    }
+                    "*(思考已输出，回复已被中断: $errorMsg)*"
                 }
                 else -> {
                     buildString {
@@ -1754,80 +1756,45 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun stopGeneration() {
+        val session = ChatGenerationManager.getSession(conversationId)
+        if (session == null && !_isGenerating.value) return
         isUserStopping = true
+        val shouldSave = session?.isMessageSaved?.compareAndSet(false, true) ?: !isMessageSaved
+        // 先冻结本轮缓冲并取得保存权，再中断网络，取消回调不得抢写错误消息。
+        session?.markFinished()
+        session?.clearAttemptStatus()
+        val responseToSave = (session?.currentResponse?.value ?: _currentResponse.value).trim()
+        val thinkingToSave = (session?.currentThinking?.value ?: _currentThinking.value).trim().ifEmpty { null }
+        val variantGroupId = session?.assistantVariantGroupId ?: activeAssistantVariantGroupId
+        val variantIndex = session?.assistantVariantIndex ?: activeAssistantVariantIndex
+        val savedModelName = session?.callingModel?.value?.ifBlank { null }
+            ?: _currentModel.value?.ifBlank { null }
+            ?: conversation?.modelName
+        val expectedMutationEpoch = ChatGenerationManager.mutationEpoch(conversationId)
+        val isDirectionPhase = session?.directionPhase == true
+        if (session != null) ChatGenerationManager.removeSession(conversationId, session)
         // v2.6.8 需求 4：待确认提示可能挂在 Application 级会话上（用户离开过再回来），
         // 两处都要应答，避免请求协程继续挂起
         val stopFallbackChoice = com.aiassistant.domain.model.ContextFallbackChoice.IGNORE
         _pendingContextFallbackPrompt.value?.onDecision(stopFallbackChoice)
         _pendingContextFallbackPrompt.value = null
-        ChatGenerationManager.getSession(conversationId)?.answerContextFallbackPrompt(stopFallbackChoice)
+        session?.answerContextFallbackPrompt(stopFallbackChoice)
         repository.cancelActiveRequest(conversationId)
-        generationJob?.cancel(CancellationException("用户暂停生成"))
+        (session?.generationJob ?: generationJob)?.cancel(CancellationException("用户暂停生成"))
         _isGenerating.value = false
         _generatingAnchor.value = null
-
-        val session = ChatGenerationManager.getSession(conversationId)
-        if (session?.directionPhase == true) {
-            session.isMessageSaved.set(true)
-            session.markFinished()
-            ChatGenerationManager.removeSession(conversationId, session)
-            _pendingReplyDirection.value = null
-            _currentResponse.value = ""
-            _currentThinking.value = ""
-            _reconnectStatus.value = null
-            return
-        }
-        val responseToSave = (session?.currentResponse?.value ?: _currentResponse.value).trim()
-        val thinkingToSave = (session?.currentThinking?.value ?: _currentThinking.value).trim().ifEmpty { null }
-        val variantGroupId = session?.assistantVariantGroupId ?: activeAssistantVariantGroupId
-        val variantIndex = session?.assistantVariantIndex ?: activeAssistantVariantIndex
+        _pendingReplyDirection.value = null
+        _currentResponse.value = ""
+        _currentThinking.value = ""
+        _reconnectStatus.value = null
+        _error.value = null
+        _keyAttemptErrors.value = emptyList()
         activeAssistantVariantGroupId = null
         activeAssistantVariantIndex = 1
-
-        val connStatus = (session?.reconnectStatus?.value ?: _reconnectStatus.value)?.takeIf { it.isNotBlank() }
-        val activeError = (session?.error?.value ?: _error.value)?.takeIf { it.isNotBlank() }
-        // v2.6.8 需求 4：Key 尝试报错明细优先取 Application 级会话（重进会话后 ViewModel 本地列表为空，
-        // 若只读本地会丢掉全部明细，写进「回复已暂停」正文的连接异常记录也随之丢失）
-        val keyAttemptErrors = session?.keyAttemptErrors?.value?.takeIf { it.isNotEmpty() }
-            ?: currentKeyAttemptErrors.toList()
-        val hasErrors = keyAttemptErrors.isNotEmpty() || connStatus != null || activeError != null
-
-        val shouldSave = session?.isMessageSaved?.compareAndSet(false, true) ?: !isMessageSaved
         if (shouldSave) {
             isMessageSaved = true
-            session?.markFinished()
-            ChatGenerationManager.removeSession(conversationId)
-            val finalContent = buildString {
-                when {
-                    responseToSave.isNotBlank() -> {
-                        append(responseToSave)
-                        append("\n\n*(回复已被暂停)*")
-                    }
-                    thinkingToSave != null -> {
-                        append("*(思考已停止，回复已暂停)*")
-                    }
-                    else -> {
-                        append("回复已停止 (用户已暂停)")
-                    }
-                }
-
-                if (hasErrors) {
-                    append("\n\n【连接异常信息记录】：")
-                    if (connStatus != null) {
-                        append("\n• 当前状态: $connStatus")
-                    }
-                    if (activeError != null && activeError != connStatus) {
-                        append("\n• 报错详情: $activeError")
-                    }
-                    if (keyAttemptErrors.isNotEmpty()) {
-                        append("\n• 尝试的 Key 报错记录:")
-                        keyAttemptErrors.forEach { append("\n  - $it") }
-                    }
-                }
-            }.trim()
-            val savedModelName = session?.callingModel?.value?.ifBlank { null }
-                ?: _currentModel.value?.ifBlank { null }
-                ?: conversation?.modelName
+            if (isDirectionPhase) return
+            val finalContent = GenerationUiStateRules.stoppedReplyContent(responseToSave)
             AiAssistantApp.instance.applicationScope.launch {
                 val message = Message(
                     conversationId = conversationId,
@@ -1836,38 +1803,12 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     thinkingContent = thinkingToSave,
                     variantGroupId = variantGroupId,
                     variantIndex = variantIndex,
-                    modelName = savedModelName
+                    modelName = savedModelName,
+                    replyDirection = session?.selectedReplyDirection
                 )
-                repository.saveMessage(message)
-            }
-
-            // 使用统计修正（v2.6.7 需求 5e）：本轮出现过报错/重连后用户主动暂停，
-            // 同样属于一次失败的模型调用。此前取消路径完全不写 api_usage_stats，
-            // 失败请求缺失导致成功率虚高。随 shouldSave 的 CAS 保证只补记一次。
-            if (hasErrors) {
-                val failReason = connStatus ?: activeError
-                    ?: keyAttemptErrors.lastOrNull() ?: "连接异常"
-                val statOption = _currentModelOption.value
-                AiAssistantApp.instance.applicationScope.launch {
-                    runCatching {
-                        AiAssistantApp.instance.database.usageStatDao().insertStat(
-                            ApiUsageStat(
-                                apiConfigId = statOption?.apiConfigId ?: apiConfig?.id ?: 0L,
-                                provider = statOption?.provider ?: apiConfig?.provider ?: "unknown",
-                                modelName = statOption?.modelName
-                                    ?: _currentModel.value?.ifBlank { null }
-                                    ?: conversation?.modelName
-                                    ?: "unknown",
-                                success = false,
-                                errorMessage = "用户暂停生成（此前连接报错：${failReason.take(160)}）"
-                            )
-                        )
-                    }
-                }
+                repository.saveMessage(message, expectedMutationEpoch)
             }
         }
-        _currentResponse.value = ""
-        _currentThinking.value = ""
     }
 
     fun translateMessageThinking(message: Message) {
@@ -2196,7 +2137,11 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     fun updateSessionMemory(memory: MemoryItem) {
         viewModelScope.launch {
-            repository.updateMemory(memory.copy(updatedAt = System.currentTimeMillis()))
+            val original = repository.getMemoryById(memory.id)
+            repository.updateMemory(memory.copy(
+                sourceMessageId = original?.sourceMessageId.takeIf { original?.content == memory.content },
+                updatedAt = System.currentTimeMillis()
+            ))
             loadConversation()
         }
     }

@@ -70,12 +70,28 @@ object ChatGenerationManager {
         val pendingContextFallbackPrompt: StateFlow<com.aiassistant.domain.model.ContextFallbackPromptState?> =
             _pendingContextFallbackPrompt.asStateFlow()
 
-        /**
-         * v2.6.8 需求 4：实时 Key 尝试报错明细同样挂在会话上。
-         * 重进会话后明细不再丢失，用户暂停生成时也能把完整 Key 报错记录写进回复正文（避免数据损失）。
-         */
+        /** 当前连接的即时失败提示；连接恢复后清除，不写入模型正文。 */
         val _keyAttemptErrors = MutableStateFlow<List<String>>(emptyList())
         val keyAttemptErrors: StateFlow<List<String>> = _keyAttemptErrors.asStateFlow()
+
+        /** 本轮 Key 尝试历史独立保留，导航重新挂载时仍可读取。 */
+        private val _keyAttemptHistory = MutableStateFlow<List<String>>(emptyList())
+        val keyAttemptHistory: StateFlow<List<String>> = _keyAttemptHistory.asStateFlow()
+
+        @Synchronized
+        fun recordAttemptError(line: String, error: String) {
+            if (!_isGenerating.value) return
+            _keyAttemptHistory.update { it + line }
+            _keyAttemptErrors.update { it + line }
+            _error.value = error
+        }
+
+        @Synchronized
+        fun clearAttemptStatus() {
+            _error.value = null
+            _reconnectStatus.value = null
+            _keyAttemptErrors.value = emptyList()
+        }
 
         /** 应答上下文回退待确认提示：清空会话级状态并唤醒等待中的请求协程 */
         fun answerContextFallbackPrompt(choice: com.aiassistant.domain.model.ContextFallbackChoice) {
@@ -92,22 +108,32 @@ object ChatGenerationManager {
         var anchorUserMessageId: Long? = null
         var anchorUserGroupId: String? = null
 
+        @Synchronized
         fun appendResponse(token: String) {
+            if (!_isGenerating.value || token.isEmpty()) return
+            clearAttemptStatus()
             _isConnecting.value = false
             _currentResponse.update { it + token }
         }
 
+        @Synchronized
         fun appendThinking(token: String) {
+            if (!_isGenerating.value || token.isEmpty()) return
+            clearAttemptStatus()
             _isConnecting.value = false
             _currentThinking.update { it + token }
         }
 
+        @Synchronized
         fun resetBuffer() {
+            if (!_isGenerating.value) return
             _currentResponse.value = ""
             _currentThinking.value = ""
         }
 
+        @Synchronized
         fun setStatus(status: String?) {
+            if (!_isGenerating.value) return
             _reconnectStatus.value = status
         }
 
@@ -122,6 +148,7 @@ object ChatGenerationManager {
             _error.value = err
         }
 
+        @Synchronized
         fun markFinished() {
             _isGenerating.value = false
             _isConnecting.value = false
