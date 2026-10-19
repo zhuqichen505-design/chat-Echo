@@ -129,6 +129,8 @@ data class PersonalizationSettings(
 )
 
 class PersonalizationManager(private val context: Context) {
+    val apiKeyRotationManager = ApiKeyRotationManager(context)
+
     private val prefs = context.applicationContext.getSharedPreferences(
         "personalization_settings",
         Context.MODE_PRIVATE

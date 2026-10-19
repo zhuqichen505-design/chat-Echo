@@ -65,7 +65,9 @@ import com.aiassistant.AiAssistantApp
 import com.aiassistant.BuildConfig
 import com.aiassistant.R
 import com.aiassistant.data.repository.AiRepository
+import com.aiassistant.data.repository.helpers.ApiEndpointHelper
 import com.aiassistant.domain.model.ApiConfig
+import com.aiassistant.domain.model.ApiKeyRotationSettings
 import com.aiassistant.domain.model.NamedApiKey
 import com.aiassistant.domain.model.Conversation
 import com.aiassistant.domain.model.EnvironmentVariable
@@ -144,7 +146,7 @@ fun ApiConfigDialog(
     config: ApiConfig?,
     isSaving: Boolean = false,
     onDismiss: () -> Unit,
-    onSave: (ApiConfig, List<String>, Set<String>, Map<String, String>, Map<String, ModelCustomSettings>, android.net.Uri?, Boolean) -> Unit
+    onSave: (ApiConfig, List<String>, Set<String>, Map<String, String>, Map<String, ModelCustomSettings>, android.net.Uri?, Boolean, ApiKeyRotationSettings) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val repository = AiAssistantApp.instance.repository
@@ -179,6 +181,17 @@ fun ApiConfigDialog(
         mutableStateOf(List(16) { false })
     }
     var apiType by remember { mutableStateOf(config?.apiType ?: "openai") }
+    val rotationManager = AiAssistantApp.instance.personalizationManager.apiKeyRotationManager
+    val rotationAddress = remember(baseUrl, apiType) { runCatching { ApiEndpointHelper.normalizeBaseUrl(baseUrl, apiType) } }
+    val rotationScopeKey = "${apiType.lowercase(java.util.Locale.ROOT)}|${rotationAddress.getOrNull() ?: baseUrl.trim()}"
+    val loadedRotationSettings = remember(config?.id, rotationScopeKey) {
+        runCatching { rotationManager.getSettings(baseUrl, apiType) }
+    }
+    var rotationDraft by remember(config?.id, rotationScopeKey) {
+        mutableStateOf(ApiKeyRotationDraft(loadedRotationSettings.getOrDefault(ApiKeyRotationSettings())))
+    }
+    var resettingKeyHealth by remember(rotationScopeKey) { mutableStateOf(false) }
+    var keyHealthResetFeedback by remember(rotationScopeKey) { mutableStateOf<Pair<Boolean, String>?>(null) }
     var modelName by remember { mutableStateOf(cleanModelName(config?.modelName) ?: "") }
     var availableModels by remember {
         mutableStateOf(parseModelList(config?.availableModels).ifEmpty {
@@ -268,7 +281,7 @@ fun ApiConfigDialog(
 
     EchoGlassDialog(
         hazeState = hazeState,
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSaving) onDismiss() },
         title = { Text(if (config == null) "添加API配置" else "编辑API配置") },
         text = {
             val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
@@ -446,7 +459,7 @@ fun ApiConfigDialog(
                             }
 
                             Text(
-                                text = "提示：可为每个 Key 设置名称或备注，排在前面的 Key 拥有最高调用优先级，根据“模型失败与重试”策略切换后序 Key。",
+                                text = "提示：可为每个 Key 设置名称或备注，拖动调整基础顺序。实际调用还会结合下方轮询、失败降权和冷却设置选择健康 Key。",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                             )
@@ -776,12 +789,36 @@ fun ApiConfigDialog(
                             }
 
                             Text(
-                                text = "💡 每个输入框填写一个独立 Key。亦可将多行或逗号分隔的密钥批量粘贴进任意输入框自动拆分。备用 Key 是否启用及错误重试次数，在“模型失败与重试”中设置。",
+                                text = "💡 每个输入框填写一个独立 Key。亦可将多行或逗号分隔的密钥批量粘贴进任意输入框自动拆分。下方可设置轮询与冷却；备用 Key 总开关及单次错误重试次数，在“模型失败与重试”中设置。",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 2.dp, top = 2.dp)
                             )
                         }
+                    }
+                    item {
+                        ApiKeyRotationSettingsSection(
+                            scopeKey = rotationScopeKey,
+                            draft = rotationDraft,
+                            onDraftChange = { rotationDraft = it },
+                            enabled = !isSaving && loadedRotationSettings.isSuccess,
+                            canResetHealth = rotationAddress.isSuccess,
+                            resettingHealth = resettingKeyHealth,
+                            resetFeedback = keyHealthResetFeedback,
+                            onResetHealth = {
+                                val targetBaseUrl = baseUrl
+                                val targetApiType = apiType
+                                resettingKeyHealth = true
+                                keyHealthResetFeedback = null
+                                scope.launch {
+                                    val success = withContext(Dispatchers.IO) {
+                                        runCatching { rotationManager.resetHealth(targetBaseUrl, targetApiType) }.getOrDefault(false)
+                                    }
+                                    keyHealthResetFeedback = success to if (success) "已清除该地址的 Key 健康记录。" else "重置失败，请重试。"
+                                    resettingKeyHealth = false
+                                }
+                            }
+                        )
                     }
                 }
 
@@ -1250,11 +1287,33 @@ fun ApiConfigDialog(
                     }
                 }
                 }
+                if (rotationDraft.validationMessage != null) {
+                    Text(
+                        text = "轮询设置有无效数字，请到“密钥”页修正后保存：${rotationDraft.validationMessage}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (baseUrl.isNotBlank() && rotationAddress.isFailure) {
+                    Text(
+                        text = rotationAddress.exceptionOrNull()?.message ?: "请填写有效的 API 地址。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (rotationAddress.isSuccess && loadedRotationSettings.isFailure) {
+                    Text(
+                        text = "轮询设置读取失败，请重新打开此 API 配置后重试。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
+                    val rotationSettings = rotationDraft.toSettingsOrNull() ?: return@TextButton
                     val cleanedCurrentModel = cleanModelName(modelName).orEmpty()
                     val modelNames = cleanModelNames(availableModels + cleanedCurrentModel)
                     val enabledModels = (enabledModelNames + modelName)
@@ -1280,9 +1339,10 @@ fun ApiConfigDialog(
                         createdAt = config?.createdAt ?: System.currentTimeMillis(),
                         updatedAt = System.currentTimeMillis()
                     )
-                    onSave(newConfig, modelNames, enabledModels, modelCapabilities, modelCustomSettings, selectedApiAvatarUri, clearApiAvatar)
+                    onSave(newConfig, modelNames, enabledModels, modelCapabilities, modelCustomSettings, selectedApiAvatarUri, clearApiAvatar, rotationSettings)
                 },
-                enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && cleanModelName(modelName) != null && !isSaving
+                enabled = rotationAddress.isSuccess && loadedRotationSettings.isSuccess && apiKey.isNotBlank() && cleanModelName(modelName) != null &&
+                    rotationDraft.validationMessage == null && !isSaving && !resettingKeyHealth
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -1292,7 +1352,7 @@ fun ApiConfigDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
                 Text("取消")
             }
         }

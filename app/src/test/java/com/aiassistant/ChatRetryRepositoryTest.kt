@@ -57,11 +57,197 @@ class ChatRetryRepositoryTest {
             assertEquals(1, endpoint.payloads.size)
         } }
     }
+    @Test fun badKeyIsSkippedOnLaterChatAndSharedAuxiliaryAndCatalogueRequests() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val headers = endpoint.requestHeaders[index - 1]
+                val key = (headers["authorization"] ?: headers["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                if (key == "synthetic-unavailable") {
+                    socket.response("401 Unauthorized", "{\"error\":{\"message\":\"synthetic invalid credential\"}}")
+                } else if (endpoint.requestLines[index - 1].contains("/models")) {
+                    socket.response("200 OK", "{\"data\":[{\"id\":\"vendor/Exact-ID\"}]}")
+                } else {
+                    val stream = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject["stream"]?.asBoolean == true
+                    if (stream) socket.response("200 OK", syntheticStreamResponse(protocol, "合成回复"), "text/event-stream")
+                    else socket.response("200 OK", syntheticSummaryResponse(protocol))
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                // Even an enabled auth retry must yield to an available backup once cooling starts.
+                f.settings.saveRetryRule(RetryErrorType.AUTHENTICATION, RetryRule(true, 3))
+                val (config, id) = f.config(endpoint.url, protocol, "synthetic-unavailable\nsynthetic-healthy")
+                val failedIndices = mutableListOf<Int>()
+                repeat(2) {
+                    var completed = false
+                    f.repository.sendChatMessageWithConfig(config, id, "合成输入 $it", onToken = {},
+                        onComplete = { _, _, _ -> completed = true }, onError = { fail(it) },
+                        onKeyAttemptError = { index, _, _ -> failedIndices.add(index) })
+                    assertTrue(completed)
+                }
+                assertEquals(listOf(1), failedIndices)
+                assertEquals(3, endpoint.payloads.size)
+                assertTrue(f.repository.executeQuickCompletionWithResult(config, "合成辅助请求").isSuccess)
+                assertEquals(listOf("vendor/Exact-ID"), f.repository.fetchAvailableModelsDirect(endpoint.url, config.apiKey, protocol).getOrThrow())
+                val sentKeys = endpoint.requestHeaders.map { (it["authorization"] ?: it["x-api-key"]).orEmpty().removePrefix("Bearer ") }
+                assertEquals(listOf("synthetic-unavailable") + List(4) { "synthetic-healthy" }, sentKeys)
+                assertTrue(com.aiassistant.utils.ApiKeyRotationManager(f.context).isCoolingDown(endpoint.url, protocol, "synthetic-unavailable"))
+            } }
+        }
+    }
+
+    @Test fun embeddedAuthenticationErrorsInHttp200StreamsAlsoCoolFailedKeysInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val key = (endpoint.requestHeaders[index - 1]["authorization"] ?: endpoint.requestHeaders[index - 1]["x-api-key"])
+                    .orEmpty().removePrefix("Bearer ")
+                val body = if (key == "synthetic-unavailable") {
+                    if (protocol == "openai") "data: {\"error\":{\"code\":\"invalid_api_key\"}}\n\n"
+                    else "data: {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"synthetic upstream error\"}}\n\n"
+                } else syntheticStreamResponse(protocol, "合成恢复回复")
+                socket.response("200 OK", body, "text/event-stream")
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.config(endpoint.url, protocol, "synthetic-unavailable\nsynthetic-healthy")
+                repeat(2) {
+                    var completed = false
+                    f.repository.sendChatMessageWithConfig(config, id, "合成输入", onToken = {},
+                        onComplete = { _, _, _ -> completed = true }, onError = { fail(it) })
+                    assertTrue(completed)
+                }
+                assertEquals(3, endpoint.payloads.size)
+                assertTrue(f.settings.apiKeyRotationManager.isCoolingDown(endpoint.url, protocol, "synthetic-unavailable"))
+                assertEquals(1, endpoint.requestHeaders.count {
+                    (it["authorization"] ?: it["x-api-key"]).orEmpty().endsWith("synthetic-unavailable")
+                })
+            } }
+        }
+    }
+
+    @Test fun embeddedQuotaErrorsInHttp200AuxiliaryAndCatalogueResponsesKeepTheirMachineCodes() = runBlocking {
+        val errors = listOf(
+            "openai" to mapOf("code" to "insufficient_quota"),
+            "anthropic" to mapOf("code" to "insufficient_quota"),
+            "anthropic" to mapOf("type" to "authentication_error")
+        )
+        for ((protocol, metadata) in errors) for (catalogue in listOf(true, false)) {
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val headers = endpoint.requestHeaders[index - 1]
+                val key = (headers["authorization"] ?: headers["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                val body = when {
+                    key == "synthetic-unavailable" -> com.google.gson.Gson().toJson(
+                        mapOf("error" to metadata + ("message" to "synthetic upstream error")) +
+                            if (protocol == "anthropic") mapOf("type" to "error", "stop_reason" to "end_turn",
+                                "content" to listOf(mapOf("type" to "text", "text" to "不得接收的合成错误正文")))
+                            else mapOf("choices" to listOf(mapOf("finish_reason" to "stop",
+                                "message" to mapOf("content" to "不得接收的合成错误正文"))))
+                    )
+                    catalogue -> "{\"data\":[{\"id\":\"vendor/Exact-ID\"}]}"
+                    else -> syntheticSummaryResponse(protocol)
+                }
+                socket.response("200 OK", body)
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val keys = if (protocol == "anthropic") "Bearer synthetic-unavailable\nBearer synthetic-healthy"
+                    else "synthetic-unavailable\nsynthetic-healthy"
+                val (config, _) = f.config(endpoint.url, protocol, keys)
+                repeat(2) {
+                    if (catalogue) assertEquals(listOf("vendor/Exact-ID"),
+                        f.repository.fetchAvailableModelsDirect(endpoint.url, config.apiKey, protocol).getOrThrow())
+                    else assertFalse(f.repository.executeQuickCompletionWithResult(config, "合成输入").getOrThrow()
+                        .contains("不得接收的合成错误正文"))
+                }
+                assertEquals(3, endpoint.payloads.size)
+                val sentKeys = endpoint.requestHeaders.map {
+                    (it["authorization"] ?: it["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                }
+                assertEquals(listOf("synthetic-unavailable", "synthetic-healthy", "synthetic-healthy"), sentKeys)
+                if (protocol == "anthropic") assertEquals(sentKeys, endpoint.requestHeaders.map { it["x-api-key"] })
+                assertTrue(f.settings.apiKeyRotationManager.isCoolingDown(endpoint.url, protocol, "synthetic-unavailable"))
+                if (!catalogue) {
+                    val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+                    assertEquals("每次实际请求只能记一条统计", 3, stats.size)
+                    assertEquals(1, stats.count { !it.success })
+                    assertEquals(2, stats.count { it.success })
+                }
+            } }
+        }
+    }
+
+    @Test fun allCoolingKeysReturnExplicitFailureWithoutNewHttpUntilManualReset() = runBlocking {
+        Endpoint { socket, _ -> socket.response("401 Unauthorized", "{\"error\":{\"message\":\"synthetic invalid credential\"}}") }.use { endpoint -> Fixture().use { f ->
+            f.settings.setBackupKeyFallbackEnabled(true)
+            val (config, _) = f.config(endpoint.url, keys = "synthetic-one\nsynthetic-two")
+            assertTrue(f.repository.executeQuickCompletionWithResult(config, "合成输入").isFailure)
+            assertEquals(2, endpoint.payloads.size)
+            val failure = f.repository.executeQuickCompletionWithResult(config, "再次请求").exceptionOrNull()
+            assertTrue(failure is com.aiassistant.utils.ApiKeyCoolingDownException)
+            assertEquals(2, endpoint.payloads.size)
+            assertTrue(f.repository.fetchAvailableModelsDirect(endpoint.url, config.apiKey).exceptionOrNull() is com.aiassistant.utils.ApiKeyCoolingDownException)
+            assertEquals(2, endpoint.payloads.size)
+            assertTrue(f.settings.apiKeyRotationManager.resetHealth(endpoint.url, "openai"))
+            assertTrue(f.repository.executeQuickCompletionWithResult(config, "手工重置后请求").isFailure)
+            assertEquals(4, endpoint.payloads.size)
+        } }
+    }
+
+    @Test fun catalogueAndStreamingFallbackFailuresAlsoPersistKeyHealth() = runBlocking {
+        for (catalogue in listOf(true, false)) {
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                val key = endpoint.requestHeaders[index - 1]["authorization"].orEmpty().removePrefix("Bearer ")
+                val stream = endpoint.payloads[index - 1].takeIf { it.isNotBlank() }
+                    ?.let { com.google.gson.JsonParser.parseString(it).asJsonObject["stream"]?.asBoolean } == true
+                when {
+                    key == "synthetic-unavailable" && !catalogue && !stream ->
+                        socket.response("405 Method Not Allowed", "{\"error\":{\"message\":\"synthetic streaming only\"}}")
+                    key == "synthetic-unavailable" ->
+                        socket.response("429 Too Many Requests", "{\"error\":{\"message\":\"token quota exceeded\"}}")
+                    catalogue -> socket.response("200 OK", "{\"data\":[{\"id\":\"vendor/Exact-ID\"}]}")
+                    else -> socket.response("200 OK", syntheticSummaryResponse())
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, _) = f.config(endpoint.url, keys = "synthetic-unavailable\nsynthetic-healthy")
+                repeat(2) {
+                    if (catalogue) assertTrue(f.repository.fetchAvailableModelsDirect(endpoint.url, config.apiKey).isSuccess)
+                    else assertTrue(f.repository.executeQuickCompletionWithResult(config, "合成流式保底输入").isSuccess)
+                }
+                val headers = endpoint.requestHeaders.map { it["authorization"] }
+                assertEquals(if (catalogue) 1 else 2, headers.count { it == "Bearer synthetic-unavailable" })
+                assertEquals(2, headers.count { it == "Bearer synthetic-healthy" })
+                assertTrue(f.settings.apiKeyRotationManager.isCoolingDown(endpoint.url, "openai", "synthetic-unavailable"))
+            } }
+        }
+    }
+
+    @Test fun disabledKeysNeverBecomeAuxiliaryCredentialsAndHealthyChatRoundRobinAdvances() = runBlocking {
+        Endpoint { socket, _ -> socket.response("200 OK", syntheticStreamResponse("openai", "合成轮询回复"), "text/event-stream") }.use { endpoint -> Fixture().use { f ->
+            f.settings.setBackupKeyFallbackEnabled(true)
+            val (config, id) = f.config(endpoint.url, keys = "[已禁用] synthetic-disabled\nsynthetic-one\nsynthetic-two")
+            repeat(3) {
+                f.repository.sendChatMessageWithConfig(config, id, "合成输入 $it", onToken = {}, onComplete = { _, _, _ -> }, onError = { fail(it) })
+            }
+            assertEquals(listOf("Bearer synthetic-one", "Bearer synthetic-two", "Bearer synthetic-one"), endpoint.requestHeaders.map { it["authorization"] })
+            val disabled = config.copy(apiKey = "[已禁用] synthetic-disabled")
+            assertTrue(f.repository.executeQuickCompletionWithResult(disabled, "合成辅助输入").isFailure)
+            assertTrue(f.repository.fetchAvailableModelsDirect(endpoint.url, disabled.apiKey).isFailure)
+            assertEquals(3, endpoint.payloads.size)
+        } }
+    }
+
     private class Endpoint(val respond: (Socket, Int) -> Unit) : AutoCloseable {
         private val server = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
         private val worker = Executors.newCachedThreadPool()
         val payloads = CopyOnWriteArrayList<String>()
         val requestLines = CopyOnWriteArrayList<String>()
+        val requestHeaders = CopyOnWriteArrayList<Map<String, String>>()
         val url = "http://127.0.0.1:${server.localPort}/v1"
         init {
             HttpTestAccess.allow(url)
@@ -84,9 +270,11 @@ class ChatRetryRepositoryTest {
                             }
                             val requestLine = line()
                             var length = 0
+                            val headers = mutableMapOf<String, String>()
                             while (true) {
                                 val header = line()
                                 if (header.isEmpty()) break
+                                headers[header.substringBefore(':').lowercase()] = header.substringAfter(':').trim()
                                 if (header.startsWith("Content-Length:", true)) length = header.substringAfter(':').trim().toInt()
                             }
                             val body = ByteArray(length)
@@ -98,6 +286,7 @@ class ChatRetryRepositoryTest {
                             }
                             val requestIndex = synchronized(payloads) {
                                 requestLines.add(requestLine)
+                                requestHeaders.add(headers)
                                 payloads.add(String(body, Charsets.UTF_8))
                                 payloads.size
                             }
@@ -142,6 +331,7 @@ class ChatRetryRepositoryTest {
         private val previous = instance.get(null)
         init {
             context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+            context.getSharedPreferences("api_key_rotation", 0).edit().clear().commit()
             settings.setBackupKeyFallbackEnabled(false)
             settings.saveSettings(settings.getSettings().copy(autoNameEnabled = false, autoMemoryEnabled = false, auxiliaryMemoryEnabled = false))
             instance.set(null, app)

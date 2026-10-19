@@ -799,6 +799,143 @@ class MemoryExtractionRepositoryTest {
         } }
     }
 
+    @Test fun automaticTimelineSkipsRoutineOnlyEventsAndAlreadyRecordedFacts() = runBlocking {
+        for (content in listOf("两人一起吃饭并闲聊。气氛轻松。", "角色甲交付两箱药品。")) {
+            Endpoint { socket, _ -> memoryReply(socket, Gson().toJson(mapOf("newStoryTime" to null,
+                "newEvent" to mapOf("timeTag" to "第1天·上午", "content" to content),
+                "atemporalSettings" to emptyList<String>()))) }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第1天·上午", event = "角色甲交付两箱药品"))
+                assertNull(f.repository.evaluateAndAutoUpdateTimeline(id, "继续交谈", "两人边吃饭边闲聊", config.id, config.modelName))
+                assertEquals("角色甲交付两箱药品", f.repository.getTimelineNodes(id).single().event)
+                assertEquals(1, endpoint.payloads.size)
+            } }
+        }
+    }
+
+    @Test fun automaticTimelineSemanticallyCondensesVerboseEventsInBothProtocols() = runBlocking {
+        val verbose = "角色甲在一片昏暗的灯光中缓慢地走进古塔，认真观察了门前潮湿的地面以及斑驳的墙壁，" +
+            "随后向守门人详细说明通行证的来历，经过漫长的核对后因证件过期被拒绝入塔，" +
+            "角色乙在一旁反复安慰同伴并承诺补办通行证，但铜钥匙的去向直到最后仍然没有查明。"
+        val concise = "角色甲因通行证过期被拒绝入塔；角色乙承诺补办，铜钥匙去向仍未查明"
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, body ->
+                val prompt = body.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                val text = if (prompt.contains("【待精简事件】")) Gson().toJson(mapOf("content" to concise))
+                    else Gson().toJson(mapOf("newStoryTime" to null,
+                        "newEvent" to mapOf("timeTag" to "古塔门前", "content" to verbose), "atemporalSettings" to emptyList<String>()))
+                completedSummaryReply(socket, text, protocol)
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-model", protocol)
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", verbose, config.id, config.modelName)!!
+                assertNull(proposal.extractionErrorMessage)
+                assertEquals(concise, proposal.newEvent!!.content)
+                assertTrue(proposal.newEvent!!.content.length <= com.aiassistant.utils.TimelineMemoryHelper.MAX_AUTO_EVENT_CHARS)
+                assertEquals(2, endpoint.payloads.size)
+                val rewrite = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                assertTrue(rewrite.contains(verbose.trimEnd('。')))
+                assertTrue(rewrite.contains("不能只留最终收尾"))
+                assertTrue(f.repository.getTimelineNodes(id).isEmpty())
+            } }
+        }
+    }
+
+    @Test fun automaticTimelineRefusesUncondensedUpdateWithoutChangingConfirmedHistory() = runBlocking {
+        val original = "角色甲因证件过期被拒绝入塔，角色乙承诺补办；铜钥匙去向仍未查明"
+        val verbose = "角色甲在塔门外等待并反复观察四周，角色乙仔细检查证件的纹理与印章并解释证件来历，" +
+            "守门人逐项核对登记簿后表示仍然需要补交担保书，随后将证件原样交还并指向城南办事处，" +
+            "两人继续讨论下一步的行程以及如何寻找已经失去联系的担保人，但尚未确定担保人的具体位置。"
+        var nodeId = 0L
+        Endpoint { socket, body ->
+            val prompt = body.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            if (prompt.contains("【待精简事件】")) memoryReply(socket, Gson().toJson(mapOf("content" to verbose)))
+            else memoryReply(socket, Gson().toJson(mapOf("action" to "UPDATE", "targetNodeId" to nodeId,
+                "newEvent" to mapOf("timeTag" to "古塔门前", "content" to verbose), "atemporalSettings" to emptyList<String>())))
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "古塔门前", event = original))
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", verbose, config.id, config.modelName)!!
+            assertNull(proposal.newEvent)
+            assertNull(proposal.targetNodeId)
+            assertTrue(proposal.extractionErrorMessage.orEmpty().contains("精简校验"))
+            assertEquals(2, endpoint.payloads.size)
+            val rewrite = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            assertTrue("合并旧事件后再精简，不能丢掉既有未决事项", rewrite.contains(original))
+            f.repository.applyAutoTimelineProposal(id, proposal)
+            assertEquals(original, f.repository.getTimelineNodes(id).single().event)
+        } }
+    }
+
+    @Test fun automaticTimelineSkipsKnownFactsAfterSemanticCondensationForAppendAndUpdate() = runBlocking {
+        val known = "角色甲因通行证过期被拒绝入塔；角色乙承诺补办，铜钥匙去向仍未查明"
+        val verbose = "角色甲在一片昏暗的灯光中缓慢地走进古塔，认真观察了门前潮湿的地面以及斑驳的墙壁，" +
+            "随后向守门人详细说明通行证的来历，经过漫长的核对后因证件过期被拒绝入塔，" +
+            "角色乙在一旁反复安慰同伴并承诺补办通行证，但铜钥匙的去向直到最后仍然没有查明。"
+        for (action in listOf("APPEND", "UPDATE")) {
+            var nodeId = 0L
+            Endpoint { socket, body ->
+                val prompt = body.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+                if (prompt.contains("【待精简事件】")) memoryReply(socket, Gson().toJson(mapOf("content" to known)))
+                else memoryReply(socket, Gson().toJson(mapOf("action" to action, "targetNodeId" to nodeId,
+                    "newEvent" to mapOf("timeTag" to "古塔门前", "content" to verbose), "atemporalSettings" to emptyList<String>())))
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "古塔门前", event = known))
+                assertNull(f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", verbose, config.id, config.modelName))
+                assertEquals(2, endpoint.payloads.size)
+                assertEquals(known, f.repository.getTimelineNodes(id).single().event)
+            } }
+        }
+    }
+
+    @Test fun automaticTimelineDoesNotDeduplicateDifferentQuotedCredentials() = runBlocking {
+        val old = "角色甲确认塔门口令为“AB”"
+        val changed = "角色甲确认塔门口令为“A；B”"
+        Endpoint { socket, _ -> memoryReply(socket, Gson().toJson(mapOf("action" to "APPEND",
+            "newEvent" to mapOf("timeTag" to "古塔门前", "content" to changed), "atemporalSettings" to emptyList<String>())))
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "古塔门前", event = old))
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "核对合成口令", changed, config.id, config.modelName)!!
+            assertEquals(changed, proposal.newEvent!!.content)
+            f.repository.applyAutoTimelineProposal(id, proposal)
+            assertEquals(listOf(old, changed), f.repository.getTimelineNodes(id).map { it.event })
+            assertEquals(1, endpoint.payloads.size)
+        } }
+    }
+
+    @Test fun cancellingAutomaticTimelineDuringSecondCondensationRequestKeepsHistory() = runBlocking {
+        val entered = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        val verbose = "角色甲在一片昏暗的灯光中缓慢地走进古塔，认真观察了门前潮湿的地面以及斑驳的墙壁，" +
+            "随后向守门人详细说明通行证的来历，经过漫长的核对后因证件过期被拒绝入塔，" +
+            "角色乙在一旁反复安慰同伴并承诺补办通行证，但铜钥匙的去向直到最后仍然没有查明。"
+        Endpoint { socket, body ->
+            val prompt = body.getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            if (prompt.contains("【待精简事件】")) {
+                entered.countDown()
+                released.await(10, TimeUnit.SECONDS)
+            } else memoryReply(socket, Gson().toJson(mapOf("action" to "APPEND",
+                "newEvent" to mapOf("timeTag" to "古塔门前", "content" to verbose), "atemporalSettings" to emptyList<String>())))
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url)
+            val original = "合成角色已经抵达塔门，尚未入塔"
+            f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id, timeTag = "古塔门前", event = original))
+            val extraction = async(Dispatchers.IO) { f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事", verbose, config.id, config.modelName) }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                f.repository.cancelActiveRequest(id)
+                try { withTimeout(3000) { extraction.await() }; fail("精简请求取消必须传播，不能变成错误提案") }
+                catch (_: CancellationException) { }
+                assertTrue(extraction.isCancelled)
+                assertEquals(2, endpoint.payloads.size)
+                assertEquals(original, f.repository.getTimelineNodes(id).single().event)
+                assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+            } finally { released.countDown(); extraction.cancelAndJoin() }
+        } }
+    }
+
     @Test fun incrementalUpdateKeepsExistingEventTarget() = runBlocking {
         var node = 0L
         Endpoint { socket, _ -> memoryReply(socket, """{"newStoryTime":null,"action":"UPDATE","targetNodeId":$node,"newEvent":{"timeTag":"第1天·清晨","category":"PLOT_EVENT","content":"林岚抵达古塔并与守门人缔结盟约"},"atemporalSettings":[]}""") }.use { endpoint -> Fixture().use { f ->
@@ -1004,18 +1141,32 @@ class MemoryExtractionRepositoryTest {
             var nodeId = 0L
             Endpoint { socket, _ -> memoryReply(socket, """{"action":"$action","targetNodeId":$nodeId,"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"林岚抵达古塔并与守门人缔结盟约"},"atemporalSettings":[]}""") }.use { endpoint -> Fixture().use { f ->
                 val (config, id) = f.conversation(endpoint.url)
+                f.repository.updateStoryTime(id, "第1天·清晨")
                 nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
                     timeTag = "第1天·清晨", event = "林岚抵达古塔", category = "PLOT_EVENT"))
+                val before = f.repository.getTimelineNodes(id).single()
                 val result = f.repository.evaluateAndAutoUpdateTimeline(id, "继续故事", "林岚抵达古塔并与守门人缔结盟约", config.id, config.modelName)!!
                 assertEquals("APPEND", result.action)
                 assertNull(result.targetNodeId)
                 // Even a stale/manually edited UPDATE proposal must be checked again at save time.
-                f.repository.applyAutoTimelineProposal(id, result.copy(action = "UPDATE", targetNodeId = nodeId))
+                try {
+                    f.repository.applyAutoTimelineProposal(id, result.copy(action = "UPDATE", targetNodeId = nodeId,
+                        previousEventContent = before.event, previousEventCategory = before.category,
+                        updatedStoryTime = "第2天·清晨",
+                        atemporalSettings = listOf(AtemporalSettingItem(content = "无效跨时提案的合成规则不应保存"))))
+                    fail("跨时 UPDATE 必须拒绝，不能覆盖早先事件或保存其它提案变化")
+                } catch (expected: IllegalStateException) {
+                    assertTrue(expected.message.orEmpty().contains("请重新提取或审阅"))
+                }
+                assertEquals(listOf(before), f.repository.getTimelineNodes(id))
+                assertEquals("第1天·清晨", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+                assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+                f.repository.applyAutoTimelineProposal(id, result)
+                f.repository.applyAutoTimelineProposal(id, result)
                 val nodes = f.db.timelineNodeDao().getTimelineNodes(id)
                 assertEquals(2, nodes.size)
                 val earlier = nodes.single { it.id == nodeId }
-                assertEquals("第1天·清晨", earlier.timeTag)
-                assertEquals("林岚抵达古塔", earlier.event)
+                assertEquals(before, earlier)
                 assertEquals("第2天·清晨", nodes.single { it.id != nodeId }.timeTag)
             } }
         }
@@ -1032,6 +1183,7 @@ class MemoryExtractionRepositoryTest {
             val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(null,
                 com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·清晨", content = "林岚抵达古塔并与守门人缔结盟约"),
                 "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = "林岚抵达古塔",
+                previousEventCategory = "PLOT_EVENT",
                 atemporalSettings = listOf(
                     // Model proposals default to this session; global promotion requires an explicit UI choice.
                     com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "古塔禁止一切火焰魔法", targetScope = "session"),
@@ -1091,6 +1243,7 @@ class MemoryExtractionRepositoryTest {
             val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult("第1天·中午",
                 com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·上午", content = "北港船队交付两箱药品并收回签收单"),
                 "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = before,
+                previousEventCategory = "PLOT_EVENT",
                 atemporalSettings = listOf(com.aiassistant.utils.AtemporalSettingItem(content = "本提案未确认成功，不应保存")))
             f.db.timelineNodeDao().updateTimelineNode(f.repository.getTimelineNodes(id).single().copy(event = manual))
             try {
@@ -1102,6 +1255,69 @@ class MemoryExtractionRepositoryTest {
             assertEquals(manual, f.repository.getTimelineNodes(id).single().event)
             assertEquals("第1天·上午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
             assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+        }
+    }
+
+    @Test fun applyingTimelineUpdateRejectsDeletedOrRetimedTargetsAndRollsBackOtherChanges() = runBlocking {
+        for (deleted in listOf(true, false)) {
+            Fixture().use { f ->
+                val (_, id) = f.conversation("https://example.invalid/v1")
+                f.repository.updateStoryTime(id, "第1天·上午")
+                val before = "合成船队已经交付两箱药品"
+                val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第1天·上午", event = before))
+                val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult("第1天·中午",
+                    TimelineEventItem(timeTag = "第1天·上午", content = "合成船队已经交付两箱药品并收到签收单"),
+                    "待确认", action = "UPDATE", targetNodeId = nodeId, previousEventContent = before,
+                    previousEventCategory = "PLOT_EVENT",
+                    atemporalSettings = listOf(AtemporalSettingItem(content = "未确认成功的合成规则不应保存")))
+                if (deleted) f.db.timelineNodeDao().deleteTimelineNodeById(nodeId)
+                else f.db.timelineNodeDao().updateTimelineNode(f.repository.getTimelineNodes(id).single().copy(timeTag = "第2天·上午"))
+                val unchangedNodes = f.repository.getTimelineNodes(id)
+                try {
+                    f.repository.applyAutoTimelineProposal(id, proposal)
+                    fail("目标失效后必须重新审阅，不能复活节点或追加陈旧事件")
+                } catch (expected: IllegalStateException) {
+                    assertTrue(expected.message.orEmpty().contains("请重新提取或审阅"))
+                }
+                assertEquals(unchangedNodes, f.repository.getTimelineNodes(id))
+                assertEquals("第1天·上午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+                assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+            }
+        }
+    }
+
+    @Test fun applyingTimelineUpdatePreservesCategoryOnlyEditsBeforeAndAfterAcceptance() = runBlocking {
+        for (acceptedFirst in listOf(false, true)) {
+            var nodeId = 0L
+            Endpoint { socket, _ -> memoryReply(socket,
+                """{"action":"UPDATE","targetNodeId":$nodeId,"newEvent":{"timeTag":"第1天·上午","category":"PLOT_EVENT","content":"合成船队交付两箱药品并收到签收单"},"atemporalSettings":[]}""")
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url)
+                f.repository.updateStoryTime(id, "第1天·上午")
+                nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(conversationId = id,
+                    timeTag = "第1天·上午", event = "合成船队交付两箱药品", category = "PLOT_EVENT"))
+                val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续合成故事",
+                    "合成船队交付两箱药品并收到签收单", config.id, config.modelName)!!
+                assertEquals("UPDATE", proposal.action)
+                assertEquals("PLOT_EVENT", proposal.previousEventCategory)
+                if (acceptedFirst) {
+                    f.repository.applyAutoTimelineProposal(id, proposal)
+                    f.repository.applyAutoTimelineProposal(id, proposal)
+                }
+                val manual = f.repository.getTimelineNodes(id).single().copy(category = "KEY_FACT")
+                f.db.timelineNodeDao().updateTimelineNode(manual)
+                try {
+                    f.repository.applyAutoTimelineProposal(id, proposal.copy(updatedStoryTime = "第1天·中午",
+                        atemporalSettings = listOf(AtemporalSettingItem(content = "分类冲突提案的合成规则不应保存"))))
+                    fail("只修改分类也必须使旧提案失效，包括曾确认过的同一提案")
+                } catch (expected: IllegalStateException) {
+                    assertTrue(expected.message.orEmpty().contains("已被修改"))
+                }
+                assertEquals(listOf(manual), f.repository.getTimelineNodes(id))
+                assertEquals("第1天·上午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+                assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
+            } }
         }
     }
 
@@ -2283,7 +2499,10 @@ class MemoryExtractionRepositoryTest {
                     val error = chatWithSavedUser(f, config, id, "合成超限失败第${round}轮")
                     assertNotNull("不能丢弃来源来伪装正式发送成功", error)
                     assertTrue("应提供同档位手动重试入口的提示：$error", error!!.contains("重试压缩"))
-                    if (round == 2) assertTrue("后续发送应明确说明上次摘要失败：$error", error.contains("上次摘要失败"))
+                    if (round == 2) {
+                        assertTrue("后续发送应明确说明上次摘要失败：$error", error.contains("上次摘要失败"))
+                        assertTrue("冷却状态仍须明确告知，不能静默绕过：$error", error.contains("冷却"))
+                    }
                     assertEquals("同一失败摘要服务不能在每轮再次调用", 1, endpoint.payloads.size)
                     assertTrue("预算放不下完整原文时不能发送正式聊天", endpoint.payloads.all(::isSummaryPayload))
                     val saved = f.db.conversationDao().getConversationById(id)!!
@@ -2373,12 +2592,12 @@ class MemoryExtractionRepositoryTest {
                 assertEquals("44条来源应按40条上限分成两块", 2, successfulPrompts.size)
                 assertEquals("备用Key的后续分块必须直接使用已验证的流式通道", 1,
                     attempts.count { it.first == "Bearer test-second" && !it.second })
-                assertEquals("每块都需由首Key独立鉴权，备用Key的能力缓存不能污染首Key", 2,
+                assertEquals("首Key鉴权失败一次后应被冷却，后续分块不能重复请求坏Key", 1,
                     attempts.count { it.first == "Bearer test-first" && !it.second })
                 assertEquals("首Key没有流式成功证据，不能继承备用Key的流式能力", 0,
                     attempts.count { it.first == "Bearer test-first" && it.second })
                 assertEquals(2, attempts.count { it.first == "Bearer test-second" && it.second })
-                assertEquals("两次401、一次网关探测、两次成功流式，不得重放额外请求", 5, attempts.size)
+                assertEquals("一次401、一次网关探测、两次成功流式，不得重放额外请求", 4, attempts.size)
                 assertEquals("首次探测与兼容流式必须处理同一份完整来源", attempts[1].third, attempts[2].third)
                 val reconstructed = successfulPrompts.flatMap(::sourceFragmentsFromSummaryPrompt)
                 assertEquals("所有来源仅在成功请求中覆盖一次，顺序不得改变", ids.take(44), reconstructed.map { it.first })

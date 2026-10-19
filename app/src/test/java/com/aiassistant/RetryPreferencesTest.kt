@@ -18,6 +18,7 @@ import com.aiassistant.ui.components.expressiveBotDurationMillis
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.readableTextColorFor
 import com.aiassistant.ui.components.sampleExpressiveBotPose
+import com.aiassistant.ui.screens.settings.ApiKeyRotationDraft
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.EchoAppearancePreset
 import com.aiassistant.utils.EchoHomeLayoutStyle
@@ -36,6 +37,131 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test
+    fun keyRotationDraftOnlyPersistsOnSaveAndRestoresAllEditedSettings() {
+        val context = RuntimeEnvironment.getApplication()
+        val baseUrl = "https://rotation-draft.test/v1"
+        val manager = PersonalizationManager(context).apiKeyRotationManager
+        val original = manager.getSettings(baseUrl, "openai")
+        val draft = ApiKeyRotationDraft(original).copy(
+            settings = original.copy(
+                mode = ApiKeyRotationSettings.PREFER_SUCCESS,
+                exponentialBackoff = false,
+                deprioritizeFailures = false,
+                resetOnSuccess = false,
+                probeWhenAllCooling = true
+            ),
+            failures = "4", cooldown = "120", maxCooldown = "900", failureReset = "0"
+        )
+
+        assertEquals("编辑草稿不能提前修改已保存策略", original, manager.getSettings(baseUrl, "openai"))
+        val saved = requireNotNull(draft.toSettingsOrNull())
+        assertTrue(manager.saveSettings(baseUrl, "openai", saved))
+        val reloaded = PersonalizationManager(context).apiKeyRotationManager.getSettings(baseUrl, "openai")
+        assertEquals(saved, reloaded)
+        assertEquals(ApiKeyRotationSettings.PREFER_SUCCESS, reloaded.mode)
+        assertFalse(reloaded.exponentialBackoff)
+        assertFalse(reloaded.deprioritizeFailures)
+        assertFalse(reloaded.resetOnSuccess)
+        assertTrue(reloaded.probeWhenAllCooling)
+        val restoredDraft = ApiKeyRotationDraft(reloaded)
+        assertEquals("4", restoredDraft.failures)
+        assertEquals("120", restoredDraft.cooldown)
+        assertEquals("900", restoredDraft.maxCooldown)
+        assertEquals("0", restoredDraft.failureReset)
+        assertEquals(saved, restoredDraft.toSettingsOrNull())
+    }
+
+    @Test
+    fun keyRotationDraftAcceptsBoundaryDurationsAndZeroDisablesTimedReset() {
+        val minimum = requireNotNull(ApiKeyRotationDraft(
+            ApiKeyRotationSettings(), failures = "1", cooldown = "1", maxCooldown = "1", failureReset = "0"
+        ).toSettingsOrNull())
+        assertEquals(1, minimum.failuresBeforeCooldown)
+        assertEquals(1L, minimum.cooldownSeconds)
+        assertEquals(1L, minimum.maxCooldownSeconds)
+        assertEquals(0L, minimum.failureResetSeconds)
+
+        val maximum = requireNotNull(ApiKeyRotationDraft(
+            ApiKeyRotationSettings(),
+            failures = ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD.toString(),
+            cooldown = ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS.toString(),
+            maxCooldown = ApiKeyRotationSettings.MAX_COOLDOWN_SECONDS.toString(),
+            failureReset = ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS.toString()
+        ).toSettingsOrNull())
+        assertEquals(100, maximum.failuresBeforeCooldown)
+        assertEquals(604800L, maximum.cooldownSeconds)
+        assertEquals(2592000L, maximum.maxCooldownSeconds)
+        assertEquals(31536000L, maximum.failureResetSeconds)
+    }
+
+    @Test
+    fun keyRotationDraftRejectsBlankOverflowAndOutOfRangeNumbersWithoutReplacingInput() {
+        val draft = ApiKeyRotationDraft(ApiKeyRotationSettings())
+        val invalidDrafts = listOf(
+            draft.copy(failures = ""), draft.copy(failures = "0"), draft.copy(failures = "101"),
+            draft.copy(failures = "2147483648"),
+            draft.copy(cooldown = ""), draft.copy(cooldown = "0"), draft.copy(cooldown = "604801"),
+            draft.copy(cooldown = "9223372036854775808"),
+            draft.copy(maxCooldown = ""), draft.copy(maxCooldown = "2592001"),
+            draft.copy(failureReset = ""), draft.copy(failureReset = " "),
+            draft.copy(failureReset = "-1"), draft.copy(failureReset = "31536001")
+        )
+        invalidDrafts.forEach { invalid ->
+            assertNotNull("非法数字应提示原因", invalid.validationMessage)
+            assertNull("非法草稿不能生成可保存设置", invalid.toSettingsOrNull())
+        }
+        val overflow = draft.copy(cooldown = "9223372036854775808")
+        assertNull(overflow.toSettingsOrNull())
+        assertEquals("9223372036854775808", overflow.cooldown)
+    }
+
+    @Test
+    fun keyRotationDraftRequiresMaximumAtLeastBaseAndAllowsCorrection() {
+        val invalid = ApiKeyRotationDraft(ApiKeyRotationSettings(), cooldown = "600", maxCooldown = "300")
+        assertNotNull(invalid.maxCooldownError)
+        assertNull(invalid.toSettingsOrNull())
+
+        val corrected = invalid.copy(maxCooldown = "600")
+        assertNull(corrected.validationMessage)
+        assertEquals(600L, requireNotNull(corrected.toSettingsOrNull()).maxCooldownSeconds)
+    }
+
+    @Test
+    fun disablingCooldownPreservesDraftAndHiddenInvalidFieldsDoNotBlockOtherSettings() {
+        val original = ApiKeyRotationSettings()
+        val edited = ApiKeyRotationDraft(original, failures = "3", cooldown = "120", maxCooldown = "900")
+        val disabled = edited.copy(settings = original.copy(cooldownEnabled = false))
+        val saved = requireNotNull(disabled.toSettingsOrNull())
+        assertFalse(saved.cooldownEnabled)
+        assertEquals(3, saved.failuresBeforeCooldown)
+        assertEquals(120L, saved.cooldownSeconds)
+        assertEquals(900L, saved.maxCooldownSeconds)
+        val restored = ApiKeyRotationDraft(saved.copy(cooldownEnabled = true))
+        assertEquals(edited.failures, restored.failures)
+        assertEquals(edited.cooldown, restored.cooldown)
+        assertEquals(edited.maxCooldown, restored.maxCooldown)
+
+        val unfinished = edited.copy(failures = "", cooldown = "", maxCooldown = "")
+        assertNull(unfinished.toSettingsOrNull())
+        val hidden = unfinished.copy(settings = original.copy(cooldownEnabled = false))
+        assertNotNull(hidden.toSettingsOrNull())
+        assertEquals("", hidden.cooldown)
+        val reenabled = hidden.copy(settings = hidden.settings.copy(cooldownEnabled = true))
+        assertEquals("", reenabled.cooldown)
+        assertNull(reenabled.toSettingsOrNull())
+    }
+
+    @Test
+    fun disablingBackoffKeepsUnfinishedMaximumDraftUntilReenabled() {
+        val draft = ApiKeyRotationDraft(ApiKeyRotationSettings(), maxCooldown = "")
+        assertNull(draft.toSettingsOrNull())
+        val fixedCooldown = draft.copy(settings = draft.settings.copy(exponentialBackoff = false))
+        assertNotNull(fixedCooldown.toSettingsOrNull())
+        assertEquals("", fixedCooldown.maxCooldown)
+        assertNull(fixedCooldown.copy(settings = fixedCooldown.settings.copy(exponentialBackoff = true)).toSettingsOrNull())
+    }
+
     @Test fun rawStoredModelIdentityKeysRemainCompatibleWhenNewBotsAreAdded() {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("personalization_settings", 0)

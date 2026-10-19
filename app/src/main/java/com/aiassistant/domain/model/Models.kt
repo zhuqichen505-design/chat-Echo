@@ -669,7 +669,8 @@ data class AnthropicResponse(
     val content: List<AnthropicResponseContent>?,
     val model: String?,
     val stop_reason: String?,
-    val usage: AnthropicUsage?
+    val usage: AnthropicUsage?,
+    val error: ApiError? = null
 )
 
 data class AnthropicResponseContent(

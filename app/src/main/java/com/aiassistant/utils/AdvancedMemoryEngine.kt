@@ -346,11 +346,9 @@ object AdvancedMemoryEngine {
     /** Shared event abstraction rules for rolling context and ordinary/creative timelines. */
     val EVENT_SUMMARY_GUIDANCE: String = """
         【事件摘要的取舍与密度】
-        - 完整保留独立事件、选择、冲突、转折、结果、未决线索及必要因果，收尾不能替代过程。
-        - 详略取决于新增事实和后续影响，不取决于篇幅或描写细腻；相同事实只记一次，不同事件不因同场景合成一句。
-        - 合并同目的的小动作为行为和结果；删去无剧情作用的修辞、感官、神态衣着、动作流水账和重复心理。影响选择、关系、约束或后续线索的细节才保留。
-        - 台词提炼为信息、承诺或结论，必要的密码/证词可引用；名称、标识、数值、否定与时间跨度准确。
-        - 不设固定字数、句数或节点数上限，不凑篇幅扩写，摘要须凝练。
+        - 只保留影响后续的关键事件、选择、冲突、原因、转折、结果、关系变化、约束与未决线索；收尾不替代关键过程，无实质新增则不记。
+        - 同目的小动作合并为行动和结果；同事实只记一次，不同重要变化不因同场景丢失。删寒暄、修辞、感官、神态衣着、流水账、重复心理与台词。
+        - 台词转为信息、承诺或结论；准确保留名称、标识、数值、否定、条件及时间跨度。遵守任务预算，用完整短句，不凑篇幅、不截断事实。
     """.trimIndent().replace("\n", " ")
 
     /** Merge the existing summary with a contiguous source range without changing factual scope. */

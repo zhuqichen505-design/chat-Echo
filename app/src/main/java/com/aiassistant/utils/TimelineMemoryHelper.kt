@@ -165,6 +165,68 @@ object TimelineMemoryHelper {
      */
     private const val MAX_EVENT_FACT_CHARS = 160
     private const val MAX_SETTING_FACT_CHARS = 96
+    const val MAX_AUTO_EVENT_CHARS = 96
+
+    /**
+     * 自动增量只做保守的确定性清理：删除完整重复句和明确的寒暄/日常流水账。
+     * 不用字符相似度推断同义，不按字数裁掉未知事实；超预算交给模型语义改写。
+     * 手工梳理和已有节点不经过这一准入规则，避免追溯删除用户已确认的历史。
+     */
+    fun compactAutoTimelineEvent(raw: String): String {
+        val cleaned = raw.trim().replace(Regex("[\\t\\r ]+"), " ").trim()
+        val sentences = splitAutoEventSentences(cleaned)
+            .map { it.trim() }.filter { it.isNotBlank() }
+            .distinct()
+            .filterNot(::isRoutineOnlyAutoTimelineSentence)
+        return sentences.joinToString("；")
+    }
+
+    private fun splitAutoEventSentences(text: String): List<String> {
+        val sentences = mutableListOf<String>()
+        val current = StringBuilder()
+        var closingQuote: Char? = null
+        for (index in text.indices) {
+            val char = text[index]
+            val openingQuote = closingQuoteAt(text, index)
+            if (closingQuote != null) {
+                current.append(char)
+                if (char == closingQuote) closingQuote = null
+            } else if (openingQuote != null) {
+                closingQuote = openingQuote
+                current.append(char)
+            } else if (char in "。！？；\n") {
+                // 问号表达未确认状态，不能把疑问改写成已经成立的事实。
+                if (char == '？') current.append(char)
+                sentences += current.toString()
+                current.clear()
+            } else current.append(char)
+        }
+        sentences += current.toString()
+        return sentences
+    }
+
+    private fun closingQuoteAt(text: String, index: Int): Char? = when (text[index]) {
+        '“' -> '”'
+        '‘' -> '’'
+        '「' -> '」'
+        '『' -> '』'
+        '[' -> ']'
+        '【' -> '】'
+        '"' -> '"'
+        '\'' -> if (text.getOrNull(index - 1)?.let { it in 'A'..'Z' || it in 'a'..'z' || it.isDigit() } == true &&
+            text.getOrNull(index + 1)?.let { it in 'A'..'Z' || it in 'a'..'z' || it.isDigit() } == true) null else '\''
+        else -> null
+    }
+
+    private fun isRoutineOnlyAutoTimelineSentence(sentence: String): Boolean {
+        // 只接受由已知日常动作构成的整句。含原因、承诺、否定、线索、数字等任何
+        // 未知成分都会保留，例如“吃饭时发现药物中毒”绝不能按“吃饭”关键词丢弃。
+        val subject = "(?:两人|双方|众人|大家|他|她|他们|她们)"
+        val action = "(?:都|一起|继续|只是|随后|相互|互相)?(?:吃饭|用餐|吃早餐|吃午饭|吃晚饭|喝茶|喝水|散步|闲聊|寒暄|打招呼|休息|整理衣服|收拾餐具)(?:完毕|结束)?"
+        val routine = Regex("^$subject$action(?:[，、]*(?:并|和|后|然后|接着|再)?(?:$subject)?$action)*$")
+        val neutralDescription = Regex("""^(?:阳光洒进房间|月光照进房间|微风轻轻吹过|雨水轻敲窗户|灯光柔和|气氛轻松|气氛温馨)$""")
+        return routine.matches(sentence) || neutralDescription.matches(sentence)
+    }
 
     fun compactExtractedFact(raw: String, maxChars: Int = MAX_EVENT_FACT_CHARS): String {
         val cleaned = raw.replace(Regex("\\s+"), " ").trim()
@@ -394,8 +456,13 @@ object TimelineMemoryHelper {
         val old = previous.trim()
         val addition = incoming.trim()
         if (old.isBlank()) return addition
-        if (addition.isBlank() || normalizedFact(old).contains(normalizedFact(addition))) return old
-        if (normalizedFact(addition).contains(normalizedFact(old))) return addition
+        if (addition.isBlank()) return old
+        val oldFact = normalizedFact(old)
+        val newFact = normalizedFact(addition)
+        if (oldFact == newFact) return old
+        val neitherHasQuestions = oldFact.none { it == '？' || it == '?' } && newFact.none { it == '？' || it == '?' }
+        if (neitherHasQuestions && oldFact.contains(newFact)) return old
+        if (neitherHasQuestions && newFact.contains(oldFact)) return addition
         val sentences = old.split(Regex("""(?<=[。！？；])|\n+""")).map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
         addition.split(Regex("""(?<=[。！？；])|\n+""")).map { it.trim() }.filter { it.isNotBlank() }.forEach { sentence ->
             if (sentences.none { normalizedFact(it) == normalizedFact(sentence) }) sentences += sentence
@@ -1170,7 +1237,20 @@ object TimelineMemoryHelper {
             .distinctBy { Triple(it.targetScope, it.targetMemoryId, normalizedFact(it.content)) }
     }
 
-    private fun normalizedFact(text: String): String = text.replace(Regex("""[，。！？、\s\[\]【】"”'’]"""), "")
+    private fun normalizedFact(text: String): String = buildString {
+        var closingQuote: Char? = null
+        for (index in text.indices) {
+            val char = text[index]
+            val openingQuote = closingQuoteAt(text, index)
+            if (closingQuote != null) {
+                if (char == closingQuote) closingQuote = null else append(char)
+            } else if (openingQuote != null) {
+                closingQuote = openingQuote
+            } else if (!char.isWhitespace() && char !in "，。！；;、[]【】") {
+                append(char)
+            }
+        }
+    }
 
     /**
      * 跨界事件与设定综合消歧与深度去重（彻底解决问题 3）

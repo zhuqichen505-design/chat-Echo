@@ -239,6 +239,41 @@ class OpenAiStreamRobustnessTest {
         val res = AiRepository.parseOpenAiStreamLine(errorJson)
         assertNotNull(res)
         assertEquals("Rate limit reached", res?.inlineErrorMessage)
+        assertEquals("rate_limit_exceeded", res?.inlineErrorCode)
+        assertNull(res?.inlineErrorType)
+    }
+
+    @Test
+    fun inlineErrorCodeOrTypeWithoutMessageStillReportsFailure() {
+        val codeOnly = AiRepository.parseOpenAiStreamLine("""data: {"error":{"code":"invalid_api_key"}}""")
+        assertEquals("invalid_api_key", codeOnly?.inlineErrorCode)
+        assertNull(codeOnly?.inlineErrorType)
+        assertEquals("API 返回错误（未提供详细原因）", codeOnly?.inlineErrorMessage)
+
+        val typeOnly = AiRepository.parseOpenAiStreamLine("""{"error":{"type":"authentication_error","message":null}}""")
+        assertEquals("authentication_error", typeOnly?.inlineErrorType)
+        assertNull(typeOnly?.inlineErrorCode)
+        assertEquals("API 返回错误（未提供详细原因）", typeOnly?.inlineErrorMessage)
+
+        val both = AiRepository.parseOpenAiStreamLine("""data: {"error":{"type":"rate_limit_error","code":"insufficient_quota","message":"  "}}""")
+        assertEquals("rate_limit_error", both?.inlineErrorType)
+        assertEquals("insufficient_quota", both?.inlineErrorCode)
+        assertFalse(both?.inlineErrorMessage.isNullOrBlank())
+    }
+
+    @Test
+    fun errorMetadataDoesNotLeakIntoSuccessfulContentAndStringErrorsRemainVisible() {
+        val stringError = AiRepository.parseOpenAiStreamLine("""data: {"error":"Incorrect API key provided"}""")
+        assertEquals("Incorrect API key provided", stringError?.inlineErrorMessage)
+        assertNull(stringError?.inlineErrorCode)
+        assertNull(stringError?.inlineErrorType)
+
+        val successful = AiRepository.parseOpenAiStreamLine("""data: {"error":null,"choices":[{"delta":{"content":"synthetic invalid_api_key example"},"finish_reason":"stop"}]}""")
+        assertEquals("synthetic invalid_api_key example", successful?.contentDelta)
+        assertEquals("stop", successful?.finishReason)
+        assertNull(successful?.inlineErrorMessage)
+        assertNull(successful?.inlineErrorCode)
+        assertNull(successful?.inlineErrorType)
     }
 
     @Test

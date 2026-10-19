@@ -17,7 +17,9 @@ data class OpenAiStreamChunkResult(
     val isDone: Boolean = false,
     val usage: Usage? = null,
     val inlineErrorMessage: String? = null,
-    val refusalDelta: String? = null
+    val refusalDelta: String? = null,
+    val inlineErrorCode: String? = null,
+    val inlineErrorType: String? = null
 )
 
 /**
@@ -63,21 +65,22 @@ object OpenAiStreamChunkParser {
             return OpenAiStreamChunkResult(isDone = true)
         }
 
-        // 检测流式返回的内联错误（如 200 OK 建立连接后第一包返回 error）
-        if (data.contains("\"error\"") && (data.contains("\"message\"") || data.contains("\"code\""))) {
-            try {
-                val errObj = JsonParser.parseString(data).asJsonObject
-                if (errObj.has("error")) {
-                    val err = errObj.get("error")
-                    val msg = if (err.isJsonObject) err.asJsonObject.get("message")?.asString else err.asString
-                    if (!msg.isNullOrBlank()) {
-                        return OpenAiStreamChunkResult(inlineErrorMessage = msg)
-                    }
-                }
-            } catch (_: Exception) {}
+        val root = runCatching { JsonParser.parseString(data) }.getOrNull()?.objectOrNull() ?: return null
+        // HTTP 200 中也可能返回鉴权或额度错误；保留机器码，不能统一丢成普通 400。
+        // 部分网关只发 code/type，不带 message，仍须让调用方看到失败。
+        val error = root.get("error")
+        val errorObject = error.objectOrNull()
+        val errorMessage = errorObject?.get("message").stringOrNull() ?: error.stringOrNull()
+        val errorCode = errorObject?.get("code").stringOrNull()?.takeIf(String::isNotBlank)
+        val errorType = errorObject?.get("type").stringOrNull()?.takeIf(String::isNotBlank)
+        if (!errorMessage.isNullOrBlank() || errorCode != null || errorType != null) {
+            return OpenAiStreamChunkResult(
+                inlineErrorMessage = errorMessage?.takeIf(String::isNotBlank) ?: "API 返回错误（未提供详细原因）",
+                inlineErrorCode = errorCode,
+                inlineErrorType = errorType
+            )
         }
 
-        val root = runCatching { JsonParser.parseString(data) }.getOrNull()?.objectOrNull() ?: return null
         val choice = root.get("choices")?.takeIf { it.isJsonArray }?.asJsonArray
             ?.firstOrNull()?.objectOrNull()
         val delta = choice?.get("delta")?.objectOrNull()
