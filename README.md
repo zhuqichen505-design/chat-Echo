@@ -2,19 +2,19 @@
 
 Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上下文管理和本地备份。
 
-2.8.14/200 将自动时间线精简、可配置多 Key 健康调度，以及删除上下文、错误提示背景、备用 Key 恢复和暂停状态修复纳入同一次发布。Room 保持 v37（20 个实体），详情见下方；当前构建与远端发布状态分别列示。
+2.8.14/200 已发布，包含自动时间线精简、可配置多 Key 健康调度，以及删除上下文、错误提示背景、备用 Key 恢复和暂停状态修复。Room 保持 v37（20 个实体），详情见下方。
 
 ## 版本与安装包
 
-- 本机版本：**2.8.14**（200），包名 `com.aiassistant`；升版后的完整源码验收、Release 构建、内容隐私与本机复制已核验，Git/标签和公开发布尚待执行。
+- 当前发布版本：**2.8.14**（200），包名 `com.aiassistant`；升版后的完整源码验收、Release 构建、内容隐私与本机复制、版本提交/标签推送和公开下载均已核验。
 - Android 8.0（API 26）及以上，当前安装包仅支持 `arm64-v8a`。
-- 最新版下载：[GitHub Releases](../../releases/latest)。
+- 最新版下载：[v2.8.14 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.14)。唯一手动附件为 `Echo-v2.8.14.apk`，GitHub 摘要与匿名公开下载 SHA256 均与本机一致；清理及独立复核退出 0，远端 Release/版本标签仅保留 v2.8.14，本机历史 APK 与旧标签保留。
 - 本版安装包名称：`Echo-v2.8.14.apk`，25,406,961 字节，446 个 ZIP 条目且 CRC 全通过；内容隐私和指定目录排他复制核验通过，源/副本 SHA256 一致，原有 210 个文件的名称/大小/哈希不变。本机历史安装包永久保留。只手动上传最新版 APK，不上传源码压缩包、历史 APK、日志或用户数据。
 - APK SHA256：`1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`。
 - 最新版元数据与验收边界见 [release-notes/latest.md](release-notes/latest.md)；该目录仅保存公开脱敏说明。
 - GitHub 自动提供的 Source code zip/tar.gz 链接无法关闭；它们不是本项目手动上传的附件。
 - v2 签名验证通过，实际证书与上版 APK 及项目 JKS 一致，使用 Android Debug 证书，**非正式生产签名**。未完成真机安装、启动与真实接口验收；升级前请备份数据。
-- 本轮构建、签名、Git 标签和公开下载核验见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md) 的 2.8.14 发布条目；历史验收不代替本版结果。
+- 本轮构建、签名、Git 标签和公开下载核验见 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md) 的 2.8.14 发布条目；发布后维护文档另行核查提交，不移动版本标签，历史验收不代替本版结果。
 
 ## v2.8.14：删除上下文与生成状态修复
 
