@@ -198,7 +198,8 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         const val PREFERENCES_NAME = "api_key_rotation"
         private const val MAX_RECORDED_FAILURES = 1000000
         private val lock = Any()
-        private val httpCode = Regex("(?i)(?:\\bHTTP(?:\\s+error)?\\s*[:(]?\\s*|API错误\\s*[（(:]\\s*)(\\d{3})\\b")
+        // Android ICU 会将跨字符类的 [: ... :] 误读为 POSIX 属性；冒号不要放在类首。
+        private val httpCode = Regex("(?i)(?:\\bHTTP(?:\\s+error)?\\s*[(:]?\\s*|API错误\\s*[（(:]\\s*)(\\d{3})\\b")
         private val keyFailureCodes = setOf(
             "invalid_api_key", "authentication_error", "authentication_failed", "invalid_authentication",
             "insufficient_quota", "quota_exceeded", "rate_limit_exceeded", "rate_limit_error",

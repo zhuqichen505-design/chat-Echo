@@ -34,6 +34,36 @@ class NetworkAndKeyStabilityTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
 
+    @Test fun startupRotationPatternsAreCompatibleWithIcuCharacterSets() {
+        // Desktop Pattern accepts some classes that Android ICU reads as malformed POSIX properties.
+        // Parse the real startup fields with ICU's set parser before compiling their JVM equivalent.
+        val patterns = ApiKeyRotationManager::class.java.declaredFields
+            .filter { it.type == Regex::class.java }
+            .map { field -> field.isAccessible = true; field.get(null) as Regex }
+        assertTrue("必须检查实际启动时编译的正则", patterns.isNotEmpty())
+        patterns.forEach { pattern ->
+            java.util.regex.Pattern.compile(com.ibm.icu.impl.UnicodeRegex.fix(pattern.pattern))
+        }
+    }
+
+    @Test fun textualHttpStatusVariantsKeepTheirKeyHealthClassification() {
+        val fixture = RotationFixture()
+        val manager = fixture.manager()
+        val accepted = listOf(
+            "HTTP 401", "HTTP error:429", "HTTP(500)", "http error (503)",
+            "API错误（403）", "API错误(408)", "API错误:402"
+        )
+        accepted.forEach { message ->
+            assertTrue(message, manager.recordFailure(ROTATION_URL, "openai", ROTATION_KEYS[0], Exception(message)))
+        }
+        assertEquals(accepted.size, fixture.preferences.all.entries.single { it.key.endsWith(".failures") }.value)
+        val snapshot = fixture.preferences.all
+        listOf("HTTP 400", "HTTP error:404", "API错误（422）", "HTTP 4010", "no status").forEach { message ->
+            assertFalse(message, manager.recordFailure(ROTATION_URL, "openai", ROTATION_KEYS[0], Exception(message)))
+        }
+        assertEquals("非 Key 错误不能修改健康记录", snapshot, fixture.preferences.all)
+    }
+
     @Test fun keyRotationBoundsRejectUnsafeTimesAndUnknownModesWithoutOverflow() {
         val normalized = ApiKeyRotationSettings(
             mode = "unknown", failuresBeforeCooldown = Int.MIN_VALUE,

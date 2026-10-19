@@ -1,3 +1,29 @@
+# Echo 2.8.15 启动 ICU 正则紧急修复走查（2026-10-19，发布准备中）
+
+用户反馈更新 v2.8.14 后无法启动。本轮延续原 APK 构建授权，目标发布版本为 2.8.15/201，以核验同签名覆盖升级条件的修复包交付。基线为当前仓库 main/`862c250`，原有未跟踪素材保留并排除；Room v37/20 实体不变，不读取历史改进归档。
+
+根因证据：`AiAssistantApp.onCreate` 创建 `PersonalizationManager` 时立即创建 `ApiKeyRotationManager`，静态字段在首页出现前编译 HTTP 状态正则。原字符类 `[:(]` 与后续字符类组合在 ICU 中被误读为 POSIX 属性；两路独立原生 ICU 72.1 对完整实际表达式编译均返回 `U_REGEX_PROPERTY_SYNTAX`，且原发布 APK 内确认存在同一表达式。桌面 JVM 正则编译接受该写法，原发布 971 项通过没有覆盖此 Android 平台差异。尚未取得用户设备异常堆栈，原生 ICU 复现不是用户手机现场日志。
+
+临时实施方案与实际范围：只在 `ApiKeyRotationManager.kt` 将字符类等价重排为 `[(:]`，恢复 ICU 完整编译，保持 HTTP/HTTP error/中英文括号和中文错误格式的 Key 状态分类。在既有 `NetworkAndKeyStabilityTest.kt` 新增两项回归：反射读取实际三个启动正则，经已有 ICU4J `UnicodeRegex.fix` 的字符集解析后编译 JVM 表达式；验证 HTTP 与中文状态变体会按原规则记录 Key 失败，普通 400/404/422、无状态码与 4010 不污染健康记录。ICU4J 字符集解析回归与原生 ICU 完整表达式编译分开核验，不将前者称为 Android 设备测试。
+
+定向验证：原生 ICU 的原表达式失败及修复表达式通过已核查；升版前定向 `NetworkAndKeyStabilityTest` 的 Gradle 退出 0，48 项测试、失败/错误/跳过 0，XML 测试时间 1.755 秒、Gradle 5m7s。
+
+升版后最终冻结验收 `20261019-232631-568`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 463.559 秒；compileDebugKotlin、testDebugUnitTest、lintDebug 均实际执行，88 套件/973 项完整单测，失败/错误/跳过 0，测试任务 121.46 秒；实读 Lint XML 为 0 Error/102 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。源码、测试及构建配置冻结后未改，后续不重复完整源码验收。
+
+Release 与产物：`assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，268.984 秒；本机元数据、全部 ZIP CRC 与 apksigner 核验脚本退出 0。唯一安装包 `Echo-v2.8.15.apk` 为 25,406,965 字节、446 条目，com.aiassistant、2.8.15/201、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。v2 签名通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 及项目 JKS 一致，Android Debug **非正式生产签名**；applicationId/签名一致且 versionCode 更高，满足保留数据覆盖升级条件，不代表设备安装启动已验证。
+
+APK 内容隐私：自动扫描、人工差异和最终 manual 证据链审核均退出 0；检查全部 446 条目、31,183 个 DEX/10,617 个资源字符串。288 候选由 27 个已审精确串及 261 个完整未变条目继承，未决 0；新增 5 个唯一串/6 条记录逐项人工阅读，未见私人值。186 张图片内容、尺寸与元数据全部一致。解压变化仅 Manifest、DEX、VCS textproto、baseline.prof 共 4 项，无新增或删除条目；baseline.prof 已做完整字节、ASCII/UTF-16 与已知私人值扫描，未作专有语义解码。自动/人工报告 SHA 链已绑定，不保证任意未知或加密私人值绝对不存在。
+
+最终 APK DEX 专项退出 0：原故障表达式在全部 DEX 中为 0、修复表达式为 1；目标 `<clinit>` 按指令边界准确加载修复表达式 1 处。提取后的完整表达式在原生 ICU 72.1 编译通过，12 项分类案例全部通过，source/APK/mapping 前后字节一致。该产物核查与 ICU4J 字符集回归、原生 ICU 完整编译分开记录，不作为设备启动结果。
+
+指定目录排他复制退出 0，唯一新增 `Echo-v2.8.15.apk`，源/副本 SHA256 一致，副本签名核验退出 0；原有 211 个文件（210 APK）名称、大小和 SHA256 全部不变，现 212 个文件（211 APK），没有覆盖或删除历史安装包。
+
+待执行：提交/标签推送、唯一最新版附件及匿名下载逐项记录，新包可下载后才处理新仓库旧远端版本。不将本机结果写成远端成功。
+
+安装包与用户数据边界：`Echo-v2.8.15.apk` 的同签名覆盖升级条件已核验，公开发布待执行，不能声称用户已获得更新或手机恢复。没有设备安装、启动、动态视觉或触控验收；无需卸载或清除应用数据。修复不改数据库、迁移、用户聊天或 Key 设置；所有本机历史安装包保留。七份文档同步本版实际结果，v2.8.15 的公开说明在版本提交前定稿，提交后保持冻结，不改写既有版本提交或移动版本标签。
+
+---
+
 # Echo 2.8.14 发布走查（2026-10-19，构建与发布完成）
 
 用户明确要求构建 APK。本轮将 `5d93d8b` 的自动时间线/多 Key 调度和 `d99d3c3` 的删除上下文/恢复暂停修复构建为 2.8.14/200；Room v37/20 实体不变。来源仅当前 chat-Echo，不同步旧项目、不读取历史改进归档。保留既有未跟踪素材，唯一新增安装包名为 `Echo-v2.8.14.apk`，历史安装包不得覆盖或删除。

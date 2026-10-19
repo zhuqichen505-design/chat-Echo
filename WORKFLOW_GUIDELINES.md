@@ -26,6 +26,14 @@
 
 ## 本次记录
 
+- 2026-10-19（v2.8.15/201 启动 ICU 紧急修复发布，进行中）：延续原 APK 构建授权，基线 main/`862c250`，原未跟踪素材保留并排除；发布目标 2.8.15/201，Room v37/20 实体不变。启动链 `AiAssistantApp` → `PersonalizationManager` → `ApiKeyRotationManager` 会立即编译状态正则；原 `[:(]` 与后续字符类组合在两路原生 ICU 72.1 完整编译均报 `U_REGEX_PROPERTY_SYNTAX`，原发布 APK 内也存在同一故障表达式。尚无用户设备堆栈，不把本机复现写成手机现场记录。
+- 临时方案与影响面：仅把 `ApiKeyRotationManager.kt` 的字符类等价重排为 `[(:]`，保留 HTTP/中文状态识别；`NetworkAndKeyStabilityTest.kt` 增加实际三个启动正则的 ICU4J 字符集解析回归和状态格式/非 Key 错误保护回归，共两项。原生 ICU 完整编译已确认修复表达式通过。
+- 升版前定向 `NetworkAndKeyStabilityTest` 的 Gradle 退出 0，48 项测试、失败/错误/跳过 0，XML 测试时间 1.755 秒、Gradle 5m7s。2.8.15/201 源码、测试和构建配置冻结后，最终验收 `20261019-232631-568` 的 `pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 463.559 秒；编译、88 套件/973 项完整单测和 Lint 均实际执行，失败/错误/跳过 0，测试任务 121.46 秒，Lint XML 0 Error/102 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。随后串行独立 Release，不改冻结输入或重复完整验收。
+- 本轮独立 Release `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，268.984 秒；本机元数据/全部 CRC/apksigner 核验脚本退出 0。`Echo-v2.8.15.apk` 25,406,965 字节/446 条目，2.8.15/201/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 和项目 JKS 一致，Android Debug 非正式生产签名，满足覆盖升级条件。
+- APK 自动内容隐私扫描、完整人工差异及最终证据链均退出 0：446 条目、31,183 DEX/10,617 资源字符串；288 候选由 27 个已审精确串及 261 个完整未变条目继承，未决 0，新增 5 唯一串/6 记录全部人工读完无发现，186 图内容/尺寸/元数据一致。仅 Manifest、DEX、VCS textproto、baseline.prof 共 4 个解压条目改变，无新增/删除条目；baseline.prof 做完整字节/ASCII/UTF-16/已知私人值扫描，未作专有语义解码，不保证任意未知/加密私人值。
+- 最终 DEX 专项退出 0：全部 DEX 原式 0、修复式 1，目标 `<clinit>` 准确加载修复式 1，提取表达式通过原生 ICU 72.1 完整编译及 12 项分类案例，source/APK/mapping 前后字节一致。指定目录排他复制退出 0，源/副本 SHA256 一致，副本签名退出 0；原有 211 文件（210 APK）名称、大小和 SHA256 未变，现 212 文件（211 APK），历史安装包无覆盖或删除。
+- 本轮在 `app/build.gradle.kts` 升版并维护七份文档；版本提交/标签推送、Release 唯一附件与匿名下载待执行，不预写成功，不改数据库/用户数据。没有设备安装启动验收，无需卸载或清除数据。完整候选、暂存、提交/元数据隐私核查及推送核验按实际记录，不读取历史改进归档；旧包和本机旧标签保留，新包成功后仅按规则撤下新仓库旧 Release/远端版本标签。
+
 - 2026-10-19（v2.8.14/200 发布）：用户明确要求构建 APK，来源为当前仓库 `5d93d8b` 与 `d99d3c3`，不从旧目录同步、不读取历史改进归档；仅递增版本配置并维护七份文档，Room v37/20 实体不变。自动时间线、多 Key 和删除/恢复/暂停修复纳入本版。既有未跟踪素材、私人配置/签名/日志/缓存和产物排除 Git，本机历史 APK 永久保留。
 - 升版冻结验收 `20261019-203850-946`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 486.819 秒；编译、88 套件/971 项完整单测与 Lint 实际执行，失败/错误/跳过 0，测试 108.85 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`。`-RerunTests` 仅强制测试任务重跑；通过后仅独立 Release 构建、文档和 Git 收尾，不改生产源码或重复完整验收。
 - 本轮 `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，264.873 秒；元数据/全部 CRC/apksigner 核验脚本退出 0。APK 25,406,961 字节/446 条目、2.8.14/200/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`。v2 签名与上版 APK/项目 JKS 一致，Android Debug 非正式生产签名。
