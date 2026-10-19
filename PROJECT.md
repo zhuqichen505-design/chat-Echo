@@ -4,13 +4,13 @@
 
 Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
 
-**当前源码版本**: v2.8.13（versionCode 199）
-**本次更新**: 2026-10-19 发布后源码修复删除消息的隐藏投影、来源记忆及方向快照残留；备用 Key 恢复后清即时错误、保留思考，暂停统一“生成已停止”并只保存真实输出；错误/上下文横幅局部背景同步进退。完成与暂停共享保存权、实际用量只记一次，旧回调在 Main 重验会话身份；副本来源映射及人工记忆改写保护一并补齐。此前自动时间线精简与多 Key 健康调度保持，详情见 UPDATE_LOG.md。
+**当前源码版本**: v2.8.14（versionCode 200）
+**本次更新**: 2026-10-19 将自动时间线 96 字精简、多 Key 可配置轮询/冷却，以及删除上下文与恢复暂停修复纳入本次发布。删除同步清理隐藏投影、明确来源记忆和方向快照；备用 Key 恢复后清即时错误、保留思考，暂停统一“生成已停止”，完成与暂停共享保存权、实际用量只记一次。错误/上下文横幅局部背景同步进退，副本来源和人工记忆改写保护一并保留，详情见 UPDATE_LOG.md。
 **数据库版本**: 37（20 个实体）
-**本轮范围（2026-10-19）**: 直接修改当前 chat-Echo，不从旧项目同步。涉及聊天上下文、来源记忆/分支、回复方向及生成生命周期和动态提示；未新增数据库实体，版本 2.8.13/199、Room v37/20 实体不变。没有 APK 构建、标签或 Release 操作；已发布的 v2.8.13 APK 不包含本轮源码变更。
-**最新源码验证**: 2026-10-19 最终冻结记录 `20261019-202502-349`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 脚本/Gradle 退出 0，总 397.657 秒；编译、88 套件/971 项完整单测及 Lint 实际执行，失败/错误/跳过 0，测试任务 109.38 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`，工作区 `git diff --check` 退出 0。本轮新增 16 项现有领域测试；Lint 警告数与上轮一致，没有关闭或 suppress 规则。通过后仅文档和 Git 收尾，详见 [walkthrough.md](walkthrough.md)。
-**安装包状态**: `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 458 秒。`Echo-v2.8.13.apk` 为 25,374,197 字节、446 个 ZIP 条目；com.aiassistant、2.8.13/199、min26/target34/compile34、arm64-v8a、无 `application-debuggable` 标志，SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。v2 签名与上版及项目签名证书一致，Android Debug **非正式生产签名**。446 条目 CRC 全通过，已知隐私模式新增候选 0，186 张图片与上一版逐字节一致；源包已排他复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.13.apk` 并核对副本哈希。GitHub 资产与匿名下载 SHA256 均与本机一致，设备安装、启动、触控和真实厂商接口尚未验收。
-**远端发布核验**: 版本提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、annotated `v2.8.13` 标签对象 `b5166201b9e72b7b3c275ee30588bf0e27f87706`，`git ls-remote` 一致。[v2.8.13 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.13) 创建并上传退出 0，唯一附件为 `Echo-v2.8.13.apk`；GitHub 资产大小 25,374,197 字节，匿名下载 SHA256 与本机均为 `24dc15ed08b5128da37ead56822544fc00b3f4eab8208da38547214566fa3405`。仅撤下新仓库远端 v2.8.12 Release/标签，本机旧标签和历史 APK 保留。最终文档收尾提交另行核验，完整隐私范围与实际结果见 [walkthrough.md](walkthrough.md)。
+**本轮范围（2026-10-19）**: 用户明确要求构建 APK，将 `5d93d8b` 的时间线/多 Key 更新及 `d99d3c3` 的删除上下文/恢复暂停修复纳入 2.8.14/200。来源仅当前 chat-Echo，不从旧项目同步；Room v37/20 实体不变。
+**最新源码验证**: 升版后最终冻结记录 `20261019-203850-946`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 486.819 秒；编译、88 套件/971 项完整单测及 Lint 实际执行，失败/错误/跳过 0，测试任务 108.85 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`。`-RerunTests` 仅强制测试任务实际重跑，没有关闭或 suppress 规则；通过后只构建与收尾文档，不重复完整源码验收，详见 [walkthrough.md](walkthrough.md)。
+**安装包状态**: `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 264.873 秒。`Echo-v2.8.14.apk` 为 25,406,961 字节、446 个 ZIP 条目；com.aiassistant、2.8.14/200、min26/target34/compile34、arm64-v8a、不可 debug，SHA256 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`。元数据、全部 CRC 与 apksigner 核验脚本退出 0，v2 签名证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版 APK 及项目 JKS 一致，Android Debug **非正式生产签名**。完整隐私扫描/提取退出 0，288 个候选精确继承有效基线证据、未决 0，新增 317 个唯一字符串逐项人工审阅未发现私人值；186 张图片内容/尺寸/元数据一致。排他复制退出 0，源/副本 SHA256 一致，原有 210 个文件（209 APK）名称/大小/SHA256 不变，现 211 个文件（210 APK）；设备安装、启动、触控和真实厂商接口尚未验收。
+**远端发布核验**: 本轮版本提交、`v2.8.14` 标签、GitHub Release 与匿名下载尚未核验；本机完成不表示已远程发布。实际结果将在 [最新发布说明](release-notes/latest.md) 与 [walkthrough.md](walkthrough.md) 补齐。
 **发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 
@@ -105,6 +105,8 @@ Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deeps
 
 | 版本 | 数据库 | 主要更新 |
 |------|--------|----------|
+| 2.8.14（本次发布） | 37 | 自动时间线 96 字准入、多 Key 健康调度与自定义冷却；删除上下文及来源记忆保护、备用 Key 恢复、停止状态与横幅退出修复 |
+| 2.8.13（已发布） | 37 | 摘要拒绝/纯标题保护、按比例直接截断与分支压缩策略继承 |
 | 2.8.12（已发布） | 37 | 输入注入回复、编辑保留摘要与主动重建；纳入摘要请求参数/推理预算/紧凑二次缩短、API 路径与正文解析，以及 bot/状态放大、时间线开关、凝练提取和紧凑展示 |
 | 2.8.11（已发布） | 35 | 同参数压缩重试、摘要短请求和流式兼容、失败后正常聊天与事件提炼 |
 | 2.8.10 | 35 | 剧情过程与自然时间跨度、设定增量维护、分支改名、创作流程完善及长会话压缩实际应用 |
