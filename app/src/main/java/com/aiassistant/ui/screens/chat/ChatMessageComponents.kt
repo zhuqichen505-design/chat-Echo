@@ -95,6 +95,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -120,6 +122,8 @@ import com.aiassistant.domain.model.Message
 import com.aiassistant.domain.model.MemoryItem
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.MarkdownText
+import com.aiassistant.ui.components.markdown.MarkdownInlineParser
+import com.aiassistant.ui.components.markdown.MarkdownColorUtils.decodeHtmlEntities
 import com.aiassistant.ui.components.parseInlineMarkdown
 import com.aiassistant.ui.components.SideAnchorItem
 import com.aiassistant.ui.components.SideAnchorNavigator
@@ -421,6 +425,8 @@ internal fun MessageBubble(
     onCopyThinking: () -> Unit,
     onQuote: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
+    isCreatingBranch: Boolean = false,
+    branchEnabled: Boolean = true,
     onRegenerate: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     /** 仅修改消息内容（不重新发送/不重新生成），用户消息的“仅编辑”入口 */
@@ -484,9 +490,24 @@ internal fun MessageBubble(
         }
     }
 
-    var activeCitation by remember { mutableStateOf<CitationInfo?>(null) }
-    val citations = remember(message.content) {
-        if (!isUser) extractCitationsFromContent(message.content) else emptyList()
+    val toolCallsList = remember(message.toolCalls) {
+        if (message.toolCalls.isNullOrBlank()) {
+            emptyList<ToolCallRecord>()
+        } else {
+            runCatching {
+                val type = com.google.gson.reflect.TypeToken.getParameterized(
+                    List::class.java, ToolCallRecord::class.java
+                ).type
+                com.google.gson.Gson().fromJson<List<ToolCallRecord>>(message.toolCalls, type).orEmpty()
+            }.getOrDefault(emptyList())
+        }
+    }
+    var activeCitation by remember(message.id) { mutableStateOf<CitationInfo?>(null) }
+    val searchCitations = remember(toolCallsList, isUser) {
+        if (!isUser) extractCitationsFromContent("", toolCallsList) else emptyList()
+    }
+    val citations = remember(message.content, searchCitations, isUser) {
+        if (!isUser) extractCitationSources(message.content, searchCitations) else emptyList()
     }
 
     // ===== 动效轮：生成状态机（P0-4）与落定/光标生命周期（P0-3）=====
@@ -506,6 +527,9 @@ internal fun MessageBubble(
         } else {
             message.content
         }
+    }
+    val stoppedErrorReport = remember(message.content, generationState) {
+        if (generationState == GenerationUiState.Cancelled) GenerationUiStateRules.stoppedReplyErrorReport(message.content) else null
     }
     // 光标生命周期：流式期间可见；生成结束后保留 300ms 供淡出，再摘除；
     // settleSignal（审核 A3）：常规路径下流式气泡随 isGenerating=false 同帧卸载（ViewModel 同帧清空
@@ -704,8 +728,7 @@ internal fun MessageBubble(
                             content = displayContent,
                             color = contentColor,
                             onCitationClick = { id ->
-                                activeCitation = citations.find { it.index == id }
-                                    ?: CitationInfo(id, "参考资料 $id", "https://www.google.com/search?q=$id")
+                                activeCitation = citationForIndex(citations, id)
                             },
                             streaming = isGenerating || cursorAlive,
                             cursor = if (cursorAlive) generationAccentColor else null,
@@ -1474,14 +1497,14 @@ internal fun MessageBubble(
                         .padding(horizontal = 2.dp),
                     horizontalAlignment = Alignment.Start
                 ) {
-                    val isErrorOutput = contentIsErrorMessage
+                    val isErrorOutput = contentIsErrorMessage || stoppedErrorReport != null
 
                     if (isErrorOutput) {
                         val interruptMarker = "[输出已被中断"
-                        val beforeInterrupt = if (message.content.contains(interruptMarker)) {
+                        val beforeInterrupt = if (stoppedErrorReport != null) displayContent else if (message.content.contains(interruptMarker)) {
                             message.content.substringBefore(interruptMarker).trimEnd()
                         } else ""
-                        val errorBody = if (beforeInterrupt.isNotBlank()) {
+                        val errorBody = if (stoppedErrorReport != null) stoppedErrorReport else if (beforeInterrupt.isNotBlank()) {
                             message.content.substring(message.content.indexOf(interruptMarker)).trim()
                         } else {
                             message.content.trim()
@@ -1489,8 +1512,12 @@ internal fun MessageBubble(
 
                         // 如果前面已有部分输出内容，先以正常气泡展示正文
                         if (beforeInterrupt.isNotBlank()) {
-                            StoryReadingTypography(readingStyle, readingFont) {
-                                MarkdownText(content = beforeInterrupt, color = textColor)
+                            if (stoppedErrorReport != null) {
+                                MessageContent(textColor)
+                            } else {
+                                StoryReadingTypography(readingStyle, readingFont) {
+                                    MarkdownText(content = beforeInterrupt, color = textColor)
+                                }
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -1529,7 +1556,7 @@ internal fun MessageBubble(
                                             tint = errorSemantic.main
                                         )
                                         Text(
-                                            text = if (beforeInterrupt.isNotBlank()) "生成已被中断" else "模型请求异常",
+                                            text = if (stoppedErrorReport != null) "暂停前的连接异常" else if (beforeInterrupt.isNotBlank()) "生成已被中断" else "模型请求异常",
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             color = errorSemantic.main,
                                             modifier = Modifier.weight(1f)
@@ -1566,21 +1593,6 @@ internal fun MessageBubble(
                     }
 
                     // 工具调用留痕展示 (支持展开查看执行摘要与注入的上下文详情)
-                    val toolCallsList = remember(message.toolCalls) {
-                        if (message.toolCalls.isNullOrBlank()) {
-                            emptyList<ToolCallRecord>()
-                        } else {
-                            try {
-                                val gson = com.google.gson.Gson()
-                                val type = com.google.gson.reflect.TypeToken.getParameterized(
-                                    List::class.java, ToolCallRecord::class.java
-                                ).type
-                                gson.fromJson<List<ToolCallRecord>>(message.toolCalls, type) ?: emptyList()
-                            } catch (e: Exception) {
-                                emptyList()
-                            }
-                        }
-                    }
                     if (toolCallsList.isNotEmpty()) {
                         ToolCallsFooter(toolCalls = toolCallsList)
                     }
@@ -1595,6 +1607,8 @@ internal fun MessageBubble(
                         onCopy = onCopy,
                         onQuote = onQuote,
                         onBranch = onBranch,
+                        isCreatingBranch = isCreatingBranch,
+                        branchEnabled = branchEnabled,
                         onRegenerate = onRegenerate,
                         onEdit = onEdit,
                         onEditInPlace = onEditInPlace,
@@ -1635,6 +1649,8 @@ internal fun MessageFooter(
     onCopy: () -> Unit,
     onQuote: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
+    isCreatingBranch: Boolean = false,
+    branchEnabled: Boolean = true,
     onRegenerate: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /** 仅修改消息内容（用户消息“仅编辑”，不重新发送/不重新生成） */
@@ -1741,12 +1757,19 @@ internal fun MessageFooter(
             )
 
             if (!isUser && onBranch != null) {
-                FooterIconButton(
-                    icon = Icons.AutoMirrored.Filled.AltRoute,
-                    contentDescription = "分支对话",
-                    tint = backdropContentColor,
-                    onClick = onBranch
-                )
+                IconButton(onClick = onBranch, enabled = branchEnabled && !isCreatingBranch,
+                    modifier = Modifier.size(48.dp).semantics {
+                        contentDescription = if (isCreatingBranch) "正在创建分支" else "分支对话"
+                    }) {
+                    if (isCreatingBranch) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        Icon(Icons.AutoMirrored.Filled.AltRoute, contentDescription = null,
+                            tint = backdropContentColor.copy(alpha = if (branchEnabled) 1f else 0.38f),
+                            modifier = Modifier.size(17.dp))
+                    }
+                }
             } else if (onQuote != null) {
                 FooterIconButton(
                     icon = Icons.Default.FormatQuote,
@@ -2155,32 +2178,106 @@ internal fun AttachmentGroupBubble(
     }
 }
 
-// v2.7.3 流畅度：引用提取正则提升为常量——extractCitationsFromContent 由 remember(message.content)
-// 在流式期间每帧调用，原先每次现场编译两个 Regex 并全文扫描
-private val CITATION_EXPLICIT_REGEX = Regex("""\[(\d+)\]\s*\[(.*?)\]\((https?://[^\s)]+)\)""")
-private val CITATION_GENERAL_REGEX = Regex("""\[(.*?)\]\((https?://[^\s)]+)\)""")
+private val CITATION_NUMBERED_LINE_REGEX = Regex("""^\s*(?:[-*+]\s+)?(?:\[\^?(\d+)]|(\d+)[.)])\s*:?\s*(.*)$""")
+private val CITATION_BARE_URL_REGEX = Regex("""https?://[^\s<>"']+""", RegexOption.IGNORE_CASE)
+private val CITATION_NUMERIC_LABEL_REGEX = Regex("""\^?\d+""")
 
-fun extractCitationsFromContent(content: String): List<CitationInfo> {
-    val list = mutableListOf<CitationInfo>()
-    CITATION_EXPLICIT_REGEX.findAll(content).forEach { match ->
-        val id = match.groupValues[1].toIntOrNull() ?: (list.size + 1)
-        val title = match.groupValues[2].ifBlank { "参考网页 $id" }
-        val url = match.groupValues[3].trim()
-        if (list.none { it.url == url || it.index == id }) {
-            list.add(CitationInfo(id, title, url))
-        }
+private fun citationWebUrl(raw: String): String? {
+    val url = decodeHtmlEntities(raw.trim())
+    return url.takeIf {
+        runCatching {
+            val uri = java.net.URI(it)
+            uri.scheme.lowercase() in setOf("http", "https") && !uri.rawAuthority.isNullOrBlank()
+        }.getOrDefault(false)
     }
-    if (list.isEmpty()) {
-        CITATION_GENERAL_REGEX.findAll(content).forEachIndexed { idx, match ->
-            val title = match.groupValues[1].ifBlank { "参考网页 ${idx + 1}" }
-            val url = match.groupValues[2].trim()
-            if (list.none { it.url == url }) {
-                list.add(CitationInfo(idx + 1, title, url))
+}
+
+private fun trimBareCitationUrl(raw: String): String {
+    var url = raw.trimEnd('.', ',', ';', '!', '?', '，', '。', '；', '！', '？', ']', '}')
+    while (url.endsWith(')') && url.count { it == ')' } > url.count { it == '(' }) url = url.dropLast(1)
+    return url
+}
+
+/** 保留资料自身的编号；模型省略网址时，从本轮成功的联网搜索留痕找回真实来源。 */
+fun extractCitationsFromContent(content: String, toolCalls: List<ToolCallRecord> = emptyList()): List<CitationInfo> {
+    val searchSources = toolCalls.filter { it.isSuccess && it.toolType == "WEB_SEARCH" }
+        .flatMap { extractCitationSources(it.detailContent) }
+        .groupBy { it.index }
+        .mapNotNull { (_, sources) ->
+            // 多次搜索可能各自从 1 编号；冲突时不得猜测正文指向哪轮搜索。
+            sources.distinctBy { it.url }.singleOrNull()
+        }
+    return extractCitationSources(content, searchSources)
+}
+
+private fun extractCitationSources(content: String, searchSources: List<CitationInfo> = emptyList()): List<CitationInfo> {
+    val explicit = linkedMapOf<Int, CitationInfo>()
+    val general = mutableListOf<MarkdownInlineParser.MarkdownLink>()
+
+    fun add(index: Int, title: String, rawUrl: String) {
+        if (index <= 0 || explicit.containsKey(index)) return
+        val url = citationWebUrl(rawUrl) ?: return
+        val plainTitle = parseInlineMarkdown(title).text.trim().trim(':', '：', '-', '(', ')', '<', '>')
+            .takeUnless { it.matches(CITATION_NUMERIC_LABEL_REGEX) }
+        explicit[index] = CitationInfo(index, plainTitle?.takeIf { it.isNotBlank() } ?: "参考网页 $index", url)
+    }
+
+    fun collect(source: String, includeGeneral: Boolean) {
+        val decoded = decodeHtmlEntities(source)
+        val lines = decoded.lines()
+        var inFence = false
+        lines.forEachIndexed { lineIndex, line ->
+            if (line.trimStart().startsWith("```") || line.trimStart().startsWith("~~~")) {
+                inFence = !inFence
+                return@forEachIndexed
+            }
+            if (inFence) return@forEachIndexed
+            val numbered = CITATION_NUMBERED_LINE_REGEX.matchEntire(line)
+            if (numbered != null) {
+                val index = (numbered.groupValues[1].ifBlank { numbered.groupValues[2] }).toIntOrNull()
+                val tail = numbered.groupValues[3]
+                // 标准脚注定义允许把目的地址放到下一缩进行。
+                val sourceTail = if (!tail.contains("http", ignoreCase = true) &&
+                    lines.getOrNull(lineIndex + 1)?.firstOrNull()?.isWhitespace() == true) {
+                    tail + " " + lines[lineIndex + 1].trim()
+                } else tail
+                val linkStart = sourceTail.indexOf('[')
+                val link = if (linkStart >= 0) MarkdownInlineParser.readMarkdownLink(sourceTail, linkStart) else null
+                val rawUrl = link?.destination ?: CITATION_BARE_URL_REGEX.find(sourceTail)?.value?.let(::trimBareCitationUrl)
+                if (index != null && rawUrl != null) {
+                    val title = link?.label ?: sourceTail.substringBefore(rawUrl).trim()
+                    add(index, title, rawUrl)
+                }
+            }
+            var start = line.indexOf('[')
+            while (start >= 0) {
+                val link = MarkdownInlineParser.readMarkdownLink(line, start)
+                if (link != null && line.getOrNull(start - 1) != '!') {
+                    if (link.label.matches(CITATION_NUMERIC_LABEL_REGEX)) {
+                        link.label.removePrefix("^").toIntOrNull()?.let { add(it, "", link.destination) }
+                    } else if (includeGeneral) {
+                        general += link
+                    }
+                }
+                start = line.indexOf('[', if (link != null) link.endExclusive else start + 1)
             }
         }
     }
-    return list
+
+    collect(content, includeGeneral = true)
+    searchSources.forEach { source -> if (!explicit.containsKey(source.index)) explicit[source.index] = source }
+    var nextIndex = 1
+    general.forEach { link ->
+        val url = citationWebUrl(link.destination) ?: return@forEach
+        if (explicit.values.any { it.url == url }) return@forEach
+        while (explicit.containsKey(nextIndex)) nextIndex++
+        add(nextIndex, link.label, url)
+    }
+    return explicit.values.sortedBy { it.index }
 }
+
+internal fun citationForIndex(citations: List<CitationInfo>, index: Int): CitationInfo =
+    citations.firstOrNull { it.index == index } ?: CitationInfo(index, "参考资料 $index", "")
 
 @Composable
 fun CitationsCardsRow(
@@ -2263,7 +2360,9 @@ fun CitationDetailDialog(
 ) {
     val uriHandler = LocalUriHandler.current
     val clipboardManager = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val hasUrl = citationWebUrl(citation.url) != null
+    var copied by remember(citation.index, citation.url) { mutableStateOf(false) }
 
     EchoGlassDialog(
         onDismissRequest = onDismiss,
@@ -2300,13 +2399,16 @@ fun CitationDetailDialog(
             }
         },
         content = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Text(
-                    text = "参考网址来源 (可长按文本选中)：",
+                    text = if (hasUrl) "参考网址来源（可长按文本选中）：" else "该引用未提供可打开的网址。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                androidx.compose.foundation.text.selection.SelectionContainer {
+                if (hasUrl) androidx.compose.foundation.text.selection.SelectionContainer {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2323,38 +2425,51 @@ fun CitationDetailDialog(
                         )
                     }
                 }
+                if (!hasUrl) {
+                    Text(
+                        text = "无法从回复或本轮搜索记录中确定编号 [${citation.index}] 对应的真实链接。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         buttons = {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TextButton(onClick = onDismiss) {
-                    Text("关闭")
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                OutlinedButton(
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(citation.url))
-                        copied = true
-                    }
-                ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (copied) "已复制网址" else "复制网址")
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                Button(
+                if (hasUrl) Button(
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         runCatching<Unit> { uriHandler.openUri(citation.url) }
-                        onDismiss()
+                            .onSuccess { onDismiss() }
+                            .onFailure { Toast.makeText(context, "无法打开网页，可复制网址后在浏览器打开", Toast.LENGTH_SHORT).show() }
                     }
                 ) {
                     Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("打开网页")
+                    Text("打开网页", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                // 主操作独占一行，次操作均分宽度；复制状态变化不会挤压“打开网页”。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text("关闭", maxLines = 1)
+                    }
+                    if (hasUrl) OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(citation.url))
+                            copied = true
+                        }
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (copied) "已复制" else "复制网址", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }

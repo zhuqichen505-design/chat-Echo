@@ -2,6 +2,7 @@ package com.aiassistant
 
 import android.app.Application
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.lifecycle.viewModelScope
 import com.aiassistant.data.local.AppDatabase
 import com.aiassistant.data.repository.AiRepository
@@ -13,6 +14,7 @@ import com.aiassistant.utils.CryptoManager
 import com.aiassistant.utils.PersonalizationManager
 import com.aiassistant.utils.TavilySearchManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.*
@@ -175,7 +177,7 @@ class ChatRetryRepositoryTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
-    @Test fun pausingConnectingBackupSavesOnlyShortStoppedPlaceholderAndActualRequestUsage() = runBlocking {
+    @Test fun pausingConnectingBackupPreservesPendingErrorsAndActualRequestUsage() = runBlocking {
         newSingleThreadContext("backup-connecting-pause-main").use { main ->
             Dispatchers.setMain(main)
             try {
@@ -210,7 +212,11 @@ class ChatRetryRepositoryTest {
                             withTimeout(5000) { generation.join() }
                             withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.role == "assistant" }) delay(10) }
                             val reply = f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }
-                            assertEquals("生成已停止", reply.content)
+                            assertTrue(reply.content.startsWith("生成已停止\n\n【连接异常信息记录】"))
+                            val savedErrors = com.aiassistant.ui.screens.chat.GenerationUiStateRules.stoppedReplyErrorReport(reply.content)!!
+                            assertTrue(savedErrors.contains("Key #1"))
+                            assertTrue(savedErrors.contains("synthetic invalid credential"))
+                            assertEquals("", com.aiassistant.ui.screens.chat.GenerationUiStateRules.stoppedReplyDisplayBody(reply.content))
                             assertNull(reply.thinkingContent)
                             assertFalse(com.aiassistant.ui.screens.chat.isErrorMessage(reply.content))
                             assertTrue(AiRepository.isErrorPlaceholderMessage(reply.content))
@@ -227,6 +233,106 @@ class ChatRetryRepositoryTest {
                             ChatGenerationManager.cancelSession(id)
                         }
                     } }
+                }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun stoppingWhileTerminalNetworkErrorWaitsForMainKeepsErrorExactlyOnce() = runBlocking {
+        newSingleThreadContext("terminal-error-pause-main").use { main ->
+            Dispatchers.setMain(main)
+            val release = CountDownLatch(1)
+            val entered = CountDownLatch(1)
+            try {
+                Endpoint { socket, _ ->
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                    socket.response("400 Bad Request", "{\"error\":{\"message\":\"synthetic terminal failure F42\"}}")
+                }.use { endpoint -> Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config(endpoint.url)
+                    val vm = ChatViewModel(id)
+                    try {
+                        withTimeout(5000) { while (vm.currentModelOption.value == null || vm.contextUsage.value.usage == null) delay(10) }
+                        withContext(Dispatchers.Main) { vm.sendMessage("合成最终报错暂停竞态") }
+                        assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                        val session = ChatGenerationManager.getSession(id)!!
+                        val generation = session.generationJob!!
+                        withContext(Dispatchers.Main) {
+                            release.countDown()
+                            // 保持本帧未让出，让 IO 错误先抵达、主线程收尾尚未执行。
+                            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                            while (session.error.value == null && System.nanoTime() < deadline) Thread.yield()
+                            assertTrue(session.error.value.orEmpty().contains("synthetic terminal failure F42"))
+                            vm.stopGeneration()
+                            vm.stopGeneration()
+                        }
+                        withTimeout(5000) { generation.join() }
+                        withTimeout(5000) { while (f.db.messageDao().getMessagesList(id).none { it.role == "assistant" }) delay(10) }
+                        val reply = f.db.messageDao().getMessagesList(id).single { it.role == "assistant" }
+                        assertTrue(com.aiassistant.ui.screens.chat.GenerationUiStateRules.stoppedReplyErrorReport(reply.content)!!
+                            .contains("synthetic terminal failure F42"))
+                        assertTrue(com.aiassistant.ui.screens.chat.GenerationUiStateRules.isStoppedContent(reply.content))
+                        assertNull(vm.error.value)
+                        assertNull(ChatGenerationManager.getSession(id))
+                        assertEquals(1, endpoint.payloads.size)
+                        assertEquals(1, f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).size)
+                    } finally {
+                        release.countDown()
+                        vm.stopGeneration()
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                        ChatGenerationManager.cancelSession(id)
+                    }
+                } }
+            } finally { Dispatchers.resetMain() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
+    @Test fun branchClickImmediatelyShowsBusyDeduplicatesAndRecoversAfterFailure() = runBlocking {
+        newSingleThreadContext("branch-operation-main").use { main ->
+            Dispatchers.setMain(main)
+            try {
+                Fixture().use { f ->
+                    f.enableViewModel()
+                    val (_, id) = f.config("https://example.invalid/v1")
+                    val replyId = f.repository.saveMessage(Message(conversationId = id, role = "assistant", content = "合成分支起点"))
+                    val vm = ChatViewModel(id)
+                    val release = CompletableDeferred<Unit>()
+                    try {
+                        withTimeout(5000) { while (vm.currentModelOption.value == null || vm.contextUsage.value.usage == null) delay(10) }
+                        val entered = CompletableDeferred<Unit>()
+                        val heldTransaction = launch(Dispatchers.IO) {
+                            f.db.withTransaction { entered.complete(Unit); release.await() }
+                        }
+                        withTimeout(5000) { entered.await() }
+                        val created = CompletableDeferred<Pair<Long, String>>()
+                        val callbacks = java.util.concurrent.atomic.AtomicInteger()
+                        withContext(Dispatchers.Main) {
+                            repeat(6) {
+                                vm.createBranch(replyId) { newId, title -> callbacks.incrementAndGet(); created.complete(newId to title) }
+                                assertEquals(replyId, vm.creatingBranchMessageId.value)
+                            }
+                        }
+                        assertFalse("事务繁忙时应保持明确的创建中状态", created.isCompleted)
+                        release.complete(Unit)
+                        heldTransaction.join()
+                        val branch = withTimeout(5000) { created.await() }
+                        withTimeout(5000) { while (vm.creatingBranchMessageId.value != null) delay(10) }
+                        assertEquals("连点不得重复创建分支", 1, callbacks.get())
+                        assertEquals(listOf(branch.first), f.repository.getConversationBranches(id).first().map { it.childConversationId })
+                        assertEquals(listOf("合成分支起点"), f.db.messageDao().getMessagesList(branch.first).map { it.content })
+
+                        // 原会话消失是实际可恢复失败；状态必须释放并给出可见原因。
+                        f.db.conversationDao().deleteConversation(f.db.conversationDao().getConversationById(id)!!)
+                        withContext(Dispatchers.Main) { vm.createBranch(replyId) { _, _ -> fail("已删除会话不能创建成功") } }
+                        withTimeout(5000) { while (vm.creatingBranchMessageId.value != null) delay(10) }
+                        assertTrue(vm.error.value.orEmpty().startsWith("创建分支失败:"))
+                    } finally {
+                        release.complete(Unit)
+                        vm.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+                    }
                 }
             } finally { Dispatchers.resetMain() }
         }

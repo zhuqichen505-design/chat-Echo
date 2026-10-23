@@ -23,25 +23,90 @@ import com.aiassistant.ui.components.markdown.LatexUnicodeConverter.parseLaTeXTo
  */
 object MarkdownInlineParser {
 
+    internal data class MarkdownLink(val label: String, val destination: String, val endExclusive: Int)
+
+    /** 共用链接边界，避免数字链接先被当作角标，以及网址中的括号被截断。 */
+    internal fun readMarkdownLink(text: String, start: Int): MarkdownLink? {
+        if (text.getOrNull(start) != '[') return null
+        var labelDepth = 1
+        var closeBracket = start + 1
+        while (closeBracket < text.length && labelDepth > 0) {
+            when (text[closeBracket]) {
+                '\\' -> closeBracket++
+                '[' -> labelDepth++
+                ']' -> labelDepth--
+            }
+            if (labelDepth > 0) closeBracket++
+        }
+        if (labelDepth != 0 || text.getOrNull(closeBracket + 1) != '(') return null
+        var cursor = closeBracket + 2
+        while (text.getOrNull(cursor)?.isWhitespace() == true) cursor++
+        val destinationStart = cursor
+        val destination: String
+        if (text.getOrNull(cursor) == '<') {
+            val end = text.indexOf('>', cursor + 1)
+            if (end == -1) return null
+            destination = text.substring(cursor + 1, end)
+            cursor = end + 1
+        } else {
+            var depth = 0
+            while (cursor < text.length) {
+                val char = text[cursor]
+                if (char == '\\' && cursor + 1 < text.length) {
+                    cursor += 2
+                    continue
+                }
+                if ((char == ')' && depth == 0) || (char.isWhitespace() && depth == 0)) break
+                if (char == '(') depth++
+                if (char == ')') depth--
+                cursor++
+            }
+            destination = text.substring(destinationStart, cursor)
+        }
+        while (text.getOrNull(cursor)?.isWhitespace() == true) cursor++
+        // Markdown 可选标题不属于网址。
+        if (text.getOrNull(cursor) == '"' || text.getOrNull(cursor) == '\'') {
+            val quote = text[cursor++]
+            while (cursor < text.length && text[cursor] != quote) {
+                if (text[cursor] == '\\') cursor++
+                cursor++
+            }
+            if (text.getOrNull(cursor) != quote) return null
+            cursor++
+            while (text.getOrNull(cursor)?.isWhitespace() == true) cursor++
+        }
+        if (destination.isBlank() || text.getOrNull(cursor) != ')') return null
+        return MarkdownLink(text.substring(start + 1, closeBracket), destination, cursor + 1)
+    }
+
     // v2.7.3 流畅度：cleanLeadingStarArtifacts 是每个 parseInlineMarkdown 的第一步
     //（含嵌套递归调用），流式尾部每帧每行触发；原先每次调用现场编译 4 个 Regex
     private val ESCAPED_STARS_REGEX = Regex("""\\(\*{2,3})""")
     private val LEADING_STAR_BEFORE_TAG_REGEX = Regex("""^\s*\*\s*(?=<font|<span|\{#)""", RegexOption.IGNORE_CASE)
     private val STAR_INSIDE_FONT_REGEX = Regex("""(<font[^>]*>)\s*\*""", RegexOption.IGNORE_CASE)
     private val STAR_INSIDE_SPAN_REGEX = Regex("""(<span[^>]*>)\s*\*""", RegexOption.IGNORE_CASE)
+    private val NUMERIC_CITATION_LABEL_REGEX = Regex("""\^?\d+""")
 
     /**
-     * v2.7.3 流畅度：引用角标形态的有界前瞻判定（'[' + 可选 '^' + ASCII 数字 + ']'）。
-     * 与原实现「对剩余全文 substring 后匹配 ^\[\^?\d+\].*」严格等价（.* 恒真），
-     * 但不再为每个 '[' 分配剩余全文子串、不再现场编译正则
+     * 有界前瞻识别 [1]、[^1]、[1, 2] 等角标，不对剩余全文反复创建子串或正则。
      */
     private fun isCitationMarkerAt(text: String, start: Int): Boolean {
         var idx = start + 1
-        if (idx < text.length && text[idx] == '^') idx++
-        val digitsStart = idx
-        while (idx < text.length && text[idx] in '0'..'9') idx++
-        if (idx == digitsStart) return false
-        return idx < text.length && text[idx] == ']'
+        while (idx < text.length) {
+            while (idx < text.length && text[idx].isWhitespace()) idx++
+            if (idx < text.length && text[idx] == '^') idx++
+            val digitsStart = idx
+            while (idx < text.length && text[idx] in '0'..'9') idx++
+            if (idx == digitsStart) return false
+            while (idx < text.length && text[idx].isWhitespace()) idx++
+            if (text.getOrNull(idx) == ']') return true
+            when (text.getOrNull(idx)) {
+                ',', '，', '、', ';', '；' -> Unit
+                else -> return false
+            }
+            idx++
+        }
+        return false
     }
 
 /**
@@ -536,37 +601,41 @@ fun parseInlineMarkdown(
                 }
 
                 // 引用角标 [1] 或 [^1]
-                decoded.startsWith("[", i) && isCitationMarkerAt(decoded, i) -> {
+                decoded.startsWith("[", i) && isCitationMarkerAt(decoded, i) &&
+                    decoded.getOrNull(decoded.indexOf(']', i) + 1) != '(' -> {
                     val closeBracket = decoded.indexOf("]", i)
                     if (closeBracket != -1) {
-                        val numStr = decoded.substring(i + 1, closeBracket).removePrefix("^")
-                        pushStringAnnotation(tag = "CITATION", annotation = numStr)
+                        val numbers = decoded.substring(i + 1, closeBracket)
+                            .split(',', '，', '、', ';', '；').map { it.trim().removePrefix("^") }
+                        numbers.forEach { numStr ->
+                            pushStringAnnotation(tag = "CITATION", annotation = numStr)
 
-                        if (isReferenceItem || i == 0) {
-                            // 末尾参考资料列表展示为正常大小，不使用上标
-                            withStyle(
-                                SpanStyle(
-                                    color = Color(0xFF6BA4F8),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                            ) {
-                                append("[$numStr] ")
+                            if (isReferenceItem || i == 0) {
+                                // 末尾参考资料列表展示为正常大小，不使用上标
+                                withStyle(
+                                    SpanStyle(
+                                        color = Color(0xFF6BA4F8),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                ) {
+                                    append("[$numStr] ")
+                                }
+                            } else {
+                                // 正文内引用角标使用微型上标
+                                withStyle(
+                                    SpanStyle(
+                                        color = Color(0xFF6BA4F8),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp,
+                                        baselineShift = BaselineShift.Superscript
+                                    )
+                                ) {
+                                    append("[$numStr]")
+                                }
                             }
-                        } else {
-                            // 正文内引用角标使用微型上标
-                            withStyle(
-                                SpanStyle(
-                                    color = Color(0xFF6BA4F8),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp,
-                                    baselineShift = BaselineShift.Superscript
-                                )
-                            ) {
-                                append("[$numStr]")
-                            }
+                            pop()
                         }
-                        pop()
                         i = closeBracket + 1
                     } else {
                         append(decoded[i])
@@ -576,28 +645,20 @@ fun parseInlineMarkdown(
 
                 // Markdown 链接 [text](url)
                 decoded.startsWith("[", i) -> {
-                    val closeBracket = decoded.indexOf("]", i)
-                    if (closeBracket != -1 && closeBracket + 1 < decoded.length && decoded[closeBracket + 1] == '(') {
-                        val closeParen = decoded.indexOf(")", closeBracket + 1)
-                        if (closeParen != -1) {
-                            val linkText = decoded.substring(i + 1, closeBracket)
-                            val url = decoded.substring(closeBracket + 2, closeParen)
-                            pushStringAnnotation(tag = "URL", annotation = url)
-                            withStyle(
-                                SpanStyle(
-                                    color = Color(0xFF6BA4F8),
-                                    fontWeight = FontWeight.Medium,
-                                    textDecoration = TextDecoration.Underline
-                                )
-                            ) {
-                                append(linkText)
-                            }
-                            pop()
-                            i = closeParen + 1
-                        } else {
-                            append(decoded[i])
-                            i++
+                    val link = readMarkdownLink(decoded, i)
+                    if (link != null) {
+                        pushStringAnnotation(tag = "URL", annotation = link.destination)
+                        withStyle(
+                            SpanStyle(
+                                color = Color(0xFF6BA4F8),
+                                fontWeight = FontWeight.Medium,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        ) {
+                            append(if (link.label.matches(NUMERIC_CITATION_LABEL_REGEX)) "[${link.label.removePrefix("^")}]" else link.label)
                         }
+                        pop()
+                        i = link.endExclusive
                     } else {
                         append(decoded[i])
                         i++

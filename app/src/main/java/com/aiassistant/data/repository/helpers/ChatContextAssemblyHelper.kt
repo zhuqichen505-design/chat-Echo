@@ -35,6 +35,7 @@ object ChatContextAssemblyHelper {
         if (content.isNullOrBlank()) return false
         val trimmed = content.trim()
         return trimmed == "生成已停止" ||
+            trimmed.startsWith("生成已停止\n\n【连接异常信息记录】") ||
             trimmed == "回复已停止 (用户已暂停)" ||
             trimmed.startsWith("回复已停止 (用户已暂停)\n\n【连接异常信息记录】") ||
             trimmed == "*(思考已停止，回复已暂停)*" ||
@@ -44,6 +45,17 @@ object ChatContextAssemblyHelper {
             trimmed.startsWith("[输出已被中断:") ||
             trimmed.contains("[输出已被中断:") ||
             trimmed.contains("failed to stream request: empty response detected", ignoreCase = true)
+    }
+
+    /** 连接诊断只供用户查看；已输出的部分回复可以继续作为历史，诊断不能进入模型上下文。 */
+    fun withoutStoppedConnectionReport(content: String): String {
+        val prefix = content.substringBefore("\n\n【连接异常信息记录】")
+        if (prefix == content) return content
+        val stopped = prefix.trim().let { body ->
+            body == "生成已停止" || body == "回复已停止 (用户已暂停)" ||
+                body.substringAfterLast("\n\n") in setOf("*(生成已停止)*", "*(回复已被暂停)*", "*(思考已停止，回复已暂停)*")
+        }
+        return if (stopped) prefix else content
     }
 
     fun isRoleplayConversation(conversation: Conversation?): Boolean {

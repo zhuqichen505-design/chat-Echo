@@ -45,6 +45,7 @@ import androidx.compose.runtime.key
 
 /** Style selected in Settings; kept local so nested Markdown blocks share one value. */
 internal val LocalStreamingAnimationStyle = compositionLocalOf { StreamingAnimationStyle.CURSOR }
+private val LocalMarkdownCitationClick = compositionLocalOf<((Int) -> Unit)?> { null }
 
 @Composable
 fun MarkdownText(
@@ -60,7 +61,8 @@ fun MarkdownText(
     val resolvedStyle = StreamingAnimationStyle.normalize(streamingAnimationStyle)
     val inlineCursor = cursor.takeIf { resolvedStyle == StreamingAnimationStyle.THIN_CURSOR }
     CompositionLocalProvider(
-        LocalStreamingAnimationStyle provides resolvedStyle
+        LocalStreamingAnimationStyle provides resolvedStyle,
+        LocalMarkdownCitationClick provides onCitationClick
     ) {
         if (!streaming) {
             MarkdownContent(
@@ -853,7 +855,7 @@ internal fun InlineMarkdownText(
     style: TextStyle,
     color: Color,
     modifier: Modifier = Modifier,
-    onCitationClick: ((Int) -> Unit)? = null,
+    onCitationClick: ((Int) -> Unit)? = LocalMarkdownCitationClick.current,
     endCursorColor: Color? = null,
     endCursorFading: Boolean = false
 ) {
@@ -897,8 +899,8 @@ internal fun InlineMarkdownText(
                     text.getStringAnnotations(tag = "CITATION", start = offset, end = offset)
                         .firstOrNull()
                         ?.let { annotation ->
-                            val id = annotation.item.toIntOrNull() ?: 1
-                            onCitationClick?.invoke(id)
+                            annotation.item.toIntOrNull()?.let { onCitationClick?.invoke(it) }
+                            return@ClickableText
                         }
                     text.getStringAnnotations(tag = "URL", start = offset, end = offset)
                         .firstOrNull()

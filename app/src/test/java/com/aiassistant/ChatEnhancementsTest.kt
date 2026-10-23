@@ -4,6 +4,7 @@ import com.aiassistant.domain.model.ApiConfig
 import com.aiassistant.ui.screens.chat.isErrorMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
@@ -188,6 +189,36 @@ class ChatEnhancementsTest {
             "合成段落\n\n【连接异常信息记录】：这是原文引用")) {
             assertEquals(normal, rules.stoppedReplyDisplayBody(normal))
         }
+    }
+
+    @Test
+    fun stoppedConnectionErrorsRemainReadableButNeverEnterModelHistory() {
+        val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
+        val helper = com.aiassistant.data.repository.helpers.ChatContextAssemblyHelper
+        for (body in listOf("", "合成部分正文")) {
+            val content = rules.stoppedReplyContent(body, listOf("Key #1：合成连接失败", "Key #1：合成连接失败", " "))
+            assertTrue(rules.isStoppedContent(content))
+            assertEquals(body, rules.stoppedReplyDisplayBody(content))
+            assertEquals("• Key #1：合成连接失败", rules.stoppedReplyErrorReport(content))
+            assertEquals(rules.stoppedReplyContent(body), helper.withoutStoppedConnectionReport(content))
+            assertEquals(body.isEmpty(), helper.isErrorPlaceholderMessage(content))
+            assertFalse(isErrorMessage(content))
+        }
+        val quoted = "合成原文\n\n【连接异常信息记录】这是正文引用"
+        assertEquals(quoted, helper.withoutStoppedConnectionReport(quoted))
+        assertNull(rules.stoppedReplyErrorReport(quoted))
+
+        val session = com.aiassistant.data.repository.ChatGenerationManager.ActiveSession(123L)
+        session.recordAttemptError("Key #1：已恢复的旧错误", "已恢复的旧错误")
+        session.appendThinking("合成思考")
+        assertTrue("收到新 token 后旧错误不能混入暂停报告", session.finishAndSnapshotPendingErrors().isEmpty())
+        session.setAttemptError("过期取消回调")
+        assertNull(session.error.value)
+        val terminal = com.aiassistant.data.repository.ChatGenerationManager.ActiveSession(124L)
+        terminal.setAttemptError("合成最终连接异常")
+        assertEquals(listOf("合成最终连接异常"), terminal.finishAndSnapshotPendingErrors())
+        terminal.appendResponse("过期输出")
+        assertEquals("", terminal.currentResponse.value)
     }
 
     @Test

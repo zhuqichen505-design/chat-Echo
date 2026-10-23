@@ -63,12 +63,20 @@ class InputInjectionRepositoryTest {
         private val previousApp = instanceField.get(null)
         private val app = AiAssistantApp()
         val repository: AiRepository
+        val messageListReads = java.util.concurrent.atomic.AtomicInteger()
 
         init {
             instanceField.set(null, app)
             AiAssistantApp::class.java.getDeclaredField("database").apply { isAccessible = true }.set(app, db)
             settings.saveSettings(settings.getSettings().copy(autoNameEnabled = false, autoMemoryEnabled = false, auxiliaryMemoryEnabled = false))
-            repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), db.messageDao(),
+            val actualMessages = db.messageDao()
+            val countedMessages = object : com.aiassistant.data.local.MessageDao by actualMessages {
+                override suspend fun getMessagesList(conversationId: Long): List<Message> {
+                    messageListReads.incrementAndGet()
+                    return actualMessages.getMessagesList(conversationId)
+                }
+            }
+            repository = AiRepository(db.folderDao(), db.apiConfigDao(), db.conversationDao(), countedMessages,
                 db.usageStatDao(), db.environmentVariableDao(), db.promptTemplateDao(), db.memoryDao(),
                 db.conversationBranchDao(), db.selectedModelDao(), crypto, settings, TavilySearchManager(context, crypto),
                 worldBookDao = db.worldBookDao(), timelineNodeDao = db.timelineNodeDao())
@@ -797,6 +805,37 @@ class InputInjectionRepositoryTest {
             val copiedConversation = f.db.conversationDao().getConversationById(copiedId)!!
             assertTrue(copiedConversation.enableInputInjection)
             assertEquals("合成复制自定义触发语", copiedConversation.inputInjectionTrigger)
+            assertEquals(before, f.db.messageDao().getMessagesList(id))
+        }
+    }
+
+    @Test fun branchingLongInjectedHistoryUsesBoundedReadsAndDropsOnlyInputsAfterCutoff() = runBlocking {
+        Fixture().use { f ->
+            f.enableViewModel()
+            val (_, id) = f.conversation()
+            repeat(48) { index ->
+                val assistant = f.db.messageDao().insertMessage(Message(conversationId = id, role = "assistant",
+                    content = "合成长分支回复$index", modelContent = "合成长分支回复$index\n\n合成长分支提示$index",
+                    createdAt = index * 2L + 1))
+                f.db.messageDao().insertMessage(Message(conversationId = id, role = "user",
+                    content = "合成长分支提示$index", modelContent = "合成触发语",
+                    injectionTargetMessageId = assistant, createdAt = index * 2L + 2))
+            }
+            val before = f.db.messageDao().getMessagesList(id)
+            val cutoff = before.last { it.role == "assistant" }
+            val readsBefore = f.messageListReads.get()
+            val branchId = f.repository.createBranchConversation(id, cutoff.id, before).first
+            assertTrue("创建长分支不能按每条注入回复重复读取全量历史", f.messageListReads.get() - readsBefore <= 2)
+            val copied = f.db.messageDao().getMessagesList(branchId)
+            assertEquals(95, copied.size)
+            assertEquals(before.dropLast(1).map { it.content }, copied.map { it.content })
+            val targets = copied.filter { it.role == "assistant" }.associateBy { it.id }
+            copied.filter { it.role == "user" }.forEach { input ->
+                val target = targets[input.injectionTargetMessageId]!!
+                assertEquals(target.content + "\n\n" + input.content, target.modelContent)
+                assertEquals("合成触发语", input.modelContent)
+            }
+            assertNull("截止回复不能夹带分支之后的隐藏提示", copied.last().modelContent)
             assertEquals(before, f.db.messageDao().getMessagesList(id))
         }
     }

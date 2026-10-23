@@ -177,6 +177,7 @@ fun ChatScreen(
         appearanceSettings.storyReadingStyle == com.aiassistant.utils.EchoStoryReadingStyle.SPLIT
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val creatingBranchMessageId by viewModel.creatingBranchMessageId.collectAsState()
     val isApplyingTimeline by viewModel.isApplyingTimeline.collectAsState()
     // 实时 Key 尝试报错明细：生成过程中无需手动暂停即可直接看到各次连接失败的具体原因
     val liveKeyErrors by viewModel.keyAttemptErrors.collectAsState()
@@ -539,7 +540,20 @@ fun ChatScreen(
                 contentColor = MaterialTheme.colorScheme.onBackground,
                 topBar = {},
         bottomBar = {
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val density = LocalDensity.current
+                val imeHeight = with(density) { WindowInsets.ime.getBottom(this).toDp() }
+                val reviewMaxHeight = ((maxHeight - imeHeight).coerceAtLeast(0.dp) * 0.45f)
+                    .coerceAtMost(360.dp)
             Column(modifier = Modifier.fillMaxWidth()) {
+                // 输入栏先按自身高度测量；捕捉结果共用剩余空间，长正文只在此区域滚动。
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .heightIn(max = reviewMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 androidx.compose.animation.AnimatedVisibility(
                     visible = pendingMemoryCandidate != null,
                     enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
@@ -570,7 +584,10 @@ fun ChatScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Icon(
                                             Icons.Default.AutoAwesome,
                                             contentDescription = null,
@@ -582,7 +599,9 @@ fun ChatScreen(
                                             if (isEditingMemory) "编辑设定记忆" else "智能识别记忆候选 (长按文字可编辑)",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     IconButton(
@@ -640,7 +659,6 @@ fun ChatScreen(
                                     Text(
                                         text = "「${candidate.distilledContent}」",
                                         style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 3,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp)
@@ -817,11 +835,13 @@ fun ChatScreen(
                                             },
                                             style = MaterialTheme.typography.titleSmall,
                                             color = MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     IconButton(
-                                        onClick = { viewModel.dismissTimelineProposal() },
+                                        onClick = { viewModel.dismissTimelineProposal(proposal) },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
@@ -1007,7 +1027,7 @@ fun ChatScreen(
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                         ) { Text("编辑", style = MaterialTheme.typography.labelSmall) }
                                         TextButton(
-                                            onClick = { viewModel.dismissTimelineProposal() },
+                                            onClick = { viewModel.dismissTimelineProposal(proposal) },
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                         ) {
                                             Text("忽略", style = MaterialTheme.typography.labelSmall)
@@ -1128,6 +1148,8 @@ fun ChatScreen(
                     )
                 }
 
+                }
+
                 ChatInputBar(
                     hazeState = hazeState,
                     inputText = inputText,
@@ -1220,6 +1242,7 @@ fun ChatScreen(
                     isBarsHidden = isBarsHidden,
                     onBarsHiddenChange = { isBarsHidden = it }
                 )
+            }
             }
         }
 ) { paddingValues ->
@@ -1419,6 +1442,8 @@ fun ChatScreen(
                                             }
                                         }
                                     } else null,
+                                    isCreatingBranch = creatingBranchMessageId == message.id,
+                                    branchEnabled = creatingBranchMessageId == null,
                                     onRegenerate = if (isLastAssistantTurn) {
                                         {
                                             preserveScrollForBranchGeneration = true

@@ -28,14 +28,22 @@ enum class GenerationUiState {
 
 object GenerationUiStateRules {
 
-    fun stoppedReplyContent(content: String): String = content.trim().let { body ->
-        if (body.isEmpty()) "生成已停止" else "$body\n\n*(生成已停止)*"
+    fun stoppedReplyContent(content: String, pendingErrors: List<String> = emptyList()): String {
+        val body = content.trim().let { if (it.isEmpty()) "生成已停止" else "$it\n\n*(生成已停止)*" }
+        val errors = pendingErrors.map(String::trim).filter(String::isNotBlank).distinct()
+        return if (errors.isEmpty()) body else body + "\n\n【连接异常信息记录】\n" +
+            errors.joinToString("\n") { "• $it" }
     }
+
+    /** 停止状态与错误报告独立展示，连接详情仍可查看和复制。 */
+    fun stoppedReplyErrorReport(content: String): String? = if (isStoppedContent(content)) {
+        content.substringAfter("\n\n【连接异常信息记录】", "").trim().removePrefix("：").trim().ifBlank { null }
+    } else null
 
     /** 仅识别生成器写入的独立停止正文或尾标，兼容旧版保存格式。 */
     fun isStoppedContent(content: String): Boolean {
         val body = content.trim()
-        if (body == "生成已停止" || body == "回复已停止 (用户已暂停)" ||
+        if (body == "生成已停止" || body.startsWith("生成已停止\n\n【连接异常信息记录】") || body == "回复已停止 (用户已暂停)" ||
             body.startsWith("回复已停止 (用户已暂停)\n\n")) return true
         return body.substringBefore("\n\n【连接异常信息记录】").trimEnd().substringAfterLast("\n\n") in setOf(
             "*(生成已停止)*", "*(回复已被暂停)*", "*(思考已停止，回复已暂停)*")
@@ -45,7 +53,7 @@ object GenerationUiStateRules {
     fun stoppedReplyDisplayBody(content: String): String {
         if (!isStoppedContent(content)) return content
         val body = content.trim()
-        if (body == "生成已停止" || body == "回复已停止 (用户已暂停)" ||
+        if (body == "生成已停止" || body.startsWith("生成已停止\n\n【连接异常信息记录】") || body == "回复已停止 (用户已暂停)" ||
             body.startsWith("回复已停止 (用户已暂停)\n\n")) return ""
         val reply = body.substringBefore("\n\n【连接异常信息记录】").trimEnd()
         return reply.substringBeforeLast("\n\n", missingDelimiterValue = "").trimEnd()

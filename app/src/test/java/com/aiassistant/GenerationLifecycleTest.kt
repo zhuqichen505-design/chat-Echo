@@ -1,7 +1,14 @@
 package com.aiassistant
 
 import com.aiassistant.data.repository.ChatGenerationManager
+import com.aiassistant.data.repository.AutoTimelineUpdateResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -36,6 +43,50 @@ class GenerationLifecycleTest {
             ChatGenerationManager.dismissTimelineProposal(id, first)
             assertSame(second, ChatGenerationManager.timelineProposals(id).value.single())
             ChatGenerationManager.dismissTimelineProposal(id, first)
+            assertSame(second, ChatGenerationManager.timelineProposals(id).value.single())
+        } finally {
+            ChatGenerationManager.dismissTimelineProposal(id, first)
+            ChatGenerationManager.dismissTimelineProposal(id, second)
+        }
+    }
+    @Test fun identicalExtractionFailuresRemainDismissibleThroughTheDisplayedStateFlow() {
+        val id = 908077L
+        val scope = CoroutineScope(Job() + Dispatchers.Unconfined)
+        val first = AutoTimelineUpdateResult(null, null, "本轮提取未完成",
+            extractionErrorMessage = "合成提取失败")
+        val second = AutoTimelineUpdateResult(null, null, "本轮提取未完成",
+            extractionErrorMessage = "合成提取失败")
+        try {
+            ChatGenerationManager.offerTimelineProposal(id, first)
+            ChatGenerationManager.offerTimelineProposal(id, second)
+            val displayed = ChatGenerationManager.timelineProposals(id).map { it.firstOrNull() }
+                .stateIn(scope, SharingStarted.Eagerly, null)
+            assertSame(first, displayed.value)
+            ChatGenerationManager.dismissTimelineProposal(id, displayed.value)
+            assertSame(second, displayed.value)
+            // 重复点击旧窗口的关闭回调不能误关随后一轮。
+            ChatGenerationManager.dismissTimelineProposal(id, first)
+            assertSame(second, displayed.value)
+            ChatGenerationManager.dismissTimelineProposal(id, displayed.value)
+            assertNull(displayed.value)
+            assertTrue(ChatGenerationManager.timelineProposals(id).value.isEmpty())
+        } finally {
+            scope.cancel()
+            ChatGenerationManager.dismissTimelineProposal(id, first)
+            ChatGenerationManager.dismissTimelineProposal(id, second)
+        }
+    }
+    @Test fun dismissingAnEditedProposalRemovesOnlyItsOriginalRound() {
+        val id = 908078L
+        val first = AutoTimelineUpdateResult("第1天", null, "合成时间更新")
+        val second = AutoTimelineUpdateResult("第2天", null, "合成时间更新")
+        try {
+            ChatGenerationManager.offerTimelineProposal(id, first)
+            ChatGenerationManager.offerTimelineProposal(id, second)
+            val edited = first.copy(updatedStoryTime = "第1天·夜间")
+            ChatGenerationManager.dismissTimelineProposal(id, edited)
+            assertSame(second, ChatGenerationManager.timelineProposals(id).value.single())
+            ChatGenerationManager.dismissTimelineProposal(id, edited)
             assertSame(second, ChatGenerationManager.timelineProposals(id).value.single())
         } finally {
             ChatGenerationManager.dismissTimelineProposal(id, first)

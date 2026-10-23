@@ -71,7 +71,9 @@ data class AutoTimelineUpdateResult(
     val previousEventContent: String? = null,
     val atemporalSettings: List<AtemporalSettingItem> = emptyList(),
     val extractionErrorMessage: String? = null,
-    val previousEventCategory: String? = null
+    val previousEventCategory: String? = null,
+    // 每次提取独立标识；相同失败文本也必须触发 StateFlow 更新，编辑 copy 保留标识。
+    val proposalId: String = java.util.UUID.randomUUID().toString()
 )
 
 class AiRepository(
@@ -1377,16 +1379,23 @@ class AiRepository(
 
     private suspend fun remapCopiedInjection(originals: List<Message>, copies: List<Message>, ids: List<Long>, conversationId: Long) {
         val idMap = originals.mapIndexed { index, message -> message.id to ids[index] }.toMap()
-        copies.forEachIndexed { index, message ->
+        val remapped = copies.mapIndexed { index, message ->
             val target = message.injectionTargetMessageId?.let(idMap::get)
-            if (message.injectionTargetMessageId != null) messageDao.updateMessage(message.copy(
-                id = ids[index], injectionTargetMessageId = target,
-                modelContent = message.modelContent.takeIf { target != null }
-            ))
+            message.copy(id = ids[index], conversationId = conversationId,
+                injectionTargetMessageId = target,
+                modelContent = if (message.injectionTargetMessageId != null && target == null) null else message.modelContent)
         }
         // A branch ending at an assistant must not carry hidden inputs from later turns.
-        copies.forEachIndexed { index, message ->
-            if (message.role == "assistant" && message.modelContent != null) rebuildInjectedAssistant(conversationId, ids[index])
+        // 从同一复制快照一次装配，避免每条注入回复都重新查询、解析整段分支历史。
+        val inputs = remapped.selectHistoryVariants().filter { !it.isExcluded && it.injectionTargetMessageId != null }
+            .groupBy { it.injectionTargetMessageId }
+        remapped.forEachIndexed { index, message ->
+            val updated = if (message.role == "assistant" && message.modelContent != null) {
+                val suffix = inputs[message.id].orEmpty()
+                message.copy(modelContent = suffix.fold(message.content) { text, input -> text + "\n\n" + input.content }
+                    .takeIf { suffix.isNotEmpty() })
+            } else message
+            if (updated != copies[index].copy(id = ids[index])) messageDao.updateMessage(updated)
         }
     }
 
@@ -5382,7 +5391,7 @@ class AiRepository(
             // Stored assistant modelContent is a cache, never an independent source of history.
             // Older versions or stale deletion snapshots may leave a removed input in that cache.
             if (message.role == "assistant") message.copy(content = inputs[message.id].orEmpty()
-                .fold(message.content) { text, input -> text + "\n\n" + input.content })
+                .fold(ChatContextAssemblyHelper.withoutStoppedConnectionReport(message.content)) { text, input -> text + "\n\n" + input.content })
             else if (message.injectionTargetMessageId != null && message.injectionTargetMessageId !in validTargets) message
             else message.modelContent?.let { message.copy(content = it) } ?: message
         }

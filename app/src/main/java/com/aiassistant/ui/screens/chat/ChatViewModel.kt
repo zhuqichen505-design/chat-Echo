@@ -73,6 +73,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    private val _creatingBranchMessageId = MutableStateFlow<Long?>(null)
+    val creatingBranchMessageId: StateFlow<Long?> = _creatingBranchMessageId.asStateFlow()
+
     // 可用模型列表，包含 API 配置来源，允许在同一对话里跨 API 切换。
     private val _availableModelOptions = MutableStateFlow<List<ChatModelOption>>(emptyList())
     val availableModelOptions: StateFlow<List<ChatModelOption>> = _availableModelOptions.asStateFlow()
@@ -217,8 +220,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         _timelineUpdateNotice.value = null
     }
 
-    fun dismissTimelineProposal() {
-        ChatGenerationManager.dismissTimelineProposal(conversationId, pendingTimelineProposal.value)
+    fun dismissTimelineProposal(proposal: AutoTimelineUpdateResult? = pendingTimelineProposal.value) {
+        ChatGenerationManager.dismissTimelineProposal(conversationId, proposal)
     }
 
     fun openDraftDialog() {
@@ -1539,6 +1542,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                             }
                         },
                         onError = { errorMsg ->
+                            // IO 已收到的错误先归属本轮，再切主线程收尾；同帧点击停止也能保存。
+                            session.setAttemptError(errorMsg)
                             AiAssistantApp.instance.applicationScope.launch(Dispatchers.Main.immediate) {
                                 slowTimeoutJob.cancel()
                                 val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
@@ -1618,6 +1623,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     )
                 }
             } catch (e: Exception) {
+                if (e !is CancellationException && !isUserStopping) session.setAttemptError(e.message ?: "未知错误")
                 withContext(NonCancellable + Dispatchers.Main.immediate) {
                     slowTimeoutJob.cancel()
                     val isStillCurrentRound = ChatGenerationManager.isCurrentSession(conversationId, session)
@@ -1761,7 +1767,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         isUserStopping = true
         val shouldSave = session?.isMessageSaved?.compareAndSet(false, true) ?: !isMessageSaved
         // 先冻结本轮缓冲并取得保存权，再中断网络，取消回调不得抢写错误消息。
-        session?.markFinished()
+        val pendingErrors = session?.finishAndSnapshotPendingErrors()
+            ?: (_keyAttemptErrors.value + listOfNotNull(_error.value)).distinct()
         session?.clearAttemptStatus()
         val responseToSave = (session?.currentResponse?.value ?: _currentResponse.value).trim()
         val thinkingToSave = (session?.currentThinking?.value ?: _currentThinking.value).trim().ifEmpty { null }
@@ -1794,7 +1801,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         if (shouldSave) {
             isMessageSaved = true
             if (isDirectionPhase) return
-            val finalContent = GenerationUiStateRules.stoppedReplyContent(responseToSave)
+            val finalContent = GenerationUiStateRules.stoppedReplyContent(responseToSave, pendingErrors)
             AiAssistantApp.instance.applicationScope.launch {
                 val message = Message(
                     conversationId = conversationId,
@@ -2065,6 +2072,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         sourceMessages: List<Message>? = null,
         onComplete: (Long, String) -> Unit
     ) {
+        // 点击时立即占位，Room 事务尚未开始也不能重复排队创建相同分支。
+        if (messageId <= 0L || !_creatingBranchMessageId.compareAndSet(null, messageId)) return
         viewModelScope.launch {
             try {
                 val effectiveOption = _currentModelOption.value
@@ -2085,11 +2094,15 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 withContext(Dispatchers.Main) {
                     onComplete(newConversationId, branchTitle)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.e("ChatViewModel", "创建分支对话失败", e)
                 withContext(Dispatchers.Main) {
                     _error.value = "创建分支失败: ${e.message}"
                 }
+            } finally {
+                _creatingBranchMessageId.value = null
             }
         }
     }
@@ -2289,11 +2302,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun applyTimelineProposal(proposal: AutoTimelineUpdateResult) {
-        val pending = pendingTimelineProposal.value
         viewModelScope.launch {
             try {
                 repository.applyAutoTimelineProposal(conversationId, proposal)
-                ChatGenerationManager.dismissTimelineProposal(conversationId, pending)
+                ChatGenerationManager.dismissTimelineProposal(conversationId, proposal)
                 _timelineUpdateNotice.value = "已保存确认的时间线与设定"
                 loadConversation()
             } catch (e: CancellationException) {

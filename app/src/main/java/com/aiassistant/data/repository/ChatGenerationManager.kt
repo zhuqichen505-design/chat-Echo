@@ -144,8 +144,20 @@ object ChatGenerationManager {
         }
 
         // A failed attempt is visible, but is NOT the end of the generation round.
+        @Synchronized
         fun setAttemptError(err: String?) {
+            if (!_isGenerating.value) return
             _error.value = err
+        }
+
+        /** 与 token 回调共用锁，冻结后再取快照，取消回调无法清掉暂停前的错误。 */
+        @Synchronized
+        fun finishAndSnapshotPendingErrors(): List<String> {
+            val errors = _keyAttemptErrors.value.toMutableList()
+            _error.value?.trim()?.takeIf { error -> error.isNotEmpty() && errors.none { it.contains(error) } }
+                ?.let(errors::add)
+            markFinished()
+            return errors
         }
 
         @Synchronized
@@ -181,7 +193,11 @@ object ChatGenerationManager {
     }
 
     fun dismissTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult?) {
-        proposalState(conversationId).update { pending -> pending.filterNot { it === proposal } }
+        if (proposal == null) return
+        proposalState(conversationId).update { pending ->
+            val index = pending.indexOfFirst { it.proposalId == proposal.proposalId }
+            if (index < 0) pending else pending.toMutableList().apply { removeAt(index) }
+        }
     }
     fun mutationEpoch(conversationId: Long): Long = mutationEpochs[conversationId] ?: 0L
 

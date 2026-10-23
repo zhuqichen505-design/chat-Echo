@@ -2,19 +2,30 @@
 
 ## 项目概述
 
-Echo 是一个 Android 原生 AI API 客户端应用，用于调用 mimo、deepseek、OpenAI、Anthropic 等 AI 模型的 API。
+Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**: v2.8.15（versionCode 201）
-**紧急修复发布状态**: v2.8.15/201 完整源码验收、Release 构建、APK 元数据/签名、内容隐私、DEX ICU、指定目录复制、Git 推送及远端发布均已核验；设备现场验收尚未执行。
-**本次更新**: 2026-10-19 源码修复 v2.8.14 启动正则的 Android ICU 兼容异常：`ApiKeyRotationManager` 静态 HTTP 状态正则将 `[:(]` 等价重排为 `[(:]`，保留状态识别语义，并在既有领域测试增加 ICU 字符集解析及状态格式回归。原生 ICU 72.1 完整编译确认旧表达式报 `U_REGEX_PROPERTY_SYNTAX`、修复表达式可编译，v2.8.14 旧发布 APK 中确认存在故障表达式；没有用户设备堆栈或安装启动验收。
-**数据库版本**: 37（20 个实体）
-**本轮范围（2026-10-19）**: 延续原 APK 构建授权，将启动正则最小修复及两项回归纳入 v2.8.15/201，维护七份文档，冻结后完整验收、构建、隐私与签名核查、排他复制、提交推送及最新版发布。来源仅当前 chat-Echo，不从旧项目同步、不读取历史改进归档；Room v37/20 实体不变。
-**最新源码验证**: 升版后冻结记录 `20261019-232631-568`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 463.559 秒；编译、88 套件/973 项完整单测及 Lint 均实际执行，失败/错误/跳过 0，测试任务 121.46 秒，Lint XML 为 0 Error/102 Warning，`inputsChangedDuringRun=false`；`git diff --check` 退出 0。升版前定向 `NetworkAndKeyStabilityTest` 48 项通过，原生 ICU 完整编译与 ICU4J 字符集兼容回归分别核验；通过后只做独立 Release、产物/文档/Git 收尾，不重复完整验收，详见 [walkthrough.md](walkthrough.md)。
-**v2.8.14 原发布验收（历史）**: 升版后最终冻结记录 `20261019-203850-946`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 486.819 秒；编译、88 套件/971 项完整单测及 Lint 实际执行，失败/错误/跳过 0，测试任务 108.85 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`。该次桌面 JVM 验收未覆盖本次已确认的 Android ICU 差异，不能证明原 APK 启动正常。
-**升级与设备边界**: 本版与 v2.8.14 的 applicationId 和签名一致，versionCode 更高，具备保留聊天与设置的覆盖升级条件，无需卸载或清除数据。完整包内容、本机复制及公开下载已核验；没有用户设备堆栈、安装启动或真实接口现场验收，不能声称手机已恢复。
-**安装包状态**: 本轮 `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，用时 268.984 秒。`Echo-v2.8.15.apk` 为 25,406,965 字节、446 个 ZIP 条目；com.aiassistant、2.8.15/201、min26/target34/compile34、arm64-v8a、不可 debug，SHA256 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。元数据、全部 CRC 与 apksigner 核验脚本退出 0，v2 签名证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 及项目 JKS 一致，Android Debug **非正式生产签名**。完整内容隐私、人工差异、DEX ICU 与指定目录排他复制均退出 0；源/副本 SHA256 一致，原有 211 文件（210 APK）名称、大小和哈希未变，现 212 文件（211 APK）。最终 APK 启动初始化实际加载修复式，原生 ICU 72.1 完整编译及 12 项分类案例通过。
-**远端发布核验**: 版本提交 `1ae2cd4e787114910eabbf63762910145d0debc5` 与 annotated `v2.8.15` 原子推送退出 0，标签对象 `2d81373810a2f40c7ceb3fc44a9762a92caf000f`，`git ls-remote` 核对 main、标签对象及解引用一致。[v2.8.15 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.15) 发布退出 0，唯一手动附件 `Echo-v2.8.15.apk`，GitHub 摘要与匿名下载 SHA256 均与本机一致。再次匿名核验成功后，仅撤下新仓库远端 v2.8.14 Release/版本标签，清理及清理后独立核验均退出 0，远端仅保留 v2.8.15；全部本机历史 APK 与旧标签保留。
-**发布维护**: 对外仅保留最新版说明及 APK 附件；旧标签删除须经用户授权。本机历史 APK 永久保留，历史审计记录不冒充当前发布。普通提交不能清除旧对象或平台缓存。
+**当前源码版本**：v2.8.16（versionCode 202）
+
+**数据库版本**：37（20 个实体），本版无迁移。
+
+**本次更新（2026-10-23）**：
+
+- 捕捉到的设定、时间线和提取失败提示共用限高滚动区域，长内容可滑动查看；输入栏优先保留空间，标题为关闭按钮留位。
+- 每次提取使用独立候选 ID，修复连续相同的总结失败或候选内容经状态合并后点击 × 无法关闭；旧窗口回调不会误关下一条候选。
+- 主动暂停前尚未恢复的连接错误与已生成正文、思考一同保存，可展开查看和复制；已恢复错误继续清除，诊断内容不会进入后续模型上下文。
+- 创建分支立即显示进度并阻止并发重复创建；隐藏输入关联改为一次消息快照重映射，避免长历史逐条重读。分支仍保留消息版本、设置及有效注入关联。
+- 修复数字链接、脚注和分组引用的点击及网址解析，支持编号资料、Markdown 链接、裸网址与本轮搜索来源回退；缺失真实网址时明确提示。链接详情使用纵向操作区，避免“打开网页”按钮受长网址挤压反复换行。
+
+**最新源码验证**：最终冻结记录 `20261023-153343-364`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本/Gradle 退出 0，296.515 秒；88 个套件/988 项完整单测，失败/错误/跳过 0，编译及 Lint 通过；Lint 0 Error/102 Warning，输入哈希一致，`git diff --check` 退出 0。Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，376.18 秒。
+
+**安装包**：`Echo-v2.8.16.apk`：25,406,965 字节，446 个 ZIP 条目且 CRC 全通过；com.aiassistant、2.8.16/202、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。SHA256 `77774547a604d2228db74b0a3443228f9517b9fb4582315105a36c2c0aac88de`。v2 签名证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.15 及项目 JKS 一致，Android Debug **非正式生产签名**。
+
+**隐私与历史保留**：完整 APK 内容扫描及人工差异检查通过，未决 0；186 张图片内容与元数据和上版一致。完整候选文件、暂存区、待推提交/标签与公共维护者元数据在每次上传前复核；原未跟踪内容、本机配置/凭据、日志、缓存和产物均排除。仅以排他创建新增唯一版本包，原有 212 个文件（211 个 APK）的名称、大小与 SHA256 均保留。未知私人值或专有二进制语义不能由通用模式完全保证。
+
+**Git 与发布状态**：源码验收、Release 构建、签名、隐私核查及本机排他复制已完成；Git 推送与公开发布待执行。
+
+**升级与验收边界**：Room v37（20 个实体）不变；同 applicationId、同签名及更高 versionCode 满足保留数据覆盖升级条件，无需卸载或清除应用数据。未连接真机或模拟器，安装、启动、键盘/触控、动态布局与用户真实接口仍须设备验收。多次独立搜索对同一局部编号给出不同网址时，正文明确网址优先；没有明确映射的歧义或缺失来源不猜链接。
+
 **技术栈**: Kotlin 2.2.21 + Jetpack Compose (BOM 2024.06.00) + Room 2.8.4 + Retrofit 2.9.0
 
 > 工作流、最高准则与 APK 发布铁律的唯一权威版本在工作区根目录 `AGENTS.md`；本文件是项目事实卡，与其冲突时以 AGENTS.md 与代码为准。
