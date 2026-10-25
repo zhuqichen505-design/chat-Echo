@@ -403,6 +403,51 @@ class ChatRetryRepositoryTest {
             assertEquals(1, endpoint.payloads.size)
         } }
     }
+    @Test fun rotationOffPinsFirstEnabledKeyAcrossChatAuxiliaryAndCatalogueAndNeverFallsBack() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                socket.response("401 Unauthorized", "{\"error\":{\"message\":\"synthetic invalid credential\"}}")
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setBackupKeyFallbackEnabled(true)
+                f.settings.setModelRetryEnabled(false)
+                val (config, id) = f.config(endpoint.url, protocol,
+                    "[已禁用] synthetic-disabled\nsynthetic-unavailable\nsynthetic-healthy")
+                val manager = f.settings.apiKeyRotationManager
+                // 先制造旧冷却，再关闭总开关；旧健康状态不能阻断手动固定的 Key。
+                manager.recordFailure(endpoint.url, protocol, "synthetic-unavailable",
+                    com.aiassistant.data.repository.ApiException(401, "synthetic"))
+                assertTrue(manager.saveSettings(endpoint.url, protocol,
+                    manager.getSettings(endpoint.url, protocol).copy(enabled = false)))
+                var failed = false
+                f.repository.sendChatMessageWithConfig(config, id, "合成输入", onToken = {},
+                    onComplete = { _, _, _ -> fail("Failure must not complete") }, onError = { failed = true })
+                assertTrue(failed)
+                assertTrue(f.repository.executeQuickCompletionWithResult(config, "合成辅助请求").isFailure)
+                assertTrue(f.repository.fetchAvailableModelsDirect(endpoint.url, config.apiKey, protocol).isFailure)
+                assertEquals(3, endpoint.payloads.size)
+                assertEquals(List(3) { "synthetic-unavailable" }, endpoint.requestHeaders.map {
+                    (it["authorization"] ?: it["x-api-key"]).orEmpty().removePrefix("Bearer ")
+                })
+            } }
+        }
+    }
+
+    @Test fun modelCatalogueAcceptsExplicitEmptyArraysButRejectsUnknownOrMalformedResponses() = runBlocking {
+        for (body in listOf("{\"data\":[]}", "{\"models\":[]}", "{\"model\":[]}")) {
+            Endpoint { socket, _ -> socket.response("200 OK", body) }.use { endpoint -> Fixture().use { f ->
+                val result = f.repository.fetchAvailableModelsDirect(endpoint.url, "synthetic-one")
+                assertEquals(body, emptyList<String>(), result.getOrThrow())
+                assertEquals(1, endpoint.payloads.size)
+            } }
+        }
+        for (body in listOf("{}", "not-json", "{\"data\":[{}]}")) {
+            Endpoint { socket, _ -> socket.response("200 OK", body) }.use { endpoint -> Fixture().use { f ->
+                assertTrue(body, f.repository.fetchAvailableModelsDirect(endpoint.url, "synthetic-one").isFailure)
+                assertEquals(1, endpoint.payloads.size)
+            } }
+        }
+    }
+
     @Test fun badKeyIsSkippedOnLaterChatAndSharedAuxiliaryAndCatalogueRequests() = runBlocking {
         for (protocol in listOf("openai", "anthropic")) {
             lateinit var endpoint: Endpoint

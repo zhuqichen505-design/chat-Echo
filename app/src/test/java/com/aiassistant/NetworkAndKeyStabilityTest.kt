@@ -92,6 +92,56 @@ class NetworkAndKeyStabilityTest {
         assertEquals(ROTATION_KEYS.toSet(), fixture.manager().orderedKeys(ROTATION_URL, "openai", dirty).toSet())
     }
 
+    @Test fun disablingRotationPinsFirstEnabledKeyAndBypassesOldHealthWithoutMutatingIt() {
+        val fixture = RotationFixture()
+        val manager = fixture.manager()
+        manager.recordFailure(ROTATION_URL, "openai", ROTATION_KEYS[0], ApiException(401, "synthetic"))
+        manager.orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS)
+        manager.saveSettings(ROTATION_URL, "openai", manager.getSettings(ROTATION_URL, "openai").copy(enabled = false))
+        val stored = fixture.preferences.all
+        val raw = "[已禁用] synthetic-disabled\n  ${ROTATION_KEYS[0]}\n${ROTATION_KEYS[1]}"
+        repeat(4) {
+            assertEquals(listOf(ROTATION_KEYS[0]), fixture.manager().orderedKeys(
+                ROTATION_URL, "openai", AiRepository.parseApiKeys(raw), allowFallback = true
+            ))
+            assertFalse(fixture.manager().isCoolingDown(ROTATION_URL, "openai", ROTATION_KEYS[0]))
+            assertFalse(fixture.manager().recordFailure(ROTATION_URL, "openai", ROTATION_KEYS[0], ApiException(429, "synthetic")))
+            fixture.manager().recordSuccess(ROTATION_URL, "openai", ROTATION_KEYS[0])
+        }
+        assertEquals("关闭轮询不应推进游标或改写健康记录", stored, fixture.preferences.all)
+        assertTrue(manager.orderedKeys(ROTATION_URL, "openai", emptyList()).isEmpty())
+        assertEquals(listOf(ROTATION_KEYS[1]), manager.orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS.drop(1)))
+        assertEquals(listOf(ROTATION_KEYS[0]), manager.orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS, false))
+    }
+
+    @Test fun rotationSwitchPersistsByAddressAndProtocolAndReenablingRestoresHealthPolicy() {
+        val fixture = RotationFixture()
+        val manager = fixture.manager()
+        val settings = ApiKeyRotationSettings(mode = ApiKeyRotationSettings.ORDERED)
+        manager.saveSettings(ROTATION_URL, "openai", settings)
+        manager.recordFailure(ROTATION_URL, "openai", ROTATION_KEYS[0], ApiException(401, "synthetic"))
+        assertTrue(manager.saveSettings(ROTATION_URL, "openai", settings.copy(enabled = false)))
+        assertFalse(fixture.manager().getSettings("rotation.example.test/v1/", "OPENAI").enabled)
+        assertTrue(fixture.manager().getSettings(ROTATION_URL, "anthropic").enabled)
+        assertTrue(fixture.manager().getSettings("https://other.example.test/v1", "openai").enabled)
+        assertEquals(listOf(ROTATION_KEYS[0]), fixture.manager().orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS))
+        assertTrue(manager.saveSettings(ROTATION_URL, "openai", settings))
+        assertTrue(fixture.manager().getSettings(ROTATION_URL, "openai").enabled)
+        assertEquals(ROTATION_KEYS.drop(1), fixture.manager().orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS))
+    }
+
+    @Test fun legacyRotationSettingsWithoutSwitchKeepRotationEnabled() {
+        val fixture = RotationFixture()
+        val manager = fixture.manager()
+        manager.saveSettings(ROTATION_URL, "openai", ApiKeyRotationSettings())
+        val enabledKey = fixture.preferences.all.keys.single { it.endsWith(".enabled") }
+        assertTrue(fixture.preferences.edit().remove(enabledKey).commit())
+        assertTrue(fixture.manager().getSettings(ROTATION_URL, "openai").enabled)
+        assertEquals(ROTATION_KEYS, (0..2).map {
+            fixture.manager().orderedKeys(ROTATION_URL, "openai", ROTATION_KEYS, false).single()
+        })
+    }
+
     @Test fun bearerAliasesAreDeduplicatedWhileOriginalSendingStringsAndCaseRemainUnchanged() {
         val fixture = RotationFixture()
         val manager = fixture.manager()

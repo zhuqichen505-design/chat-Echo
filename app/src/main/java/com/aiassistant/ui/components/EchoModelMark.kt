@@ -45,7 +45,7 @@ import kotlin.math.abs
 
 /** 身份标识的展示状态；历史消息没有可靠完成凭据时保持中性。 */
 enum class EchoModelMarkState {
-    Neutral, Connecting, Thinking, Replying, Completed;
+    Neutral, Connecting, Thinking, Replying, Completed, Paused, Failed;
 
     val isActive: Boolean get() = this == Connecting || this == Thinking || this == Replying
 }
@@ -152,7 +152,7 @@ internal fun EchoModelMark(
     // even when a caller does not provide an explicit avatar size.  An incoming
     // fixed size still wins through Compose constraints (the message row and the
     // appearance preview both provide one), while geometric marks retain 26 dp.
-    Canvas(modifier.size(if (isBot) 30.dp else 26.dp).semantics {
+    Canvas(modifier.size(if (isBot) 38.dp else 26.dp).semantics {
         description?.let { contentDescription = it }
     }) {
         if (isExpressiveBot) {
@@ -255,6 +255,22 @@ private fun DrawScope.drawExpressiveBotEffect(color: Color, effect: ExpressiveBo
                 center - Offset(radius, radius), Size(effect.size, effect.size), style = stroke)
         }
         ExpressiveBotEffectKind.SignalDot -> drawCircle(tint, radius, center)
+        ExpressiveBotEffectKind.Pause -> {
+            val barWidth = effect.size * .27f
+            val barHeight = effect.size * .85f
+            for (direction in listOf(-1f, 1f)) {
+                drawRoundRect(tint,
+                    Offset(center.x + direction * effect.size * .23f - barWidth / 2f, center.y - barHeight / 2f),
+                    Size(barWidth, barHeight), CornerRadius(barWidth * .25f))
+            }
+        }
+        ExpressiveBotEffectKind.Error -> {
+            drawCircle(tint, radius, center)
+            val ink = readableTextColorFor(color).copy(alpha = effect.alpha)
+            drawLine(ink, center + Offset(0f, -radius * .48f), center + Offset(0f, radius * .05f),
+                effect.size * .16f, StrokeCap.Round)
+            drawCircle(ink, effect.size * .09f, center + Offset(0f, radius * .49f))
+        }
         ExpressiveBotEffectKind.Thought -> {
             fun emergingColor(start: Float, duration: Float): Color {
                 val amount = ((effect.progress - start) / duration).coerceIn(0f, 1f)
@@ -409,6 +425,10 @@ private fun DrawScope.drawModelBot(
                     else -> line(Offset(10.8f, 17.3f), Offset(15.2f, 17.3f))
                 }
             }
+        }
+        if (state == EchoModelMarkState.Paused || state == EchoModelMarkState.Failed) {
+            val effect = sampleExpressiveBotEffects(state, 0f).single()
+            drawExpressiveBotEffect(color, effect.copy(x = 22.5f, y = 3f, size = 5.5f))
         }
     }
 }

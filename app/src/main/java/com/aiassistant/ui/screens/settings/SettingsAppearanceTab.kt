@@ -595,7 +595,7 @@ fun AppearanceTab(
                     saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }
                 }
                 if (!settings.showModelAvatar) {
-                    Text("连接发出信号弧、思考浮起泡泡、待机冒出 Z；回复轻点，完成闪星收势。遵循系统移除动画设置。",
+                    Text("连接发出信号弧、思考浮起泡泡、待机冒出 Z；回复轻点，完成闪星收势。主动暂停显示双竖条，出错显示叹号。遵循系统移除动画设置。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -628,7 +628,9 @@ fun AppearanceTab(
                             EchoModelMarkState.Connecting to "连接",
                             EchoModelMarkState.Thinking to "思考",
                             EchoModelMarkState.Replying to "回复",
-                            EchoModelMarkState.Completed to "完成"
+                            EchoModelMarkState.Completed to "完成",
+                            EchoModelMarkState.Paused to "主动暂停",
+                            EchoModelMarkState.Failed to "连接 / 回复出错"
                         ).forEach { (value, label) ->
                             FilterChip(selected = modelMarkPreviewState == value,
                                 onClick = {

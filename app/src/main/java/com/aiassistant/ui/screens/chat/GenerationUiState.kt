@@ -60,17 +60,26 @@ object GenerationUiStateRules {
     }
 
     /** 只识别生成器写入的独立终止尾标，不因正文提到“暂停”就误判。 */
+    fun isInterruptedContent(content: String): Boolean {
+        val body = content.trim()
+        if (!body.endsWith(")*")) return false
+        val lastBlock = body.substringAfterLast("\n\n")
+        return lastBlock.startsWith("*(输出已被中断: ") ||
+            lastBlock.startsWith("*(思考已输出，回复已被中断: ")
+    }
+
     fun modelMarkHasSuccessfulBody(content: String): Boolean {
         val body = content.trim()
         if (body.isEmpty() || isStoppedContent(body) || isErrorMessage(body)) return false
-        return !(body.endsWith(")*") &&
-            (body.startsWith("*(思考已输出，回复已被中断: ") || body.contains("\n\n*(输出已被中断: ")))
+        return !isInterruptedContent(body)
     }
 
     fun modelMarkState(state: GenerationUiState, completed: Boolean): EchoModelMarkState = when (state) {
         GenerationUiState.Connecting, GenerationUiState.Reconnecting -> EchoModelMarkState.Connecting
         GenerationUiState.Thinking -> EchoModelMarkState.Thinking
         GenerationUiState.Streaming -> EchoModelMarkState.Replying
+        GenerationUiState.Cancelled -> EchoModelMarkState.Paused
+        GenerationUiState.Failed -> EchoModelMarkState.Failed
         GenerationUiState.Idle, GenerationUiState.Settling ->
             if (completed) EchoModelMarkState.Completed else EchoModelMarkState.Neutral
         else -> EchoModelMarkState.Neutral
@@ -138,6 +147,7 @@ object GenerationUiStateRules {
         contentIsError: Boolean = false
     ): GenerationUiState = when {
         !isGenerating && isStoppedContent(content) -> GenerationUiState.Cancelled
+        !isGenerating && isInterruptedContent(content) -> GenerationUiState.Failed
         contentIsError -> GenerationUiState.Failed
         isGenerating && reconnectStatus in listOf("等待选择回复方向", "回复方向生成失败，等待处理") -> GenerationUiState.ChoosingDirection
         isGenerating && content.isBlank() && !hasThinking -> {

@@ -84,6 +84,7 @@ import com.aiassistant.ui.components.EchoPulseRing
 import com.aiassistant.ui.components.EchoTextToolbar
 import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
+import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.ModelMarkCompletionMotion
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.StreamingAnimationStyle
@@ -557,6 +558,16 @@ internal fun MessageBubble(
             remember(message.content) { GenerationUiStateRules.modelMarkHasSuccessfulBody(message.content) })
     val modelMarkIdleEffects = GenerationUiStateRules.modelMarkAllowsIdle(
         generationState, !isUser && latestAssistantIdentity, message.content)
+    val modelMarkDescription = when (modelMarkState) {
+        EchoModelMarkState.Paused -> "模型标识，回复已主动暂停"
+        EchoModelMarkState.Failed -> "模型标识，连接或回复出错"
+        else -> "模型标识"
+    }
+    val modelMarkAccent = when (modelMarkState) {
+        EchoModelMarkState.Failed -> MaterialTheme.colorScheme.error
+        EchoModelMarkState.Paused -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
     LaunchedEffect(modelMarkState, modelMarkCompleted, modelMarkCompletionNow, personalizationSettings.showModelAvatar) {
         if (personalizationSettings.showModelAvatar) {
             // Keep hidden identities up to date, so restoring a mark never celebrates an unseen old completion.
@@ -985,7 +996,7 @@ internal fun MessageBubble(
                             )
                         } else {
                             EchoModelMark(
-                                color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
+                                color = modelMarkColorFor(modelMarkAccent, resolvedReadableBackdrop),
                                 style = personalizationSettings.modelMarkStyle,
                                 animated = GenerationUiStateRules.animateModelMark(generationState),
                                 state = modelMarkState,
@@ -994,9 +1005,9 @@ internal fun MessageBubble(
                                 idleEffects = modelMarkIdleEffects,
                                 // Keep the bot and its upper-right status symbol readable beside
                                 // the taller thinking/status capsule.
-                                modifier = Modifier.padding(top = 3.dp).size(34.dp),
+                                modifier = Modifier.padding(top = 3.dp).size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 38.dp else 34.dp),
                                 reducedMotion = reducedMotion,
-                                description = "模型标识"
+                                description = modelMarkDescription
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1189,15 +1200,16 @@ internal fun MessageBubble(
                                 )
                             } else {
                                 EchoModelMark(
-                                    color = modelMarkColorFor(MaterialTheme.colorScheme.primary, resolvedReadableBackdrop),
+                                    color = modelMarkColorFor(modelMarkAccent, resolvedReadableBackdrop),
                                     style = personalizationSettings.modelMarkStyle,
                                     animated = GenerationUiStateRules.animateModelMark(generationState),
                                     state = modelMarkState,
                                     completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                     completionOwner = modelMarkCompletionOwner,
                                     idleEffects = modelMarkIdleEffects,
-                                    modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 32.dp else 22.dp),
-                                    reducedMotion = reducedMotion
+                                    modifier = Modifier.size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 38.dp else 22.dp),
+                                    reducedMotion = reducedMotion,
+                                    description = modelMarkDescription
                                 )
                             }
                             Text(

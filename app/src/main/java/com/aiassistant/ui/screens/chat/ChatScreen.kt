@@ -540,616 +540,203 @@ fun ChatScreen(
                 contentColor = MaterialTheme.colorScheme.onBackground,
                 topBar = {},
         bottomBar = {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                val density = LocalDensity.current
-                val imeHeight = with(density) { WindowInsets.ime.getBottom(this).toDp() }
-                val reviewMaxHeight = ((maxHeight - imeHeight).coerceAtLeast(0.dp) * 0.45f)
-                    .coerceAtMost(360.dp)
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // 输入栏先按自身高度测量；捕捉结果共用剩余空间，长正文只在此区域滚动。
-                Column(
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .fillMaxWidth()
-                        .heightIn(max = reviewMaxHeight)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = pendingMemoryCandidate != null,
-                    enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
-                    exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()
-                ) {
-                    pendingMemoryCandidate?.let { candidate ->
-                        var isEditingMemory by remember(candidate.sourceMessageId, candidate.distilledContent) {
-                            mutableStateOf(false)
-                        }
-                        var editedMemoryContent by remember(candidate.sourceMessageId, candidate.distilledContent) {
-                            mutableStateOf(candidate.distilledContent)
-                        }
-
-                        EchoGlassCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                            shape = EchoTokens.Radius.shapeMd
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            if (isEditingMemory) "编辑设定记忆" else "智能识别记忆候选 (长按文字可编辑)",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { viewModel.dismissPendingMemory() },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "忽略",
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                }
-
-                                SessionSettingChangeDetails(candidate.action, candidate.previousContent,
-                                    candidate.evidence, candidate.changeReason)
-                                if (isEditingMemory) {
-                                    OutlinedTextField(
-                                        value = editedMemoryContent,
-                                        onValueChange = { editedMemoryContent = it },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
-                                        textStyle = MaterialTheme.typography.bodySmall,
-                                        minLines = 2,
-                                        maxLines = 5,
-                                        label = { Text("编辑设定/记忆内容") }
-                                    )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                                    ) {
-                                        TextButton(
-                                            onClick = {
-                                                editedMemoryContent = candidate.distilledContent
-                                                isEditingMemory = false
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("取消", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                viewModel.acceptPendingMemory("session", editedMemoryContent)
-                                                isEditingMemory = false
-                                            },
-                                            enabled = editedMemoryContent.isNotBlank(),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("应用", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-                                } else {
-                                    Text(
-                                        text = "「${candidate.distilledContent}」",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                            .clip(EchoTokens.Radius.shapeSm)
-                                            .combinedClickable(
-                                                onClick = {},
-                                                onLongClick = {
-                                                    editedMemoryContent = candidate.distilledContent
-                                                    isEditingMemory = true
-                                                }
-                                            )
-                                    )
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        TextButton(
-                                            onClick = { viewModel.dismissPendingMemory() },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.defaultMinSize(minHeight = 32.dp)
-                                        ) {
-                                            Text("忽略", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        OutlinedButton(
-                                            onClick = { viewModel.acceptPendingMemory("session") },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.defaultMinSize(minHeight = 32.dp)
-                                        ) {
-                                            Text("仅本会话生效", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        Button(
-                                            onClick = { viewModel.acceptPendingMemory("user") },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.defaultMinSize(minHeight = 32.dp)
-                                        ) {
-                                            Text("存为跨会话长期记忆", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-                                }
-                            }
+            ChatReviewInputLayout(
+                review = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    val hasPendingReview = pendingMemoryCandidate != null || pendingTimelineProposal != null
+                    if (hasPendingReview) {
+                        key(conversationId) {
+                            ChatPendingReviewPanels(
+                                memory = pendingMemoryCandidate,
+                                timeline = pendingTimelineProposal,
+                                onDismissMemory = { viewModel.dismissPendingMemory() },
+                                onAcceptMemory = { scope, content -> viewModel.acceptPendingMemory(scope, content) },
+                                onDismissTimeline = { viewModel.dismissTimelineProposal(it) },
+                                onApplyTimeline = { viewModel.applyTimelineProposal(it) },
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
                         }
                     }
-                }
-
-                // 需求 4：时间线实时梳理进度卡片（实时可见已梳理事件数、随时查看与暂停/保存）
-                AnimatedVisibility(
-                    visible = isReconcilingTimeline,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    EchoGlassCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
-                        shape = EchoTokens.Radius.shapeMd
+                    // 进度、通知和排队消息单独滚动，不改变候选正文的位置。
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = if (hasPendingReview) 112.dp else 280.dp)
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        // 需求 4：时间线实时梳理进度卡片（实时可见已梳理事件数、随时查看与暂停/保存）
+                        AnimatedVisibility(
+                            visible = isReconcilingTimeline,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Column {
-                                    Text(
-                                        text = "时间线正在全量梳理...",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = timelineReconcileProgress ?: "已梳理 ${liveReconcileDraft?.events?.size ?: 0} 条事件",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = { viewModel.openLiveDraftForReview() },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("实时查看", style = MaterialTheme.typography.labelSmall)
-                                }
-                                TextButton(
-                                    onClick = { viewModel.cancelTimelineReconciliation() },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("暂停/保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (timelineExtractionCount > 0) {
-                    Text("正在提取本轮时间线与设定…", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp))
-                }
-
-                // 需求 1 & 2：时间线自动识别事件与时间变动待确认卡片
-                AnimatedVisibility(
-                    visible = pendingTimelineProposal != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    pendingTimelineProposal?.let { proposal ->
-                        var editedSettings by remember(proposal) { mutableStateOf(proposal.atemporalSettings.map { it.copy() }) }
-                        var isEditingTimeline by remember(proposal) {
-                            mutableStateOf(false)
-                        }
-                        var editedStoryTime by remember(proposal.updatedStoryTime) {
-                            mutableStateOf(proposal.updatedStoryTime.orEmpty())
-                        }
-                        var editedEventTimeTag by remember(proposal.newEvent?.timeTag) {
-                            mutableStateOf(proposal.newEvent?.timeTag.orEmpty())
-                        }
-                        var editedEventContent by remember(proposal.newEvent?.content) {
-                            mutableStateOf(proposal.newEvent?.content.orEmpty())
-                        }
-
-                        EchoGlassCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
-                            shape = EchoTokens.Radius.shapeMd
-                        ) {
-                            Column(
+                            EchoGlassCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
+                                shape = EchoTokens.Radius.shapeMd
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(
                                         modifier = Modifier.weight(1f),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.HistoryEdu,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Text(
-                                            text = if (isEditingTimeline) {
-                                                "编辑本轮时间线与设定"
-                                            } else if (proposal.action == "UPDATE") {
-                                                "时间线更新待确认 (长按可编辑)"
-                                            } else {
-                                                "本轮时间线与设定待确认"
-                                            },
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { viewModel.dismissTimelineProposal(proposal) },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "忽略",
+                                        CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
-                                    }
-                                }
-
-                                proposal.extractionErrorMessage?.let { message ->
-                                    Text(message, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error)
-                                }
-
-                                if (isEditingTimeline) {
-                                    if (!proposal.updatedStoryTime.isNullOrBlank()) {
-                                        OutlinedTextField(
-                                            value = editedStoryTime,
-                                            onValueChange = { editedStoryTime = it },
-                                            label = { Text("推进时空") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    if (proposal.newEvent != null) {
-                                        OutlinedTextField(
-                                            value = editedEventTimeTag,
-                                            onValueChange = { editedEventTimeTag = it },
-                                            label = { Text("事件时间节点") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = MaterialTheme.typography.bodySmall
-                                        )
-                                        OutlinedTextField(
-                                            value = editedEventContent,
-                                            onValueChange = { editedEventContent = it },
-                                            label = { Text("事件内容") },
-                                            minLines = 2,
-                                            maxLines = 4,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    editedSettings.forEachIndexed { index, setting ->
-                                        OutlinedTextField(
-                                            value = setting.content,
-                                            onValueChange = { value -> editedSettings = editedSettings.mapIndexed { i, item ->
-                                                if (i == index) item.copy(content = value) else item
-                                            } },
-                                            label = { Text("设定 · ${setting.category}") },
-                                            modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 4)
+                                        Column {
+                                            Text(
+                                                text = "时间线正在全量梳理...",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = timelineReconcileProgress ?: "已梳理 ${liveReconcileDraft?.events?.size ?: 0} 条事件",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         TextButton(
-                                            onClick = {
-                                                editedStoryTime = proposal.updatedStoryTime.orEmpty()
-                                                editedEventTimeTag = proposal.newEvent?.timeTag.orEmpty()
-                                                editedEventContent = proposal.newEvent?.content.orEmpty()
-                                                editedSettings = proposal.atemporalSettings.map { it.copy() }
-                                                isEditingTimeline = false
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                            onClick = { viewModel.openLiveDraftForReview() },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                         ) {
-                                            Text("取消", style = MaterialTheme.typography.labelSmall)
+                                            Text("实时查看", style = MaterialTheme.typography.labelSmall)
                                         }
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Button(
-                                            onClick = {
-                                                val modifiedProposal = proposal.copy(
-                                                    updatedStoryTime = editedStoryTime.trim().ifBlank { null },
-                                                    newEvent = proposal.newEvent?.copy(
-                                                        timeTag = editedEventTimeTag.trim(),
-                                                        content = editedEventContent.trim()
-                                                    ),
-                                                    atemporalSettings = editedSettings
-                                                )
-                                                viewModel.applyTimelineProposal(modifiedProposal)
-                                                isEditingTimeline = false
-                                            },
-                                            enabled = (proposal.newEvent == null || editedEventContent.isNotBlank()) &&
-                                                (editedStoryTime.isNotBlank() || editedEventContent.isNotBlank() || editedSettings.any { it.isSelected && it.content.isNotBlank() }),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                                            shape = EchoTokens.Radius.shapePill
+                                        TextButton(
+                                            onClick = { viewModel.cancelTimelineReconciliation() },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                         ) {
-                                            Text("应用", style = MaterialTheme.typography.labelSmall)
+                                            Text("暂停/保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                                         }
                                     }
-                                } else {
-                                    Column(
+                                }
+                            }
+                        }
+
+                        if (timelineExtractionCount > 0) {
+                            Text("正在提取本轮时间线与设定…", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp))
+                        }
+
+                        // 时间线变动提示显示数秒后自动消失（退场由下方 AnimatedVisibility 平滑收起），
+                        // 手动「查看/关闭」仍即时生效
+                        LaunchedEffect(timelineUpdateNotice) {
+                            if (timelineUpdateNotice != null) {
+                                kotlinx.coroutines.delay(5000)
+                                viewModel.dismissTimelineUpdateNotice()
+                            }
+                        }
+
+                        // 时间线自动增量更新提醒胶囊
+                        AnimatedVisibility(
+                            visible = timelineUpdateNotice != null,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            timelineUpdateNotice?.let { notice ->
+                                EchoGlassCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+                                    shape = EchoTokens.Radius.shapeMd
+                                ) {
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(EchoTokens.Radius.shapeSm)
-                                            .combinedClickable(
-                                                onClick = {},
-                                                onLongClick = {
-                                                    editedStoryTime = proposal.updatedStoryTime.orEmpty()
-                                                    editedEventTimeTag = proposal.newEvent?.timeTag.orEmpty()
-                                                    editedEventContent = proposal.newEvent?.content.orEmpty()
-                                                    isEditingTimeline = true
-                                                }
-                                            ),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        if (!proposal.updatedStoryTime.isNullOrBlank()) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.HistoryEdu,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                             Text(
-                                                text = "🕒 推进时空：${proposal.updatedStoryTime}",
+                                                text = notice,
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
-
-                                        if (proposal.newEvent != null) {
-                                            if (proposal.action == "UPDATE" && !proposal.previousEventContent.isNullOrBlank()) {
-                                                Column(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .background(
-                                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                                                            shape = EchoTokens.Radius.shapeSm
-                                                        )
-                                                        .padding(6.dp),
-                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "原事件：${proposal.previousEventContent}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = "充实更新：[${proposal.newEvent.timeTag}] ${proposal.newEvent.content}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                                                    )
-                                                }
-                                            } else {
-                                                Text(
-                                                    text = "📌 新增事件：[${proposal.newEvent.timeTag}] 【${proposal.newEvent.category.displayName}】${proposal.newEvent.content}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurface
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.dismissTimelineUpdateNotice()
+                                                    showSettingsDialog = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("查看", style = MaterialTheme.typography.labelSmall)
+                                            }
+                                            IconButton(
+                                                onClick = { viewModel.dismissTimelineUpdateNotice() },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "关闭",
+                                                    modifier = Modifier.size(14.dp)
                                                 )
                                             }
                                         }
                                     }
-
-                                    editedSettings.forEachIndexed { index, setting ->
-                                        SessionSettingChangeDetails(setting.action, setting.previousContent,
-                                            setting.evidence, setting.changeReason)
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = setting.isSelected, onCheckedChange = { selected ->
-                                                editedSettings = editedSettings.mapIndexed { i, item ->
-                                                    if (i == index) item.copy(isSelected = selected) else item
-                                                }
-                                            })
-                                            Text("【${setting.category}】${setting.content}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                modifier = Modifier.weight(1f).clickable {
-                                                    editedSettings = editedSettings.mapIndexed { i, item ->
-                                                        if (i == index) item.copy(isSelected = !item.isSelected) else item
-                                                    }
-                                                })
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        TextButton(
-                                            onClick = { isEditingTimeline = true },
-                                            enabled = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || editedSettings.isNotEmpty(),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                        ) { Text("编辑", style = MaterialTheme.typography.labelSmall) }
-                                        TextButton(
-                                            onClick = { viewModel.dismissTimelineProposal(proposal) },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("忽略", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Button(
-                                            onClick = { viewModel.applyTimelineProposal(proposal.copy(atemporalSettings = editedSettings)) },
-                                            enabled = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || editedSettings.any { it.isSelected && it.content.isNotBlank() },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                                            shape = EchoTokens.Radius.shapePill
-                                        ) {
-                                            Text("确认应用", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
                                 }
                             }
                         }
-                    }
-                }
 
-                // 时间线变动提示显示数秒后自动消失（退场由下方 AnimatedVisibility 平滑收起），
-                // 手动「查看/关闭」仍即时生效
-                LaunchedEffect(timelineUpdateNotice) {
-                    if (timelineUpdateNotice != null) {
-                        kotlinx.coroutines.delay(5000)
-                        viewModel.dismissTimelineUpdateNotice()
-                    }
-                }
-
-                // 时间线自动增量更新提醒胶囊
-                AnimatedVisibility(
-                    visible = timelineUpdateNotice != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    timelineUpdateNotice?.let { notice ->
-                        EchoGlassCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-                            shape = EchoTokens.Radius.shapeMd
+                        // 需求 6：模型回复时排队消息悬浮卡片 (UI 严格按照 media_1789390149204.png 设计落地)
+                        AnimatedVisibility(
+                            visible = messageQueue.isNotEmpty(),
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.HistoryEdu,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = notice,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(
-                                        onClick = {
-                                            viewModel.dismissTimelineUpdateNotice()
-                                            showSettingsDialog = true
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("查看", style = MaterialTheme.typography.labelSmall)
+                            MessageQueueCard(
+                                queue = messageQueue,
+                                isPaused = isQueuePaused,
+                                onTogglePause = { viewModel.toggleQueuePause() },
+                                onRecall = { id ->
+                                    val recalled = viewModel.recallQueuedMessage(id)
+                                    if (recalled != null) {
+                                        inputText = if (inputText.isBlank()) recalled.content else "$inputText\n${recalled.content}"
+                                        if (recalled.attachments.isNotEmpty()) {
+                                            selectedAttachments = selectedAttachments + recalled.attachments
+                                        }
                                     }
-                                    IconButton(
-                                        onClick = { viewModel.dismissTimelineUpdateNotice() },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "关闭",
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                }
-                            }
+                                },
+                                onEdit = { msg -> editingQueueItem = msg },
+                                onRemove = { id -> viewModel.removeQueuedMessage(id) },
+                                onMove = { from, to -> viewModel.moveQueuedMessage(from, to) }
+                            )
                         }
+
                     }
                 }
-
-                // 需求 6：模型回复时排队消息悬浮卡片 (UI 严格按照 media_1789390149204.png 设计落地)
-                AnimatedVisibility(
-                    visible = messageQueue.isNotEmpty(),
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    MessageQueueCard(
-                        queue = messageQueue,
-                        isPaused = isQueuePaused,
-                        onTogglePause = { viewModel.toggleQueuePause() },
-                        onRecall = { id ->
-                            val recalled = viewModel.recallQueuedMessage(id)
-                            if (recalled != null) {
-                                inputText = if (inputText.isBlank()) recalled.content else "$inputText\n${recalled.content}"
-                                if (recalled.attachments.isNotEmpty()) {
-                                    selectedAttachments = selectedAttachments + recalled.attachments
-                                }
-                            }
-                        },
-                        onEdit = { msg -> editingQueueItem = msg },
-                        onRemove = { id -> viewModel.removeQueuedMessage(id) },
-                        onMove = { from, to -> viewModel.moveQueuedMessage(from, to) }
-                    )
-                }
-
-                }
-
+                },
+                input = {
                 ChatInputBar(
                     hazeState = hazeState,
                     inputText = inputText,
@@ -1242,8 +829,8 @@ fun ChatScreen(
                     isBarsHidden = isBarsHidden,
                     onBarsHiddenChange = { isBarsHidden = it }
                 )
-            }
-            }
+                }
+            )
         }
 ) { paddingValues ->
         BoxWithConstraints(

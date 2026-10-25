@@ -475,10 +475,9 @@ class AiRepository(
                     val normalizedBaseUrl = normalizeApiBaseUrl(baseUrl, apiType)
                     val models = fetchModelsFromEndpoint(normalizedBaseUrl, key, apiType)
                     val cleanedModels = sanitizeModelNames(models)
-                    if (cleanedModels.isNotEmpty()) {
-                        keyRotationManager.recordSuccess(baseUrl, apiType, key)
-                        return@withContext Result.success(cleanedModels)
-                    }
+                    // 明确返回的空清单也属于成功，用于与此前导入的模型比较。
+                    keyRotationManager.recordSuccess(baseUrl, apiType, key)
+                    return@withContext Result.success(cleanedModels)
                 } catch (e: Exception) {
                     if (isRequestCancellation(e)) throw e
                     keyRotationManager.recordFailure(baseUrl, apiType, key, e)
@@ -517,6 +516,14 @@ class AiRepository(
             }.getOrNull()
             if (modelError != null) throw embeddedApiError(modelError)
 
+            val modelArray = runCatching {
+                val root = JsonParser.parseString(bodyText).asJsonObject
+                listOf("data", "models", "model").firstNotNullOfOrNull { field ->
+                    root.get(field)?.takeIf { it.isJsonArray }?.asJsonArray
+                }
+            }.getOrNull()
+            if (modelArray != null && modelArray.size() == 0) return emptyList()
+
             val dynamicModels = parseModelNamesAndCacheContextWindows(bodyText, baseUrl, apiType)
             if (dynamicModels.isNotEmpty()) return dynamicModels
 
@@ -527,6 +534,7 @@ class AiRepository(
                 ?.distinct()
                 ?.sorted()
                 .orEmpty()
+                .ifEmpty { throw IllegalStateException("API 未返回有效的模型清单，请检查接口或手动输入模型名称") }
         }
     }
 

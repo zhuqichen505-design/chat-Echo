@@ -33,6 +33,7 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val prefix = settingsPrefix(scope(baseUrl, apiType))
         val safe = settings.normalized()
         prefs.edit()
+            .putBoolean(prefix + "enabled", safe.enabled)
             .putString(prefix + "mode", safe.mode)
             .putBoolean(prefix + "cooldownEnabled", safe.cooldownEnabled)
             .putInt(prefix + "failuresBeforeCooldown", safe.failuresBeforeCooldown)
@@ -60,6 +61,8 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val scope = scope(baseUrl, apiType)
         val snapshot = prefs.all
         val settings = readSettings(scope, snapshot)
+        // 关闭时始终使用列表中的首个启用 Key，不轮换、不自动切换，也不受旧冷却记录拦截。
+        if (!settings.enabled) return@synchronized unique.take(1)
         val now = nowMillis().coerceAtLeast(0)
         val editor = prefs.edit()
         val candidates = unique.map { key ->
@@ -98,7 +101,7 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val scope = scope(baseUrl, apiType)
         val snapshot = prefs.all
         val settings = readSettings(scope, snapshot)
-        if (!settings.cooldownEnabled) return@synchronized false
+        if (!settings.enabled || !settings.cooldownEnabled) return@synchronized false
         val now = nowMillis().coerceAtLeast(0)
         val editor = prefs.edit()
         val health = readHealth(scope, keyId(key), snapshot, settings, now, editor)
@@ -112,6 +115,7 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val id = keyId(key)
         val snapshot = prefs.all
         val settings = readSettings(scope, snapshot)
+        if (!settings.enabled) return@synchronized
         val editor = prefs.edit().putString(preferredKey(scope), id)
         if (settings.resetOnSuccess) removeHealth(editor, scope, id)
         else editor.remove(healthPrefix(scope, id) + "coolingUntil")
@@ -126,6 +130,7 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val id = keyId(key)
         val snapshot = prefs.all
         val settings = readSettings(scope, snapshot)
+        if (!settings.enabled) return@synchronized false
         val now = nowMillis().coerceAtLeast(0)
         val editor = prefs.edit()
         val previous = readHealth(scope, id, snapshot, settings, now, editor)
@@ -151,6 +156,7 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         val prefix = settingsPrefix(scope)
         val defaults = ApiKeyRotationSettings()
         return ApiKeyRotationSettings(
+            enabled = snapshot[prefix + "enabled"] as? Boolean ?: defaults.enabled,
             mode = snapshot[prefix + "mode"] as? String ?: defaults.mode,
             cooldownEnabled = snapshot[prefix + "cooldownEnabled"] as? Boolean ?: defaults.cooldownEnabled,
             failuresBeforeCooldown = snapshot[prefix + "failuresBeforeCooldown"] as? Int ?: defaults.failuresBeforeCooldown,

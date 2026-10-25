@@ -43,18 +43,18 @@ internal data class ApiKeyRotationDraft(
     val failureReset: String = settings.failureResetSeconds.toString()
 ) {
     val failuresError: String?
-        get() = if (settings.cooldownEnabled && failures.toIntOrNull() !in 1..ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD) {
+        get() = if (settings.enabled && settings.cooldownEnabled && failures.toIntOrNull() !in 1..ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD) {
             "请输入 1 至 ${ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD} 次"
         } else null
 
     val cooldownError: String?
-        get() = if (settings.cooldownEnabled && cooldown.toLongOrNull() !in 1L..ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS) {
+        get() = if (settings.enabled && settings.cooldownEnabled && cooldown.toLongOrNull() !in 1L..ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS) {
             "请输入 1 至 ${ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS} 秒"
         } else null
 
     val maxCooldownError: String?
         get() {
-            if (!settings.cooldownEnabled || !settings.exponentialBackoff) return null
+            if (!settings.enabled || !settings.cooldownEnabled || !settings.exponentialBackoff) return null
             val maximum = maxCooldown.toLongOrNull()
             return when {
                 maximum !in 1L..ApiKeyRotationSettings.MAX_COOLDOWN_SECONDS ->
@@ -66,7 +66,7 @@ internal data class ApiKeyRotationDraft(
         }
 
     val failureResetError: String?
-        get() = if (failureReset.toLongOrNull() !in 0L..ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS) {
+        get() = if (settings.enabled && failureReset.toLongOrNull() !in 0L..ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS) {
             "请输入 0 至 ${ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS} 秒"
         } else null
 
@@ -85,7 +85,9 @@ internal data class ApiKeyRotationDraft(
             maxCooldownSeconds = maxCooldown.toLongOrNull()
                 ?.takeIf { it in 1L..ApiKeyRotationSettings.MAX_COOLDOWN_SECONDS }
                 ?: settings.maxCooldownSeconds,
-            failureResetSeconds = failureReset.toLongOrNull() ?: settings.failureResetSeconds
+            failureResetSeconds = failureReset.toLongOrNull()
+                ?.takeIf { it in 0L..ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS }
+                ?: settings.failureResetSeconds
         ).normalized()
     }
 }
@@ -117,131 +119,146 @@ internal fun ApiKeyRotationSettingsSection(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("多 Key 轮询与冷却", style = MaterialTheme.typography.titleSmall)
+            RotationToggleRow(
+                title = "启用多 Key 轮询",
+                description = if (settings.enabled) "按下方策略选择 Key；关闭后固定使用列表中第一个已启用的 Key。"
+                    else "已关闭：固定使用第一个已启用的 Key，失败后不切换其他 Key，也不受冷却记录拦截。",
+                checked = settings.enabled,
+                enabled = enabled,
+                onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(enabled = it))) }
+            )
+            Text(
+                "同一 API 地址及类型的配置共用此开关和策略；点击“保存”后生效。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (settings.enabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("多 Key 轮询与冷却", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = "${modes.firstOrNull { it.first == settings.mode }?.second ?: "轮流优先"} · " +
+                                if (settings.cooldownEnabled) "失败冷却已开启" else "失败冷却已关闭",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "收起轮询设置" else "展开轮询设置"
+                    )
+                }
+                if (expanded) {
                     Text(
-                        text = "${modes.firstOrNull { it.first == settings.mode }?.second ?: "轮流优先"} · " +
-                            if (settings.cooldownEnabled) "失败冷却已开启" else "失败冷却已关闭",
+                        "同一 API 地址及类型的配置共用此策略和失败记录。更改地址或类型会载入对应策略；以下修改点击“保存”后生效。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "收起轮询设置" else "展开轮询设置"
-                )
-            }
-            if (expanded) {
-                Text(
-                    "同一 API 地址及类型的配置共用此策略和失败记录。更改地址或类型会载入对应策略；以下修改点击“保存”后生效。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                modes.forEach { (mode, label, description) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().selectable(
-                            selected = settings.mode == mode,
-                            enabled = enabled,
-                            role = Role.RadioButton,
-                            onClick = { onDraftChange(draft.copy(settings = settings.copy(mode = mode))) }
-                        ),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = settings.mode == mode, onClick = null, enabled = enabled)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(label, style = MaterialTheme.typography.bodyMedium)
-                            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    modes.forEach { (mode, label, description) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().selectable(
+                                selected = settings.mode == mode,
+                                enabled = enabled,
+                                role = Role.RadioButton,
+                                onClick = { onDraftChange(draft.copy(settings = settings.copy(mode = mode))) }
+                            ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = settings.mode == mode, onClick = null, enabled = enabled)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
-                }
-                RotationToggleRow(
-                    title = "失败自动降权",
-                    description = "失败较多的 Key 排到健康 Key 后面，避免每次从故障 Key 开始。",
-                    checked = settings.deprioritizeFailures,
-                    enabled = enabled,
-                    onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(deprioritizeFailures = it))) }
-                )
-                RotationToggleRow(
-                    title = "失败后暂时冷却",
-                    description = "达到失败阈值后跳过该 Key，冷却结束后重新参与选择。",
-                    checked = settings.cooldownEnabled,
-                    enabled = enabled,
-                    onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(cooldownEnabled = it))) }
-                )
-                if (settings.cooldownEnabled) {
-                    RotationNumberField(
-                        label = "触发冷却的失败次数", value = draft.failures,
-                        onValueChange = { onDraftChange(draft.copy(failures = it)) },
-                        description = "1 至 ${ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD} 次；设为 1 即首次失败后冷却。",
-                        error = draft.failuresError, enabled = enabled
-                    )
-                    RotationNumberField(
-                        label = "基础冷却时长（秒）", value = draft.cooldown,
-                        onValueChange = { onDraftChange(draft.copy(cooldown = it)) },
-                        description = "1 至 ${ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS} 秒（7 天）；300 秒为 5 分钟。",
-                        error = draft.cooldownError, enabled = enabled
+                    RotationToggleRow(
+                        title = "失败自动降权",
+                        description = "失败较多的 Key 排到健康 Key 后面，避免每次从故障 Key 开始。",
+                        checked = settings.deprioritizeFailures,
+                        enabled = enabled,
+                        onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(deprioritizeFailures = it))) }
                     )
                     RotationToggleRow(
-                        title = "重复失败递增冷却",
-                        description = "继续失败时将冷却时长逐次加倍，直到设定上限。",
-                        checked = settings.exponentialBackoff,
+                        title = "失败后暂时冷却",
+                        description = "达到失败阈值后跳过该 Key，冷却结束后重新参与选择。",
+                        checked = settings.cooldownEnabled,
                         enabled = enabled,
-                        onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(exponentialBackoff = it))) }
+                        onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(cooldownEnabled = it))) }
                     )
-                    if (settings.exponentialBackoff) {
+                    if (settings.cooldownEnabled) {
                         RotationNumberField(
-                            label = "最大冷却时长（秒）", value = draft.maxCooldown,
-                            onValueChange = { onDraftChange(draft.copy(maxCooldown = it)) },
-                            description = "不得小于基础冷却，最多 ${ApiKeyRotationSettings.MAX_COOLDOWN_SECONDS} 秒（30 天）。",
-                            error = draft.maxCooldownError, enabled = enabled
+                            label = "触发冷却的失败次数", value = draft.failures,
+                            onValueChange = { onDraftChange(draft.copy(failures = it)) },
+                            description = "1 至 ${ApiKeyRotationSettings.MAX_FAILURE_THRESHOLD} 次；设为 1 即首次失败后冷却。",
+                            error = draft.failuresError, enabled = enabled
+                        )
+                        RotationNumberField(
+                            label = "基础冷却时长（秒）", value = draft.cooldown,
+                            onValueChange = { onDraftChange(draft.copy(cooldown = it)) },
+                            description = "1 至 ${ApiKeyRotationSettings.MAX_BASE_COOLDOWN_SECONDS} 秒（7 天）；300 秒为 5 分钟。",
+                            error = draft.cooldownError, enabled = enabled
+                        )
+                        RotationToggleRow(
+                            title = "重复失败递增冷却",
+                            description = "继续失败时将冷却时长逐次加倍，直到设定上限。",
+                            checked = settings.exponentialBackoff,
+                            enabled = enabled,
+                            onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(exponentialBackoff = it))) }
+                        )
+                        if (settings.exponentialBackoff) {
+                            RotationNumberField(
+                                label = "最大冷却时长（秒）", value = draft.maxCooldown,
+                                onValueChange = { onDraftChange(draft.copy(maxCooldown = it)) },
+                                description = "不得小于基础冷却，最多 ${ApiKeyRotationSettings.MAX_COOLDOWN_SECONDS} 秒（30 天）。",
+                                error = draft.maxCooldownError, enabled = enabled
+                            )
+                        }
+                        RotationToggleRow(
+                            title = "全部冷却时探测一个 Key",
+                            description = if (settings.probeWhenAllCooling) "提前尝试最早恢复的一个 Key；仍失败则返回错误。"
+                                else "直接提示稍后重试，避免继续触发失败。",
+                            checked = settings.probeWhenAllCooling,
+                            enabled = enabled,
+                            onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(probeWhenAllCooling = it))) }
                         )
                     }
+                    RotationNumberField(
+                        label = "失败记录自动重置间隔（秒）", value = draft.failureReset,
+                        onValueChange = { onDraftChange(draft.copy(failureReset = it)) },
+                        description = "距上次失败达到此间隔后清除记录。0 关闭；最多 ${ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS} 秒（365 天）。",
+                        error = draft.failureResetError, enabled = enabled
+                    )
                     RotationToggleRow(
-                        title = "全部冷却时探测一个 Key",
-                        description = if (settings.probeWhenAllCooling) "提前尝试最早恢复的一个 Key；仍失败则返回错误。"
-                            else "直接提示稍后重试，避免继续触发失败。",
-                        checked = settings.probeWhenAllCooling,
+                        title = "调用成功后清除失败记录",
+                        description = "该 Key 再次成功时恢复健康优先级，并重置递增冷却。",
+                        checked = settings.resetOnSuccess,
                         enabled = enabled,
-                        onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(probeWhenAllCooling = it))) }
+                        onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(resetOnSuccess = it))) }
                     )
-                }
-                RotationNumberField(
-                    label = "失败记录自动重置间隔（秒）", value = draft.failureReset,
-                    onValueChange = { onDraftChange(draft.copy(failureReset = it)) },
-                    description = "距上次失败达到此间隔后清除记录。0 关闭；最多 ${ApiKeyRotationSettings.MAX_FAILURE_RESET_SECONDS} 秒（365 天）。",
-                    error = draft.failureResetError, enabled = enabled
-                )
-                RotationToggleRow(
-                    title = "调用成功后清除失败记录",
-                    description = "该 Key 再次成功时恢复健康优先级，并重置递增冷却。",
-                    checked = settings.resetOnSuccess,
-                    enabled = enabled,
-                    onCheckedChange = { onDraftChange(draft.copy(settings = settings.copy(resetOnSuccess = it))) }
-                )
-                Text(
-                    "备用 Key 总开关及单次请求的错误重试次数仍在“模型失败与重试”中设置。关闭备用 Key 时仍会按此策略选择首个 Key，失败后不切换其他 Key。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                TextButton(onClick = onResetHealth, enabled = enabled && canResetHealth && !resettingHealth) {
-                    Text(if (resettingHealth) "正在重置…" else "立即重置此地址的 Key 健康记录")
-                }
-                Text(
-                    "重置会立即清除失败次数、冷却和调用顺序记录，即使取消本次编辑也会生效。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                resetFeedback?.let { (success, message) ->
                     Text(
-                        message,
+                        "备用 Key 总开关及单次请求的错误重试次数仍在“模型失败与重试”中设置。关闭备用 Key 时仍会按此策略选择首个 Key，失败后不切换其他 Key。",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    TextButton(onClick = onResetHealth, enabled = enabled && canResetHealth && !resettingHealth) {
+                        Text(if (resettingHealth) "正在重置…" else "立即重置此地址的 Key 健康记录")
+                    }
+                    Text(
+                        "重置会立即清除失败次数、冷却和调用顺序记录，即使取消本次编辑也会生效。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    resetFeedback?.let { (success, message) ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
         }

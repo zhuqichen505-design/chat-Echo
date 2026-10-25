@@ -11,7 +11,8 @@ data class ApiKeyRotationSettings(
     val failureResetSeconds: Long = 86400,
     val deprioritizeFailures: Boolean = true,
     val resetOnSuccess: Boolean = true,
-    val probeWhenAllCooling: Boolean = false
+    val probeWhenAllCooling: Boolean = false,
+    val enabled: Boolean = true
 ) {
     /** 0 秒重置间隔表示不按时间自动清除失败记录。 */
     fun normalized(): ApiKeyRotationSettings {

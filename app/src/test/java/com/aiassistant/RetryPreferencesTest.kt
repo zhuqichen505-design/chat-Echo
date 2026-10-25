@@ -95,6 +95,28 @@ class RetryPreferencesTest {
         assertEquals(31536000L, maximum.failureResetSeconds)
     }
 
+    @Test fun rotationOffCanBeSavedWithUnfinishedHiddenNumbersAndRestoresDraftOnReenable() {
+        val settings = ApiKeyRotationSettings(mode = ApiKeyRotationSettings.PREFER_SUCCESS)
+        val unfinished = ApiKeyRotationDraft(settings, failures = "", cooldown = "", maxCooldown = "", failureReset = "")
+        assertNull(unfinished.toSettingsOrNull())
+        val disabled = unfinished.copy(settings = settings.copy(enabled = false))
+        assertNull(disabled.validationMessage)
+        assertEquals(settings.copy(enabled = false), disabled.toSettingsOrNull())
+        assertEquals("", disabled.failureReset)
+        assertNull(disabled.copy(settings = settings).toSettingsOrNull())
+    }
+
+    @Test fun rotationSwitchOnlyPersistsWhenDraftIsSaved() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = PersonalizationManager(context).apiKeyRotationManager
+        val baseUrl = "https://rotation-switch-draft.test/v1"
+        val original = manager.getSettings(baseUrl, "openai")
+        val draft = ApiKeyRotationDraft(original.copy(enabled = false))
+        assertTrue(manager.getSettings(baseUrl, "openai").enabled)
+        assertTrue(manager.saveSettings(baseUrl, "openai", requireNotNull(draft.toSettingsOrNull())))
+        assertFalse(PersonalizationManager(context).apiKeyRotationManager.getSettings(baseUrl, "openai").enabled)
+    }
+
     @Test
     fun keyRotationDraftRejectsBlankOverflowAndOutOfRangeNumbersWithoutReplacingInput() {
         val draft = ApiKeyRotationDraft(ApiKeyRotationSettings())
@@ -202,7 +224,9 @@ class RetryPreferencesTest {
     fun expressiveBotsRenderRealDistinctUnclippedFramesAtMessageAndPreviewSizes() {
         val styles = EchoModelMarkStyle.expressiveBotStyles
         val states = listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
-            EchoModelMarkState.Replying, EchoModelMarkState.Completed, EchoModelMarkState.Neutral)
+            EchoModelMarkState.Replying, EchoModelMarkState.Completed, EchoModelMarkState.Neutral,
+            EchoModelMarkState.Paused, EchoModelMarkState.Failed)
+        val sizes = listOf(26, 38, 64, 128)
         val outputDirectory = File("build/reports/visual-tests/model-bots")
         assertTrue(outputDirectory.isDirectory || outputDirectory.mkdirs())
         for ((theme, backdrop) in listOf("light" to Color.White, "dark" to Color.Black)) {
@@ -211,9 +235,11 @@ class RetryPreferencesTest {
             val gallery = Bitmap.createBitmap(8 * 128, styles.size * states.size * 128, Bitmap.Config.ARGB_8888)
             gallery.eraseColor(backdrop.toArgb())
             val galleryCanvas = android.graphics.Canvas(gallery)
+            val terminalSymbols = mutableMapOf<Pair<String, Int>, MutableSet<Int>>()
             for ((styleIndex, style) in styles.withIndex()) {
                 for ((stateIndex, state) in states.withIndex()) {
-                    for (size in listOf(26, 128)) {
+                    val isTerminal = state == EchoModelMarkState.Paused || state == EchoModelMarkState.Failed
+                    for (size in sizes) {
                         val symbolFrames = mutableListOf<Pair<Int, Float>>()
                         val speechInteriorFrames = mutableListOf<Pair<Int, List<Int>>>()
                         val snapshots = (0 until 8).map { frame ->
@@ -224,6 +250,7 @@ class RetryPreferencesTest {
                                 EchoModelMarkState.Replying -> 5600f
                                 EchoModelMarkState.Neutral -> 7000f
                                 EchoModelMarkState.Completed -> expressiveBotDurationMillis(style, state)
+                                EchoModelMarkState.Paused, EchoModelMarkState.Failed -> 1000f
                             }
                             val pose = sampleExpressiveBotPose(style, state,
                                 windowMillis * frame / 8f,
@@ -235,6 +262,18 @@ class RetryPreferencesTest {
                             }
                             val pixels = IntArray(size * size)
                             bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+                            if (isTerminal && frame == 0) {
+                                val reducedBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                                val reducedPose = sampleExpressiveBotPose(style, state, 90_000f, reducedMotion = true)
+                                CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr,
+                                    Canvas(reducedBitmap.asImageBitmap()), Size(size.toFloat(), size.toFloat())) {
+                                    drawExpressiveBot(bodyColor, reducedPose)
+                                }
+                                val reducedPixels = IntArray(size * size)
+                                reducedBitmap.getPixels(reducedPixels, 0, size, 0, 0, size, size)
+                                assertArrayEquals("$style $state $size dp 减弱动态仍须实际绘出相同的终止状态", pixels, reducedPixels)
+                                reducedBitmap.recycle()
+                            }
                             // The symbol layer occupies the clear space above every transformed body.
                             // Alpha coverage detects subpixel strokes without requiring a pure color.
                             val symbolPixels = pixels.copyOfRange(0, size * (size * .16f).toInt())
@@ -276,7 +315,9 @@ class RetryPreferencesTest {
                             }
                             // Thin capsule edges and brief blinks are antialiased and need not contain
                             // exact eyeColor pixels. Measure their real contribution on the opaque body.
-                            val (leftEye, rightEye) = projectedEyeVisibility(pixels, size, bodyColor.toArgb(), eyeColor)
+                            // Error's contrasting exclamation is outside the face and must not pass as an eye.
+                            val facePixels = pixels.copyOf().apply { fill(0, 0, size * (size * .2f).toInt()) }
+                            val (leftEye, rightEye) = projectedEyeVisibility(facePixels, size, bodyColor.toArgb(), eyeColor)
                             val minimumArea = size * size / (26f * 26f)
                             fun visible(eye: EyeVisibility) = eye.effectivePixels >= 2 &&
                                 eye.coverageArea >= minimumArea && eye.peakCoverage >= .45f
@@ -299,10 +340,18 @@ class RetryPreferencesTest {
                             bitmap.recycle()
                             pixels.contentHashCode()
                         }
-                        assertTrue("$style $state $size dp 必须是真实多帧运动，不能只更换表情标签",
-                            snapshots.toSet().size >= 5)
-                        assertTrue("$style $state $size dp 外部符号本身必须实际绘制出不同像素帧",
-                            symbolFrames.map { it.first }.toSet().size >= 4)
+                        if (isTerminal) {
+                            assertEquals("$style $state $size dp 终止状态应持续显示，不闪动、不退回待机", 1, snapshots.toSet().size)
+                            assertEquals("$style $state $size dp 终止符号墨迹应稳定", 1, symbolFrames.map { it.first }.toSet().size)
+                            assertEquals("$style $state $size dp 每一帧必须有可见终止符号", 8,
+                                symbolFrames.count { it.second > size * size / (26f * 26f) * .15f })
+                            terminalSymbols.getOrPut(style to size) { mutableSetOf() }.add(symbolFrames.first().first)
+                        } else {
+                            assertTrue("$style $state $size dp 必须是真实多帧运动，不能只更换表情标签",
+                                snapshots.toSet().size >= 5)
+                            assertTrue("$style $state $size dp 外部符号本身必须实际绘制出不同像素帧",
+                                symbolFrames.map { it.first }.toSet().size >= 4)
+                        }
                         assertTrue("$style $state $size dp 外部符号应在多个关键帧中可见",
                             symbolFrames.count { it.second > size * size / (26f * 26f) * .15f } >= 3)
                         if (state == EchoModelMarkState.Replying && size == 128) {
@@ -313,6 +362,10 @@ class RetryPreferencesTest {
                         }
                     }
                 }
+            }
+            for (style in styles) for (size in sizes) {
+                assertEquals("$style $size dp 主动暂停和失败必须绘制出不同的实际符号", 2,
+                    terminalSymbols[style to size]?.size)
             }
             File(outputDirectory, "expressive-bots-$theme.png").outputStream().use {
                 assertTrue(gallery.compress(Bitmap.CompressFormat.PNG, 100, it))

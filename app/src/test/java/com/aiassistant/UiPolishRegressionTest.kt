@@ -3,6 +3,7 @@ package com.aiassistant
 import com.aiassistant.ui.components.SmoothReorderState
 import com.aiassistant.ui.screens.settings.cleanModelNames
 import com.aiassistant.ui.screens.settings.parseModelList
+import com.aiassistant.ui.screens.settings.apiModelDiscoveryEntries
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -151,6 +152,38 @@ class UiPolishRegressionTest {
     fun parseModelList_preservesJsonArrayOrder() {
         val raw = """["zeta-model","alpha-model","mid-model"]"""
         assertEquals(listOf("zeta-model", "alpha-model", "mid-model"), parseModelList(raw))
+    }
+
+    @Test fun modelDiscoveryOnlyMarksMissingModelsAfterSuccessfulFetchAndKeepsThemFirst() {
+        val configured = listOf("synthetic-kept", "synthetic-missing", "synthetic-other-missing")
+        assertTrue(apiModelDiscoveryEntries(configured, null).isEmpty())
+        val rows = apiModelDiscoveryEntries(configured, listOf("synthetic-new", "synthetic-kept", "synthetic-new"))
+        assertEquals(listOf("synthetic-missing", "synthetic-other-missing", "synthetic-new", "synthetic-kept"), rows.map { it.model })
+        assertEquals(listOf(true, true, false, false), rows.map { it.isUnavailable })
+        assertEquals(listOf(true, true, false, true), rows.map { it.isAdded })
+        assertTrue(apiModelDiscoveryEntries(configured, null).none { it.isUnavailable })
+    }
+
+    @Test fun modelDiscoveryRemovalAndReaddingUpdateBothMissingAndReturnedRows() {
+        val fetched = listOf("synthetic-current", "synthetic-new")
+        val configured = listOf("synthetic-missing", "synthetic-current")
+        val afterRemoval = apiModelDiscoveryEntries(configured - "synthetic-missing" - "synthetic-current", fetched)
+        assertEquals(fetched, afterRemoval.map { it.model })
+        assertTrue(afterRemoval.none { it.isAdded || it.isUnavailable })
+        val afterAdding = apiModelDiscoveryEntries(listOf("synthetic-current"), fetched)
+        assertTrue(afterAdding.single { it.model == "synthetic-current" }.isAdded)
+        assertTrue(!afterAdding.single { it.model == "synthetic-new" }.isAdded)
+    }
+
+    @Test fun modelDiscoverySearchIncludesMissingModelsAndDoesNotTruncateLargeLists() {
+        val fetched = (0..124).map { "synthetic-model-$it" }
+        val configured = listOf("synthetic-missing-model", "synthetic-model-124")
+        val all = apiModelDiscoveryEntries(configured, fetched)
+        assertEquals(126, all.size)
+        assertEquals("synthetic-missing-model", all.first().model)
+        assertTrue(all.last().isAdded)
+        assertEquals(listOf("synthetic-missing-model"), apiModelDiscoveryEntries(configured, fetched, " MISSING ").map { it.model })
+        assertTrue(apiModelDiscoveryEntries(configured, fetched, "no-match").isEmpty())
     }
 
     @Test

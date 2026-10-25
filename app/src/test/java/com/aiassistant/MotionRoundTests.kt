@@ -34,6 +34,56 @@ import org.junit.Test
  */
 class MotionRoundTests {
 
+    @Test fun pausedAndFailedRepliesKeepDistinctVisibleSymbolsWithoutHistoricalFrameLoops() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            for ((state, symbol) in listOf(EchoModelMarkState.Paused to ExpressiveBotEffectKind.Pause,
+                EchoModelMarkState.Failed to ExpressiveBotEffectKind.Error)) {
+                val expected = sampleExpressiveBotPose(style, state, 0f)
+                assertEquals(symbol, expected.effects.single().kind)
+                assertEquals(1f, expected.effects.single().alpha, 0f)
+                assertEquals("终止状态不能随时间消失或进入待机", expected,
+                    sampleExpressiveBotPose(style, state, 90_000f, idleEffects = true))
+                assertEquals("减弱动态仍要保留暂停和错误标识", expected,
+                    sampleExpressiveBotPose(style, state, 0f, reducedMotion = true))
+                val historical = ExpressiveBotMotionController(style)
+                historical.update(state)
+                assertEquals("历史暂停和错误在首次挂载时直接可见", expected, historical.pose)
+                assertFalse("历史终止消息不能启动常驻帧循环", historical.needsFrames)
+
+                val controller = ExpressiveBotMotionController(style)
+                controller.update(EchoModelMarkState.Replying)
+                advanceExpressiveBot(controller, 400f)
+                val before = controller.pose
+                controller.update(state)
+                assertEquals("终止应平滑地从当前姿态进入", before, controller.pose)
+                advanceExpressiveBot(controller, 300f)
+                assertEquals(expected, controller.pose)
+                assertFalse(controller.needsFrames)
+                assertFalse(controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Spark || it.kind == ExpressiveBotEffectKind.Z })
+            }
+        }
+    }
+
+    @Test fun terminalModelMarkFollowsExplicitPauseOrFailureAndResetsWhenRetryProducesText() {
+        val paused = GenerationUiStateRules.stoppedReplyContent("合成部分回复", listOf("合成连接错误"))
+        val pausedState = GenerationUiStateRules.derive(false, paused, true, "合成连接错误", contentIsError = true)
+        assertEquals("停止时保留的错误详情不能覆盖主动暂停状态", GenerationUiState.Cancelled, pausedState)
+        assertEquals(EchoModelMarkState.Paused, GenerationUiStateRules.modelMarkState(pausedState, completed = true))
+        for (content in listOf("合成部分回复\n\n*(输出已被中断: 合成断线)*", "*(思考已输出，回复已被中断: 合成断线)*")) {
+            val state = GenerationUiStateRules.derive(false, content, true, null)
+            assertEquals("已保存的中断尾标应重新派生错误状态", GenerationUiState.Failed, state)
+            assertEquals(EchoModelMarkState.Failed, GenerationUiStateRules.modelMarkState(state, completed = true))
+            assertFalse(GenerationUiStateRules.modelMarkAllowsIdle(state, true, content))
+        }
+        val retrying = GenerationUiStateRules.derive(true, "", false, "正在自动尝试备用 Key")
+        assertEquals(EchoModelMarkState.Connecting, GenerationUiStateRules.modelMarkState(retrying, completed = false))
+        val recovered = GenerationUiStateRules.derive(true, "合成恢复回复", true, "合成旧连接错误")
+        assertEquals(EchoModelMarkState.Replying, GenerationUiStateRules.modelMarkState(recovered, completed = false))
+        val quoted = "她说：*(输出已被中断: 合成例子)* 是一条提示。"
+        assertEquals(GenerationUiState.Idle, GenerationUiStateRules.derive(false, quoted, false, null))
+        assertTrue(GenerationUiStateRules.modelMarkHasSuccessfulBody(quoted))
+    }
+
     @Test fun expressiveExternalSymbolsMoveThroughConnectionThinkingReplyingAndExplicitIdle() {
         val states = mapOf(EchoModelMarkState.Connecting to ExpressiveBotEffectKind.Signal,
             EchoModelMarkState.Thinking to ExpressiveBotEffectKind.Thought,
@@ -83,11 +133,11 @@ class MotionRoundTests {
                 val visible = frame.filter { it.alpha > .1f }
                 for (effect in visible) {
                     val minimumSize = when (effect.kind) {
-                        ExpressiveBotEffectKind.Signal -> 7f
-                        ExpressiveBotEffectKind.SignalDot -> 2f
-                        ExpressiveBotEffectKind.Thought -> 11f
-                        ExpressiveBotEffectKind.Speech -> 16f
-                        ExpressiveBotEffectKind.Z -> 8f
+                        ExpressiveBotEffectKind.Signal -> 10f
+                        ExpressiveBotEffectKind.SignalDot -> 3f
+                        ExpressiveBotEffectKind.Thought -> 13f
+                        ExpressiveBotEffectKind.Speech -> 20f
+                        ExpressiveBotEffectKind.Z -> 10f
                         else -> 10f
                     }
                     assertTrue("$state 符号不能退回小而难辨的尺寸", effect.size >= minimumSize)
@@ -273,6 +323,8 @@ class MotionRoundTests {
             }
             ExpressiveBotEffectKind.SignalDot -> floatArrayOf(effect.x - radius, effect.y - radius,
                 effect.x + radius, effect.y + radius)
+            ExpressiveBotEffectKind.Pause, ExpressiveBotEffectKind.Error ->
+                floatArrayOf(effect.x - radius, effect.y - radius, effect.x + radius, effect.y + radius)
             ExpressiveBotEffectKind.Thought -> floatArrayOf(effect.x - effect.size * 12.85f / 14f,
                 effect.y - effect.size * 9f / 28f - 1.1f, effect.x + radius + 1.1f,
                 effect.y + effect.size * 8.95f / 14f)
@@ -549,12 +601,12 @@ class MotionRoundTests {
         advance(true, "合成重试正文")
         assertEquals(EchoModelMarkState.Completed to true, advance(false, "合成重试正文"))
         advance(true, "合成部分正文")
-        assertEquals(EchoModelMarkState.Neutral to false,
+        assertEquals(EchoModelMarkState.Paused to false,
             advance(false, "合成部分正文\n\n*(回复已被暂停)*"))
         advance(true, "", thinking = true)
-        assertEquals(EchoModelMarkState.Neutral to false, advance(false, "*(思考已停止，回复已暂停)*", thinking = true))
+        assertEquals(EchoModelMarkState.Paused to false, advance(false, "*(思考已停止，回复已暂停)*", thinking = true))
         assertEquals(EchoModelMarkState.Neutral to false, advance(true, "", retry = "等待选择回复方向"))
-        assertEquals(EchoModelMarkState.Neutral to false, advance(false, "请求失败\n\n合成错误", error = true))
+        assertEquals(EchoModelMarkState.Failed to false, advance(false, "请求失败\n\n合成错误", error = true))
 
         val preview = ModelMarkCompletionMotion()
         assertTrue(preview.update(EchoModelMarkState.Completed, completionEvent = 1L))
