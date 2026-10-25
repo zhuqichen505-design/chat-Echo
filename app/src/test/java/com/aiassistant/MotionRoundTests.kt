@@ -56,7 +56,10 @@ class MotionRoundTests {
                 val before = controller.pose
                 controller.update(state)
                 assertEquals("终止应平滑地从当前姿态进入", before, controller.pose)
-                advanceExpressiveBot(controller, 300f)
+                advanceExpressiveBot(controller, 120f)
+                assertTrue("暂停 / 错误应有可见的进入动效，而不是瞬间替换静态符号",
+                    controller.pose != before && controller.pose != expected)
+                advanceExpressiveBot(controller, 700f)
                 assertEquals(expected, controller.pose)
                 assertFalse(controller.needsFrames)
                 assertFalse(controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Spark || it.kind == ExpressiveBotEffectKind.Z })
@@ -121,6 +124,17 @@ class MotionRoundTests {
             val rest = expressiveBotRestPose(style)
             for (time in listOf(0f, 1000f, 30_000f)) {
                 assertEquals("历史中性消息默认不显示待机符号", rest, sampleExpressiveBotPose(style, EchoModelMarkState.Neutral, time))
+            }
+        }
+    }
+
+    @Test fun wideBotKeepsEveryActiveAndTerminalSymbolAtItsOwnUpperRightAnchor() {
+        for (state in EchoModelMarkState.entries.filter { it != EchoModelMarkState.Neutral }) {
+            val frames = (0..12).map { sampleExpressiveBotPose(EchoModelMarkStyle.BOT_WIDE, state, it * 80f, idleEffects = true) }
+            frames.flatMap { it.effects }.filter { it.alpha > .1f }.forEach { effect ->
+                val bounds = expressiveEffectBounds(effect)
+                assertTrue("扁扁的 ${state.name} 符号右边不能越过画板", bounds[2] < 100f)
+                assertTrue("扁扁的 ${state.name} 符号必须位于身体右上侧", effect.x >= 85f && bounds[3] < 20f)
             }
         }
     }

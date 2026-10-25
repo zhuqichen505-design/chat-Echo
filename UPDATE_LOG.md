@@ -1,5 +1,17 @@
 # 维护记录
 
+## 2026-10-26 · 2.8.17 发版：Bot 动画与纸本装帧预览重做
+
+基线 `main/ba7d6fd`，版本由 2.8.16/202 递增到 2.8.17/203，Room v37 / 20 个实体不变。本次按用户明确要求构建并发布 APK。
+
+- Bot：暂停 / 错误从活动状态切换时加入约 520ms 进入动画，末帧保持双竖条 / 圆底叹号；历史终止消息、减弱动态不启动常驻动画。扁扁体态的连接、思考、回复、完成、暂停和错误符号采用独立右上锚点，避免靠左和越界。
+- 预览：Bot 预览支持七状态、减弱动态、冻结、完整播放和暂停 / 错误 / 恢复动图；毛边文库强化毛边叠页、双线书眉、砖红洇印，其他三套重做为线装针脚、活页手札、织布精装，真实页面结构保持不变。
+- 影响文件：`ExpressiveBotMotion.kt`、`EchoModelMark.kt`、`MotionRoundTests.kt`、`RetryPreferencesTest.kt`、`design/book-theme-preview/bot-motion.js`、`design/book-theme-preview/bot-preview/`、`design/book-theme-preview/materials.css` 与七张主题图，以及版本 / 发布文档。数据库、API 协议和用户数据格式未改。
+
+最终 verify `20261025-235531-637`：脚本 / Gradle 退出 0，321.196 秒；88 套件 / 1,007 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。定向 Bot 测试最终通过，Release `assembleRelease --no-daemon --build-cache` 退出 0。
+
+APK：`D:/Agent/APP-Echo/app/releases/Echo-v2.8.17.apk`，25,456,117 字节，SHA256 `72bd79b22e3e6016b36b89eb83a64c3b85eb02b2be3049fa6daf89bf6dee45e9`；`com.aiassistant`、2.8.17/203、arm64-v8a、v2 签名通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 完整性、签名、隐私和发布目录排他复制已核查；未连接设备，安装 / 启动 / 键盘 / 触控 / 真实接口仍需设备验收。
+
 ## 2026-10-25 · 思考强度、文本选择、弹窗与 Bot / 纸本预览完善（未发版）
 
 基线 `main/ba7d6fd`；版本 2.8.16/202、Room v37 / 20 实体不变，未构建 APK。原未跟踪 `.playwright-cli/` 和 `deepseek.png` 保留，不读 `APP改进/`。

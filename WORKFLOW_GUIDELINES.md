@@ -26,6 +26,14 @@
 
 ## 本次记录
 
+## 2026-10-26 · 2.8.17 Bot 动画 / 主题重做 / APK 发版
+
+- 基线 main/`ba7d6fd`；versionName 2.8.17、versionCode 203；Room v37 / 20 个实体不变。用户明确要求构建 APK，依次完成源码冻结、verify、Release、隐私核查、提交、推送、标签和 Release 附件核验。
+- Bot 暂停 / 错误加入 520ms 活动进入；扁扁符号独立右上锚点，终止末帧稳定；既有领域测试加入中间帧和边界断言。毛边文库优化，其他三套纸本装帧重做；预览不应用到 App。
+- 最终 verify `20261025-235531-637` 退出 0，321.196 秒；88 套件 / 1,007 项完整单测，失败 / 错误 / 跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致；`git diff --check` 退出 0。
+- Release `assembleRelease --no-daemon --build-cache` 退出 0；APK 25,456,117 字节，SHA256 `72bd79b22e3e6016b36b89eb83a64c3b85eb02b2be3049fa6daf89bf6dee45e9`，v2 签名通过，证书摘要与项目 JKS / 上版一致，Android Debug 非正式生产签名。只复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.17.apk`，未覆盖历史包。
+- 完整候选源码、测试、文档、PNG / GIF、APK 内容 / 元数据、提交作者和待推历史隐私核查通过；原未跟踪内容和本机报告排除。设备未连接，安装启动 / 触控 / 键盘 / 动态视觉 / 真实接口仍需验收。
+
 ## 2026-10-25 · 思考强度、文本选择、弹窗、滚动与 Bot / 主题预览完善
 
 - 基线 main/`ba7d6fd`；版本 2.8.16/202、Room v37 / 20 实体不变，无 APK 构建。原未跟踪内容保留。

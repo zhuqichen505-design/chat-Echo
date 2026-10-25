@@ -2,7 +2,17 @@
 
 Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上下文管理和本地备份。
 
-**2026-10-25 当前源码完善（未发版）**：版本仍为 v2.8.16/202，Room v37（20 个实体）不变，本轮未构建 APK。
+**Echo 2.8.17/203（2026-10-26）**：本轮完成 Bot 暂停 / 错误动态、扁扁右上符号定位、纸本主题重做，并已构建 Release APK。Room v37（20 个实体）不变。
+
+- 暂停和连接 / 回复错误从活动状态进入时有约 520ms 的渐入与收势，落定后双竖条 / 叹号稳定可见；历史状态和减弱动态保持静止，扁扁的连接、思考、回复、暂停和错误符号分别使用右上锚点。
+- 毛边文库继续强化毛边叠页、双线书眉和砖红洇印；素纸线装、牛皮手札、藏书精装分别重做针脚 / 双线框、活页孔 / 横格 / 便笺、织布封面 / 书脊 / 金线压框。
+- 真实页面预览和 Bot 动画预览已更新，均为浏览器重建样稿，不替代设备验收。
+
+APK：`Echo-v2.8.17.apk`，25,456,117 字节，`com.aiassistant`，versionCode 203，versionName 2.8.17，arm64-v8a，minSdk 26 / targetSdk 34 / compileSdk 34，SHA256 `72bd79b22e3e6016b36b89eb83a64c3b85eb02b2be3049fa6daf89bf6dee45e9`。签名证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+最终冻结验收 `20261025-235531-637`：标准 verify 退出 0，321.196 秒；88 套件 / 1,007 项完整单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，234 秒。
+
+**2026-10-25 当前源码完善（已包含于本次发版）**：
 
 - 设定与时间线候选固定窗口边界，标题和操作区不随正文移动，只有窗口内正文滚动；小屏会按输入栏与键盘的实际空间分配，支持全屏编辑。
 - 新增 [Bot 状态动画预览](design/book-theme-preview/bot-preview/index.html)，展示连接、思考、回复、完成、主动暂停、连接 / 回复出错和待机；[暂停 / 出错 / 恢复动图](design/book-theme-preview/bot-preview/status-transitions.gif)由当前动作参数生成。

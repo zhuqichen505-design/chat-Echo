@@ -107,6 +107,8 @@ internal fun EchoModelMark(
     }
     val expressiveFrame = remember { mutableStateOf(expressiveMotion.pose) }
     val completionProgress = remember { Animatable(1f) }
+    val terminalProgress = remember { Animatable(1f) }
+    var previousMarkState by remember { mutableStateOf<EchoModelMarkState?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var lifecycleStarted by remember(lifecycle) {
         mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
@@ -124,6 +126,16 @@ internal fun EchoModelMark(
             enabled = isExpressiveBot, idleEffects = idleEffects)
         expressiveFrame.value = expressiveMotion.pose
         completionProgress.snapTo(1f)
+        val terminalEnter = isBot && !isExpressiveBot && !reducedMotion &&
+            state in setOf(EchoModelMarkState.Paused, EchoModelMarkState.Failed) &&
+            previousMarkState?.isActive == true
+        if (terminalEnter) {
+            terminalProgress.snapTo(0f)
+            terminalProgress.animateTo(1f, EchoMotion.tweenSpec(EchoMotion.Duration.fast))
+        } else {
+            terminalProgress.snapTo(1f)
+        }
+        previousMarkState = state
         if (!lifecycleStarted) return@LaunchedEffect
         if (isBot && !isExpressiveBot && playCompletion && !reducedMotion) {
             completionProgress.snapTo(0f)
@@ -163,7 +175,8 @@ internal fun EchoModelMark(
         val pulse = if (phase == null) 0f else sin((progress * 2f * PI).toFloat())
         if (isBot) {
             drawModelBot(color, resolvedStyle, state, progress,
-                moving = phase != null, completionProgress = completionProgress.value)
+                moving = phase != null, completionProgress = completionProgress.value,
+                terminalProgress = terminalProgress.value)
             return@Canvas
         }
         val radius = size.minDimension * 0.43f
@@ -339,7 +352,8 @@ private fun DrawScope.drawModelBot(
     state: EchoModelMarkState,
     progress: Float,
     moving: Boolean,
-    completionProgress: Float
+    completionProgress: Float,
+    terminalProgress: Float = 1f
 ) {
     val scaleFactor = size.minDimension / 26f
     val wave = if (moving) sin(progress * 2f * PI.toFloat()) else 0f
@@ -354,7 +368,9 @@ private fun DrawScope.drawModelBot(
         scale(scaleFactor, scaleFactor, Offset.Zero)
     }) {
         rotate(angle, Offset(13f, 14f)) {
-            withTransform({ translate(0f, nod * 1.1f) }) {
+            val terminalBob = if (state == EchoModelMarkState.Paused || state == EchoModelMarkState.Failed)
+                (1f - terminalProgress) * .9f else 0f
+            withTransform({ translate(0f, nod * 1.1f + terminalBob) }) {
                 val stroke = Stroke(1.45f, cap = StrokeCap.Round)
                 fun line(start: Offset, end: Offset, tint: Color = color) =
                     drawLine(tint, start, end, 1.45f, StrokeCap.Round)
@@ -427,8 +443,13 @@ private fun DrawScope.drawModelBot(
             }
         }
         if (state == EchoModelMarkState.Paused || state == EchoModelMarkState.Failed) {
-            val effect = sampleExpressiveBotEffects(state, 0f).single()
-            drawExpressiveBotEffect(color, effect.copy(x = 22.5f, y = 3f, size = 5.5f))
+            val effect = sampleExpressiveBotEffects(state, terminalProgress * 520f, style = when (style) {
+                EchoModelMarkStyle.BOT_CAPSULE -> EchoModelMarkStyle.BOT_WIDE
+                else -> EchoModelMarkStyle.BOT_ORB
+            }).single()
+            val terminalX = if (style == EchoModelMarkStyle.BOT_CAPSULE) 23.2f else 22.5f
+            drawExpressiveBotEffect(color, effect.copy(x = terminalX, y = 3f,
+                size = 3.9f + 1.6f * terminalProgress))
         }
     }
 }

@@ -341,8 +341,9 @@ class RetryPreferencesTest {
                             pixels.contentHashCode()
                         }
                         if (isTerminal) {
-                            assertEquals("$style $state $size dp 终止状态应持续显示，不闪动、不退回待机", 1, snapshots.toSet().size)
-                            assertEquals("$style $state $size dp 终止符号墨迹应稳定", 1, symbolFrames.map { it.first }.toSet().size)
+                            assertTrue("$style $state $size dp 终止状态应有清晰的进入动效", snapshots.toSet().size >= 3)
+                            assertEquals("$style $state $size dp 终止状态在动画末尾应稳定", snapshots.first(), snapshots.last())
+                            assertTrue("$style $state $size dp 终止符号进入过程应有实际像素变化", symbolFrames.map { it.first }.toSet().size >= 3)
                             assertEquals("$style $state $size dp 每一帧必须有可见终止符号", 8,
                                 symbolFrames.count { it.second > size * size / (26f * 26f) * .15f })
                             terminalSymbols.getOrPut(style to size) { mutableSetOf() }.add(symbolFrames.first().first)

@@ -10,8 +10,8 @@ function durationOf(shape,state){const i=shape==='square'?1:shape==='flat'?2:0;r
 function blinkAt(time,start,duration){const p=(time-start)/duration;if(p<0||p>1)return 0;if(p<.42)return smooth(p/.42);if(p<.6)return 1;return 1-smooth((p-.6)/.4)}
 function sampleBot(shape,state,time,reducedMotion=false,idleEffects=false){
  const rest=restPose(shape),elapsed=Number.isFinite(time)?Math.max(0,time):0;
- const idlePose=seconds=>({...rest,faceY:idleEffects?(reducedMotion?4.2:4.2*smooth(seconds/1.2)):0,effects:sampleEffects('idle',seconds,reducedMotion,idleEffects)});
- if(state==='paused'||state==='failed')return {...rest,effects:sampleEffects(state,0,reducedMotion,idleEffects)};
+ const idlePose=seconds=>({...rest,faceY:idleEffects?(reducedMotion?4.2:4.2*smooth(seconds/1.2)):0,effects:sampleEffects('idle',seconds,reducedMotion,idleEffects,shape)});
+ if(state==='paused'||state==='failed')return {...rest,effects:sampleEffects(state,elapsed,reducedMotion,idleEffects,shape)};
  if(state==='idle'||(reducedMotion&&state==='completed'))return idlePose(elapsed);
  const duration=durationOf(shape,state);
  if(state==='completed'&&elapsed>=duration)return idlePose(elapsed-duration);
@@ -41,20 +41,23 @@ function sampleBot(shape,state,time,reducedMotion=false,idleEffects=false){
   const blink=blinkAt((elapsed*1000)%6100,3060,160);
   if(blink>0)pose={...pose,left:{...pose.left,height:mix(rest.left.height,2.2,blink)},right:{...pose.right,height:mix(rest.right.height,2.2,blink)}};
  }
- return{...pose,effects:sampleEffects(state,elapsed,reducedMotion,idleEffects)};
+ return{...pose,effects:sampleEffects(state,elapsed,reducedMotion,idleEffects,shape)};
 }
 /* Exact numeric counterpart of sampleExpressiveBotEffects; time is seconds here. */
-function sampleEffects(state,time,reducedMotion=false,idleEffects=false){
+function sampleEffects(state,time,reducedMotion=false,idleEffects=false,shape='round'){
  if(state==='idle'&&!idleEffects)return[];
  const elapsed=Number.isFinite(time)?Math.max(0,time):0,effect=(id,kind,x,y,size,alpha,progress=0)=>({id,kind,x,y,size,alpha:clamp(alpha),progress});
- if(state==='paused')return[effect(50,'Pause',84,8.5,16,1)];
- if(state==='failed')return[effect(60,'Error',87,9.5,16,1)];
- if(reducedMotion)return({connecting:[effect(3,'SignalDot',83,16.3,3.2,.88),...Array.from({length:3},(_,i)=>effect(i,'Signal',83,16.3,10+i*9,.88))],thinking:[effect(10,'Thought',89,7.4,16,.9,.4)],replying:[effect(20,'Speech',87,8.9,20,.9,.4)],idle:[effect(40,'Z',87,9.3,14,.9)],completed:[]})[state]||[];
+ const wide=shape==='flat';
+ const amount=(reducedMotion||elapsed<=0||elapsed>=.9)?1:smooth(elapsed/.52);
+ if(state==='paused')return[effect(50,'Pause',wide?85+5*amount:72+12*amount,9.5-amount,5.5+10.5*amount,.45+.55*amount,amount)];
+ if(state==='failed')return[effect(60,'Error',wide?86+5*amount:73+11*amount,10-amount,5.5+10.5*amount,.45+.55*amount,amount)];
+ const signalX=wide?85.8:83,signalSizes=wide?[10,18,24]:[10,19,28],thoughtX=wide?87.5:87,speechX=wide?86.5:87,speechSize=wide?19:20,sparkX=wide?88:85;
+ if(reducedMotion)return({connecting:[effect(3,'SignalDot',signalX,16.3,3.2,.88),...Array.from({length:3},(_,i)=>effect(i,'Signal',signalX,16.3,signalSizes[i],.88))],thinking:[effect(10,'Thought',thoughtX,7.4,16,.9,.4)],replying:[effect(20,'Speech',speechX,8.9,speechSize,.9,.4)],idle:[effect(40,'Z',wide?88:87,9.3,14,.9)],completed:[]})[state]||[];
  const opacity=p=>smooth(p/.14)*(1-smooth((p-.58)/.2));
- if(state==='connecting'){const p=elapsed%6/6;return[effect(3,'SignalDot',83,16.3,3.2,.78),...Array.from({length:3},(_,i)=>{const start=.05+i*.13,alpha=smooth((p-start)/.12)*(1-smooth((p-.70)/.16));return effect(i,'Signal',83,16.3,10+i*9,alpha*.9)})]}
- if(state==='thinking'){const p=elapsed%6.4/6.4,travel=smooth((p-.08)/.5);return[effect(10,'Thought',87+2*travel,9.5-2.1*travel,13+3*travel,opacity(p)*.9,p)]}
- if(state==='replying'){const p=elapsed%5.6/5.6;return[effect(20,'Speech',87,8.9,20,opacity(p)*.9,p)]}
- if(state==='completed'){const p=clamp(elapsed/1.3);return[effect(30,'Spark',85,9.4,12+2*smooth(p/.25),opacity(p)*.9)]}
+ if(state==='connecting'){const p=elapsed%6/6;return[effect(3,'SignalDot',signalX,16.3,3.2,.78),...Array.from({length:3},(_,i)=>{const start=.05+i*.13,alpha=smooth((p-start)/.12)*(1-smooth((p-.70)/.16));return effect(i,'Signal',signalX,16.3,signalSizes[i],alpha*.9)})]}
+ if(state==='thinking'){const p=elapsed%6.4/6.4,travel=smooth((p-.08)/.5);return[effect(10,'Thought',thoughtX+2*travel,9.5-2.1*travel,13+3*travel,opacity(p)*.9,p)]}
+ if(state==='replying'){const p=elapsed%5.6/5.6;return[effect(20,'Speech',speechX,8.9,speechSize,opacity(p)*.9,p)]}
+ if(state==='completed'){const p=clamp(elapsed/1.3);return[effect(30,'Spark',sparkX,9.4,12+2*smooth(p/.25),opacity(p)*.9)]}
  if(state==='idle'){const p=elapsed%7/7,travel=smooth((p-.08)/.5);return[effect(40,'Z',82+5*travel,11.8-2.5*travel,10+4*travel,opacity(p)*.9*smooth(elapsed/.26))]}
  return[];
 }
