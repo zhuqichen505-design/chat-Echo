@@ -19,6 +19,8 @@ Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、�
 
 最终冻结验收 `20261025-182554-240`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，294.672 秒；编译通过，88 套件 / 1000 项完整单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入前后哈希一致，`git diff --check` 退出 0。
 
+本次功能提交 `86614d9f63fd9e0f94a7c6dff6eb734c87d740ad` 已推送至 main；`git push --no-follow-tags origin HEAD:main` 与 `git ls-remote origin refs/heads/main` 均退出 0，远端与本机提交一致、无待推提交。提交前完整 32 个候选文件（含七张合成预览图）及待推提交 / 元数据核查通过，未决 0；原未跟踪素材保留。本条为功能提交后的纯文档收尾，不改验收源码、不新建版本标签或 Release。
+
 **已发布更新（2026-10-23，v2.8.16）**：
 
 - 捕捉到的设定、时间线和提取失败提示共用限高滚动区域，长内容可滑动查看；输入栏优先保留空间，标题为关闭按钮留位。

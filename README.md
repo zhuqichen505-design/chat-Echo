@@ -12,6 +12,8 @@ Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上�
 
 最终冻结验收 `20261025-182554-240`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，294.672 秒；编译通过，88 套件 / 1000 项完整单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入前后哈希一致，`git diff --check` 退出 0。
 
+本次功能提交 `86614d9f63fd9e0f94a7c6dff6eb734c87d740ad` 已推送至 main；`git push --no-follow-tags origin HEAD:main` 与 `git ls-remote origin refs/heads/main` 均退出 0，远端与本机提交一致、无待推提交。提交前完整 32 个候选文件（含七张合成预览图）及待推提交 / 元数据核查通过，未决 0；原未跟踪素材保留。本条为功能提交后的纯文档收尾，不改验收源码、不新建版本标签或 Release。
+
 轮询开关沿用独立的本机策略存储，现有完整备份不包含该策略。未连接设备，手机触控、键盘和真实 API 仍需验收。
 
 **已发布 v2.8.16/202 聊天交互修复**：下列安装包与发布验证对应已发布版本，不包含上述源码更新。
