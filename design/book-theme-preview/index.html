@@ -4,29 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Echo · 纸上回声 / 四种书本主题预览</title>
+  <title>Echo · 纸本主题 / 实际页面预览</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="preview.css">
+  <link rel="stylesheet" href="preview.css?v=actual-2">
 </head>
 <body>
-  <header class="masthead"><a href="./index.html" class="brand">Echo<span>装帧试验室</span></a><span class="edition">纸本系列 · 二〇二六</span><span class="preview-tag">仅供预览 · 尚未应用</span></header>
+  <header class="masthead"><a href="./index.html" class="brand">Echo<span>纸本主题</span></a><span class="preview-tag">仅供预览 · 未应用到 App</span></header>
   <main>
     <section class="introduction">
-      <div class="intro-copy"><h1>让对话，<br>落在纸上。</h1><p>纸纤维、油墨与装订的细节。<br>四种不同的书，留给同一个故事。</p></div>
-      <div class="material-sample" aria-hidden="true"><div class="sample-cover"><span>E</span><small>ECHO<br>COLLECTED WORDS</small></div><div class="sample-page"><span>纸上回声</span><i></i><p>翻开一页，<br>世界便有了回音。</p></div><div class="sample-ribbon"></div></div>
-      <aside class="intro-note"><span class="seal" aria-hidden="true">纸</span><p>从纸张触感出发。<br>从书脊、页边到文字的呼吸，<br>分别尝试四种装帧语言。</p></aside>
+      <div><h1>把纸感，放回真实的 Echo。</h1><p>沿用当前 App 的会话首页、聊天界面和对话设置弹窗。四套方案保持相同结构，比较纸张、油墨与控件的质感。</p></div>
+      <span class="source-badge">依据当前源码重建<br>非设备截图</span>
     </section>
     <section class="desk" aria-label="预览控制">
-      <div class="scene-switch" role="group" aria-label="预览页面"><button data-scene="chat" aria-pressed="true">正文与对话</button><button data-scene="home" aria-pressed="false">会话目录</button><button data-scene="settings" aria-pressed="false">阅读设定</button></div>
+      <span class="desk-label">预览工具</span>
+      <div class="scene-switch" role="group" aria-label="预览页面"><button data-scene="home" aria-pressed="false">会话首页</button><button data-scene="chat" aria-pressed="true">聊天界面</button><button data-scene="settings" aria-pressed="false">对话设置弹窗</button></div>
       <label class="texture-control"><input id="texture" type="checkbox" checked> 显示纸纹</label>
-      <label class="font-control" for="font-size">正文 <input id="font-size" type="range" min="14" max="20" step="2" value="16"><output id="font-value" for="font-size">16</output></label>
+      <label class="state-control" for="chat-status">回复状态 <select id="chat-status"><option value="completed">已完成</option><option value="thinking">思考中</option><option value="replying">回复中</option><option value="paused">主动暂停</option><option value="failed">连接 / 回复出错</option></select></label>
       <button id="compare" aria-pressed="false">单独查看</button>
     </section>
-    <div class="theme-switch" role="group" aria-label="选择装帧"><button data-theme="deckle" aria-pressed="true"><i></i>毛边文库</button><button data-theme="thread" aria-pressed="false"><i></i>素纸线装</button><button data-theme="field" aria-pressed="false"><i></i>牛皮手札</button><button data-theme="cloth" aria-pressed="false"><i></i>藏书精装</button></div>
+    <div class="theme-switch" role="group" aria-label="选择主题"><button data-theme="deckle" aria-pressed="true"><i></i>毛边文库</button><button data-theme="thread" aria-pressed="false"><i></i>素纸线装</button><button data-theme="field" aria-pressed="false"><i></i>牛皮手札</button><button data-theme="cloth" aria-pressed="false"><i></i>藏书精装</button></div>
+    <p class="scene-description" id="scene-description"></p>
     <section class="gallery" data-focus="deckle" aria-label="四种主题比较"></section>
-    <section class="design-note"><h2>把装帧的细节，放进界面。</h2><div><p><strong>纸张有层次</strong>细纤维、轻压痕与叠页阴影共同表现材料；纹理始终弱于文字，长篇阅读仍然清楚。</p><p><strong>结构跟着装帧走</strong>文库的通栏目录、线装的留白、手札的横格、精装的布面书脊，各有自己的节奏。</p><p><strong>操作留在手边</strong>正文可滚动，输入栏固定；页面切换、纸纹和字号均可操作。样稿不改动 App 配置。</p></div></section>
+    <div class="preview-feedback" role="status" aria-live="polite"></div>
+    <details class="source-map"><summary>查看与实际 App 的对应关系</summary><div class="source-table"><table><thead><tr><th>预览内容</th><th>当前源码依据</th><th>保持的结构</th></tr></thead><tbody><tr><td>会话首页</td><td>HomeScreen.kt / HomePresentationComponents.kt / EchoAppShell.kt</td><td>ECHO 顶栏、搜索、文件夹、新对话、条件显示的继续最近故事、会话卡片和四入口底栏。</td></tr><tr><td>普通聊天</td><td>ChatScreen.kt / ChatMessageComponents.kt / ChatInputComponents.kt</td><td>返回、标题、上下文用量、设置、消息气泡、状态胶囊与双层输入区；详情页没有根页底栏。</td></tr><tr><td>对话设置弹窗</td><td>ChatSettingsDialogs.kt</td><td>模型与生成 / 提示与记忆 / 外观与模式三页签；底部取消和保存。</td></tr></tbody></table></div><p>示例设置：聚焦对话首页、存在最近故事；普通聊天中隐藏模型头像、选择圆圆 Bot、显示思考胶囊，并已开启普通对话应用阅读字体。会话、消息、模型与配置名称均为合成数据。上方页面切换与状态选择属于预览工具。</p></details>
   </main>
-  <footer class="site-footer"><span>Echo · 纸上回声</span><p>全部文案与会话均为合成示例。无外部资源、无网络请求、不保存输入。色彩、装饰与材质使用本地 CSS / SVG 绘制。正式主题待选定后再接入。</p></footer>
-  <script src="preview.js"></script>
+  <footer class="site-footer"><span>Echo · 实际页面主题预览</span><p>基于当前源码重建的浏览器样稿。未更改 App 页面、导航、主题或偏好，不调用模型接口。正式主题待选定后再接入。</p></footer>
+  <script src="scene-home.js?v=actual-2"></script>
+  <script src="scene-chat.js?v=actual-2"></script>
+  <script src="scene-settings.js?v=actual-2"></script>
+  <script src="preview.js?v=actual-2"></script>
 </body>
 </html>
