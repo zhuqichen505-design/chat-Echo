@@ -26,6 +26,7 @@ object TokenEstimationHelper {
     }
 
     fun normalizeThinkingEffort(effort: String?, providerType: String = "openai", modelName: String? = null): String {
+        if (effort.equals("default", ignoreCase = true)) return "default"
         if (effort?.startsWith("budget:") == true) return effort
         // 未指定模型名时保持历史安全映射（max/ultra→high），避免向未知网关发送过高档位
         if (modelName.isNullOrBlank()) {

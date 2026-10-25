@@ -8,6 +8,39 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReasoningControlsTest {
+    @Test fun serverDefaultIsAnEnabledOmissionRatherThanMediumOrOff() {
+        for (model in listOf("gpt-6-astra", "gpt-6-sol", "deepseek-v4-pro", "glm-5.3", "gemini-3.8-flash")) {
+            val option = ReasoningControls.selected(model, "openai", true, "default")
+            assertEquals(model, "default", option.value)
+            assertTrue(model, option.enabled)
+            assertNull(model, ReasoningControls.wireChatEffort(model, "openai", true, option.value))
+            assertEquals("default", TokenEstimationHelper.normalizeThinkingEffort("default", "openai", model))
+        }
+        val evidence = ReasoningCapabilityEvidence(supportsThinking = true, efforts = listOf("none", "LOW", "HIGH"), defaultEffort = "HIGH")
+        assertEquals("default", ReasoningControls.selected("synthetic-model", "openai", true, "Default", evidence).value)
+        assertEquals("HIGH", ReasoningControls.selected("synthetic-model", "openai", true, null, evidence).value)
+        assertEquals("none", ReasoningControls.selected("synthetic-model", "openai", false, "default", evidence).value)
+        assertEquals("default", TokenEstimationHelper.normalizeThinkingEffort("DEFAULT"))
+    }
+
+    @Test fun adaptiveDefaultOmitsEffortButBudgetThinkingDoesNotInventAnOptionalBudget() {
+        for (model in listOf("claude-opus-4-7", "claude-opus-4-8")) {
+            assertTrue(ReasoningControls.options(model, "anthropic").any { it.value == "default" && it.enabled })
+            assertEquals("default", ReasoningControls.selected(model, "anthropic", true, "default").value)
+            assertEquals("adaptive", ReasoningControls.wireThinkingType(model, "anthropic", true))
+            assertNull(ReasoningControls.wireChatEffort(model, "anthropic", true, "default"))
+        }
+        for (model in listOf("claude-3-7-sonnet", "claude-sonnet-4-6")) {
+            assertEquals("enabled", ReasoningControls.wireThinkingType(model, "anthropic", true))
+            assertTrue(ReasoningControls.options(model, "anthropic").none { it.value == "default" })
+        }
+        val adaptiveEvidence = ReasoningCapabilityEvidence(supportsThinking = true, efforts = listOf("low", "high"), thinkingType = "adaptive")
+        assertEquals("default", ReasoningControls.selected("claude-sonnet-4-6", "anthropic", true, "default", adaptiveEvidence).value)
+        assertNull(ReasoningControls.wireChatEffort("claude-sonnet-4-6", "anthropic", true, "default", adaptiveEvidence))
+        val budgetEvidence = adaptiveEvidence.copy(thinkingType = "enabled")
+        assertTrue(ReasoningControls.options("synthetic-native", "anthropic", budgetEvidence).none { it.value == "default" })
+    }
+
     @Test fun gatewayWireDoesNotGuessNewExtensionsAndRetainsBudgetThinking() {
         assertNull(ReasoningControls.wireThinkingType("deepseek-v4-pro", "openai", true))
         assertNull(ReasoningControls.wireThinkingType("deepseek-v4-pro", "openai", false))
@@ -32,7 +65,8 @@ class ReasoningControlsTest {
             "gemini-3.1-pro" to listOf("low", "medium", "high")
         )
         cases.forEach { (model, values) ->
-            assertEquals(model, values, ReasoningControls.options(model).map { it.value })
+            val expectedOptions = values.takeWhile { it == "disabled" } + "default" + values.filterNot { it == "disabled" }
+            assertEquals(model, expectedOptions, ReasoningControls.options(model).map { it.value })
             values.forEach { value ->
                 assertEquals(value, ReasoningControls.selected(model, "openai", value != "disabled", value).value)
                 if (value != "disabled") assertEquals(value, TokenEstimationHelper.normalizeThinkingEffort(value, "openai", model))
@@ -69,7 +103,7 @@ class ReasoningControlsTest {
             assertFalse(model, ReasoningControls.policy(model).alwaysThinking)
             assertTrue(model, ReasoningControls.canToggle(model, "openai"))
             assertFalse(model, ReasoningControls.hasIntensityChoice(model, "openai"))
-            assertEquals("默认", ReasoningControls.options(model).single().label)
+            assertEquals("Default（默认）", ReasoningControls.options(model).single().label)
             assertNull(ReasoningControls.wireEffort(model, "openai", true, "default"))
         }
     }
@@ -84,7 +118,7 @@ class ReasoningControlsTest {
         assertTrue(ReasoningControls.policy("MiniMax-M2.7").alwaysThinking)
         assertTrue(ReasoningControls.policy("kimi-k2.7-code").alwaysThinking)
         assertEquals("disabled", ReasoningControls.thinkingType("kimi-k2.6", "openai", false))
-        assertEquals(listOf("Low", "Medium", "High"), ReasoningControls.options("gemini-3.8-flash").map { it.label })
+        assertEquals(listOf("Default（默认）", "Low", "Medium", "High"), ReasoningControls.options("gemini-3.8-flash").map { it.label })
         assertEquals(listOf("low", "medium", "high", "max"), ReasoningControls.options("claude-sonnet-4-6", "anthropic").filter { it.enabled }.map { it.value })
     }
 
@@ -94,7 +128,7 @@ class ReasoningControlsTest {
             "parameters":{"reasoning_effort":{"enum":["low","medium","high"]}}}
         }""").asJsonObject)!!
         assertFalse(ReasoningControls.policy("glm-5.3", evidence).alwaysThinking)
-        assertEquals(listOf("disabled", "low", "medium", "high"), ReasoningControls.options("glm-5.3", "openai", evidence).map { it.value })
+        assertEquals(listOf("disabled", "default", "low", "medium", "high"), ReasoningControls.options("glm-5.3", "openai", evidence).map { it.value })
         val option = ReasoningControls.selected("glm-5.3", "openai", true, "Medium", evidence)
         assertEquals("Medium", option.label)
         assertEquals("medium", ReasoningControls.wireEffort("glm-5.3", "openai", true, option.value, evidence))

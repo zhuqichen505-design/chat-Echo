@@ -75,6 +75,7 @@ import com.aiassistant.domain.model.ModelCustomSettings
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.readableTextColorFor
 import com.aiassistant.ui.components.rememberReadableBackdropColors
@@ -451,6 +452,8 @@ fun UniversalModelPickerCard(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            EchoSelectionIndicator(isFollowSelected)
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     "跟随当前会话模型（自动继承）",
@@ -503,6 +506,8 @@ fun UniversalModelPickerCard(
                                                     .padding(horizontal = 10.dp, vertical = 7.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                EchoSelectionIndicator(isSelected)
+                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         Text(

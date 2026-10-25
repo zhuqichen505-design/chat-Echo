@@ -108,6 +108,7 @@ import com.aiassistant.ui.components.TransientLazyListScrollbar
 import com.aiassistant.ui.components.EchoPillSlider
 import androidx.compose.runtime.CompositionLocalProvider
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.echoFilterChipBorder
 import com.aiassistant.ui.components.echoFilterChipColors
@@ -199,9 +200,7 @@ fun ModelSelector(
                 DropdownMenuItem(
                     text = { Text(com.aiassistant.domain.model.ModelDisplayName.format(currentModel)) },
                     onClick = { expanded = false },
-                    leadingIcon = {
-                        Icon(Icons.Default.Check, contentDescription = null)
-                    }
+                    leadingIcon = { EchoSelectionIndicator(selected = true) }
                 )
             } else {
                 availableModels.forEach { model ->
@@ -216,15 +215,7 @@ fun ModelSelector(
                             onModelSelected(model)
                             expanded = false
                         },
-                        leadingIcon = {
-                            if (model == currentModel) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+                        leadingIcon = { EchoSelectionIndicator(model == currentModel) }
                     )
                 }
             }
@@ -306,15 +297,7 @@ fun ModelSelector(
                             onModelSelected(option)
                             expanded = false
                         },
-                        leadingIcon = {
-                            if (option.sameModelOption(currentOption, currentLabel)) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+                        leadingIcon = { EchoSelectionIndicator(option.sameModelOption(currentOption, currentLabel)) }
                     )
                 }
             }
@@ -376,6 +359,14 @@ internal fun chatTuningProfile(
     )
 }
 
+/** The current choice must remain visible even while the enabled-model list is refreshing. */
+internal fun chatSettingsModelOptions(
+    currentOption: ChatModelOption?,
+    availableOptions: List<ChatModelOption>
+): List<ChatModelOption> = (listOfNotNull(currentOption) + availableOptions)
+    .filter { it.modelName.isNotBlank() }
+    .distinctBy { "${it.apiConfigId}:${it.modelName}" }
+
 @Composable
 internal fun ChatSettingsModelSelector(
     currentOption: ChatModelOption?,
@@ -389,6 +380,9 @@ internal fun ChatSettingsModelSelector(
     var selectorWidth by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
     val currentLabel = currentOption?.modelName ?: fallbackModel
+    val options = remember(currentOption, availableOptions) {
+        chatSettingsModelOptions(currentOption, availableOptions)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val cap = remember(currentLabel) {
@@ -498,13 +492,13 @@ internal fun ChatSettingsModelSelector(
                 onDismissRequest = { expanded = false },
                 modifier = menuModifier
             ) {
-                if (availableOptions.isEmpty()) {
+                if (options.isEmpty()) {
                     DropdownMenuItem(
                         text = { Text("暂无可切换模型") },
                         onClick = { expanded = false }
                     )
                 } else {
-                    availableOptions.forEach { option ->
+                    options.forEach { option ->
                         DropdownMenuItem(
                             text = { ModelOptionText(option = option) },
                             enabled = option.apiConfigId > 0,
@@ -512,15 +506,7 @@ internal fun ChatSettingsModelSelector(
                                 onModelSelected(option)
                                 expanded = false
                             },
-                            leadingIcon = {
-                                if (option.sameModelOption(currentOption, currentLabel)) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
+                            leadingIcon = { EchoSelectionIndicator(option.sameModelOption(currentOption, currentLabel)) }
                         )
                     }
                 }

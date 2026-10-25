@@ -1,5 +1,19 @@
 # 维护记录
 
+## 2026-10-25 · 思考强度、文本选择、弹窗与 Bot / 纸本预览完善（未发版）
+
+基线 `main/ba7d6fd`；版本 2.8.16/202、Room v37 / 20 实体不变，未构建 APK。原未跟踪 `.playwright-cli/` 和 `deepseek.png` 保留，不读 `APP改进/`。
+
+临时实施方案与根因：候选区之前虽然已有独立正文滚动，但展开卡片仍随内容重新测量，窗口边界不稳定；本轮让展开卡片填满分配视口、正文用内部 ScrollState 滚动。思考强度之前把 Default 当无选项回退或把选项挤成连续滑块；本轮将 Default 定义为“省略 effort、跟随服务端默认”，仅在允许省略的契约提供，预算式契约保留显式预算，并用有间距 FilterChip。输入选择问题来自 BasicTextField + 外层滚动 + 自定义 bringIntoView 门禁坐标不一致；本轮迁移到 BasicTextField2 / TextFieldState 原生视口，统一 ChatInput、回复编辑和系统提示词，工具栏改为窗口坐标和动态边界。弹窗之前由各调用点各自限制宽高，改为 EchoDialogLayout Standard / Expanded 统一规范。模型选择从 Check 图标改为固定 24dp 槽位中的当前圆点，列表刷新仍保留当前模型。
+
+涉及文件：`ReasoningControls.kt`、`TokenEstimationHelper.kt`、`EchoNativeTextField.kt`、`EchoScrollableTextEditor.kt`、`EchoTextToolbar.kt`、`EchoDialogLayout.kt`、`EchoSelectionIndicator.kt`、聊天输入 / 消息 / 设置 / 上下文 / 候选 / 模型选择、首页配置与通用模型选择、对应领域测试；预览增加 `bot-motion.js`、`bot-preview/`、`materials.css` 并重生成四套装帧图。数据库、版本和真实 API 协议未改。
+
+Default 取舍：可行且有需要，但不保证上游一定思考；它只表示客户端不固定指定强度，保留思考开关并跟随服务端默认。原生 `budget_tokens` 契约没有 Default，避免发送非法省略预算。定向测试：ReasoningControls / UiPolishRegression / ChatRetryRepository 共 85 项通过；BasicTextField2 在当前 Compose 1.6.8 编译通过。
+
+最终冻结验收：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 退出 0，记录 `20261025-213354-276`，340.69 秒；88 套件 / 1,006 项单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。浏览器主题预览五种宽度 × 三场景 15 组布局、17 组交互通过；Bot 动画预览四种宽度、暂停 / 错误终止符号和 33 个过渡帧通过，浏览器错误 0。未连接真机，文本拖柄、键盘和 Bot 动态仍需设备走查。
+
+隐私：完整源码、测试、六个主题源文件、七张装帧图、Bot 预览 SVG / GIF 和维护文档均结合自动扫描与人工复核；示例内容合成，未调用接口或上传数据，原未跟踪内容和本机构建报告不提交。
+
 ## 2026-10-25 · 按实际页面重做纸本主题预览（未应用）
 
 基线 `main/48eece4`；用户指出此前“会话目录”等概念页面与实际 App 不符。本轮仅修改 `design/book-theme-preview/` 和五份维护记录，原未跟踪素材保留，Android 源码、版本 2.8.16/202、Room v37 和应用主题均不变，未构建 APK。

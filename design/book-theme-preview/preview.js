@@ -1,10 +1,10 @@
 (() => {
   'use strict';
   const themes = [
-    {id:'deckle', name:'毛边文库', english:'PAPERBACK', description:'微黄书纸与砖红油墨，纸纤维落在页面和控件表面。', notes:'暖白纸张 · 砖红强调 · 轻纤维', colors:['#f6efdf','#91402d','#3e342a','#eadfca']},
-    {id:'thread', name:'素纸线装', english:'THREADBOUND', description:'灰白纸张与松绿墨色，保留真实组件的留白和层级。', notes:'灰白纸张 · 松绿强调 · 细压线', colors:['#eef1e8','#345a45','#263e34','#d5e2d0']},
-    {id:'field', name:'牛皮手札', english:'FIELD NOTES', description:'浅牛皮纸与深绿控件，页面带有很轻的横格肌理。', notes:'牛皮纸张 · 深绿强调 · 淡横格', colors:['#e6cea9','#345746','#403222','#d7bd94']},
-    {id:'cloth', name:'藏书精装', english:'CLOTHBOUND', description:'梅棕顶栏与象牙纸页，纸感延伸到气泡、弹窗和按钮。', notes:'象牙纸页 · 梅棕顶栏 · 浅金分隔', colors:['#f3ebd9','#553a45','#66404b','#e9dcc8']}
+    {id:'deckle', name:'毛边文库', english:'PAPERBACK', description:'未经裁齐的页边、洇开的砖红印记，消息像叠放的薄书纸。', notes:'毛边与叠页 · 铅印书眉 · 砖红印记', colors:['#f6efdf','#91402d','#3e342a','#eadfca']},
+    {id:'thread', name:'素纸线装', english:'THREADBOUND', description:'可见的线装针脚、方正的双线框，灰白宣纸承接松绿墨色。', notes:'装订针脚 · 双线边框 · 宣纸留白', colors:['#eef1e8','#345a45','#263e34','#d5e2d0']},
+    {id:'field', name:'牛皮手札', english:'FIELD NOTES', description:'活页装订、铅笔页线与胶带便笺，把对话放进随身手札。', notes:'活页装订 · 铅笔横格 · 胶带便笺', colors:['#e6cea9','#345746','#403222','#d7bd94']},
+    {id:'cloth', name:'藏书精装', english:'CLOTHBOUND', description:'梅棕布面包住象牙内页，压金细线与书脊阴影勾出层次。', notes:'布面封边 · 细金压框 · 象牙书纸', colors:['#f3ebd9','#553a45','#66404b','#e9dcc8']}
   ];
   const paths = {
     back:'<path d="m15 18-6-6 6-6M9 12h12"/>',

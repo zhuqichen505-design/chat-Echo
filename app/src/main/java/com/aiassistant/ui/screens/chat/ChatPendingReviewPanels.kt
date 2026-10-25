@@ -70,7 +70,7 @@ internal fun ChatPendingReviewPanels(
     var selectedPanel by rememberSaveable { mutableStateOf("timeline") }
     val memoryExpanded = memory != null && (timeline == null || selectedPanel == "memory")
     val timelineExpanded = timeline != null && !memoryExpanded
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth().fillMaxHeight()) {
         memory?.let { candidate ->
             PendingMemoryReview(
                 candidate = candidate,
@@ -78,7 +78,7 @@ internal fun ChatPendingReviewPanels(
                 onExpand = { selectedPanel = "memory" },
                 onDismiss = onDismissMemory,
                 onAccept = onAcceptMemory,
-                modifier = if (memoryExpanded) Modifier.weight(1f, fill = false) else Modifier
+                modifier = if (memoryExpanded) Modifier.weight(1f) else Modifier
             )
         }
         timeline?.let { proposal ->
@@ -88,7 +88,7 @@ internal fun ChatPendingReviewPanels(
                 onExpand = { selectedPanel = "timeline" },
                 onDismiss = { onDismissTimeline(proposal) },
                 onApply = onApplyTimeline,
-                modifier = if (timelineExpanded) Modifier.weight(1f, fill = false) else Modifier
+                modifier = if (timelineExpanded) Modifier.weight(1f) else Modifier
             )
         }
     }
@@ -111,11 +111,13 @@ private fun PendingReviewCard(
 ) {
     var fullScreen by remember(reviewKey) { mutableStateOf(false) }
     EchoGlassCard(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier = modifier.fillMaxWidth().then(if (expanded) Modifier.fillMaxHeight() else Modifier)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         containerColor = containerColor,
         shape = EchoTokens.Radius.shapeMd
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Column(Modifier.fillMaxWidth().then(if (expanded) Modifier.fillMaxHeight() else Modifier)
+            .padding(horizontal = 12.dp, vertical = 6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     Modifier.weight(1f).heightIn(min = 40.dp).clickable(onClick = onExpand),
@@ -136,7 +138,7 @@ private fun PendingReviewCard(
             }
             if (expanded) {
                 Column(
-                    modifier = Modifier.weight(1f, fill = false).fillMaxWidth()
+                    modifier = Modifier.weight(1f).fillMaxWidth()
                         .verticalScroll(scrollState).padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     content = body

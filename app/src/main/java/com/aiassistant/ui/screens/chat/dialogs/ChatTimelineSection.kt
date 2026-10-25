@@ -714,7 +714,7 @@ fun ChatSettingsTimelineSection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showStoryTimeEditDialog = false },
-            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 400.dp),
+            modifier = Modifier,
             title = {
                 Text("修改故事时间推进节点", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },
@@ -774,7 +774,7 @@ fun ChatSettingsTimelineSection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showAddDialog = false },
-            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 420.dp),
+            modifier = Modifier,
             title = {
                 Text("添加时间线节点", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },
@@ -854,7 +854,7 @@ fun ChatSettingsTimelineSection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { nodeToEdit = null },
-            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 420.dp),
+            modifier = Modifier,
             title = {
                 Text("编辑时间节点", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },
@@ -938,7 +938,7 @@ fun ChatSettingsTimelineSection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showClearConfirmDialog = false },
-            modifier = Modifier.fillMaxWidth(0.88f).widthIn(max = 380.dp),
+            modifier = Modifier,
             title = {
                 Text("清空故事时间线", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },

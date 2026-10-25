@@ -8,6 +8,19 @@ Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、�
 
 **数据库版本**：37（20 个实体），本版无迁移。
 
+**当前源码完善（2026-10-25，未发版）**：
+
+- 候选审阅区固定可用窗口，内部正文独立滚动；输入栏与 IME 空间按实际测量，长文可全屏编辑。
+- Bot 动画另有浏览器预览，覆盖七种状态和暂停 / 错误 / 恢复过程；不改变 Android 当前主题设置。
+- `ReasoningControls` 支持 Default（默认）省略强度语义；普通协议省略 effort，原生预算式 Anthropic 契约保持明确预算档位，不能用 Default 伪造省略预算。
+- 思考与智能搜索按钮统一控件尺寸；强度弹窗改为统一弹窗、独立 FilterChip、8dp 间距和最小点击区域。
+- `EchoNativeTextField` / `EchoScrollableTextEditor` 统一输入、回复编辑和系统提示词的原生选区 / 滚动坐标；`EchoTextToolbar` 修复窗口坐标与窄屏操作。
+- `EchoDialogLayout` 统一弹窗安全区、16dp 横向 / 24dp 纵向边距、Standard 480dp / Expanded 640dp 宽度和 90% 最大高度；模型选择统一当前项圆点。
+- 纸本预览保留真实页面结构并强化四种材质装帧差异，新增 Bot 动画预览与动图；均未应用到 App。
+- 版本、Room v37 / 20 个实体不变；本轮未构建 APK。
+
+最终冻结验收 `20261025-213354-276`：标准 verify 退出 0，340.69 秒；88 套件 / 1,006 项单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。
+
 **纸本主题预览校正（2026-10-25）**：上一版概念样稿偏离实际页面，现按 HomeScreen、ChatScreen、ChatInputComponents、ChatSettingsDialogs 与 EchoAppShell 重建：真实首页 / 普通聊天 / 三页签对话设置弹窗；四种纸本材质保持同一组件结构，源码对应与示例设置在预览中列明。只改预览和维护记录，App 源码及偏好不变。浏览器 15 组布局、17 组交互通过，错误 0；标准 verify `20261025-203849-905` 退出 0，13.885 秒，Android 输入未变，编译 / 1000 项单测 / Lint 分析 UP-TO-DATE，沿用既有完整验收。
 
 **当前源码更新（2026-10-25，未发版）**：

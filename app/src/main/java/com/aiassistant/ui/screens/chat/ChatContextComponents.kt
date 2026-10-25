@@ -383,9 +383,7 @@ internal fun ContextUsageDialog(
     EchoGlassDialog(
         hazeState = hazeState,
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 560.dp),
+        modifier = Modifier,
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -419,9 +417,7 @@ internal fun ContextUsageDialog(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     item {

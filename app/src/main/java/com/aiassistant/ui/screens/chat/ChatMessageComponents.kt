@@ -2378,9 +2378,7 @@ fun CitationDetailDialog(
 
     EchoGlassDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .widthIn(max = 440.dp),
+        modifier = Modifier,
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -2669,9 +2667,7 @@ fun ToolCallDetailDialog(
     val context = LocalContext.current
     EchoGlassDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .widthIn(max = 440.dp),
+        modifier = Modifier,
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

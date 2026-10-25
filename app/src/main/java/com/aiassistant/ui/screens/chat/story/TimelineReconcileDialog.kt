@@ -209,9 +209,7 @@ fun TimelineReconcileDialog(
     EchoGlassDialog(
         hazeState = hazeState,
         onDismissRequest = { if (!isApplying) onDismiss() },
-        modifier = Modifier
-            .fillMaxWidth(0.98f)
-            .widthIn(max = 620.dp),
+        size = com.aiassistant.ui.components.EchoDialogSize.Expanded,
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -243,9 +241,7 @@ fun TimelineReconcileDialog(
         },
         content = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // 0. 模型提炼来源与状态指示

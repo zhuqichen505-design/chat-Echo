@@ -17,6 +17,43 @@ import androidx.compose.ui.graphics.luminance
  * 2. SmoothReorderState 抬升量与按 key 高度记录
  */
 class UiPolishRegressionTest {
+    @Test fun dialogBoundsRespectTheCurrentViewportIncludingKeyboardSizedWindows() {
+        fun bounds(width: Int, height: Int, expanded: Boolean = false) =
+            com.aiassistant.ui.components.echoDialogBounds(
+                androidx.compose.ui.unit.Dp(width.toFloat()),
+                androidx.compose.ui.unit.Dp(height.toFloat()),
+                if (expanded) com.aiassistant.ui.components.EchoDialogSize.Expanded
+                else com.aiassistant.ui.components.EchoDialogSize.Standard
+            )
+        val phone = bounds(328, 640)
+        assertEquals(328f, phone.width.value, 0f)
+        assertTrue(phone.maximumHeight.value in 0f..640f)
+        assertEquals(480f, bounds(1000, 900).width.value, 0f)
+        assertEquals(640f, bounds(1000, 900, expanded = true).width.value, 0f)
+        assertEquals(phone.width, bounds(328, 640, expanded = true).width)
+        val keyboardWindow = bounds(328, 68)
+        assertTrue("No forced 240dp minimum may overflow the remaining IME viewport",
+            keyboardWindow.maximumHeight.value in 0f..68f)
+        assertEquals(0f, bounds(0, 0).maximumHeight.value, 0f)
+        assertEquals(0f, bounds(-1, -1).width.value, 0f)
+    }
+
+    @Test fun currentModelRemainsInTheMenuWithoutMergingEqualNamesAcrossProviders() {
+        fun option(config: Long, model: String) = com.aiassistant.domain.model.ChatModelOption(
+            apiConfigId = config, configName = "Synthetic config", provider = "Synthetic provider",
+            apiType = "openai", modelName = model
+        )
+        val current = option(1, "synthetic-model")
+        val otherProvider = option(2, "synthetic-model")
+        val choices = com.aiassistant.ui.screens.chat.chatSettingsModelOptions(
+            current, listOf(otherProvider, current, option(3, ""))
+        )
+        assertEquals(listOf(current, otherProvider), choices)
+        assertEquals(listOf(current),
+            com.aiassistant.ui.screens.chat.chatSettingsModelOptions(current, emptyList()))
+        assertTrue(com.aiassistant.ui.screens.chat.chatSettingsModelOptions(null, emptyList()).isEmpty())
+    }
+
     @Test fun allPresetThemeTextPairsMeetReadableContrastInBothModes() {
         fun contrast(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float =
             (maxOf(a.luminance(), b.luminance()) + 0.05f) / (minOf(a.luminance(), b.luminance()) + 0.05f)
@@ -124,6 +161,30 @@ class UiPolishRegressionTest {
         assertTrue(com.aiassistant.ui.components.shouldFollowEditorCursor(true, old, clicked, clicked.text))
         val typed = clicked.copy(text = "合成新增长文本")
         assertTrue(com.aiassistant.ui.components.shouldFollowEditorCursor(true, clicked, typed, typed.text))
+    }
+
+    @Test fun selectionToolbarPositionUsesWindowCoordinatesAndStaysInsideBounds() {
+        val position = com.aiassistant.ui.components.selectionToolbarPosition(
+            selection = androidx.compose.ui.geometry.Rect(100f, 160f, 180f, 190f),
+            rootInWindow = androidx.compose.ui.unit.IntOffset(20, 40),
+            window = androidx.compose.ui.unit.IntSize(400, 800),
+            popup = androidx.compose.ui.unit.IntSize(220, 48),
+            marginPx = 16,
+            gapPx = 10
+        )
+        assertEquals(50, position.x)
+        assertEquals(142, position.y)
+
+        val bottom = com.aiassistant.ui.components.selectionToolbarPosition(
+            selection = androidx.compose.ui.geometry.Rect(150f, 760f, 200f, 790f),
+            rootInWindow = androidx.compose.ui.unit.IntOffset.Zero,
+            window = androidx.compose.ui.unit.IntSize(400, 800),
+            popup = androidx.compose.ui.unit.IntSize(220, 48),
+            marginPx = 16,
+            gapPx = 10
+        )
+        assertTrue(bottom.x in 16..164)
+        assertTrue(bottom.y in 16..736)
     }
 
     private val testClock = object : androidx.compose.runtime.MonotonicFrameClock {

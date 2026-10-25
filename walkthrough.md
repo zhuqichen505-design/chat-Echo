@@ -1,5 +1,18 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-10-25 · 思考 / 文本选择 / 弹窗 / 滚动与 Bot 预览完善
+
+基线 `main/ba7d6fd`，只处理本次需求，未构建 APK；版本 2.8.16/202、Room v37 / 20 实体不变。
+
+- 候选设定 / 时间线：展开区域填满实际分配视口，标题和操作区保持固定，正文通过各候选独立 ScrollState 滚动；IME 空间由 `ChatReviewInputLayout` 真实测量。
+- Default：`ReasoningControls` 将 Default（默认）作为独立的服务端默认语义，省略可选 effort；Anthropic 等明确预算契约不提供 Default。输入思考按钮与智能搜索统一固定尺寸，强度选择使用有 8dp 间距和最小 72×40dp 的 FilterChip。
+- 文本选择：BasicTextField2 / TextFieldState 统一 ChatInput 和 `EchoScrollableTextEditor`，移除外层滚动与自定义光标可见性门禁；工具栏使用 root→window 坐标、动态边界和横向滚动，复制 / 粘贴 / 引用语义保留。
+- 弹窗 / 模型：`EchoDialogLayout` 统一安全区、边距、Standard 480dp / Expanded 640dp 和 90% 最大高度；模型下拉、首页 API 配置、通用模型选择使用同一 24dp 当前圆点指示器。
+- Bot：新增独立浏览器动作预览，连接、思考、回复、完成、主动暂停、连接 / 回复出错、待机均可切换；暂停 / 错误 / 恢复序列生成 33 个过渡帧和 GIF，终止状态不闪烁。
+- 纸本主题：在真实会话首页 / 普通聊天 / 对话设置弹窗结构上重新制作毛边叠页、线装针脚、活页手札、布面压金，避免只换配色；新增 `materials.css` 和七张更新图，主题未应用。
+
+最终验收：标准 verify `20261025-213354-276` 退出 0，340.69 秒；88 套件 / 1,006 项单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。定向 ReasoningControls / UiPolishRegression / ChatRetryRepository 共 85 项通过，BasicTextField2 编译通过。Playwright 真实页面预览 15 组布局 / 17 组交互通过；Bot 预览四种宽度、终止符号和过渡帧检查通过，浏览器错误 0。无设备，拖柄、键盘、触控和动态视觉仍需人工验收。
+
 ## 2026-10-25 · 纸本主题预览与实际页面对齐
 
 基线 `48eece4`；本次是预览校正，未修改 Android 源码、应用主题、版本和数据库，未构建 APK。上一版引入了 App 不存在的目录 / 阅读页面与页码，已在原预览路径重做，旧链接直接看到新图。

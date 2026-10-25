@@ -553,7 +553,7 @@ fun ChatScreen(
                                 onAcceptMemory = { scope, content -> viewModel.acceptPendingMemory(scope, content) },
                                 onDismissTimeline = { viewModel.dismissTimelineProposal(it) },
                                 onApplyTimeline = { viewModel.applyTimelineProposal(it) },
-                                modifier = Modifier.weight(1f, fill = false)
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -2303,9 +2303,7 @@ fun ChatScreen(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { branchSuccessDialog = null },
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .widthIn(max = 420.dp),
+            modifier = Modifier,
             title = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

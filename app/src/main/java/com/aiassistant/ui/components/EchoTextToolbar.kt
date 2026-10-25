@@ -2,10 +2,13 @@ package com.aiassistant.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -29,6 +32,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import com.aiassistant.ui.theme.EchoTokens
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.TextToolbar
@@ -51,16 +56,20 @@ import kotlin.math.roundToInt
 
 class EchoTextToolbarState(
     rect: Rect,
-    val canCopy: Boolean = false,
-    val canPaste: Boolean = false,
-    val canCut: Boolean = false,
-    val canSelectAll: Boolean = false,
+    canCopy: Boolean = false,
+    canPaste: Boolean = false,
+    canCut: Boolean = false,
+    canSelectAll: Boolean = false,
     var onCopy: (() -> Unit)? = null,
     var onPaste: (() -> Unit)? = null,
     var onCut: (() -> Unit)? = null,
     var onSelectAll: (() -> Unit)? = null
 ) {
     var rect by mutableStateOf(rect)
+    var canCopy by mutableStateOf(canCopy)
+    var canPaste by mutableStateOf(canPaste)
+    var canCut by mutableStateOf(canCut)
+    var canSelectAll by mutableStateOf(canSelectAll)
 
     constructor(
         rect: Rect,
@@ -123,6 +132,10 @@ class EchoTextToolbar : TextToolbar {
         val hasPaste = onPasteRequested != null
         val hasCut = onCutRequested != null
         val hasSelectAll = onSelectAllRequested != null
+        if (listOf(rect.left, rect.top, rect.right, rect.bottom).any { !it.isFinite() }) {
+            hide()
+            return
+        }
 
         // Avoid showing empty floating box if no actions are available
         if (!hasCopy && !hasPaste && !hasCut && !hasSelectAll) {
@@ -137,13 +150,13 @@ class EchoTextToolbar : TextToolbar {
             current.onPaste = onPasteRequested
             current.onCut = onCutRequested
             current.onSelectAll = onSelectAllRequested
-            if (abs(current.rect.left - rect.left) > 16f ||
-                abs(current.rect.top - rect.top) > 16f ||
-                abs(current.rect.right - rect.right) > 16f ||
-                abs(current.rect.bottom - rect.bottom) > 16f
-            ) {
-                current.rect = rect
-            }
+            current.canCopy = hasCopy
+            current.canPaste = hasPaste
+            current.canCut = hasCut
+            current.canSelectAll = hasSelectAll
+            // Rect state uses structural equality; retaining its exact position does not recreate
+            // the popup. A 16px dead zone left the toolbar behind a moving selection or viewport.
+            current.rect = rect
             _status = TextToolbarStatus.Shown
             return
         }
@@ -170,7 +183,7 @@ class InAppSelectionClipboardManager(
     var isQuoteCapturing: Boolean = false
 
     override fun getText(): AnnotatedString? {
-        return lastCapturedText ?: delegate.getText()
+        return delegate.getText()
     }
 
     override fun setText(annotatedString: AnnotatedString) {
@@ -181,8 +194,35 @@ class InAppSelectionClipboardManager(
     }
 
     override fun hasText(): Boolean {
-        return lastCapturedText != null || delegate.hasText()
+        return delegate.hasText()
     }
+}
+
+/** Selection bounds and popup placement must share the host window's pixel coordinates. */
+internal fun selectionToolbarPosition(
+    selection: Rect,
+    rootInWindow: IntOffset,
+    window: IntSize,
+    popup: IntSize,
+    marginPx: Int,
+    gapPx: Int
+): IntOffset {
+    val horizontalMargin = marginPx.coerceAtMost(((window.width - popup.width) / 2).coerceAtLeast(0))
+    val verticalMargin = marginPx.coerceAtMost(((window.height - popup.height) / 2).coerceAtLeast(0))
+    val maximumX = (window.width - popup.width - horizontalMargin).coerceAtLeast(horizontalMargin)
+    val maximumY = (window.height - popup.height - verticalMargin).coerceAtLeast(verticalMargin)
+    val center = (selection.left + selection.right) / 2f + rootInWindow.x
+    val above = selection.top + rootInWindow.y - popup.height - gapPx
+    val below = selection.bottom + rootInWindow.y + gapPx
+    val y = when {
+        above >= verticalMargin -> above
+        below + popup.height <= window.height - verticalMargin -> below
+        else -> above.coerceAtLeast(verticalMargin.toFloat())
+    }
+    return IntOffset(
+        (center - popup.width / 2f).roundToInt().coerceIn(horizontalMargin, maximumX),
+        y.roundToInt().coerceIn(verticalMargin, maximumY)
+    )
 }
 
 @Composable
@@ -194,10 +234,13 @@ fun EchoTextToolbarHost(
     val clipboardManager = LocalClipboardManager.current
     val inAppClipboard = clipboardManager as? InAppSelectionClipboardManager
     val density = LocalDensity.current
+    val view = LocalView.current
+    val maxToolbarWidth = (LocalConfiguration.current.screenWidthDp.dp - 32.dp).coerceAtLeast(48.dp)
     val glass = echoGlassPalette()
     val coroutineScope = rememberCoroutineScope()
 
-    val popupPositionProvider = remember(density) {
+    val selectionRect = menu.rect
+    val popupPositionProvider = remember(density, view, selectionRect) {
         object : PopupPositionProvider {
             override fun calculatePosition(
                 anchorBounds: IntRect,
@@ -205,15 +248,16 @@ fun EchoTextToolbarHost(
                 layoutDirection: LayoutDirection,
                 popupContentSize: IntSize
             ): IntOffset {
-                val menuRect = toolbar.activeMenu?.rect ?: Rect.Zero
-                val x = ((menuRect.left + menuRect.right) / 2f - popupContentSize.width / 2f)
-                    .roundToInt()
-                    .coerceIn(16, (windowSize.width - popupContentSize.width - 16).coerceAtLeast(16))
-
-                val yAbove = (menuRect.top - popupContentSize.height - with(density) { 10.dp.toPx() }).roundToInt()
-                val yBelow = (menuRect.bottom + with(density) { 10.dp.toPx() }).roundToInt()
-                val y = if (yAbove >= 70) yAbove else yBelow
-                return IntOffset(x, y.coerceIn(16, (windowSize.height - popupContentSize.height - 16).coerceAtLeast(16)))
+                // Compose supplies selection bounds in root coordinates; PopupPositionProvider
+                // expects window coordinates. This offset also covers inset/dialog root views.
+                val rootLocation = IntArray(2)
+                view.getLocationInWindow(rootLocation)
+                return selectionToolbarPosition(
+                    selectionRect, IntOffset(rootLocation[0], rootLocation[1]),
+                    windowSize, popupContentSize,
+                    marginPx = with(density) { 16.dp.roundToPx() },
+                    gapPx = with(density) { 10.dp.roundToPx() }
+                )
             }
         }
     }
@@ -236,7 +280,9 @@ fun EchoTextToolbarHost(
             shadowElevation = EchoTokens.Elevation.overlay(isDark).elevation
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                modifier = Modifier.widthIn(max = maxToolbarWidth)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -276,9 +322,13 @@ fun EchoTextToolbarHost(
                         text = "引用",
                         onClick = {
                             if (inAppClipboard != null) {
+                                inAppClipboard.lastCapturedText = null
                                 inAppClipboard.isQuoteCapturing = true
-                                menu.onCopy?.invoke()
-                                inAppClipboard.isQuoteCapturing = false
+                                try {
+                                    menu.onCopy?.invoke()
+                                } finally {
+                                    inAppClipboard.isQuoteCapturing = false
+                                }
                                 val captured = inAppClipboard.lastCapturedText?.text.orEmpty()
                                 if (captured.isNotBlank()) {
                                     onQuoteSelected(captured)

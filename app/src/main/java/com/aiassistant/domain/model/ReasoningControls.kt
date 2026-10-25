@@ -4,7 +4,7 @@ package com.aiassistant.domain.model
 object ReasoningControls {
     data class Option(val value: String, val label: String, val enabled: Boolean = true)
     fun displayLabel(value: String): String = when (value) {
-        "default" -> "默认"
+        "default" -> "Default（默认）"
         "disabled", "none" -> "关闭"
         else -> value.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
     }
@@ -25,8 +25,8 @@ object ReasoningControls {
     fun options(model: String, apiType: String = "openai", evidence: ReasoningCapabilityEvidence? = null): List<Option> {
         val policy = policy(model, evidence)
         val nativeClaude = apiType == "anthropic"
-        if (evidence?.supportsThinking == false) return listOf(Option("default", "默认", false))
-        if (policy.vendor == ModelVendor.CLAUDE && !nativeClaude && evidence?.efforts == null) return listOf(Option("default", "默认"))
+        if (evidence?.supportsThinking == false) return listOf(Option("default", displayLabel("default"), false))
+        if (policy.vendor == ModelVendor.CLAUDE && !nativeClaude && evidence?.efforts == null) return listOf(Option("default", displayLabel("default")))
         if (nativeClaude && policy.thinkingGears.isEmpty() && evidence?.thinkingType != "adaptive" &&
             (evidence?.thinkingType == "enabled" || (policy.vendor == ModelVendor.CLAUDE && evidence?.efforts == null &&
             Regex("claude-(3[-.]7|sonnet-4|opus-4)").containsMatchIn(model.lowercase())))) return listOf(
@@ -34,12 +34,23 @@ object ReasoningControls {
             Option("budget:1024", "Budget_tokens=1024"), Option("budget:4096", "Budget_tokens=4096"),
             Option("budget:8192", "Budget_tokens=8192"), Option("budget:16384", "Budget_tokens=16384")
         )
-        if (policy.thinkingGears.isEmpty()) return listOf(Option("default", "默认"))
+        if (policy.thinkingGears.isEmpty()) return listOf(Option("default", displayLabel("default")))
         val gears = policy.thinkingGears.filterNot { policy.alwaysThinking && it.equals("none", true) }
             .map { Option(it, displayLabel(it), !it.equals("none", true)) }
-        if (gears.isEmpty()) return listOf(Option("default", "默认"))
-        return if (policy.alwaysThinking || policy.thinkingGears.any { it.equals("none", true) }) gears
-        else if (canToggle(model, apiType, evidence)) listOf(Option("disabled", "关闭", false)) + gears else gears
+        if (gears.isEmpty()) return listOf(Option("default", displayLabel("default")))
+        // Effort is optional, so the server default is a real choice rather than an alias for Medium.
+        // Native budget-based thinking still requires budget_tokens; do not offer a misleading omission.
+        // Gears are non-empty here, so wireThinkingType cannot enter the budget-options fallback.
+        val strengths = gears.filter { it.enabled }
+        val enabledOptions = if (nativeClaude && wireThinkingType(model, apiType, true, evidence) == "enabled") strengths
+            else listOf(Option("default", displayLabel("default"))) + strengths
+        val offOptions = gears.filterNot { it.enabled }
+        return when {
+            policy.alwaysThinking -> enabledOptions
+            offOptions.isNotEmpty() -> offOptions + enabledOptions
+            canToggle(model, apiType, evidence) -> listOf(Option("disabled", "关闭", false)) + enabledOptions
+            else -> enabledOptions
+        }
     }
 
     fun canToggle(model: String, apiType: String, evidence: ReasoningCapabilityEvidence? = null): Boolean {
@@ -55,7 +66,7 @@ object ReasoningControls {
     fun selected(model: String, apiType: String, enabled: Boolean, raw: String?, evidence: ReasoningCapabilityEvidence? = null): Option {
         val options = options(model, apiType, evidence)
         if (!enabled) options.firstOrNull { !it.enabled }?.let { return it }
-        if (!enabled && !policy(model, evidence).alwaysThinking) return Option("default", "默认", false)
+        if (!enabled && !policy(model, evidence).alwaysThinking) return Option("default", displayLabel("default"), false)
         options.firstOrNull { it.value.equals(raw, true) && it.enabled }?.let { return it }
         if (apiType == "anthropic" && options.any { it.value.startsWith("budget:") }) {
             val budget = when(raw) { "low", "fast" -> 1024; "high", "deep" -> 8192; "max", "ultra" -> 16384; else -> 4096 }

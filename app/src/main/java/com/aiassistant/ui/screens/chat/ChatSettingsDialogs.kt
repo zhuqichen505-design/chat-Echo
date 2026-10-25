@@ -380,9 +380,7 @@ fun ChatSettingsDialog(
     EchoGlassDialog(
         hazeState = hazeState,
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.90f)
-            .widthIn(max = 430.dp),
+        modifier = Modifier,
         tint = dialogContainerColor,
         containerColor = dialogContainerColor,
         contentColor = dialogContentColor,
@@ -417,8 +415,7 @@ fun ChatSettingsDialog(
                     }
                 }
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth()
-                        .heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.65f).dp),
+                    modifier = Modifier.fillMaxWidth(),
                     state = dialogListState,
                     contentPadding = PaddingValues(end = 2.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)

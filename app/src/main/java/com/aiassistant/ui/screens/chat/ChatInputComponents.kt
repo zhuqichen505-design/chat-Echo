@@ -39,6 +39,9 @@ import com.aiassistant.domain.model.ToolCallRecord
 import com.aiassistant.domain.model.QueuedMessage
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text2.TextFieldDecorator
+import androidx.compose.foundation.text2.input.TextFieldLineLimits
+import com.aiassistant.ui.components.EchoNativeTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -111,6 +114,7 @@ import com.aiassistant.ui.components.TransientLazyListScrollbar
 import com.aiassistant.ui.components.EchoPillSlider
 import androidx.compose.runtime.CompositionLocalProvider
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.echoFilterChipBorder
 import com.aiassistant.ui.components.echoFilterChipColors
@@ -236,13 +240,8 @@ fun ChatInputBar(
             .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // 深度思考向上展开渐变滑块气泡弹窗
-        AnimatedVisibility(
-            visible = showThinkingPopover && hasIntensityChoice && !isBarsHidden,
-            enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom),
-            modifier = Modifier.clip(RoundedCornerShape(22.dp))
-        ) {
+        // A bounded modal keeps strength choices independent of input/keyboard height.
+        if (showThinkingPopover && hasIntensityChoice && !isBarsHidden) {
             ReasoningEffortPopupCard(
                 enableThinking = enableThinking,
                 thinkingEffort = thinkingEffort,
@@ -370,7 +369,7 @@ fun ChatInputBar(
                         Spacer(modifier = Modifier.height(6.dp))
                     }
 
-                    BasicTextField(
+                    EchoNativeTextField(
                         value = inputFieldValue,
                         onValueChange = {
                             inputFieldValue = it
@@ -398,8 +397,10 @@ fun ChatInputBar(
                         ),
                         // Native cursor shares the field's scrolling, bidi and IME coordinates.
                         cursorBrush = SolidColor(inputTextColor),
-                        maxLines = if (isInputExpanded || (customInputHeightDp ?: 0f) > 60f) 15 else 5,
-                        decorationBox = { innerTextField ->
+                        lineLimits = TextFieldLineLimits.MultiLine(
+                            maxHeightInLines = if (isInputExpanded || (customInputHeightDp ?: 0f) > 60f) 15 else 5
+                        ),
+                        decorator = TextFieldDecorator { innerTextField ->
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -442,7 +443,7 @@ fun ChatInputBar(
                             item {
                                 val selection = com.aiassistant.domain.model.ReasoningControls.selected(modelName, apiType, thinkingActive, thinkingEffort, reasoningCapability)
                                 val effortText = when {
-                                    selection.value == "default" -> "深度思考"
+                                    selection.value == "default" -> "Default"
                                     selection.value.startsWith("budget:") -> selection.value.removePrefix("budget:")
                                     else -> selection.label
                                 }
@@ -458,7 +459,7 @@ fun ChatInputBar(
                                     text = effortText,
                                     icon = null,
                                     trailingIcon = if (hasIntensityChoice) Icons.Default.ExpandLess else null,
-                                    fixedThinkingSize = true,
+                                    fixedControlSize = true,
                                     selected = thinkingActive,
                                     onClick = {
                                         if (hasIntensityChoice) onThinkingPopoverChange(!showThinkingPopover)
@@ -499,6 +500,7 @@ fun ChatInputBar(
                             item {
                                 InputPillButton(
                                     text = "智能搜索",
+                                    fixedControlSize = true,
                                     selected = enableWebSearch,
                                     onClick = { onWebSearchChange(!enableWebSearch) },
                                     containerColor = if (enableWebSearch) {
@@ -984,6 +986,16 @@ internal fun ReasoningEffortPopupCard(
             ),
             ThinkingEffortLevel(
                 step = 1,
+                key = "default",
+                enabled = true,
+                name = "Default",
+                subtitle = "Default（默认）· 交给服务端",
+                detail = "不固定指定强度，保留思考开关；实际思考量由当前模型服务的默认策略决定。",
+                primaryColor = EchoThinkingColors.medium,
+                gradientColors = EchoThinkingColors.mediumGradient
+            ),
+            ThinkingEffortLevel(
+                step = 2,
                 key = "low",
                 enabled = true,
                 name = "low",
@@ -993,7 +1005,7 @@ internal fun ReasoningEffortPopupCard(
                 gradientColors = EchoThinkingColors.lowGradient
             ),
             ThinkingEffortLevel(
-                step = 2,
+                step = 3,
                 key = "medium",
                 enabled = true,
                 name = "medium",
@@ -1003,7 +1015,7 @@ internal fun ReasoningEffortPopupCard(
                 gradientColors = EchoThinkingColors.mediumGradient
             ),
             ThinkingEffortLevel(
-                step = 3,
+                step = 4,
                 key = "high",
                 enabled = true,
                 name = "high",
@@ -1013,7 +1025,7 @@ internal fun ReasoningEffortPopupCard(
                 gradientColors = EchoThinkingColors.highGradient
             ),
             ThinkingEffortLevel(
-                step = 4,
+                step = 5,
                 key = "max",
                 enabled = true,
                 name = "max",
@@ -1026,172 +1038,84 @@ internal fun ReasoningEffortPopupCard(
             com.aiassistant.domain.model.ReasoningControls.options(modelName, apiType, reasoningCapability).mapIndexed { index, option ->
                 val template = templates.firstOrNull { it.key == option.value } ?: templates[if (option.enabled) 3 else 0]
                 template.copy(step = index, key = option.value, enabled = option.enabled, name = option.label,
-                    subtitle = option.label, detail = "当前模型与接口的实际参数")
+                    subtitle = option.label, detail = when {
+                        option.value == "default" -> "不固定指定强度，跟随模型服务默认策略。保留思考开关设置，实际思考量由服务决定；不等于固定的 Medium。"
+                        !option.enabled -> "关闭当前模型可选的思考过程；强制思考的模型保持原生行为。"
+                        option.value.startsWith("budget:") -> "使用所选数值作为思考预算；当前接口需要明确的预算档位。"
+                        else -> "采用 ${option.label} 强度。实际速度、消耗与支持范围以当前模型服务为准。"
+                    })
             }
         }
     }
 
-    val maxStep = levels.lastIndex
-    val selected = com.aiassistant.domain.model.ReasoningControls.selected(modelName, apiType, enableThinking, thinkingEffort, reasoningCapability)
-    val currentStep = levels.indexOfFirst { it.key == selected.value }.coerceAtLeast(0)
-
-    var sliderIndex by remember(levels) { mutableFloatStateOf(currentStep.toFloat()) }
-    LaunchedEffect(currentStep) {
-        if (sliderIndex.roundToInt() != currentStep) {
-            sliderIndex = currentStep.toFloat()
-        }
-    }
-    val currentLevel = levels[sliderIndex.roundToInt().coerceIn(0, maxStep)]
-    val glass = echoGlassPalette()
-
-    val popupShape = RoundedCornerShape(22.dp)
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .clip(popupShape),
-        shape = popupShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-        border = BorderStroke(1.dp, currentLevel.primaryColor.copy(alpha = 0.45f)),
-        shadowElevation = 0.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // 顶部 Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Brush.linearGradient(currentLevel.gradientColors)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Psychology,
-                            contentDescription = null,
-                            tint = readableTextColorFor(currentLevel.primaryColor),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "深度思考强度",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            IconButton(
-                                onClick = { showParamsExplanationDialog = true },
-                                modifier = Modifier.size(22.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = "思考参数说明",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = currentLevel.subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = currentLevel.primaryColor,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+    val selected = com.aiassistant.domain.model.ReasoningControls.selected(
+        modelName, apiType, enableThinking, thinkingEffort, reasoningCapability
+    )
+    val currentLevel = levels.firstOrNull { it.key == selected.value } ?: levels.first()
+    EchoGlassDialog(
+        onDismissRequest = onClose,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Default.Psychology, null, tint = currentLevel.primaryColor, modifier = Modifier.size(24.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("深度思考强度", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(currentLevel.subtitle, style = MaterialTheme.typography.bodySmall, color = currentLevel.primaryColor)
                 }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = onClose,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("完成", fontWeight = FontWeight.Bold)
-                    }
+                IconButton(onClick = { showParamsExplanationDialog = true }) {
+                    Icon(Icons.Default.Info, "思考参数说明", tint = MaterialTheme.colorScheme.primary)
                 }
             }
-
-            // 胶囊美观滑块区域 (严格还原 media_1788845280823.jpg)
+        },
+        text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Labels and slider share the same endpoint inset and evenly spaced centers.
-                androidx.compose.ui.layout.SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
-                    val cellWidth = constraints.maxWidth / levels.size
-                    val labels = subcompose("labels") {
-                    levels.forEach { lvl ->
-                        val isSelected = currentLevel.step == lvl.step
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) lvl.primaryColor else glass.control,
-                            contentColor = if (isSelected) readableTextColorFor(lvl.primaryColor) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            border = BorderStroke(
-                                1.dp,
-                                if (isSelected) lvl.primaryColor else glass.outline
-                            ),
-                            modifier = Modifier.clickable {
-                                sliderIndex = lvl.step.toFloat()
-                                onEffortSelected(lvl.enabled, lvl.key)
-                            }
-                        ) {
-                            Text(
-                                text = lvl.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 2,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                    }.map { it.measure(androidx.compose.ui.unit.Constraints.fixedWidth(cellWidth)) }
-                    val radius = 14.dp.roundToPx()
-                    val inset = maxOf(cellWidth / 2, radius)
-                    val sliderLeft = inset - radius
-                    val sliderWidth = (constraints.maxWidth - 2 * sliderLeft).coerceAtLeast(1)
-                    val slider = subcompose("slider") {
-                        EchoPillSlider(
-                            value = sliderIndex,
-                            onValueChange = { newVal ->
-                                sliderIndex = newVal
-                                val target = levels[newVal.roundToInt().coerceIn(0, maxStep)]
-                                onEffortSelected(target.enabled, target.key)
+                Text(
+                    "选择适合当前任务的思考强度。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                // Default and Off are discrete policies, not ordered intensity stops.
+                // Independent chips wrap on small screens instead of forcing their borders together.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    levels.forEach { level ->
+                        val isSelected = currentLevel.key == level.key
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onEffortSelected(level.enabled, level.key) },
+                            modifier = Modifier.widthIn(min = 72.dp, max = 180.dp).heightIn(min = 40.dp),
+                            label = {
+                                Text(level.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
                             },
-                            valueRange = 0f..maxStep.toFloat(),
-                            steps = (levels.size - 2).coerceAtLeast(0),
-                            activeColor = currentLevel.primaryColor
+                            leadingIcon = if (isSelected) {
+                                { Icon(Icons.Default.Check, "当前强度", Modifier.size(16.dp)) }
+                            } else null,
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(isSelected),
+                            elevation = echoFilterChipElevation()
                         )
-                    }.single().measure(androidx.compose.ui.unit.Constraints.fixedWidth(sliderWidth))
-                    val gap = 4.dp.roundToPx()
-                    layout(constraints.maxWidth, slider.height + gap + (labels.maxOfOrNull { it.height } ?: 0)) {
-                        slider.placeRelative(sliderLeft, 0)
-                        labels.forEachIndexed { index, label ->
-                            val center = com.aiassistant.domain.model.ReasoningStopLayout.center(index, levels.size, constraints.maxWidth.toFloat(), inset.toFloat())
-                            label.placeRelative((center - label.width / 2f).roundToInt(), slider.height + gap)
-                        }
                     }
                 }
+                Text(currentLevel.detail, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (apiType == "anthropic" && com.aiassistant.domain.model.ReasoningControls.wireThinkingType(
+                        modelName, apiType, true, reasoningCapability) == "enabled") {
+                    Text(
+                        "当前接口需要数值思考预算，不能省略为服务端默认强度。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("完成", fontWeight = FontWeight.Bold) } }
+    )
 
     if (showParamsExplanationDialog) {
         ThinkingParamsExplanationDialog(
@@ -1210,9 +1134,6 @@ internal fun ThinkingParamsExplanationDialog(
 
     EchoGlassDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .widthIn(max = 440.dp),
         tint = containerColor,
         containerColor = containerColor,
         contentColor = contentColor,
@@ -1250,6 +1171,18 @@ internal fun ThinkingParamsExplanationDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ThinkingParamCard(
+                    title = "Default（默认）",
+                    badge = "跟随服务端",
+                    badgeColor = EchoThinkingColors.medium,
+                    desc = "不固定选择强度，由当前模型服务采用默认策略。客户端保留思考开关设置；服务端默认可能采用不同的思考量，Default 不代表 Medium。",
+                    params = listOf(
+                        "兼容接口" to "不发送 reasoning_effort",
+                        "自适应思考" to "保留思考模式，不发送 output_config.effort",
+                        "原生数值预算接口" to "必须提供 budget_tokens，因此保留明确预算，不提供 Default 档"
+                    )
+                )
+
+                ThinkingParamCard(
                     title = "关闭思考 (None)",
                     badge = "无思考预算",
                     badgeColor = EchoThinkingColors.none,
@@ -1275,9 +1208,9 @@ internal fun ThinkingParamsExplanationDialog(
 
                 ThinkingParamCard(
                     title = "Medium",
-                    badge = "推荐默认",
+                    badge = "固定中档",
                     badgeColor = EchoThinkingColors.medium,
-                    desc = "投入适度思考预算，严密推演逻辑与代码设计（日常最佳平衡点）。",
+                    desc = "显式选择中等强度，与跟随服务端的 Default 档位不同。",
                     params = listOf(
                         "OpenAI GPT-5.6/6" to "reasoning_effort = \"medium\"",
                         "支持 effort 的 Claude / Anthropic" to "output_config.effort = medium",
@@ -1483,15 +1416,7 @@ internal fun InputModelSelector(
                             onModelSelected(option)
                             expanded = false
                         },
-                        leadingIcon = {
-                            if (option.sameModelOption(currentOption, currentLabel)) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+                        leadingIcon = { EchoSelectionIndicator(option.sameModelOption(currentOption, currentLabel)) }
                     )
                 }
             }
@@ -1559,13 +1484,13 @@ internal fun InputPillButton(
     containerColor: Color? = null,
     contentColor: Color? = null,
     borderColor: Color? = null,
-    fixedThinkingSize: Boolean = false
+    fixedControlSize: Boolean = false
 ) {
     val pillShape = RoundedCornerShape(999.dp)
     val glass = echoGlassPalette()
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelLarge
-    val referenceSize = textMeasurer.measure("深度思考", labelStyle.copy(fontWeight = FontWeight.Medium)).size
+    val referenceSize = textMeasurer.measure("智能搜索", labelStyle.copy(fontWeight = FontWeight.Medium)).size
     val density = LocalDensity.current
     val textWidth = with(density) { referenceSize.width.toDp() }
     val fixedHeight = with(density) { referenceSize.height.toDp() } + 14.dp
@@ -1584,7 +1509,7 @@ internal fun InputPillButton(
     }
     Surface(
         modifier = Modifier
-            .then(if (fixedThinkingSize) Modifier.width(textWidth + 44.dp).height(fixedHeight.coerceAtLeast(34.dp)) else Modifier.heightIn(min = 34.dp))
+            .then(if (fixedControlSize) Modifier.width(textWidth + 44.dp).height(fixedHeight.coerceAtLeast(34.dp)) else Modifier.heightIn(min = 34.dp))
             .echoShapeClick(pillShape, onClick = onClick),
         shape = pillShape,
         color = resolvedContainerColor,
@@ -1607,8 +1532,8 @@ internal fun InputPillButton(
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,
-                modifier = if (fixedThinkingSize) Modifier.width(textWidth) else Modifier,
-                textAlign = if (fixedThinkingSize) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start,
+                modifier = if (fixedControlSize) Modifier.weight(1f) else Modifier,
+                textAlign = if (fixedControlSize) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1619,7 +1544,7 @@ internal fun InputPillButton(
                     modifier = Modifier.size(16.dp),
                     tint = resolvedContentColor
                 )
-            } else if (fixedThinkingSize) {
+            } else if (fixedControlSize) {
                 Spacer(Modifier.size(16.dp))
             }
         }

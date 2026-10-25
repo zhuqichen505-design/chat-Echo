@@ -33,7 +33,7 @@ fun ReplyDirectionDialog(
         paneTitleText = "选择本轮回复方向",
         title = { Text(if (prompt.error == null) "这次，往哪个方向聊？" else "回复方向暂未生成", style = MaterialTheme.typography.titleLarge) },
         content = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (prompt.error != null) {
                     Text(prompt.error, style = MaterialTheme.typography.bodyMedium)

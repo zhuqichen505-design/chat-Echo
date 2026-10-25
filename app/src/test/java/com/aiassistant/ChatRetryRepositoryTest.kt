@@ -382,6 +382,43 @@ class ChatRetryRepositoryTest {
         }
     }
 
+    @Test fun savedDefaultStrengthOmitsOnlyEffortAfterAnExplicitChoiceInBothWireProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                socket.response("200 OK", syntheticStreamResponse(protocol, "合成默认强度回复"), "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                val (original, id) = f.config(endpoint.url, protocol)
+                val model = if (protocol == "anthropic") "claude-opus-4-7" else "gpt-6-astra"
+                val explicit = original.copy(modelName = model, enableThinking = true, thinkingEffort = "high")
+                f.db.apiConfigDao().updateConfig(explicit)
+                f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(modelName = model))
+                f.repository.sendChatMessageWithConfig(explicit, id, "合成指定强度请求", onToken = {},
+                    onComplete = { _, _, _ -> }, onError = { fail(it) })
+
+                f.db.apiConfigDao().updateConfig(explicit.copy(thinkingEffort = "default"))
+                val restored = f.db.apiConfigDao().getConfigById(explicit.id)!!
+                assertTrue(restored.enableThinking)
+                assertEquals("default", restored.thinkingEffort)
+                f.repository.sendChatMessageWithConfig(restored, id, "合成服务默认请求", onToken = {},
+                    onComplete = { _, _, _ -> }, onError = { fail(it) })
+                assertEquals("每次发送只能请求一次", 2, endpoint.payloads.size)
+                val first = com.google.gson.JsonParser.parseString(endpoint.payloads[0]).asJsonObject
+                val second = com.google.gson.JsonParser.parseString(endpoint.payloads[1]).asJsonObject
+                if (protocol == "openai") {
+                    assertEquals("high", first["reasoning_effort"].asString)
+                    assertFalse(second.has("reasoning_effort"))
+                    assertFalse(second.has("thinking_effort"))
+                    assertFalse(second.has("thinking_budget"))
+                } else {
+                    assertEquals("high", first.getAsJsonObject("output_config")["effort"].asString)
+                    assertFalse(second.has("output_config"))
+                    assertEquals("adaptive", second.getAsJsonObject("thinking")["type"].asString)
+                    assertFalse(second.getAsJsonObject("thinking").has("budget_tokens"))
+                }
+            } }
+        }
+    }
+
     @Test fun modelCatalogueHttpDeniedReportsPermissionRatherThanPresetOrKeyFallback() = runBlocking {
         Endpoint { socket, _ -> socket.response("200 OK", "{\"data\":[{\"id\":\"vendor/Exact-ID\"}]}") }.use { endpoint -> Fixture().use { f ->
             com.aiassistant.data.remote.HttpAccessPolicy.initialize { com.aiassistant.data.remote.HttpAccessRules() }

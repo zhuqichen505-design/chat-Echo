@@ -1,0 +1,77 @@
+/* Four bindings applied to the same real Echo UI hierarchy. Decoration never handles input. */
+.bot-preview-link{font-size:11px;border-bottom:1px solid #8b9883;margin-left:auto;margin-right:23px}
+.introduction h1{letter-spacing:.025em;font-size:36px}.study-description{min-height:43px}
+.device{border-radius:7px 17px 17px 7px;box-shadow:2px 2px 0 #c7c1b2,4px 4px 0 #e7e3d6,7px 7px 0 #c3bdad,10px 15px 25px #24291e1d;overflow:hidden}
+.device::before{content:"";position:absolute;pointer-events:none;inset:0;z-index:13}.device::after{opacity:.55}
+.device .chat-title{font-family:var(--reader);font-weight:600}.device .dialog{width:calc(100% - 32px);max-width:480px;max-height:90%}
+.device .model-pill{font-size:9px}.device .assistant-body{line-height:2.05}
+
+/* Soft-cut paperback: uneven fibres, loose slips, old letterpress rules. */
+.deckle{--paper:#f5ead3;--surface:#faf1df;--card:#fff8e9;--rule:#bdab87;--bubble:#ede0c4;background-image:radial-gradient(ellipse at top left,#e7d4a75c,transparent 65%)}
+.deckle::before{background:linear-gradient(90deg,#7e634429 0,transparent 16px,transparent calc(100% - 5px),#9b825826),repeating-linear-gradient(0deg,transparent 0 35px,#937b4a0a 35px 36px)}
+.deckle .system-bar{background:transparent}.deckle .chat-header{border-radius:2px 5px 5px 2px;border-width:1px 0 3px;border-bottom-style:double;margin-top:4px;background:transparent;box-shadow:0 3px 0 #7b5c1d09}
+.deckle .home-header{background:transparent;border-bottom:3px double var(--rule);margin-inline:15px;padding-inline:0;height:59px}
+.deckle .home-brand strong{font-family:Georgia,serif;letter-spacing:.1em}.deckle .user-bubble{position:relative;border:0;border-radius:1px;background:#fcf4df;box-shadow:1px 3px 0 #d9c7a499,2px 5px 6px #6b4b1b12;padding:16px 14px;clip-path:polygon(0 1%,14% 0,32% 1%,53% 0,74% 1%,100% 0,99% 20%,100% 41%,99.3% 65%,100% 99%,79% 100%,62% 99%,42% 100%,22% 99%,0 100%,.7% 70%,0 42%,.6% 20%)}
+.deckle .user-avatar{background:transparent;border:1px solid #9b4935;color:#91402d;box-shadow:inset 0 0 0 2px var(--paper)}
+.deckle .thinking-capsule{border-radius:3px;background:transparent;border-color:#b99d72;font-family:var(--reader)}
+.deckle .model-pill{border:1px solid #a7624b;background:transparent;border-radius:1px;font-family:var(--reader);padding:2px 5px}
+.deckle .home-new-chat{border-radius:3px;box-shadow:inset 0 0 0 3px var(--accent),inset 0 0 0 4px #fff0ce70;font-family:var(--reader);font-size:15px;letter-spacing:.08em}
+.deckle .home-configure{border-radius:3px}.deckle .conversation-row{border-radius:3px 6px 6px 3px;box-shadow:1px 2px 0 #d6c5a4,2px 4px 0 #fcf5e5;border-color:#cbb28a;margin-bottom:13px}
+.deckle .home-story{border-radius:3px;border-block:1px solid var(--rule);background:transparent}
+.deckle .chat-composer{border:1px solid var(--rule);border-top:3px double var(--rule);border-radius:4px;background:#fbf3e1;box-shadow:0 -4px 0 #b3955b0b}
+.deckle .input-pill{border-radius:4px}.deckle .root-nav{border-top:3px double var(--rule);background:#f5ead3}.deckle .root-nav button>svg{border-radius:4px}
+.deckle .dialog{border-radius:5px;border-top:4px double #b09a73;box-shadow:3px 4px 0 #c4b08a,6px 7px 0 #f5ead3,0 16px 30px #30241633}
+
+/* Threadbound: the stitch is a material edge; it introduces no sidebar or navigation. */
+.thread{--paper:#f0f2e8;--surface:#f6f8ee;--card:#fafbf4;--rule:#9fae99;border-left:9px solid #405e4a;border-radius:0 3px 3px 0;box-shadow:2px 1px 0 #b6c1ac,4px 3px 0 #eef2e3,6px 5px 0 #a4b398,10px 15px 25px #25371f1c}
+.thread::before{inset:23px auto 20px 0;width:16px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='79'%3E%3Ccircle cx='4' cy='14' r='2' fill='%236e805b'/%3E%3Ccircle cx='4' cy='52' r='2' fill='%236e805b'/%3E%3Cpath d='M-3 11 Q9 13 4 17 L4 49 Q10 52-3 56' fill='none' stroke='%23b3a374' stroke-width='2'/%3E%3C/svg%3E");background-repeat:repeat-y;opacity:.9}
+.thread .app-surface{padding-left:8px}.thread .system-bar{padding-left:25px}.thread .chat-header{background:transparent;border-radius:0;border:1px solid var(--rule);outline:1px solid var(--rule);outline-offset:-5px;margin:5px 12px 7px 16px}
+.thread .home-header{background:transparent;border-bottom:1px solid var(--rule);margin-inline:16px;padding-inline:0}
+.thread .chat-title,.thread .home-brand strong{font-family:var(--reader);font-weight:600;letter-spacing:.05em}
+.thread .user-bubble{border:1px solid var(--rule);border-radius:0;outline:1px solid #b6c4ac;outline-offset:-5px;background:#fafbef}
+.thread .thinking-capsule{border-radius:1px;background:transparent;padding-block:7px}.thread .home-search-input{border-radius:1px;border-color:#aab89f}.thread .home-folders button{border-radius:1px}
+.thread .home-new-chat{border-radius:1px;border:1px solid var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--accent),inset 0 0 0 4px #dce9c999;font-family:var(--reader);letter-spacing:.1em}
+.thread .home-configure{border-radius:1px}.thread .home-story{background:transparent;border-radius:0;border-block:1px solid var(--rule);padding-inline:5px}
+.thread .conversation-row{border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent;padding:15px 3px;box-shadow:none;margin:0}
+.thread .model-pill{border:1px solid var(--rule);background:transparent;border-radius:0;padding:2px 4px}
+.thread .chat-composer{background:#f8faef;border-radius:1px;border:1px solid var(--rule);outline:1px solid var(--rule);outline-offset:-5px;margin-left:15px}
+.thread .input-pill{border-radius:1px}.thread .root-nav{background:transparent;border-top:1px solid var(--rule)}.thread .root-nav button+button{border-left:1px solid #c1cbb8}.thread .root-nav button>svg{border-radius:1px}
+.thread .dialog{border-radius:0;border:1px solid #7d9275;outline:1px solid #94a788;outline-offset:-6px;box-shadow:5px 5px #dce5cf,7px 7px #9bab8d}
+
+/* Field notebook: binding holes, a pencil margin, tape on the existing message slip. */
+.field{--paper:#dfc093;--surface:#f0d9b0;--card:#f3dfb9;--bubble:#edd3a7;--rule:#a98b5e;border-left:8px solid #6f5638;border-radius:2px 13px 13px 2px;background-image:linear-gradient(90deg,transparent 0 28px,#9b5c3f33 28px 29px,transparent 29px 32px,#9b5c3f22 32px 33px,transparent 33px),repeating-linear-gradient(transparent 0 27px,#8c6b3e28 27px 28px);box-shadow:2px 2px #ac8b5f,5px 4px #e9d2ad,8px 7px #9b7a4a,12px 16px 24px #44362024}
+.field::before{inset:34px auto 17px 0;width:21px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='21' height='62'%3E%3Ccircle cx='9' cy='24' r='4.5' fill='%23927650'/%3E%3Ccircle cx='9' cy='23' r='3.5' fill='%233a4439'/%3E%3Cpath d='M1 20 Q-3 5 12 11 Q19 14 12 25' fill='none' stroke='%236d7560' stroke-width='2'/%3E%3C/svg%3E");background-repeat:repeat-y}
+.field .app-surface{padding-left:13px}.field .system-bar{background:#cfad7b;padding-left:29px}.field .chat-header{border-radius:2px;background:#e8cfa5;border-style:dashed;margin-top:6px}
+.field .home-header{background:#d4b17f;border-bottom:1px dashed #9b7e52}.field .chat-title{font-family:var(--ui);font-size:16px}
+.field .user-bubble{position:relative;background:#f8e9c8;border:0;border-radius:0;box-shadow:2px 3px 5px #58441e24;transform:rotate(-.6deg);padding-block:18px}
+.field .user-message-content{position:relative}.field .user-message-content::before{content:"";position:absolute;width:47px;height:13px;top:-6px;left:38%;background:repeating-linear-gradient(90deg,#d0bd8580 0 2px,#e5d9b29c 2px 4px);z-index:1;pointer-events:none;transform:rotate(4deg)}
+.field .chat-scroll{padding-left:21px}.field .thinking-capsule{background:#ebd2a6;border-style:dashed;border-radius:3px;color:#4d412d}
+.field .assistant-body{line-height:28px;font-family:var(--reader)}.field .assistant-body p{margin-bottom:14px}
+.field .home-search-input,.field .home-folders button{border-radius:4px;background:#edd4a9}.field .home-new-chat{border-radius:3px;font-family:var(--ui);box-shadow:2px 3px 0 #53644566}
+.field .home-configure{border-radius:3px}.field .home-story{background:#f2ddb7;border-radius:0;border:1px solid #b09365;box-shadow:2px 3px #ac8d5c55;transform:rotate(-.4deg)}
+.field .conversation-row{background:#f3dfb9;border-radius:2px;border:1px solid #ac8e5c;box-shadow:2px 3px #ae8a4f44;margin-bottom:13px}
+.field .model-pill{background:transparent;border-radius:1px;border:1px dashed #7d8b61;padding:2px 4px}
+.field .chat-composer{border-radius:3px;background:#efd7af;border:1px solid #987b50;box-shadow:2px 3px 0 #9e7b4e66;margin-left:17px}
+.field .input-pill{border-radius:4px}.field .root-nav{background:#cfad7b;border-top:1px dashed #967548}.field .root-nav button>svg{border-radius:3px}
+.field .dialog{background:#ecd2a5;border-radius:3px;border:1px solid #8f744b;box-shadow:4px 5px #a88a5e,7px 8px #e4cba2,0 16px 30px #30241633}
+
+/* Clothbound: woven cover, gold tooling and a thick ivory page block. */
+.cloth{--paper:#f0e6d0;--surface:#f7edda;--card:#fbf2df;--rule:#bba174;--header:#513540;border:5px solid #513540;border-left-width:14px;border-radius:4px 11px 11px 4px;box-shadow:2px 2px #baa17b,5px 4px #e5d3b3,8px 7px #513540,12px 17px 24px #25172030}
+.cloth::before{background:linear-gradient(90deg,#51354024,transparent 14px,transparent calc(100% - 5px),#b99b6850);box-shadow:inset -3px 0 0 #eadcc2,inset -4px 0 0 #b49a6c}
+.cloth .system-bar,.cloth .home-header,.cloth .chat-header{background-color:#513540;background-image:repeating-linear-gradient(91deg,#fff2c308 0 1px,transparent 1px 3px),repeating-linear-gradient(0deg,#190c160d 0 1px,transparent 1px 3px);color:#f1debb}
+.cloth .home-header{border-block:1px solid #ac8b54;margin-top:2px;margin-bottom:6px}.cloth .chat-header{margin:2px 7px 6px;border:1px solid #ab8a52;outline:1px solid #ab8a5266;outline-offset:-5px;border-radius:4px}
+.cloth .chat-title{font-family:var(--reader);letter-spacing:.05em;font-weight:600}.cloth .home-brand strong{font-family:Georgia,serif;letter-spacing:.12em}
+.cloth .user-bubble{background:#f4e8ce;border:1px solid #bea273;border-radius:4px;box-shadow:inset 0 0 0 3px #f0e6d0,inset 0 0 0 4px #bea27355}
+.cloth .thinking-capsule{border-radius:3px;border-color:#b59767;background:transparent;font-family:var(--reader)}
+.cloth .home-search-input{border-radius:5px;border-color:#b89963}.cloth .home-folders button{border-radius:4px;border-color:#baa174}
+.cloth .home-new-chat{border-radius:4px;background:#66404b;box-shadow:inset 0 0 0 3px #66404b,inset 0 0 0 4px #c5a468;font-family:var(--reader);letter-spacing:.08em}
+.cloth .home-configure{border-radius:4px}.cloth .home-story{border:1px solid #b99b67;outline:1px solid #b99b6777;outline-offset:-5px;border-radius:4px;background:#eee0c6}
+.cloth .conversation-row{border-radius:4px;border:1px solid #bda16f;background:#fbf2df;box-shadow:inset 0 0 0 3px #f4e9d0,inset 0 0 0 4px #d6c19b66}
+.cloth .model-pill{border:1px solid #bba174;background:transparent;border-radius:2px}
+.cloth .chat-composer{border-radius:4px;border:1px solid #ac8d57;box-shadow:inset 0 0 0 3px #f7edda,inset 0 0 0 4px #d0b989,0 -4px 0 #b99b6712;background:#f7edda;margin-inline:7px}
+.cloth .input-pill{border-radius:4px}.cloth .root-nav{background:#513540;border-top:1px solid #ac8b54}.cloth .root-nav button{color:#e8d8ba}.cloth .root-nav [aria-current=page]{color:#ffe3a3}.cloth .root-nav [aria-current=page]>svg{background:#78545e;border-radius:4px}
+.cloth .dialog{border-radius:5px;border:1px solid #a78a54;outline:1px solid #bea16d;outline-offset:-6px;background:#f7edda;box-shadow:5px 6px #513540,7px 8px #bca16e,0 15px 30px #20121b40}
+
+.device .setting-chips{gap:8px}.device .setting-chips button{border-radius:7px;padding:6px 10px}.device .composer-pills .input-pill{min-width:78px;justify-content:center;height:30px;padding:5px 7px}
+.no-texture .device.field{background-image:none}.no-texture .cloth .system-bar,.no-texture .cloth .home-header,.no-texture .cloth .chat-header{background-image:none}
+@media(max-width:650px){.bot-preview-link{font-size:9px;margin-inline:auto 8px;max-width:95px;line-height:1.6}.brand{gap:8px}.brand span{padding-left:8px;font-size:10px}.preview-tag{font-size:8px;max-width:82px;line-height:1.6;text-align:center}.introduction h1{font-size:28px}.field .assistant-body{font-size:15px}.device .composer-pills .input-pill{min-width:74px}.device .chat-composer{padding-inline:9px}.device .composer-tools{gap:3px}}

@@ -509,7 +509,7 @@ fun ChatSettingsSessionMemorySection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showAddDialog = false },
-            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 400.dp),
+            modifier = Modifier,
             title = {
                 Text("添加会话专属设定与规则", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },
@@ -562,7 +562,7 @@ fun ChatSettingsSessionMemorySection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { memoryToEdit = null },
-            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 400.dp),
+            modifier = Modifier,
             title = {
                 Text("编辑会话专属设定与规则", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },
@@ -607,7 +607,7 @@ fun ChatSettingsSessionMemorySection(
         EchoGlassDialog(
             hazeState = hazeState,
             onDismissRequest = { showClearConfirmDialog = false },
-            modifier = Modifier.fillMaxWidth(0.88f).widthIn(max = 380.dp),
+            modifier = Modifier,
             title = {
                 Text("清空本会话设定", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             },

@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -312,6 +315,7 @@ fun EchoWallpaperBackground(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EchoGlassDialog(
     hazeState: HazeState? = null,
@@ -325,7 +329,8 @@ fun EchoGlassDialog(
     content: (@Composable ColumnScope.() -> Unit)? = null,
     buttons: (@Composable ColumnScope.() -> Unit)? = null,
     /** §6.0 无障碍：屏幕阅读器进入弹窗时朗读的面板标题 */
-    paneTitleText: String = "对话框"
+    paneTitleText: String = "对话框",
+    size: EchoDialogSize = EchoDialogSize.Standard
 ) {
     val glass = echoGlassPalette()
     val resolvedTint = if (tint != Color.Unspecified) tint else glass.panel
@@ -357,7 +362,6 @@ fun EchoGlassDialog(
                             isNavigationBarContrastEnforced = false
                         }
                         addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-                        addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                         addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
                         setDimAmount(0.42f)
                     }
@@ -368,13 +372,12 @@ fun EchoGlassDialog(
         }
 
         val resolvedPaneTitle = paneTitleText
-        val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-        val maxResponsiveHeight = (configuration.screenHeightDp * 0.88f).dp.coerceAtLeast(240.dp)
-        val maxResponsiveWidth = (configuration.screenWidthDp - 24).dp.coerceAtMost(560.dp)
-
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(horizontal = EchoDialogLayout.horizontalMargin, vertical = EchoDialogLayout.verticalMargin)
                 .clickable(
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                     indication = null,
@@ -382,11 +385,12 @@ fun EchoGlassDialog(
                 ),
             contentAlignment = Alignment.Center
         ) {
+            val bounds = echoDialogBounds(maxWidth, maxHeight, size)
             Surface(
                 modifier = modifier
-                    .widthIn(max = maxResponsiveWidth)
+                    .widthIn(max = bounds.width)
                     .fillMaxWidth()
-                    .heightIn(max = maxResponsiveHeight)
+                    .heightIn(max = bounds.maximumHeight)
                     .focusable() // §6.0：弹窗自身可聚焦，配合 Compose 弹窗窗口焦点陷阱，防止键盘焦点逃逸到背景层
                     .semantics { paneTitle = resolvedPaneTitle }
                     .clickable(
@@ -407,11 +411,11 @@ fun EchoGlassDialog(
                 shadowElevation = EchoTokens.Elevation.none
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp)
+                    modifier = Modifier.padding(EchoDialogLayout.contentPadding)
                 ) {
                     if (title != null) {
                         title()
-                        Spacer(modifier = Modifier.height(EchoTokens.Spacing.sm))
+                        Spacer(modifier = Modifier.height(EchoDialogLayout.titleGap))
                     }
                     if (content != null) {
                         Box(
@@ -425,7 +429,7 @@ fun EchoGlassDialog(
                         }
                     }
                     if (buttons != null) {
-                        Spacer(modifier = Modifier.height(EchoTokens.Spacing.md))
+                        Spacer(modifier = Modifier.height(EchoDialogLayout.actionGap))
                         buttons()
                     }
                 }
@@ -448,7 +452,8 @@ fun EchoGlassDialog(
     title: (@Composable ColumnScope.() -> Unit)? = null,
     text: (@Composable ColumnScope.() -> Unit)? = null,
     confirmButton: @Composable RowScope.() -> Unit,
-    dismissButton: (@Composable RowScope.() -> Unit)? = null
+    dismissButton: (@Composable RowScope.() -> Unit)? = null,
+    size: EchoDialogSize = EchoDialogSize.Standard
 ) {
     EchoGlassDialog(
         hazeState = hazeState,
@@ -458,6 +463,7 @@ fun EchoGlassDialog(
         tint = tint,
         contentColor = contentColor,
         containerColor = containerColor,
+        size = size,
         title = if (icon != null || title != null) {
             {
                 icon?.invoke(this)

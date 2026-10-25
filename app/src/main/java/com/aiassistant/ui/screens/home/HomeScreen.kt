@@ -68,6 +68,7 @@ import android.widget.Toast
 import com.aiassistant.ui.components.CardEmphasis
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.SideAnchorItem
 import com.aiassistant.ui.components.SideAnchorNavigator
@@ -1442,15 +1443,7 @@ fun ConfigSelector(
                             )
                         }
                     },
-                    leadingIcon = {
-                        if (config.id == selectedConfig?.id) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null, // decorative
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
+                    leadingIcon = { EchoSelectionIndicator(config.id == selectedConfig?.id) }
                 )
             }
 
