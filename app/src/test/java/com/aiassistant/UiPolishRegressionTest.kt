@@ -30,6 +30,31 @@ import androidx.compose.ui.graphics.luminance
 @org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34], application = android.app.Application::class, manifest = org.robolectric.annotation.Config.NONE)
 class UiPolishRegressionTest {
+    @Test fun paperParagraphsUseDifferentIndentAndKeepTextOutsideTheStyle() {
+        val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp))
+        val deckle = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Deckle)
+        val cotton = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Cotton)
+        assertEquals(androidx.compose.ui.unit.TextUnit(2f, androidx.compose.ui.unit.TextUnitType.Em), deckle.textIndent?.firstLine)
+        assertEquals(androidx.compose.ui.text.style.TextIndent.None, cotton.textIndent)
+        assertEquals(base.fontSize, deckle.fontSize)
+        assertEquals(base, com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.None))
+    }
+
+    @Test fun paperAppearancePresetsArePersistableAndUseDistinctThemeTokens() {
+        val presets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.DECKLE,
+            com.aiassistant.utils.EchoAppearancePreset.COTTON
+        )
+        assertEquals(presets, presets.map { com.aiassistant.utils.EchoAppearancePreset.sanitize(it) })
+        assertTrue(com.aiassistant.utils.EchoAppearancePreset.values.containsAll(presets))
+        val deckleLight = com.aiassistant.ui.theme.echoColorScheme(com.aiassistant.utils.EchoAppearancePreset.DECKLE, false)
+        val cottonLight = com.aiassistant.ui.theme.echoColorScheme(com.aiassistant.utils.EchoAppearancePreset.COTTON, false)
+        assertTrue("毛边文库和棉纸诗笺应有不同主色", deckleLight.primary != cottonLight.primary)
+        assertTrue("毛边文库和棉纸诗笺应有不同背景", deckleLight.background != cottonLight.background)
+        assertTrue("纸张主题使用较平的面板形状", com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.DECKLE).flatSurfaces)
+        assertTrue(com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.COTTON).flatSurfaces)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun frequentSelectionUpdatesKeepScrollingAndIdleReleasesTheMutationLock() = runTest {
         val selections = MutableStateFlow(TextRange.Zero)

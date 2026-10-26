@@ -38,6 +38,28 @@ import java.io.File
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
     @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun paperTexturesHaveDeterministicDistinctTranslucentFibres() {
+        val hashes = mutableSetOf<Int>()
+        for (material in listOf(com.aiassistant.ui.theme.EchoPaperMaterial.Deckle, com.aiassistant.ui.theme.EchoPaperMaterial.Cotton)) {
+            for (dark in listOf(false, true)) {
+                val first = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
+                val second = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
+                fun pixels(bitmap: Bitmap) = IntArray(bitmap.width * bitmap.height).also {
+                    bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                }
+                val a = pixels(first)
+                assertArrayEquals("纸纹重建不能随机闪变", a, pixels(second))
+                assertTrue("纸纹应有实际颗粒与纤维", a.toSet().size > 12)
+                assertTrue("纸纹须为透明纹理而非遮住内容的底图", a.all { it ushr 24 <= 48 })
+                hashes += a.contentHashCode()
+                first.recycle(); second.recycle()
+            }
+        }
+        assertEquals("两种纸张及浅深模式必须实际区别", 4, hashes.size)
+    }
+
+    @Test
     fun keyRotationDraftOnlyPersistsOnSaveAndRestoresAllEditedSettings() {
         val context = RuntimeEnvironment.getApplication()
         val baseUrl = "https://rotation-draft.test/v1"
@@ -657,6 +679,16 @@ class RetryPreferencesTest {
         assertEquals(EchoAppearancePreset.EXISTING, prefs.getString("appearance_preset", null))
         assertEquals(EchoStoryReadingStyle.IMMERSIVE, prefs.getString("story_reading_style", null))
         assertEquals(EchoStreamingAnimationStyle.THIN_CURSOR, prefs.getString("streaming_animation_style", null))
+    }
+
+    @Test fun paperAppearancePresetsRemainValidAndPersistAcrossManagerRecreation() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = PersonalizationManager(context)
+        for (preset in listOf(EchoAppearancePreset.DECKLE, EchoAppearancePreset.COTTON)) {
+            assertTrue("纸本主题必须是可持久化的有效预设", preset in EchoAppearancePreset.values)
+            assertTrue(manager.saveSettings(manager.getSettings().copy(appearancePreset = preset)))
+            assertEquals(preset, PersonalizationManager(context).getSettings().appearancePreset)
+        }
     }
 
     @Test fun httpPermissionsDefaultClosedPersistAndRemainDeviceLocal() {

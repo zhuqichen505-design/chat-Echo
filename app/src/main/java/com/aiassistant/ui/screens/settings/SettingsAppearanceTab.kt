@@ -498,7 +498,7 @@ fun AppearanceTab(
         item {
             SettingsGlassCard(hazeState = hazeState) {
                 Text("主题预设", style = MaterialTheme.typography.titleMedium)
-                Text("切换主题会同步首页与对话页的纯色背景。用过的图片保留在背景历史中，可随时恢复。", style = MaterialTheme.typography.bodySmall,
+                Text("切换主题会同步首页、对话页和弹窗的颜色、纸张质感与排版倾向。用过的图片保留在背景历史中，可随时恢复。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Column(Modifier.fillMaxWidth().selectableGroup()) {
                     val presets = listOf(
@@ -506,7 +506,9 @@ fun AppearanceTab(
                         AppearancePresetOption(EchoAppearancePreset.CLEAR_SKY, "晴空", "蓝白层次，清晰舒展", listOf(0xFF2C73B7, 0xFF83D3F0, 0xFFEDF4FC)),
                         AppearancePresetOption(EchoAppearancePreset.NIGHT_VOYAGE, "夜航", "墨绿与暖金，安静阅读", listOf(0xFF172B29, 0xFFD6BB83, 0xFFA5C9AD)),
                         AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "纸色与赭红，温和分明", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354)),
-                        AppearancePresetOption(EchoAppearancePreset.MONO, "墨白", "黑白对照、细线轮廓、平面材质", listOf(0xFF242424, 0xFFE9E9E9, 0xFFFFFFFF))
+                        AppearancePresetOption(EchoAppearancePreset.MONO, "墨白", "黑白对照、细线轮廓、平面材质", listOf(0xFF242424, 0xFFE9E9E9, 0xFFFFFFFF)),
+                        AppearancePresetOption(EchoAppearancePreset.DECKLE, "毛边文库", "暖纸纤维、砖红铅墨、书页排版", listOf(0xFFF2E8D3, 0xFF8B3E2D, 0xFFEADAC0)),
+                        AppearancePresetOption(EchoAppearancePreset.COTTON, "棉纸诗笺", "冷白棉纸、松绿蓝墨、舒展留白", listOf(0xFFF4F5F1, 0xFF375D70, 0xFFDDE6E6))
                     )
                     presets.forEach { preset ->
                         val selected = settings.appearancePreset == preset.id

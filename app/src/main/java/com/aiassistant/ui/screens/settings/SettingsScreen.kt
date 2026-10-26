@@ -3,6 +3,7 @@
 package com.aiassistant.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
+import com.aiassistant.ui.theme.echoPaperTexture
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -637,6 +638,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .matchParentSize()
                 .background(MaterialTheme.colorScheme.background)
+                .echoPaperTexture()
                 .echoHazeSource(hazeState)
         ) {
             settingsBackgroundBitmap?.let { bitmap ->

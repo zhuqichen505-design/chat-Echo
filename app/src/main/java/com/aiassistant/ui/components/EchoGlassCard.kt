@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.echoPaperTexture
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -54,7 +55,7 @@ fun EchoGlassCard(
     val colorScheme = MaterialTheme.colorScheme
     if (LocalEchoThemeStyle.current.flatSurfaces) {
         val surface = (containerColor ?: colorScheme.surface).compositeOver(colorScheme.surface).copy(alpha = 1f)
-        Box(modifier = modifier.clip(shape).background(surface, shape).then(
+        Box(modifier = modifier.clip(shape).background(surface, shape).echoPaperTexture().then(
             if (showBorder && borderWidth > 0.dp) Modifier.border(borderWidth, borderColor ?: colorScheme.outlineVariant, shape)
             else Modifier
         ), content = content)

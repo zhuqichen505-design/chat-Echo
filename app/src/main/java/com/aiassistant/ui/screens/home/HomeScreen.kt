@@ -6,6 +6,7 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.graphics.Typeface
+import com.aiassistant.ui.theme.echoPaperTexture
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -231,6 +232,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
+                    .echoPaperTexture()
                     .echoHazeSource(hazeState)
             ) {
                 homeBackgroundBitmap?.let { bitmap ->

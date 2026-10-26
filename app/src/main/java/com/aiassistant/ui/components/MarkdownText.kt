@@ -42,6 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.key
+import com.aiassistant.ui.theme.EchoPaperMaterial
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.unit.em
 
 /** Style selected in Settings; kept local so nested Markdown blocks share one value. */
 internal val LocalStreamingAnimationStyle = compositionLocalOf { StreamingAnimationStyle.CURSOR }
@@ -655,9 +660,9 @@ private fun MarkdownContent(
                             }
                             InlineMarkdownText(
                                 text = parseInlineMarkdown(mergedLines.toString()),
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = paperParagraphStyle(MaterialTheme.typography.bodyLarge, LocalEchoThemeStyle.current.paperMaterial),
                                 color = color,
-                                modifier = Modifier.padding(vertical = 2.dp),
+                                modifier = Modifier.padding(vertical = if (LocalEchoThemeStyle.current.paperMaterial == EchoPaperMaterial.Cotton) 5.dp else 2.dp),
                                 onCitationClick = onCitationClick,
                                 endCursorColor = if (index >= lines.size) endCursorColor else null,
                                 endCursorFading = endCursorFading
@@ -697,6 +702,13 @@ private fun hasUnclosedInlineFormatting(text: String): Boolean {
 
     return (count3 % 2 != 0) || (count2 % 2 != 0) || (count1 % 2 != 0) || (countTilde % 2 != 0) ||
         (countFontOpen > countFontClose) || (countSpanOpen > countSpanClose)
+}
+
+/** Paragraph treatment only: list markers, code, tables and source text stay untouched. */
+internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial): TextStyle = when (material) {
+    EchoPaperMaterial.Deckle -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 2.em))
+    EchoPaperMaterial.Cotton -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent.None)
+    EchoPaperMaterial.None -> style
 }
 
 /**

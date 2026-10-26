@@ -4,9 +4,20 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.8.18（versionCode 204）
+**当前源码版本**：v2.8.19（versionCode 205）
 
 **数据库版本**：37（20 个实体），本版无迁移。
+
+**2.8.19 当前修复（2026-10-26）**：基线 `main/75e40c4`。本轮正式接入 DECKLE（毛边文库）和 COTTON（棉纸诗笺）两套纸本主题，保留五个旧主题；另外两套纸本方案继续仅供预览。源码冻结验收、构建和 APK 隐私核查已通过。最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。 Git 与 Release 结果待提交阶段完成。
+
+- DECKLE / COTTON 的浅深配色、主题选择和持久化已接入设置；Room v37 / 20 个实体、请求协议和消息数据不变。
+- `EchoPaperTexture` 以固定种子生成半透明噪点与短 / 长纤维缓存 Shader，纹理绘制在文字下方且不拦截触摸；首页、聊天、设置背景以及 `EchoGlassCard`、`EchoHazePanel`、`EchoGlassDialog` 共享组件统一挂载。
+- `Type` 使用既有 `echo_literary_regular` 字体，`EchoThemeStyle` 提供纸本行距、字距和低圆角平面；`MarkdownText` 仅调整普通段落（毛边 2em 首行缩进，棉纸 5dp 段距），列表 / 代码 / 表格 / 原文字不变。
+- 前轮 Bot 状态符号右移与颜色引用误判修复随本轮进入包。
+
+临时实施方案与影响面：原主题系统主要提供颜色和控件样式，缺少纸张材质层，且 Markdown 排版无法区分普通段落与结构化内容。本轮新增 `EchoPaperTexture.kt`，在 `Theme.kt` / `EchoThemeStyle.kt` / `Type.kt` 统一主题语义；更新 `HomeScreen.kt`、`ChatScreen.kt`、`SettingsScreen.kt`、`SettingsAppearanceTab.kt`、`EchoGlassCard.kt`、`EchoHaze.kt`、`MarkdownText.kt`、`PersonalizationManager.kt`，并扩展 `RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt` 等回归覆盖。纹理只负责视觉层，不改变点击、滚动、选择或请求链路。
+
+未连接真机或模拟器；自动测试、浏览器预览和构建成功不能作为安装启动、键盘 / 触控、设备动画或真实接口验收。
 
 **2.8.18 已发布修复（2026-10-26）**：基线 `main/ba0d4e4`。源码和测试冻结后的完整验收、Release 构建、产物 / 签名及 APK 隐私核查通过；版本提交与标签已推送，Release 唯一手动 APK 附件及匿名下载核验通过。
 

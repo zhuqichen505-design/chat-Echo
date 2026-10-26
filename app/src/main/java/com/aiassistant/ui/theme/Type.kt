@@ -7,9 +7,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.aiassistant.utils.EchoAppearancePreset
+import com.aiassistant.R
 
 // 使用系统默认字体，但设置更人性化的参数
 val DefaultFontFamily = FontFamily.Default
+internal val PaperFontFamily = FontFamily(Font(R.font.echo_literary_regular))
 
 val Typography = Typography(
     // 大标题 - 用于页面标题
@@ -136,8 +138,8 @@ val Typography = Typography(
 
 /** 墨白用更利落的标题和中性字距表达层次，正文字号和用户阅读字体不受影响。 */
 internal fun echoTypographyFor(appearancePreset: String): Typography =
-    if (EchoAppearancePreset.sanitize(appearancePreset) == EchoAppearancePreset.MONO) {
-        Typography.copy(
+    when (EchoAppearancePreset.sanitize(appearancePreset)) {
+        EchoAppearancePreset.MONO -> Typography.copy(
             displayLarge = Typography.displayLarge.copy(fontWeight = FontWeight.Medium),
             displayMedium = Typography.displayMedium.copy(fontWeight = FontWeight.Medium),
             displaySmall = Typography.displaySmall.copy(fontWeight = FontWeight.Medium),
@@ -151,6 +153,31 @@ internal fun echoTypographyFor(appearancePreset: String): Typography =
             labelMedium = Typography.labelMedium.copy(letterSpacing = 0.sp),
             labelSmall = Typography.labelSmall.copy(letterSpacing = 0.sp)
         )
-    } else {
-        Typography
+        EchoAppearancePreset.DECKLE -> Typography.copy(
+            displayLarge = Typography.displayLarge.copy(fontFamily = PaperFontFamily, letterSpacing = (-0.15).sp),
+            displayMedium = Typography.displayMedium.copy(fontFamily = PaperFontFamily),
+            displaySmall = Typography.displaySmall.copy(fontFamily = PaperFontFamily),
+            headlineLarge = Typography.headlineLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .15.sp),
+            headlineMedium = Typography.headlineMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .15.sp),
+            headlineSmall = Typography.headlineSmall.copy(fontFamily = PaperFontFamily, letterSpacing = .1.sp),
+            titleLarge = Typography.titleLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .2.sp),
+            titleMedium = Typography.titleMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .15.sp),
+            bodyLarge = Typography.bodyLarge.copy(fontFamily = PaperFontFamily, lineHeight = 29.sp),
+            bodyMedium = Typography.bodyMedium.copy(fontFamily = PaperFontFamily, lineHeight = 25.sp),
+            bodySmall = Typography.bodySmall.copy(fontFamily = PaperFontFamily, lineHeight = 20.sp)
+        )
+        EchoAppearancePreset.COTTON -> Typography.copy(
+            displayLarge = Typography.displayLarge.copy(fontFamily = PaperFontFamily),
+            displayMedium = Typography.displayMedium.copy(fontFamily = PaperFontFamily),
+            displaySmall = Typography.displaySmall.copy(fontFamily = PaperFontFamily),
+            headlineLarge = Typography.headlineLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .3.sp),
+            headlineMedium = Typography.headlineMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .25.sp),
+            headlineSmall = Typography.headlineSmall.copy(fontFamily = PaperFontFamily, letterSpacing = .2.sp),
+            titleLarge = Typography.titleLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .3.sp),
+            titleMedium = Typography.titleMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .2.sp),
+            bodyLarge = Typography.bodyLarge.copy(fontFamily = PaperFontFamily, lineHeight = 30.sp, letterSpacing = .1.sp),
+            bodyMedium = Typography.bodyMedium.copy(fontFamily = PaperFontFamily, lineHeight = 26.sp, letterSpacing = .1.sp),
+            bodySmall = Typography.bodySmall.copy(fontFamily = PaperFontFamily, lineHeight = 21.sp)
+        )
+        else -> Typography
     }

@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-10-26 · 2.8.19 毛边 / 棉纸正式主题（源码与构建已验收，Git / Release待提交）
+
+- 基线 main/`75e40c4`；versionName 2.8.19、versionCode 205；Room v37 / 20 个实体不变。只改当前明确需求，保留五个旧主题；DECKLE / 毛边文库和 COTTON / 棉纸诗笺正式接入，其余两套纸本方案仍为预览。
+- 根因与实施：上一轮纸本主要是配色，缺少共享纸纹和排版入口。本轮新增 `EchoPaperTexture` 固定种子噪点与短 / 长纤维缓存 Shader；`Theme` / `EchoThemeStyle` / `Type` 提供浅深色、文学字体、纸本行距 / 字距 / 低圆角；首页 / 聊天 / 设置及共享 `EchoGlassCard`、`EchoHazePanel`、`EchoGlassDialog` 接入；`PersonalizationManager` 持久化主题；`MarkdownText` 只改普通段落，列表 / 代码 / 表格 / 原文字不变。
+- 影响文件与测试清单见 UPDATE_LOG / walkthrough：主题、首页、聊天、设置、共享组件、Markdown、偏好管理和对应回归测试；前轮 Bot 右上符号右移 / 颜色误判修复随本轮包进入。
+- 影响范围：不改 Room schema、请求协议、消息数据、滚动、输入法或选择交互；纹理在文字下绘制，不拦截触摸。
+- 验证待补：冻结后执行标准 verify、`git diff --check`、Release、APK 隐私核查、Git / 标签 / Release 核验；不写旧版测试、构建或 APK 数字，不声称设备视觉 / 真实接口已验收。
+- 用户设备未连接；人工重点为主题持久化、浅深对比、纹理连续性、交互不被拦截、Markdown 段落差异、结构化内容不变及 Bot 符号 / 颜色回归。
+
+以下为历史任务记录，状态和验收数字对应当时版本。
+
 ## 2026-10-26 · 2.8.18 聊天输入 / 滑块 / 自然尺寸候选 / Bot 修复
 
 - 基线 main/`ba0d4e4`；versionName 2.8.18、versionCode 204；Room v37 / 20 个实体不变。仅处理本次明确要求，原未跟踪内容保留，不读不采信归档任务书。
@@ -47,7 +58,7 @@
 - 基线 main/`ba7d6fd`；versionName 2.8.17、versionCode 203；Room v37 / 20 个实体不变。用户明确要求构建 APK，依次完成源码冻结、verify、Release、隐私核查、提交、推送、标签和 Release 附件核验。
 - Bot 暂停 / 错误加入 520ms 活动进入；扁扁符号独立右上锚点，终止末帧稳定；既有领域测试加入中间帧和边界断言。毛边文库优化，其他三套纸本装帧重做；预览不应用到 App。
 - 最终 verify `20261025-235531-637` 退出 0，321.196 秒；88 套件 / 1,007 项完整单测，失败 / 错误 / 跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致；`git diff --check` 退出 0。
-- Release `assembleRelease --no-daemon --build-cache` 退出 0；APK 25,456,117 字节，SHA256 `72bd79b22e3e6016b36b89eb83a64c3b85eb02b2be3049fa6daf89bf6dee45e9`，v2 签名通过，证书摘要与项目 JKS / 上版一致，Android Debug 非正式生产签名。只复制到 `D:/Agent/APP-Echo/app/releases/Echo-v2.8.17.apk`，未覆盖历史包。
+- Release `assembleRelease --no-daemon --build-cache` 退出 0；APK 25,456,117 字节，SHA256 `72bd79b22e3e6016b36b89eb83a64c3b85eb02b2be3049fa6daf89bf6dee45e9`，v2 签名通过，证书摘要与项目 JKS / 上版一致，Android Debug 非正式生产签名。只复制到 `<本机发布目录>/Echo-v2.8.17.apk`，未覆盖历史包。
 - 完整候选源码、测试、文档、PNG / GIF、APK 内容 / 元数据、提交作者和待推历史隐私核查通过；原未跟踪内容和本机报告排除。设备未连接，安装启动 / 触控 / 键盘 / 动态视觉 / 真实接口仍需验收。
 
 ## 2026-10-25 · 思考强度、文本选择、弹窗、滚动与 Bot / 主题预览完善
@@ -112,8 +123,8 @@ Room v37（20 个实体）不变；同 applicationId、同签名及更高 versio
 
 - 2026-10-19（v2.8.15/201 启动 ICU 紧急修复发布完成）：延续原 APK 构建授权，基线 main/`862c250`，原未跟踪素材保留并排除；版本 2.8.15/201，Room v37/20 实体不变。启动链 `AiAssistantApp` → `PersonalizationManager` → `ApiKeyRotationManager` 会立即编译状态正则；原 `[:(]` 与后续字符类组合在两路原生 ICU 72.1 完整编译均报 `U_REGEX_PROPERTY_SYNTAX`，原发布 APK 内也存在同一故障表达式。尚无用户设备堆栈，不把本机复现写成手机现场记录。
 - 临时方案与影响面：仅把 `ApiKeyRotationManager.kt` 的字符类等价重排为 `[(:]`，保留 HTTP/中文状态识别；`NetworkAndKeyStabilityTest.kt` 增加实际三个启动正则的 ICU4J 字符集解析回归和状态格式/非 Key 错误保护回归，共两项。原生 ICU 完整编译已确认修复表达式通过。
-- 升版前定向 `NetworkAndKeyStabilityTest` 的 Gradle 退出 0，48 项测试、失败/错误/跳过 0，XML 测试时间 1.755 秒、Gradle 5m7s。2.8.15/201 源码、测试和构建配置冻结后，最终验收 `20261019-232631-568` 的 `pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 463.559 秒；编译、88 套件/973 项完整单测和 Lint 均实际执行，失败/错误/跳过 0，测试任务 121.46 秒，Lint XML 0 Error/102 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。随后串行独立 Release，不改冻结输入或重复完整验收。
-- 本轮独立 Release `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，268.984 秒；本机元数据/全部 CRC/apksigner 核验脚本退出 0。`Echo-v2.8.15.apk` 25,406,965 字节/446 条目，2.8.15/201/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 和项目 JKS 一致，Android Debug 非正式生产签名，满足覆盖升级条件。
+- 升版前定向 `NetworkAndKeyStabilityTest` 的 Gradle 退出 0，48 项测试、失败/错误/跳过 0，XML 测试时间 1.755 秒、Gradle 5m7s。2.8.15/201 源码、测试和构建配置冻结后，最终验收 `20261019-232631-568` 的 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存> -RerunTests` 脚本/Gradle 退出 0，总 463.559 秒；编译、88 套件/973 项完整单测和 Lint 均实际执行，失败/错误/跳过 0，测试任务 121.46 秒，Lint XML 0 Error/102 Warning，`inputsChangedDuringRun=false`，`git diff --check` 退出 0。随后串行独立 Release，不改冻结输入或重复完整验收。
+- 本轮独立 Release `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，268.984 秒；本机元数据/全部 CRC/apksigner 核验脚本退出 0。`Echo-v2.8.15.apk` 25,406,965 字节/446 条目，2.8.15/201/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`。v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与 v2.8.14 和项目 JKS 一致，Android Debug 非正式生产签名，满足覆盖升级条件。
 - APK 自动内容隐私扫描、完整人工差异及最终证据链均退出 0：446 条目、31,183 DEX/10,617 资源字符串；288 候选由 27 个已审精确串及 261 个完整未变条目继承，未决 0，新增 5 唯一串/6 记录全部人工读完无发现，186 图内容/尺寸/元数据一致。仅 Manifest、DEX、VCS textproto、baseline.prof 共 4 个解压条目改变，无新增/删除条目；baseline.prof 做完整字节/ASCII/UTF-16/已知私人值扫描，未作专有语义解码，不保证任意未知/加密私人值。
 - 最终 DEX 专项退出 0：全部 DEX 原式 0、修复式 1，目标 `<clinit>` 准确加载修复式 1，提取表达式通过原生 ICU 72.1 完整编译及 12 项分类案例，source/APK/mapping 前后字节一致。指定目录排他复制退出 0，源/副本 SHA256 一致，副本签名退出 0；原有 211 文件（210 APK）名称、大小和 SHA256 未变，现 212 文件（211 APK），历史安装包无覆盖或删除。
 - 本轮在 `app/build.gradle.kts` 升版并维护七份文档。完整候选/暂存/版本提交 10 文件隐私扫描均退出 0，89 匹配精确继承已审证据、未决 0，完整 blob 与人工报告一致，公共提交/tag 元数据及差异检查通过。版本提交 `1ae2cd4e787114910eabbf63762910145d0debc5` 与 annotated `v2.8.15` 原子推送退出 0，标签对象 `2d81373810a2f40c7ceb3fc44a9762a92caf000f`，`git ls-remote` 核验 main、标签及解引用一致。
@@ -121,15 +132,15 @@ Room v37（20 个实体）不变；同 applicationId、同签名及更高 versio
 - 公开说明在版本提交后保持冻结，发布后仅六份维护文档另行审核提交，不移动版本标签或重复 Gradle。不改数据库/用户数据，没有设备安装启动验收，无需卸载或清除数据；不读取历史改进归档。
 
 - 2026-10-19（v2.8.14/200 发布）：用户明确要求构建 APK，来源为当前仓库 `5d93d8b` 与 `d99d3c3`，不从旧目录同步、不读取历史改进归档；仅递增版本配置并维护七份文档，Room v37/20 实体不变。自动时间线、多 Key 和删除/恢复/暂停修复纳入本版。既有未跟踪素材、私人配置/签名/日志/缓存和产物排除 Git，本机历史 APK 永久保留。
-- 升版冻结验收 `20261019-203850-946`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home -RerunTests` 脚本/Gradle 退出 0，总 486.819 秒；编译、88 套件/971 项完整单测与 Lint 实际执行，失败/错误/跳过 0，测试 108.85 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`。`-RerunTests` 仅强制测试任务重跑；通过后仅独立 Release 构建、文档和 Git 收尾，不改生产源码或重复完整验收。
-- 本轮 `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，264.873 秒；元数据/全部 CRC/apksigner 核验脚本退出 0。APK 25,406,961 字节/446 条目、2.8.14/200/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`。v2 签名与上版 APK/项目 JKS 一致，Android Debug 非正式生产签名。
+- 升版冻结验收 `20261019-203850-946`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存> -RerunTests` 脚本/Gradle 退出 0，总 486.819 秒；编译、88 套件/971 项完整单测与 Lint 实际执行，失败/错误/跳过 0，测试 108.85 秒，Lint 0 Error/102 Warning，`inputsChangedDuringRun=false`。`-RerunTests` 仅强制测试任务重跑；通过后仅独立 Release 构建、文档和 Git 收尾，不改生产源码或重复完整验收。
+- 本轮 `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，264.873 秒；元数据/全部 CRC/apksigner 核验脚本退出 0。APK 25,406,961 字节/446 条目、2.8.14/200/com.aiassistant、min26/target34/compile34、arm64-v8a、不可 debug；SHA256 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`。v2 签名与上版 APK/项目 JKS 一致，Android Debug 非正式生产签名。
 - APK 隐私扫描/提取退出 0：31,183 个 DEX/10,617 个资源字符串，288 个候选精确继承有效基线、未决 0；新增 317 个唯一字符串/318 条记录逐项人工阅读未发现私人值。186 张图片内容/尺寸/元数据一致、变化 0；5 个变化 ZIP 条目仅产物元数据/DEX。自动/人工/基线报告 SHA 链绑定。排他复制退出 0，源副本一致，原 210 文件（209 APK）名称/大小/SHA256 均不变，现 211 文件（210 APK）。未知/混淆私人值不作绝对保证，设备及真实接口仍待验收。
 - 版本 Git 核查：完整 8 个候选、暂存与提交全文隐私扫描退出 0，24 个匹配均继承已审基线、未决 0；完整 blob 与审核候选一致，公共提交/标签元数据及独立人工复核通过。版本提交 `3d20b0376575649063f1a16d46f73497c3181367` 与 annotated `v2.8.14` 推送退出 0，标签对象 `68fcb34278a5383bd97564eb8b020bf009c25c07`，`git ls-remote` 核对 main、标签对象及解引用一致。
 - 公开发布：[v2.8.14 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.14) 发布脚本退出 0，唯一手动附件为 `Echo-v2.8.14.apk`（25,406,961 字节），GitHub 摘要和匿名公开下载 SHA256 与本机一致。再次匿名下载核验成功后，仅撤下新仓库远端 v2.8.13 Release/版本标签，清理退出 0；清理后独立复核退出 0，远端 Release/版本标签仅余 v2.8.14，唯一附件与匿名下载哈希一致。本机全部历史 APK 和旧标签保留，不操作旧仓库。
 - 发布后仅收尾六份维护文档，候选及后续提交/元数据另行完整隐私核查后推送，最终 main 结果在交付核验；不修改冻结公开说明、不移动版本标签、不重复 Gradle。
 
 - 2026-10-19（删除上下文与生成状态修复，未构建 APK）：基线 main/5d93d8b，已有未跟踪素材保留并排除；仅当前仓库实现，不读取历史改进归档。删除依据当前数据库行清理投影/来源记忆，发送校验全部方向快照来源；副本映射来源，人工内容编辑解除来源。恢复输出清即时错误；暂停与完成共享保存权，旧回调 Main 重验身份，实际统计只记一次；错误/上下文横幅局部背景同步进退，停止文案统一“生成已停止”。版本 2.8.13/199、Room v37/20 实体不变，无 APK、标签或 Release 操作。
-- 本轮最终冻结验收 `20261019-202502-349`：`pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 脚本/Gradle 退出 0，总 397.657 秒；编译、88 套件/971 项完整单测及 Lint 实际执行，本轮新增 16 项，失败/错误/跳过 0，测试 109.38 秒，Lint 0 Error/102 Warning，输入哈希一致；`git diff --check` 退出 0。不并行 Gradle、不边改源码边验收；通过后仅文档和 Git，不重复 Gradle。
+- 本轮最终冻结验收 `20261019-202502-349`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本/Gradle 退出 0，总 397.657 秒；编译、88 套件/971 项完整单测及 Lint 实际执行，本轮新增 16 项，失败/错误/跳过 0，测试 109.38 秒，Lint 0 Error/102 Warning，输入哈希一致；`git diff --check` 退出 0。不并行 Gradle、不边改源码边验收；通过后仅文档和 Git，不重复 Gradle。
 - 本轮隐私核查：25 个完整候选全文扫描退出 0，36 个匹配继承基线，新增未解决 0；结合新增字串、合成测试来源与文件名人工审阅。候选变化后重扫，暂存与提交继续逐 blob 对照，公共维护者元数据，仅 main 不推标签；远端实际状态在交付记录。原未跟踪素材、配置/密钥、缓存、日志和产物排除；未覆盖任意未知私人值、设备数据或平台缓存。设备动态视觉及真实厂商接口尚未验收，不以合成 HTTP 冒充。
 
 - 2026-10-19（发布后源码，未构建 APK）：按需求精简自动增量时间线并新增多 Key 持久健康调度。来源仅当前仓库，版本 2.8.13/199、Room v37/20 实体不变；无旧目录同步，不读取历史改进归档，不构建 APK、不打标签或操作 Release。自动事件通常 20～72 字、上限 96 字，超长最多一次语义精简；UPDATE 校验目标和旧正文/分类，事实标识/问句/取消/事务保护保留。按地址与协议共享轮询、失败降权、暂时冷却与重置，全部正式/辅助/目录请求统一接线；HTTP 200 内嵌错误保留机器码，同凭据前缀别名不绕过冷却。
@@ -137,7 +148,7 @@ Room v37（20 个实体）不变；同 applicationId、同签名及更高 versio
 - 本轮最终冻结验收 `20261019-192747-656`：标准 verify（显式指定本机可写缓存）脚本/Gradle 退出 0，总 456.501 秒；编译、88 套件/955 项完整单测和 lintDebug 实际执行，测试 139.08 秒，失败/错误/跳过 0；Lint 0 Error/102 Warning，输入哈希一致，工作区差异检查退出 0。新增 48 项领域测试；新增的 7 条偏好写入建议保留，确保同步持久化和显式保存结果，未新增 suppress 或关闭规则。通过后只改文档，不再重复 Gradle。
 - 上传范围：22 个完整候选（11 主源码/6 测试/5 文档）全文扫描退出 0，98 个继承匹配精确对照、新增未解决 0；新增代码/合成测试/文档/文件名人工复核通过，新增图片/二进制为 0。候选变更后重扫，完整暂存和提交按 blob 哈希核对，公共维护者元数据及仅本轮 main 范围检查；不推标签，实际提交与远端核验在对话交付记录。原未跟踪素材与浏览器目录保留且排除，本机配置/密钥、报告、缓存与产物不提交；未知/加密私人值、设备数据和外部平台缓存不作保证。
 
-- 2026-10-18（v2.8.13/199，APK 构建与发布完成）：用户明确要求构建 APK。版本由 2.8.12/198 递增为 2.8.13/199，Room v37/20 实体不变；标准 verify `20261018-223236-977` 退出 0，88 套件/907 项通过，Lint 0 Error/95 Warning；Release `assembleRelease --no-daemon --build-cache -g D:/Agent/APP-Echo/app/.gradle-home` 退出 0，包 25,374,197 字节、446 条目、arm64-v8a，SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`，证书与上版一致且为 Android Debug 非正式生产签名。已知 APK 隐私模式新增候选 0，图片 186 张与上版一致，排他复制到指定目录成功。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、main、v2.8.13 标签、GitHub Release 与匿名下载复核均通过；旧 v2.8.12 Release/标签已撤下，本机历史包不删除、不覆盖。原未跟踪素材、配置、缓存、报告和构建产物排除。
+- 2026-10-18（v2.8.13/199，APK 构建与发布完成）：用户明确要求构建 APK。版本由 2.8.12/198 递增为 2.8.13/199，Room v37/20 实体不变；标准 verify `20261018-223236-977` 退出 0，88 套件/907 项通过，Lint 0 Error/95 Warning；Release `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，包 25,374,197 字节、446 条目、arm64-v8a，SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`，证书与上版一致且为 Android Debug 非正式生产签名。已知 APK 隐私模式新增候选 0，图片 186 张与上版一致，排他复制到指定目录成功。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、main、v2.8.13 标签、GitHub Release 与匿名下载复核均通过；旧 v2.8.12 Release/标签已撤下，本机历史包不删除、不覆盖。原未跟踪素材、配置、缓存、报告和构建产物排除。
 
 - 2026-10-18（发布后源码，未构建 APK）：按用户要求修复摘要拒绝误报/误存，识别并隔离旧拒绝或纯标题摘要；新增 LT/6 按比例直接截断上下文，10%～90%/步长 5%，按最早完整轮次取整，置顶与最近一轮保留，不调用/注入摘要、不改本机聊天或覆盖位置。预览仅更新候选，超预算提示调整比例，不自动多截或回到摘要；分支继承压缩档位、轮数和比例。复用现有持久化字段，2.8.12/198、Room v37/20 实体不变。新增既有领域回归覆盖协议/正文拒绝、误判边界、失败保护、旧坏摘要重建、双协议实际截断请求、比例恢复、分支继承与 VM 预览。最终冻结验收 `20261018-213324-277` 的标准 verify（显式使用本机可写 Gradle 缓存）脚本/Gradle 退出 0，总 381.218 秒；编译与 88 套件/907 项完整单测实际执行，测试任务 102.90 秒，失败/错误/跳过 0，Lint 0 Error/95 Warning，输入哈希一致，工作区/暂存差异检查退出 0。前两轮虽通过，实质补修后均重新冻结验收；通过后仅文档和 Git 收尾，不构建 APK、不升版或操作 Release。完整 23 个候选（10 主源码/8 测试/5 文档）逐 blob 扫描退出 0，49 个模式候选均继承基线、无新增，全部新增字串、文件名/URL 与合成夹具人工复核通过；文档补齐后重扫，提交后核对 blob、公共元数据和本轮待推提交，仅推 main。原未跟踪素材、配置/密钥、缓存、报告与构建产物排除，模式扫描不能保证任意未知或加密私人值，设备数据与平台缓存不在范围；远端实际结果见交付。
 
@@ -250,12 +261,12 @@ Room v37（20 个实体）不变；同 applicationId、同签名及更高 versio
 - `assembleRelease --no-daemon` 退出 0；aapt/apksigner/复制后哈希核验退出 0，APK 16,848,145 字节、445 条目。初次二进制扫描退出 1：删除全部 NUL 字节导致第三方 OCR 库被误拼成 token 模式；比对缓存原始 AAR 与 v2.8.3 中该库完全一致，修正为连续 UTF-16 字符串扫描后退出 0、无命中；未将疑似内容写入报告。排他复制退出 0，没有覆盖/删除历史包，Android Debug 证书为非正式生产签名。
 - 本轮 26 个完整暂存文件（源码、测试、配置、文档及 HTML）终审扫描退出 0，并结合人工复核；无新增图片/二进制源码资产。待推送仅本轮提交与 v2.8.4 标签，采用公共维护者占位元数据；提交后再次对照已审核文件哈希及提交/标签元数据，远端实际状态以交付核验为准。原有未跟踪图片及浏览器目录保留本机，SDK/密钥/本机配置与构建输出不进入提交。公共维护者占位身份提交，无旧待推提交；外部平台缓存不在本次核查范围。
 
-- 2026-10-15（独立外观偏好与首页预览，未发版）：三种主题/三种阅读/三种动画独立选择；首页只提供六种结构。`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合命令退出 0；83 套件 / 633 项全部通过（失败、错误、跳过均为 0），Lint 0 Error / 88 Warning；`git diff --check` 退出 0。Gradle 使用 `-g D:/Agent/APP-Echo/app/.gradle-home`。 预览页在 1440/390 px 检查无页面横向溢出，主题/阅读/动画切换和减弱动态可用，控制台无错误；不代表 Android 设备验收。未构建 APK、未改版本和数据库。
+- 2026-10-15（独立外观偏好与首页预览，未发版）：三种主题/三种阅读/三种动画独立选择；首页只提供六种结构。`compileDebugKotlin testDebugUnitTest lintDebug --no-daemon` 联合命令退出 0；83 套件 / 633 项全部通过（失败、错误、跳过均为 0），Lint 0 Error / 88 Warning；`git diff --check` 退出 0。Gradle 使用 `-g <本机可写缓存>`。 预览页在 1440/390 px 检查无页面横向溢出，主题/阅读/动画切换和减弱动态可用，控制台无错误；不代表 Android 设备验收。未构建 APK、未改版本和数据库。
 - 暂存差异检查首次退出 2（新增 HTML 尾部多余空行），修正后退出 0。
 - 本轮提交前隐私核查范围：25 个完整候选文件（模式扫描退出 0），涵盖源码、测试、文档、HTML、4 张 PNG 可见内容及元数据、文件名和提交元数据；自动模式扫描结合人工检查，未发现私人值。仅合成场景，SDK/签名/原有未跟踪图片/构建输出/浏览器日志排除；报告不含敏感原文。待推送仅本轮提交，无新增标签，Git 与远端结果以交付为准；未核查外部平台缓存，不声称清除历史对象。
 
 - 2026-10-15（未发版）：角色创作提示精简、世界书基础 JSON 导入/兼容确认/事务新副本、统一预算与三态书目选择、时间线空记忆修复、聊天流式落库衔接和 User-Agent 版本同步。仅现有页面必要操作已接入，整体布局仍为三套预览待用户选择。当前源码与 v2.8.3 APK 区分，未构建 APK，Room v34 不变。
-- 最终验证：`compileDebugKotlin` 退出 0；`testDebugUnitTest` 退出 0，83 套件 / 631 项通过、无失败或跳过；`lintDebug --rerun-tasks` 退出 0，0 Error / 88 Warning；`git diff --check` 退出 0。Gradle 命令均使用 `-g D:/Agent/APP-Echo/app/.gradle-home --no-daemon`。
+- 最终验证：`compileDebugKotlin` 退出 0；`testDebugUnitTest` 退出 0，83 套件 / 631 项通过、无失败或跳过；`lintDebug --rerun-tasks` 退出 0，0 Error / 88 Warning；`git diff --check` 退出 0。Gradle 命令均使用 `-g <本机可写缓存> --no-daemon`。
 - 本轮验收关注：导入不覆盖同名书、不自动绑定；兼容损失需明确确认，书与高级语义词条默认停用；null/空选择/指定书目分别生效；最近消息触发与严格估算预算；人物规则不重复；空记忆仍有当前时间；回复完成不夺走阅读位置。设备和真实模型仍待验收。
 - 本轮依据当前源码及可复核公开资料，未使用 `APP改进/` 作为事实来源。文档修正旧路径与无效引用。
 - 提交前隐私核查：完整暂存候选 33 文件进行路径、联系方式、密钥及地址模式扫描，退出 0、无敏感模式命中；结合人工核对新增源码/合成测试/文档和 3 张预览可见内容。PNG 仅含 IHDR/IDAT/IEND，无文字或 EXIF 元数据。SDK 配置、签名、既有未跟踪图片、浏览器与构建日志均排除。作者与邮箱使用公共维护者占位身份；提交前无待推送旧提交或标签。本次未核查外部平台缓存，也未上传设备数据；不声称清除旧平台对象。提交及远端实际结果见交付报告。

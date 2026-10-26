@@ -10,6 +10,7 @@ import com.aiassistant.ui.components.CropShapeMode
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.aiassistant.ui.theme.echoPaperTexture
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.TransformOrigin
@@ -524,6 +525,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .matchParentSize()
                     .background(MaterialTheme.colorScheme.background)
+                    .echoPaperTexture()
                     .echoHazeSource(hazeState)
             ) {
                 chatBackgroundBitmap?.let { bitmap ->

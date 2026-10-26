@@ -64,6 +64,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.echoPaperTexture
 import dev.chrisbanes.haze.HazeDefaults
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -187,7 +188,7 @@ fun Modifier.echoHazePanel(
     if (LocalEchoThemeStyle.current.flatSurfaces) {
         val surface = if (tint == Color.Unspecified) colorScheme.surface
             else tint.compositeOver(colorScheme.surface).copy(alpha = 1f)
-        return this.clip(shape).background(surface, shape).then(
+        return this.clip(shape).background(surface, shape).echoPaperTexture().then(
             if (showBorder) Modifier.border(1.dp, colorScheme.outlineVariant, shape) else Modifier
         )
     }
@@ -411,7 +412,7 @@ fun EchoGlassDialog(
                 shadowElevation = EchoTokens.Elevation.none
             ) {
                 Column(
-                    modifier = Modifier.padding(EchoDialogLayout.contentPadding)
+                    modifier = Modifier.echoPaperTexture().padding(EchoDialogLayout.contentPadding)
                 ) {
                     if (title != null) {
                         title()

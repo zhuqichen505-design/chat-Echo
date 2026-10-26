@@ -15,20 +15,34 @@ data class EchoThemeStyle(
     val panelCornerRadius: Dp = 18.dp,
     val controlCornerRadius: Dp = 12.dp,
     val dialogCornerRadius: Dp = 24.dp,
-    val flatSurfaces: Boolean = false
+    val flatSurfaces: Boolean = false,
+    val paperMaterial: EchoPaperMaterial = EchoPaperMaterial.None
 )
 
 internal fun echoThemeStyleFor(appearancePreset: String): EchoThemeStyle =
-    if (EchoAppearancePreset.sanitize(appearancePreset) == EchoAppearancePreset.MONO) {
-        EchoThemeStyle(
+    when (EchoAppearancePreset.sanitize(appearancePreset)) {
+        EchoAppearancePreset.MONO -> EchoThemeStyle(
             isMonochrome = true,
             panelCornerRadius = 8.dp,
             controlCornerRadius = 6.dp,
             dialogCornerRadius = 12.dp,
             flatSurfaces = true
         )
-    } else {
-        EchoThemeStyle()
+        EchoAppearancePreset.DECKLE -> EchoThemeStyle(
+            panelCornerRadius = 6.dp,
+            controlCornerRadius = 6.dp,
+            dialogCornerRadius = 12.dp,
+            flatSurfaces = true,
+            paperMaterial = EchoPaperMaterial.Deckle
+        )
+        EchoAppearancePreset.COTTON -> EchoThemeStyle(
+            panelCornerRadius = 8.dp,
+            controlCornerRadius = 8.dp,
+            dialogCornerRadius = 14.dp,
+            flatSurfaces = true,
+            paperMaterial = EchoPaperMaterial.Cotton
+        )
+        else -> EchoThemeStyle()
     }
 
 val LocalEchoThemeStyle = staticCompositionLocalOf { EchoThemeStyle() }

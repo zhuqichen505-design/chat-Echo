@@ -2,6 +2,17 @@
 
 Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上下文管理和本地备份。
 
+**当前源码：Echo 2.8.19/205（2026-10-26）**。本轮以 `main/75e40c4` 为基线，Room v37（20 个实体）不变。正式接入毛边文库（DECKLE）与棉纸诗笺（COTTON），保留五个旧主题；其余两套纸本方案继续作为预览，不进入正式主题选择。
+
+- DECKLE / COTTON 具备完整浅色与深色配色，设置页可选择并持久化；主题不改变模型请求、消息数据或数据库结构。
+- 新增固定种子的纸纹绘制：半透明噪点、短 / 长纤维缓存 Shader 只绘制在文字下方，不拦截点击、滚动或文本选择。首页、聊天、设置背景以及共享 `EchoGlassCard`、`EchoHazePanel`、`EchoGlassDialog` 统一接入。
+- 纸本主题使用既有 `echo_literary_regular` 字体，调整纸本行距、字距和低圆角平面；Markdown 普通段落按主题应用毛边 2em 首行缩进或棉纸 5dp 段距，列表、代码、表格和原文字保持原排版。
+- 前轮 Bot 右上符号右移与颜色引用误判修复随本版进入构建。
+
+临时实施方案：原主题只有颜色切换，缺少纸张材质、排版和组件层统一入口；本轮以 `EchoThemeStyle` / `Type` 生成纸本字体与形状，以 `Theme` 提供浅深色语义色，以 `EchoPaperTexture` 缓存固定种子纹理，再由首页、聊天、设置及共享卡片 / 对话框挂载纹理。设置与 `PersonalizationManager` 负责选择和持久化，`MarkdownText` 只改变普通段落，避免影响列表、代码、表格和原文字。涉及 `app/build.gradle.kts`、`ui/theme`、`HomeScreen.kt`、`ChatScreen.kt`、`SettingsScreen.kt`、`SettingsAppearanceTab.kt`、`EchoGlassCard.kt`、`EchoHaze.kt`、`MarkdownText.kt`、`PersonalizationManager.kt` 及对应回归测试。
+
+源码冻结验收、Release 构建和 APK 隐私核查已通过。最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。 Git 与 Release 结果待提交阶段完成。未连接真机或模拟器，不能把自动测试、浏览器预览或构建结果写成设备视觉、触控、键盘或真实接口验收。
+
 **已发布 Echo 2.8.18/204（2026-10-26）**。本轮修复聊天输入、思考强度选择、候选窗口和 Bot 状态表现；Room v37（20 个实体）不变。基线为 `main/ba0d4e4`，完整源码验收、Release 构建、产物 / 签名和 APK 隐私核查通过；版本提交与标签已推送，Release 唯一手动 APK 附件及匿名下载核验通过。
 
 - 思考强度按钮缩窄到原智能搜索的尺寸，智能搜索恢复自然宽度及文字居中；思考窗口恢复胶囊滑块，档位名称使用无外框文字，支持拖动与点选，`Default` 不再附加“默认”。
@@ -20,7 +31,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC 全通过，DEX / 资源、已�
 
 下载：[Echo v2.8.18 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.18)。版本提交 `1e16b10028c412bc01912c374b83034451f4b268` 与 `v2.8.18` 已推送，远端一致，核验时无待推提交；发布退出 0，GitHub 附件摘要、匿名下载 SHA256 与上述本机 APK 一致。旧版处理退出 0：仅撤下新仓库旧 v2.8.16 Release 及远端 v2.8.16 / v2.8.17 版本标签，远端仅保留 v2.8.18；本机旧标签及全部历史 APK 保留。发布结果收尾仅更新六份维护文档，公开发布说明保持冻结，不新建或移动版本标签，不重复编译。
 
-以下为历史版本与阶段记录，行为和验收结果仅对应当时版本；当前行为以顶部 2.8.18 说明为准。
+以下为历史版本与阶段记录，行为和验收结果仅对应当时版本；当前行为以顶部 2.8.19 说明为准。
 
 **历史 Echo 2.8.17/203（2026-10-26）**：本轮完成 Bot 暂停 / 错误动态、扁扁右上符号定位、纸本主题重做，并已构建 Release APK。Room v37（20 个实体）不变。
 
@@ -42,7 +53,7 @@ APK：`Echo-v2.8.17.apk`，25,456,117 字节，`com.aiassistant`，versionCode 2
 - 对话设置、上下文、思考强度等弹窗使用统一的安全区、边距、宽度和最大高度规则；模型列表、首页配置和通用模型选择统一用左侧圆点标识当前选中项。
 - 纸本主题预览重新强化装帧差异：毛边叠页、线装针脚、活页手札、布面压金，同时仍对应真实会话首页、普通聊天和三页签对话设置弹窗，尚未应用到 App。
 
-最终冻结验收 `20261025-213354-276`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home` 退出 0，340.69 秒；88 套件 / 1,006 项单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。
+最终冻结验收 `20261025-213354-276`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 退出 0，340.69 秒；88 套件 / 1,006 项单测实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。
 
 **纸本预览已按实际页面校正（2026-10-25）**：四套方案沿用真实会话首页、普通聊天及对话设置弹窗，保持控件与导航位置；预览注明源码对应关系和示例设置。它是浏览器重建样稿，不是设备截图，尚未应用主题。本轮只修改预览与记录，未修改 Android 源码、版本或数据库，未构建 APK。
 
