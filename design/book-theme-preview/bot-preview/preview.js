@@ -2,7 +2,7 @@
   'use strict';
   const motion=window.EchoBotMotion;
   const shapes=[['round','圆圆'],['square','方方'],['flat','扁扁']];
-  const labels={connecting:'连接：视线先看向信号，身体缓缓跟随。',thinking:'思考：抬眼思索，右上气泡慢慢形成。',replying:'回复：正文输出，右上说话泡慢慢点亮。',completed:'完成：只演一次收势，随后保持静止。',paused:'主动暂停：身体收回，双竖条持续保留。',failed:'连接 / 回复出错：圆底叹号持续保留，可恢复到回复。',idle:'待机：仅最新成功回复的身份可以进入 Z 待机。'};
+  const labels={connecting:'连接：视线先看向信号，身体缓缓跟随。',thinking:'思考：抬眼思索，右上气泡慢慢形成。',replying:'回复：正文输出，右上说话泡慢慢点亮。',completed:'完成：只演一次收势，随后保持静止。',paused:'主动暂停：缓缓闭眼，呼气后收回身体，双竖条持续保留。',failed:'连接 / 回复出错：双眼变成 ><，连续左右摇头后落定。',idle:'待机：仅最新成功回复的身份可以进入 Z 待机。'};
   const stage=document.querySelector('.stage');
   const chip=(shape,size,state='replying')=>'<span class="bot-svg state-'+state+'" data-shape="'+shape+'" style="width:'+size+'px;height:'+size+'px" role="img" aria-label="'+shape+' Bot">'+motion.svg(motion.sampleBot(shape,state,0))+'</span>';
   stage.innerHTML=shapes.map(([shape,name])=>'<article class="bot-card"><div class="card-heading"><h2>'+name+'</h2><span>同一动作参数 · 不同体态</span></div><div class="large-bot">'+chip(shape,144)+'</div><div class="actual-sizes"><div class="size-example">'+chip(shape,38)+'<span>聊天 38px</span></div><div class="size-example">'+chip(shape,64)+'<span>64px</span></div></div></article>').join('');

@@ -203,12 +203,15 @@ fun ChatInputBar(
     val hasIntensityChoice = com.aiassistant.domain.model.ReasoningControls.hasIntensityChoice(modelName, apiType, reasoningCapability)
     // v2.7.4 需求 4：发送后清除输入框焦点（软键盘随之收起）
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val inputFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val inputKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     // v2.7.4 需求 2：TextFieldValue 承载选区/焦点/布局以支持自绘光标；对外仍保持 String API，
     // 声明在 AnimatedContent 之外，输入栏隐藏/恢复切换不丢内部状态
     var inputFieldValue by remember { mutableStateOf(TextFieldValue(inputText)) }
+    val inputAcknowledgements = remember { com.aiassistant.ui.components.EditorTextAcknowledgements(inputText) }
     // Reconcile before rendering, never from a delayed effect that can race an IME edit.
     // Parent echoes preserve selection/composition; actual external replacements land at the end.
-    if (inputText != inputFieldValue.text) {
+    if (inputAcknowledgements.isReplacement(inputText)) {
         inputFieldValue = com.aiassistant.ui.components.reconcileEditorText(inputFieldValue, inputText)
     }
     // v2.7.8 需求 1：软键盘收起即回到最小高度（与失焦重置双保险）——
@@ -370,9 +373,11 @@ fun ChatInputBar(
                     }
 
                     EchoNativeTextField(
+                        focusRequester = inputFocusRequester,
                         value = inputFieldValue,
                         onValueChange = {
                             inputFieldValue = it
+                            inputAcknowledgements.published(it.text)
                             onInputChange(it.text)
                         },
                         modifier = Modifier
@@ -459,7 +464,7 @@ fun ChatInputBar(
                                     text = effortText,
                                     icon = null,
                                     trailingIcon = if (hasIntensityChoice) Icons.Default.ExpandLess else null,
-                                    fixedControlSize = true,
+                                    matchSearchSize = true,
                                     selected = thinkingActive,
                                     onClick = {
                                         if (hasIntensityChoice) onThinkingPopoverChange(!showThinkingPopover)
@@ -500,7 +505,6 @@ fun ChatInputBar(
                             item {
                                 InputPillButton(
                                     text = "智能搜索",
-                                    fixedControlSize = true,
                                     selected = enableWebSearch,
                                     onClick = { onWebSearchChange(!enableWebSearch) },
                                     containerColor = if (enableWebSearch) {
@@ -757,6 +761,12 @@ fun ChatInputBar(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .size(handleBoxSize)
+                        .pointerInput(inputFocusRequester, inputKeyboard) {
+                            detectTapGestures {
+                                inputFocusRequester.requestFocus()
+                                inputKeyboard?.show()
+                            }
+                        }
                         // v2.7.7 需求 1：移除手柄的点按展开/收起切换——点击输入框（含手柄热区）
                         // 不再改变输入框大小，大小只随拖拽（手动改变）变化
                         .pointerInput(Unit) {
@@ -989,7 +999,7 @@ internal fun ReasoningEffortPopupCard(
                 key = "default",
                 enabled = true,
                 name = "Default",
-                subtitle = "Default（默认）· 交给服务端",
+                subtitle = "Default · 交给服务端",
                 detail = "不固定指定强度，保留思考开关；实际思考量由当前模型服务的默认策略决定。",
                 primaryColor = EchoThinkingColors.medium,
                 gradientColors = EchoThinkingColors.mediumGradient
@@ -1051,7 +1061,8 @@ internal fun ReasoningEffortPopupCard(
     val selected = com.aiassistant.domain.model.ReasoningControls.selected(
         modelName, apiType, enableThinking, thinkingEffort, reasoningCapability
     )
-    val currentLevel = levels.firstOrNull { it.key == selected.value } ?: levels.first()
+    val currentStep = levels.indexOfFirst { it.key == selected.value }.coerceAtLeast(0)
+    val currentLevel = levels[currentStep]
     EchoGlassDialog(
         onDismissRequest = onClose,
         title = {
@@ -1076,32 +1087,11 @@ internal fun ReasoningEffortPopupCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                // Default and Off are discrete policies, not ordered intensity stops.
-                // Independent chips wrap on small screens instead of forcing their borders together.
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    levels.forEach { level ->
-                        val isSelected = currentLevel.key == level.key
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { onEffortSelected(level.enabled, level.key) },
-                            modifier = Modifier.widthIn(min = 72.dp, max = 180.dp).heightIn(min = 40.dp),
-                            label = {
-                                Text(level.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
-                            },
-                            leadingIcon = if (isSelected) {
-                                { Icon(Icons.Default.Check, "当前强度", Modifier.size(16.dp)) }
-                            } else null,
-                            colors = echoFilterChipColors(),
-                            border = echoFilterChipBorder(isSelected),
-                            elevation = echoFilterChipElevation()
-                        )
-                    }
-                }
+                ReasoningEffortSlider(
+                    levels = levels,
+                    currentStep = currentStep,
+                    onEffortSelected = onEffortSelected
+                )
                 Text(currentLevel.detail, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (apiType == "anthropic" && com.aiassistant.domain.model.ReasoningControls.wireThinkingType(
@@ -1121,6 +1111,77 @@ internal fun ReasoningEffortPopupCard(
         ThinkingParamsExplanationDialog(
             onDismiss = { showParamsExplanationDialog = false }
         )
+    }
+}
+
+/** Label centers follow the slider stops, without enclosing boxes around every gear. */
+@Composable
+private fun ReasoningEffortSlider(
+    levels: List<ThinkingEffortLevel>,
+    currentStep: Int,
+    onEffortSelected: (Boolean, String) -> Unit
+) {
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = LocalDensity.current
+    val labelStyle = MaterialTheme.typography.labelMedium
+    val names = levels.map { level ->
+        if (level.key.startsWith("budget:")) level.key.removePrefix("budget:") else level.name
+    }
+    val minCellWidth = with(density) {
+        names.maxOf { textMeasurer.measure(it, labelStyle.copy(fontWeight = FontWeight.Bold)).size.width }.toDp()
+    } + 10.dp
+    val currentLevel = levels[currentStep]
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // Keep large accessibility fonts readable while preserving a single continuous slider.
+        val contentWidth = maxOf(maxWidth, minCellWidth * levels.size)
+        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            androidx.compose.ui.layout.SubcomposeLayout(Modifier.width(contentWidth)) { constraints ->
+                val cellWidth = constraints.maxWidth / levels.size
+                val labels = subcompose("labels") {
+                    levels.forEachIndexed { index, level ->
+                        val isSelected = currentStep == index
+                        Text(
+                            text = names[index],
+                            style = labelStyle,
+                            color = if (isSelected) level.primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .heightIn(min = 40.dp)
+                                .clickable { onEffortSelected(level.enabled, level.key) }
+                                .wrapContentHeight(Alignment.CenterVertically)
+                        )
+                    }
+                }.map { it.measure(androidx.compose.ui.unit.Constraints.fixedWidth(cellWidth)) }
+                val radius = 14.dp.roundToPx()
+                val inset = maxOf(cellWidth / 2, radius)
+                val sliderLeft = inset - radius
+                val sliderWidth = (constraints.maxWidth - 2 * sliderLeft).coerceAtLeast(1)
+                val slider = subcompose("slider") {
+                    EchoPillSlider(
+                        value = currentStep.toFloat(),
+                        onValueChange = { position ->
+                            val level = levels[position.roundToInt().coerceIn(levels.indices)]
+                            onEffortSelected(level.enabled, level.key)
+                        },
+                        valueRange = 0f..levels.lastIndex.toFloat(),
+                        steps = (levels.size - 2).coerceAtLeast(0),
+                        activeColor = currentLevel.primaryColor
+                    )
+                }.single().measure(androidx.compose.ui.unit.Constraints.fixedWidth(sliderWidth))
+                val gap = 4.dp.roundToPx()
+                layout(constraints.maxWidth, slider.height + gap + (labels.maxOfOrNull { it.height } ?: 0)) {
+                    slider.placeRelative(sliderLeft, 0)
+                    labels.forEachIndexed { index, label ->
+                        val center = com.aiassistant.domain.model.ReasoningStopLayout.center(
+                            index, levels.size, constraints.maxWidth.toFloat(), inset.toFloat()
+                        )
+                        label.placeRelative((center - label.width / 2f).roundToInt(), slider.height + gap)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1171,7 +1232,7 @@ internal fun ThinkingParamsExplanationDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ThinkingParamCard(
-                    title = "Default（默认）",
+                    title = "Default",
                     badge = "跟随服务端",
                     badgeColor = EchoThinkingColors.medium,
                     desc = "不固定选择强度，由当前模型服务采用默认策略。客户端保留思考开关设置；服务端默认可能采用不同的思考量，Default 不代表 Medium。",
@@ -1484,13 +1545,13 @@ internal fun InputPillButton(
     containerColor: Color? = null,
     contentColor: Color? = null,
     borderColor: Color? = null,
-    fixedControlSize: Boolean = false
+    matchSearchSize: Boolean = false
 ) {
     val pillShape = RoundedCornerShape(999.dp)
     val glass = echoGlassPalette()
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelLarge
-    val referenceSize = textMeasurer.measure("智能搜索", labelStyle.copy(fontWeight = FontWeight.Medium)).size
+    val referenceSize = textMeasurer.measure("智能搜索", labelStyle).size
     val density = LocalDensity.current
     val textWidth = with(density) { referenceSize.width.toDp() }
     val fixedHeight = with(density) { referenceSize.height.toDp() } + 14.dp
@@ -1509,7 +1570,7 @@ internal fun InputPillButton(
     }
     Surface(
         modifier = Modifier
-            .then(if (fixedControlSize) Modifier.width(textWidth + 44.dp).height(fixedHeight.coerceAtLeast(34.dp)) else Modifier.heightIn(min = 34.dp))
+            .then(if (matchSearchSize) Modifier.width(textWidth + 24.dp).height(fixedHeight.coerceAtLeast(34.dp)) else Modifier.heightIn(min = 34.dp))
             .echoShapeClick(pillShape, onClick = onClick),
         shape = pillShape,
         color = resolvedContainerColor,
@@ -1517,9 +1578,11 @@ internal fun InputPillButton(
         border = BorderStroke(if (selected) 1.3.dp else 1.dp, borderColor ?: if (selected) glass.outlineSelected else glass.outline)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            modifier = Modifier
+                .then(if (matchSearchSize) Modifier.fillMaxWidth() else Modifier)
+                .padding(horizontal = if (matchSearchSize) 8.dp else 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
         ) {
             if (icon != null) {
                 Icon(
@@ -1532,8 +1595,8 @@ internal fun InputPillButton(
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,
-                modifier = if (fixedControlSize) Modifier.weight(1f) else Modifier,
-                textAlign = if (fixedControlSize) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start,
+                modifier = if (matchSearchSize) Modifier.weight(1f, fill = false) else Modifier,
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1541,11 +1604,9 @@ internal fun InputPillButton(
                 Icon(
                     imageVector = trailingIcon,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(if (matchSearchSize) 12.dp else 16.dp),
                     tint = resolvedContentColor
                 )
-            } else if (fixedControlSize) {
-                Spacer(Modifier.size(16.dp))
             }
         }
     }

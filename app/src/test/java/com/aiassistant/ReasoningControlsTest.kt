@@ -103,7 +103,7 @@ class ReasoningControlsTest {
             assertFalse(model, ReasoningControls.policy(model).alwaysThinking)
             assertTrue(model, ReasoningControls.canToggle(model, "openai"))
             assertFalse(model, ReasoningControls.hasIntensityChoice(model, "openai"))
-            assertEquals("Default（默认）", ReasoningControls.options(model).single().label)
+            assertEquals("Default", ReasoningControls.options(model).single().label)
             assertNull(ReasoningControls.wireEffort(model, "openai", true, "default"))
         }
     }
@@ -118,7 +118,7 @@ class ReasoningControlsTest {
         assertTrue(ReasoningControls.policy("MiniMax-M2.7").alwaysThinking)
         assertTrue(ReasoningControls.policy("kimi-k2.7-code").alwaysThinking)
         assertEquals("disabled", ReasoningControls.thinkingType("kimi-k2.6", "openai", false))
-        assertEquals(listOf("Default（默认）", "Low", "Medium", "High"), ReasoningControls.options("gemini-3.8-flash").map { it.label })
+        assertEquals(listOf("Default", "Low", "Medium", "High"), ReasoningControls.options("gemini-3.8-flash").map { it.label })
         assertEquals(listOf("low", "medium", "high", "max"), ReasoningControls.options("claude-sonnet-4-6", "anthropic").filter { it.enabled }.map { it.value })
     }
 

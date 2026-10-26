@@ -1,5 +1,33 @@
 # 维护记录
 
+## 2026-10-26 · 2.8.18 聊天输入、思考滑块、候选尺寸与 Bot 修复
+
+基线 `main/ba0d4e4`，版本由 2.8.17/203 递增到 2.8.18/204，Room v37 / 20 个实体不变。更新仅来自当前仓库；原未跟踪素材保留，不混入本轮提交。完整源码验收、Release 构建、产物 / 签名及 APK 隐私核查已通过；Git / Release 尚未执行，不复用上版结果。
+
+临时实施方案与根因：原按钮逻辑把搜索与思考同时加宽并保留空尾图标位置；强度窗口误用选项框替换滑块；候选区域多层 `fillMaxHeight` / 强制填充 weight 导致短内容也撑满；文本编辑器没有区分较早回传与外部替换，可能回写旧选区；自动拖选直接追随远端选区，滚动过快；终止 Bot 缺少可辨识的身体 / 眼睛动作，本体也按整个画布而非身体定位；胶囊测量了隐藏换行内容，留下多余宽度。本轮分别修正这些共享实现，不针对单个标点做补丁。
+
+1. 思考按钮匹配原智能搜索的窄尺寸，智能搜索恢复自然宽度与文字居中。
+2. 恢复思考强度胶囊滑块；档位用无外框文字，支持拖动 / 点选且与吸附点对齐。
+3. `Default` 统一只显示英文名称，不改变省略强度的请求语义。
+4. 时间线与设定捕捉窗口按内容自然增高，到达可用上限后仅正文滚动，保留标题、操作、草稿和全屏入口。
+5. 输入及共享编辑器区分回传确认与外部替换，保留输入法选区 / 组合输入，补齐点击空白、关闭键盘后再点及调整热区的输入法唤起。
+6. 拖选自动滚动改为按时间计算并限速，靠近边缘缓慢移动，松手后不持续追赶远端选区。
+7. 暂停时约 900ms 闭眼收势，错误时约 1500ms 摇头并呈现 `><` 眼睛；落定、历史和减弱动态仍明确可读。
+8. Bot 本体与整个思考 / 连接胶囊中心对齐，放大的右上状态符号不再影响本体定位。
+9. 折叠胶囊仅测量当前可见单行文字，消除无思考 Token 时尾部空白。
+
+源码 / 测试文件：`app/build.gradle.kts`；`app/src/main/java/com/aiassistant/domain/model/ReasoningControls.kt`；`app/src/main/java/com/aiassistant/ui/components/` 下的 `EchoModelMark.kt`、`ExpressiveBotMotion.kt`、`EchoNativeTextField.kt`、`EchoScrollableTextEditor.kt`、`EditorInteractionPolicy.kt`；`app/src/main/java/com/aiassistant/ui/screens/chat/` 下的 `ChatInputComponents.kt`、`ChatMessageComponents.kt`、`ChatPendingReviewPanels.kt`；`app/src/test/java/com/aiassistant/` 下的 `MotionRoundTests.kt`、`ReasoningControlsTest.kt`、`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`。Bot 浏览器预览的脚本、说明及合成总览 / 动图同步更新；四套纸本主题仍未应用，不修改用户主题偏好。
+
+最终冻结验收 `20261026-141333-381`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，290.776 秒；88 套件 / 1,013 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。回归覆盖 Bot 终止动作 / 本体锚点、Default 标签、旧回传保护与拖选速度；浏览器参数重建预览的 4 种宽度、37 帧过渡检查通过，错误 0。
+
+Release `assembleRelease --no-daemon --build-cache` 退出 0，391.35 秒。`Echo-v2.8.18.apk`：25,472,501 字节，SHA256 `1ace8d21fe20874f46e941d39a531e18838bbbe5bf3f67879b91beaed5d0e491`；`com.aiassistant`、2.8.18/204、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug，aapt 退出 0。apksigner v2 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与项目 JKS / 旧包一致，Android Debug **非正式生产签名**。指定发布目录排他复制退出 0，原 214 个文件（213 个 APK）的名称、大小及 SHA256 均未变，没有覆盖或删除。Git / Release 尚未执行，不把产物核验写成上传成功。
+
+APK 隐私核查通过：446 个 ZIP 条目 CRC 全通过，扫描 31,512 条实际 DEX 字符串、10,617 条资源字符串、已知私人标记、签名块及图片元数据，未决 0。相对已审基线的结构性标识符已分类，剩余 203 条新增可读项逐条人工审阅并关联 UI / 依赖源码，未发现用户数据或凭据；186 张图片与基线内容 / 元数据一致，changedImage 为 0。未知混淆私人值、设备数据和平台缓存不在保证范围，提交与上传候选仍须独立核查。
+
+收敛记录：首轮测试编译出现 API 与当前 Compose 版本不匹配，修正调用并补齐 Robolectric 环境；像素测试修正取样窗口和状态符号层隔离，另实际修复小尺寸闭眼线条的可见性。没有删除测试或放宽像素阈值；修正后重新冻结并完成上述完整验收。
+
+隐私与边界：用户提供的截图仅用于定位问题，未复制入仓库；预览与测试使用合成内容。源码、测试、文档、预览图片与元数据、暂存区、待推提交 / 标签及 APK 均须在上传前重新完成隐私核查。本机配置、签名、报告、缓存、产物和既有未跟踪内容排除。未连接真机或模拟器，自动测试与浏览器样稿不能代替设备输入法、拖柄、动态视觉、安装启动及真实接口验收，人工步骤见本轮 `walkthrough.md`。
+
 ## 2026-10-26 · 2.8.17 发版：Bot 动画与纸本装帧预览重做
 
 基线 `main/ba7d6fd`，版本由 2.8.16/202 递增到 2.8.17/203，Room v37 / 20 个实体不变。本次按用户明确要求构建并发布 APK。

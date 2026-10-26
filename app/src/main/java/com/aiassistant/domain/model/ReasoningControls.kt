@@ -4,7 +4,7 @@ package com.aiassistant.domain.model
 object ReasoningControls {
     data class Option(val value: String, val label: String, val enabled: Boolean = true)
     fun displayLabel(value: String): String = when (value) {
-        "default" -> "Default（默认）"
+        "default" -> "Default"
         "disabled", "none" -> "关闭"
         else -> value.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
     }

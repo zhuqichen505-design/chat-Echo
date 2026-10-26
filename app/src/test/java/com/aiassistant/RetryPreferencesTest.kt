@@ -250,7 +250,8 @@ class RetryPreferencesTest {
                                 EchoModelMarkState.Replying -> 5600f
                                 EchoModelMarkState.Neutral -> 7000f
                                 EchoModelMarkState.Completed -> expressiveBotDurationMillis(style, state)
-                                EchoModelMarkState.Paused, EchoModelMarkState.Failed -> 1000f
+                                // Include both the full expressive gesture and its settled hold.
+                                EchoModelMarkState.Paused, EchoModelMarkState.Failed -> expressiveBotDurationMillis(style, state) + 400f
                             }
                             val pose = sampleExpressiveBotPose(style, state,
                                 windowMillis * frame / 8f,
@@ -274,9 +275,17 @@ class RetryPreferencesTest {
                                 assertArrayEquals("$style $state $size dp 减弱动态仍须实际绘出相同的终止状态", pixels, reducedPixels)
                                 reducedBitmap.recycle()
                             }
-                            // The symbol layer occupies the clear space above every transformed body.
-                            // Alpha coverage detects subpixel strokes without requiring a pure color.
-                            val symbolPixels = pixels.copyOfRange(0, size * (size * .16f).toInt())
+                            // Isolate the actual independent symbol layer: a shaking body's upper
+                            // corner may legitimately enter this band and must not count as a glyph.
+                            // The original full-body pixels still drive eye visibility and edge checks.
+                            val symbolBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                            CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr,
+                                Canvas(symbolBitmap.asImageBitmap()), Size(size.toFloat(), size.toFloat())) {
+                                drawExpressiveBot(bodyColor, pose.copy(bodyX = 1000f))
+                            }
+                            val symbolPixels = IntArray(size * (size * .16f).toInt())
+                            symbolBitmap.getPixels(symbolPixels, 0, size, 0, 0, size, (size * .16f).toInt())
+                            symbolBitmap.recycle()
                             assertTrue("$style $state $size dp 外部符号实际墨迹必须位于右上角",
                                 symbolPixels.withIndex().all { (index, pixel) ->
                                     pixel ushr 24 == 0 || index % size > size * .65f

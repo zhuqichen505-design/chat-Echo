@@ -6,6 +6,17 @@ import com.aiassistant.ui.screens.settings.parseModelList
 import com.aiassistant.ui.screens.settings.apiModelDiscoveryEntries
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.ui.text.TextRange
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,7 +27,129 @@ import androidx.compose.ui.graphics.luminance
  * 1. 模型列表拖拽排序必须保持自定义顺序（cleanModelNames 去重但不重排）
  * 2. SmoothReorderState 抬升量与按 key 高度记录
  */
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [34], application = android.app.Application::class, manifest = org.robolectric.annotation.Config.NONE)
 class UiPolishRegressionTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun frequentSelectionUpdatesKeepScrollingAndIdleReleasesTheMutationLock() = runTest {
+        val selections = MutableStateFlow(TextRange.Zero)
+        var position = 0f
+        val scrollState = ScrollableState { delta -> position += delta; delta }
+        val follower = backgroundScope.launch {
+            com.aiassistant.ui.components.followEditorSelectionScroll(
+                selections, scrollState, 1f, distanceAt = { 1_000f },
+                frameNanos = { delay(16); testScheduler.currentTime * 1_000_000L }
+            )
+        }
+        runCurrent()
+        try {
+            repeat(20) { index ->
+                selections.value = TextRange(0, index + 2)
+                runCurrent()
+                advanceTimeBy(4)
+                runCurrent()
+                if (index == 9) assertTrue("选区更新快于帧率时也必须滚动", position > 0f)
+            }
+            assertTrue(follower.isActive)
+            assertTrue(position > 0f)
+            assertTrue(position <= 88f * testScheduler.currentTime / 1_000f + .001f)
+            advanceTimeBy(180)
+            runCurrent()
+            assertTrue("空闲选区必须释放滚动锁", !scrollState.isScrollInProgress)
+            val settled = position
+            advanceTimeBy(80)
+            runCurrent()
+            assertEquals("空闲后不继续追赶远处选区", settled, position, .001f)
+            scrollState.scroll(MutatePriority.Default) { scrollBy(7f) }
+            assertEquals(settled + 7f, position, .001f)
+        } finally { follower.cancelAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun selectionFollowRestartsAfterUserInputWithoutCollapsingTheSelection() = runTest {
+        val selections = MutableStateFlow(TextRange.Zero)
+        var position = 0f
+        val scrollState = ScrollableState { delta -> position += delta; delta }
+        val follower = backgroundScope.launch {
+            com.aiassistant.ui.components.followEditorSelectionScroll(
+                selections, scrollState, 1f, distanceAt = { 1_000f },
+                frameNanos = { delay(16); testScheduler.currentTime * 1_000_000L }
+            )
+        }
+        runCurrent()
+        try {
+            selections.value = TextRange(0, 8)
+            runCurrent()
+            advanceTimeBy(64)
+            runCurrent()
+            assertTrue(position > 0f)
+            assertTrue(scrollState.isScrollInProgress)
+            scrollState.scroll(MutatePriority.UserInput) { scrollBy(-5f) }
+            runCurrent()
+            assertTrue("手动滚动不能取消选区观察器", follower.isActive)
+            assertTrue(!scrollState.isScrollInProgress)
+            val manuallyScrolled = position
+            advanceTimeBy(32)
+            runCurrent()
+            assertEquals(manuallyScrolled, position, .001f)
+            selections.value = TextRange(0, 9)
+            runCurrent()
+            advanceTimeBy(48)
+            runCurrent()
+            assertTrue("非折叠选区继续变化时须恢复限速", position > manuallyScrolled)
+            assertTrue(follower.isActive)
+            advanceTimeBy(180)
+            runCurrent()
+            assertTrue(!scrollState.isScrollInProgress)
+        } finally { follower.cancelAndJoin() }
+    }
+
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    @Test fun delayedEditorAcknowledgementsCannotRewindAnImeEditOrHandleDrag() {
+        val initial = androidx.compose.ui.text.input.TextFieldValue("合成编辑内容", androidx.compose.ui.text.TextRange(2))
+        val editor = com.aiassistant.ui.components.NativeEditorState(initial)
+        editor.field.edit { replace(2, 2, "新增"); selectCharsIn(androidx.compose.ui.text.TextRange(3)) }
+        val published = requireNotNull(editor.valueToPublish())
+        editor.field.edit { replace(3, 3, "后续"); selectCharsIn(androidx.compose.ui.text.TextRange(2, 6)) }
+        val latest = editor.currentValue()
+        editor.reconcileExternal(published)
+        assertEquals("延迟的文本/选区回声不能覆盖新编辑", latest, editor.currentValue())
+        assertEquals("未发布的新编辑不能被确认旧值时吞掉", latest, editor.valueToPublish())
+        editor.field.edit { selectCharsIn(androidx.compose.ui.text.TextRange(1, 7)) }
+        val dragged = editor.currentValue()
+        editor.reconcileExternal(latest)
+        assertEquals(dragged, editor.currentValue())
+        assertEquals(dragged, editor.valueToPublish())
+        editor.reconcileExternal(androidx.compose.ui.text.input.TextFieldValue("外部替换", androidx.compose.ui.text.TextRange(4)))
+        assertEquals("外部替换", editor.currentValue().text)
+        assertEquals(androidx.compose.ui.text.TextRange(4), editor.currentValue().selection)
+    }
+
+    @Test fun stringParentEchoOnlyAcknowledgesTextAndDoesNotReplaceNewerLocalSelection() {
+        val acknowledgements = com.aiassistant.ui.components.EditorTextAcknowledgements("初始")
+        acknowledgements.published("合成第一段")
+        acknowledgements.published("合成第一段与后续")
+        assertTrue(!acknowledgements.isReplacement("初始"))
+        assertTrue(!acknowledgements.isReplacement("合成第一段"))
+        assertTrue(!acknowledgements.isReplacement("合成第一段与后续"))
+        assertTrue(acknowledgements.isReplacement(""))
+        assertTrue(!acknowledgements.isReplacement(""))
+        assertTrue(acknowledgements.isReplacement("外部插入"))
+    }
+
+    @Test fun selectionScrollSpeedIsBoundedByTimeDensityAndDistance() {
+        fun step(distance: Float, density: Float = 1f, seconds: Float = 1f / 60f) =
+            com.aiassistant.ui.components.editorSelectionScrollStep(distance, density, seconds)
+        assertTrue(step(1000f) <= 88f / 60f)
+        assertEquals(step(1000f) * 3, step(3000f, 3f), .001f)
+        assertEquals(-step(1000f), step(-1000f), .001f)
+        assertEquals(.1f, step(.1f), .001f)
+        assertEquals(0f, step(0f), 0f)
+        assertEquals(0f, step(Float.NaN), 0f)
+        assertTrue("卡帧后不应追赶跳滚", step(1000f, seconds = 1f) <= 4.4f)
+        assertEquals(step(1000f, seconds = 1f / 30f), 2 * step(1000f), .001f)
+    }
+
     @Test fun dialogBoundsRespectTheCurrentViewportIncludingKeyboardSizedWindows() {
         fun bounds(width: Int, height: Int, expanded: Boolean = false) =
             com.aiassistant.ui.components.echoDialogBounds(

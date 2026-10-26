@@ -155,7 +155,9 @@ fun EchoVerticalScrollSlider(
         if (max <= 0) return
         dragProgress = fraction.coerceIn(0f, 1f)
         scope.launch {
-            currentScrollState.scrollTo((fraction.coerceIn(0f, 1f) * max).roundToInt())
+            currentScrollState.scroll(androidx.compose.foundation.MutatePriority.UserInput) {
+                scrollBy((fraction.coerceIn(0f, 1f) * max).roundToInt() - currentScrollState.value.toFloat())
+            }
         }
     }
 

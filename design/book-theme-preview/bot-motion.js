@@ -5,13 +5,20 @@
 const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 const smooth=x=>{const t=clamp(x);return t*t*(3-2*t)};
 const mix=(a,b,t)=>a+(b-a)*t;
-function restPose(shape){const eye=(x,y,width,height)=>({x,y,width,height});const common={bodyX:0,bodyY:0,rotation:0,scaleX:1,scaleY:1,faceX:0,faceY:0,effects:[]};if(shape==='square')return{...common,bodyWidth:74,bodyHeight:72,cornerRadius:17,left:eye(40.7,50.6,8.8,24.3),right:eye(59.3,50.6,8.8,24.3)};if(shape==='flat')return{...common,bodyWidth:86,bodyHeight:64,cornerRadius:17,left:eye(38,53,8.5,22),right:eye(62,53,8.5,22)};return{...common,bodyWidth:72,bodyHeight:72,cornerRadius:36,left:eye(41,50.7,8.5,23.6),right:eye(59,50.7,8.5,23.6)}}
-function durationOf(shape,state){const i=shape==='square'?1:shape==='flat'?2:0;return({connecting:[3.8,4.6,3.4],thinking:[6.2,7,5.8],replying:[2.9,3.2,2.6],completed:[1.5,1.6,1.4]})[state]?.[i]||0}
+function restPose(shape){const eye=(x,y,width,height)=>({x,y,width,height,pinch:0});const common={bodyX:0,bodyY:0,rotation:0,scaleX:1,scaleY:1,faceX:0,faceY:0,effects:[]};if(shape==='square')return{...common,bodyWidth:74,bodyHeight:72,cornerRadius:17,left:eye(40.7,50.6,8.8,24.3),right:eye(59.3,50.6,8.8,24.3)};if(shape==='flat')return{...common,bodyWidth:86,bodyHeight:64,cornerRadius:17,left:eye(38,53,8.5,22),right:eye(62,53,8.5,22)};return{...common,bodyWidth:72,bodyHeight:72,cornerRadius:36,left:eye(41,50.7,8.5,23.6),right:eye(59,50.7,8.5,23.6)}}
+function durationOf(shape,state){const i=shape==='square'?1:shape==='flat'?2:0;if(state==='paused')return .9;if(state==='failed')return 1.5;return({connecting:[3.8,4.6,3.4],thinking:[6.2,7,5.8],replying:[2.9,3.2,2.6],completed:[1.5,1.6,1.4]})[state]?.[i]||0}
 function blinkAt(time,start,duration){const p=(time-start)/duration;if(p<0||p>1)return 0;if(p<.42)return smooth(p/.42);if(p<.6)return 1;return 1-smooth((p-.6)/.4)}
 function sampleBot(shape,state,time,reducedMotion=false,idleEffects=false){
  const rest=restPose(shape),elapsed=Number.isFinite(time)?Math.max(0,time):0;
  const idlePose=seconds=>({...rest,faceY:idleEffects?(reducedMotion?4.2:4.2*smooth(seconds/1.2)):0,effects:sampleEffects('idle',seconds,reducedMotion,idleEffects,shape)});
- if(state==='paused'||state==='failed')return {...rest,effects:sampleEffects(state,elapsed,reducedMotion,idleEffects,shape)};
+ if(state==='paused'||state==='failed'){
+  const duration=durationOf(shape,state),p=reducedMotion||elapsed<=0||elapsed>=duration?1:elapsed/duration;
+  const track=(...points)=>{for(let i=2;i<points.length;i+=2)if(p<=points[i])return mix(points[i-1],points[i+1],smooth((p-points[i-2])/(points[i]-points[i-2])));return points.at(-1)};
+  let pose;
+  if(state==='paused'){const close=smooth(p/.60),exhale=track(0,0,.36,1,.72,.35,1,0);pose={...rest,bodyY:1.2*exhale,scaleX:1+.024*exhale,scaleY:1-.028*exhale,faceY:.8*close,left:{...rest.left,width:mix(rest.left.width,12,close),height:mix(rest.left.height,4.2,close)},right:{...rest.right,width:mix(rest.right.width,12,close),height:mix(rest.right.height,4.2,close)}};}
+  else{const squint=smooth(p/.18),shake=track(0,0,.15,-1,.32,1,.48,-.78,.64,.60,.80,-.28,.94,0,1,0);pose={...rest,bodyX:2.3*shake,rotation:(shape==='flat'?7:9)*shake,faceX:-.9*shake,left:{...rest.left,height:mix(rest.left.height,14,squint),pinch:squint},right:{...rest.right,height:mix(rest.right.height,14,squint),pinch:squint}};}
+  return{...pose,effects:sampleEffects(state,elapsed,reducedMotion,idleEffects,shape)};
+ }
  if(state==='idle'||(reducedMotion&&state==='completed'))return idlePose(elapsed);
  const duration=durationOf(shape,state);
  if(state==='completed'&&elapsed>=duration)return idlePose(elapsed-duration);
@@ -48,7 +55,7 @@ function sampleEffects(state,time,reducedMotion=false,idleEffects=false,shape='r
  if(state==='idle'&&!idleEffects)return[];
  const elapsed=Number.isFinite(time)?Math.max(0,time):0,effect=(id,kind,x,y,size,alpha,progress=0)=>({id,kind,x,y,size,alpha:clamp(alpha),progress});
  const wide=shape==='flat';
- const amount=(reducedMotion||elapsed<=0||elapsed>=.9)?1:smooth(elapsed/.52);
+ const amount=(reducedMotion||elapsed<=0||elapsed>=.52)?1:smooth(elapsed/.52);
  if(state==='paused')return[effect(50,'Pause',wide?85+5*amount:72+12*amount,9.5-amount,5.5+10.5*amount,.45+.55*amount,amount)];
  if(state==='failed')return[effect(60,'Error',wide?86+5*amount:73+11*amount,10-amount,5.5+10.5*amount,.45+.55*amount,amount)];
  const signalX=wide?85.8:83,signalSizes=wide?[10,18,24]:[10,19,28],thoughtX=wide?87.5:87,speechX=wide?86.5:87,speechSize=wide?19:20,sparkX=wide?88:85;
@@ -89,7 +96,7 @@ function effectSvg(e){
  return '';
 }
 function svg(pose){
- const eyes=[pose.left,pose.right].map(eye=>'<rect x="'+(eye.x+pose.faceX-eye.width/2)+'" y="'+(eye.y+pose.faceY-eye.height/2)+'" width="'+eye.width+'" height="'+eye.height+'" rx="'+Math.min(eye.width,eye.height)/2+'" fill="var(--bot-eye, #fffaf0)"/>').join('');
+ const eyes=[pose.left,pose.right].map((eye,index)=>{const p=clamp(eye.pinch||0),x=eye.x+pose.faceX,y=eye.y+pose.faceY,d=index===0?1:-1;return '<g fill="var(--bot-eye, #fffaf0)"><rect x="'+(x-eye.width/2)+'" y="'+(y-eye.height/2)+'" width="'+eye.width+'" height="'+eye.height+'" rx="'+Math.min(eye.width,eye.height)/2+'" opacity="'+(1-p)+'"/><path d="M '+(x-d*eye.width*.42)+' '+(y-eye.height*.42)+' L '+(x+d*eye.width*.42)+' '+y+' L '+(x-d*eye.width*.42)+' '+(y+eye.height*.42)+'" fill="none" stroke="var(--bot-eye, #fffaf0)" stroke-width="'+(eye.width*.34)+'" stroke-linecap="round" stroke-linejoin="round" opacity="'+p+'"/></g>';}).join('');
  return '<svg viewBox="0 0 100 100" aria-hidden="true"><g transform="translate('+pose.bodyX+' '+pose.bodyY+') translate(50 54) rotate('+pose.rotation+') scale('+pose.scaleX+' '+pose.scaleY+') translate(-50 -54)"><rect x="'+(50-pose.bodyWidth/2)+'" y="'+(54-pose.bodyHeight/2)+'" width="'+pose.bodyWidth+'" height="'+pose.bodyHeight+'" rx="'+pose.cornerRadius+'" fill="var(--bot-body, #315b45)"/>'+eyes+'</g>'+(pose.effects||[]).map(effectSvg).join('')+'</svg>';
 }
 window.EchoBotMotion={sampleBot,sampleEffects,blendPose,smooth,restPose,svg};

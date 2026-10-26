@@ -8,8 +8,8 @@
     <section class="controls" aria-label="动作预览控制"><div class="states" role="group" aria-label="选择 Bot 状态"><button data-state="connecting">连接</button><button data-state="thinking">思考</button><button data-state="replying" aria-pressed="true">回复</button><button data-state="completed">完成</button><button data-state="paused">主动暂停</button><button data-state="failed">连接 / 回复出错</button><button data-state="idle">待机</button></div><button id="play">播放完整过程</button><button id="replay">重播当前状态</button><button id="freeze" aria-pressed="false">冻结画面</button><label><input id="reduce" type="checkbox">减弱动态</label></section>
     <p id="status" role="status">回复：正文输出，右上说话泡慢慢点亮。</p>
     <section class="stage" aria-label="三款 Bot 动作"></section>
-    <section class="new-states" aria-label="新增终止状态"><article><div><h2>主动暂停</h2><p>双竖条持续保留。身体平稳收回，保留已生成的回复；不会误演完成收势。</p></div><div class="terminal-bots" data-terminal="paused"></div></article><article><div><h2>连接 / 回复出错</h2><p>圆底叹号持续保留。与用户暂停区分，恢复输出后回到回复状态。</p></div><div class="terminal-bots" data-terminal="failed"></div></article></section>
-    <p class="note">暂停和错误是稳定的终止状态：切换时有约 260 毫秒过渡，落定后符号持续显示，不反复闪动。示例同时给出 38px 的聊天实际尺寸与放大尺寸。系统减弱动态时使用静姿。</p>
+    <section class="new-states" aria-label="新增终止状态"><article><div><h2>主动暂停</h2><p>缓缓闭上双眼，轻轻呼气后收回身体。闭眼表情与双竖条持续保留。</p></div><div class="terminal-bots" data-terminal="paused"></div></article><article><div><h2>连接 / 回复出错</h2><p>双眼变成 &gt;&lt;，连续左右摇头后落定。错误表情和圆底叹号持续保留。</p></div><div class="terminal-bots" data-terminal="failed"></div></article></section>
+    <p class="note">主动暂停播放约 900 毫秒的闭眼与呼气动作，连接 / 回复出错播放约 1500 毫秒的摇头动作；落定后不启动常驻帧循环。示例同时给出 38px 的聊天实际尺寸与放大尺寸。历史终止消息与系统减弱动态使用静姿。</p>
     <details><summary>动作与源码对应</summary><p>100 × 100 画板、身体与眼睛轨迹、独立右上符号、状态过渡采用 ExpressiveBotMotion.kt 与 EchoModelMark.kt 的参数。此页使用 SVG 对照绘制，不替代 Android 安装、触控与设备视觉验证。</p></details>
   </main>
   <script src="../bot-motion.js"></script><script src="preview.js"></script>

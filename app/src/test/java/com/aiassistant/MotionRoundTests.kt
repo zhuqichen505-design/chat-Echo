@@ -59,11 +59,33 @@ class MotionRoundTests {
                 advanceExpressiveBot(controller, 120f)
                 assertTrue("暂停 / 错误应有可见的进入动效，而不是瞬间替换静态符号",
                     controller.pose != before && controller.pose != expected)
-                advanceExpressiveBot(controller, 700f)
+                advanceExpressiveBot(controller, expressiveBotDurationMillis(style, state))
                 assertEquals(expected, controller.pose)
                 assertFalse(controller.needsFrames)
                 assertFalse(controller.pose.effects.any { it.kind == ExpressiveBotEffectKind.Spark || it.kind == ExpressiveBotEffectKind.Z })
             }
+        }
+    }
+
+    @Test fun terminalBotsCloseTheirEyesOrShakeWithPinchedEyesBeforeSettling() {
+        for (style in EchoModelMarkStyle.expressiveBotStyles) {
+            val pauseDuration = expressiveBotDurationMillis(style, EchoModelMarkState.Paused)
+            val pauseFrames = (1..30).map { sampleExpressiveBotPose(style, EchoModelMarkState.Paused, pauseDuration * it / 30f) }
+            val pause = sampleExpressiveBotPose(style, EchoModelMarkState.Paused, 0f)
+            assertEquals(4.2f, pause.left.height, .001f)
+            assertEquals(12f, pause.left.width, .001f)
+            assertEquals(pause.left.height, pause.right.height, 0f)
+            assertEquals(0f, pause.left.pinch, 0f)
+            assertTrue("暂停过程应真正闭眼并呼气，而不只是切换外部符号",
+                pauseFrames.map { it.left.height }.toSet().size > 10 && pauseFrames.maxOf { it.bodyY } > 1f)
+            val failDuration = expressiveBotDurationMillis(style, EchoModelMarkState.Failed)
+            val failFrames = (1..60).map { sampleExpressiveBotPose(style, EchoModelMarkState.Failed, failDuration * it / 60f) }
+            assertTrue("连接失败应有清楚的左右摇头", failFrames.minOf { it.rotation } < -5f && failFrames.maxOf { it.rotation } > 5f)
+            val failure = sampleExpressiveBotPose(style, EchoModelMarkState.Failed, 0f)
+            assertEquals("失败末帧为 >< 双眼", 1f, failure.left.pinch, 0f)
+            assertEquals(failure.left.pinch, failure.right.pinch, 0f)
+            assertEquals(0f, failure.rotation, 0f)
+            assertEquals(failure, sampleExpressiveBotPose(style, EchoModelMarkState.Failed, 90_000f))
         }
     }
 
@@ -413,14 +435,19 @@ class MotionRoundTests {
                         assertTrue(pose.bodyWidth > 0f && pose.bodyHeight > 0f && pose.cornerRadius > 0f)
                         assertTrue(pose.scaleX in .8f..1.2f && pose.scaleY in .8f..1.2f)
                         assertEquals("双眼必须同步眨眼，不能一长一短", pose.left.height, pose.right.height, 0f)
-                        assertEquals("双眼保持相同的固定宽度", pose.left.width, pose.right.width, 0f)
+                        assertEquals("双眼保持相同宽度", pose.left.width, pose.right.width, 0f)
                         assertEquals("视线移动不能使两眼高低错位", pose.left.y, pose.right.y, 0f)
                         assertEquals(rest.left.x, pose.left.x, 0f)
                         assertEquals(rest.right.x, pose.right.x, 0f)
                         assertEquals(rest.left.y, pose.left.y, 0f)
                         assertEquals(rest.right.y, pose.right.y, 0f)
-                        assertEquals(rest.left.width, pose.left.width, 0f)
-                        assertEquals(rest.right.width, pose.right.width, 0f)
+                        if (state == EchoModelMarkState.Paused) {
+                            assertTrue("闭眼线条适当加宽以保持小尺寸可读性", pose.left.width in rest.left.width..12f)
+                            assertTrue(pose.right.width in rest.right.width..12f)
+                        } else {
+                            assertEquals(rest.left.width, pose.left.width, 0f)
+                            assertEquals(rest.right.width, pose.right.width, 0f)
+                        }
                         for (eye in listOf(pose.left, pose.right)) {
                             assertTrue(listOf(eye.x, eye.y, eye.width, eye.height).all { it.isFinite() })
                             assertTrue(eye.width > 0f && eye.height > 0f)

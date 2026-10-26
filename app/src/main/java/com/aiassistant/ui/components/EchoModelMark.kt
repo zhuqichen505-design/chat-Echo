@@ -50,6 +50,14 @@ enum class EchoModelMarkState {
     val isActive: Boolean get() = this == Connecting || this == Thinking || this == Replying
 }
 
+/** Body anchor only: enlarging or moving a decorative status symbol never changes row alignment. */
+internal fun modelMarkBodyCenterFraction(style: String): Float = when (style) {
+    in EchoModelMarkStyle.expressiveBotStyles -> .54f
+    EchoModelMarkStyle.BOT_CAPSULE -> 14.5f / 26f
+    in EchoModelMarkStyle.botStyles -> 14f / 26f
+    else -> .5f
+}
+
 /** 一次完成只消费一次；切换显示设置或重挂载历史不会自行反复点头。 */
 internal class ModelMarkCompletionMotion {
     private var previous: EchoModelMarkState? = null
@@ -131,7 +139,7 @@ internal fun EchoModelMark(
             previousMarkState?.isActive == true
         if (terminalEnter) {
             terminalProgress.snapTo(0f)
-            terminalProgress.animateTo(1f, EchoMotion.tweenSpec(EchoMotion.Duration.fast))
+            terminalProgress.animateTo(1f, EchoMotion.tweenSpec(expressiveBotDurationMillis(resolvedStyle, state).toInt()))
         } else {
             terminalProgress.snapTo(1f)
         }
@@ -246,10 +254,22 @@ internal fun DrawScope.drawExpressiveBot(color: Color, pose: ExpressiveBotPose) 
         }) {
             drawRoundRect(color, Offset(50f - pose.bodyWidth * .5f, 54f - pose.bodyHeight * .5f),
                 Size(pose.bodyWidth, pose.bodyHeight), CornerRadius(pose.cornerRadius, pose.cornerRadius))
-            listOf(pose.left, pose.right).forEach { eye ->
-                drawRoundRect(eyeColor,
-                    Offset(pose.faceX + eye.x - eye.width * .5f, pose.faceY + eye.y - eye.height * .5f),
+            listOf(pose.left, pose.right).forEachIndexed { index, eye ->
+                val pinch = eye.pinch.coerceIn(0f, 1f)
+                val eyeCenter = Offset(pose.faceX + eye.x, pose.faceY + eye.y)
+                if (pinch < 1f) drawRoundRect(eyeColor.copy(alpha = eyeColor.alpha * (1f - pinch)),
+                    eyeCenter - Offset(eye.width * .5f, eye.height * .5f),
                     Size(eye.width, eye.height), CornerRadius(minOf(eye.width, eye.height) * .5f))
+                if (pinch > 0f) {
+                    val direction = if (index == 0) 1f else -1f
+                    val squint = Path().apply {
+                        moveTo(eyeCenter.x - direction * eye.width * .42f, eyeCenter.y - eye.height * .42f)
+                        lineTo(eyeCenter.x + direction * eye.width * .42f, eyeCenter.y)
+                        lineTo(eyeCenter.x - direction * eye.width * .42f, eyeCenter.y + eye.height * .42f)
+                    }
+                    drawPath(squint, eyeColor.copy(alpha = eyeColor.alpha * pinch),
+                        style = Stroke(eye.width * .34f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
             }
         }
     }
@@ -358,9 +378,12 @@ private fun DrawScope.drawModelBot(
     val scaleFactor = size.minDimension / 26f
     val wave = if (moving) sin(progress * 2f * PI.toFloat()) else 0f
     val nod = if (state == EchoModelMarkState.Completed) sin(completionProgress * PI.toFloat()) else 0f
+    val terminalShake = if (state == EchoModelMarkState.Failed)
+        sin(terminalProgress * PI.toFloat() * 5f) * (1f - terminalProgress) else 0f
     val angle = when (state) {
         EchoModelMarkState.Thinking -> if (moving) -3f + wave * 2f else -4f
         EchoModelMarkState.Completed -> nod * 4f
+        EchoModelMarkState.Failed -> terminalShake * 10f
         else -> 0f
     }
     withTransform({
@@ -411,6 +434,17 @@ private fun DrawScope.drawModelBot(
                     val eyeTint = if (state == EchoModelMarkState.Connecting && moving && connectionStep != index + 1)
                         color.copy(alpha = color.alpha * 0.4f) else color
                     when {
+                        state == EchoModelMarkState.Paused ->
+                            line(Offset(x - 1.25f, 13.2f), Offset(x + 1.25f, 13.2f))
+                        state == EchoModelMarkState.Failed -> {
+                            val direction = if (index == 0) 1f else -1f
+                            val squint = Path().apply {
+                                moveTo(x - direction * 1.1f, 11.9f)
+                                lineTo(x + direction * 1.1f, 13.2f)
+                                lineTo(x - direction * 1.1f, 14.5f)
+                            }
+                            drawPath(squint, color, style = stroke)
+                        }
                         state == EchoModelMarkState.Completed -> {
                             val smileEye = Path().apply {
                                 moveTo(x - 1.2f, 13.4f)

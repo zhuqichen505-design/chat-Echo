@@ -87,6 +87,7 @@ import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.ModelMarkCompletionMotion
 import com.aiassistant.ui.components.modelMarkColorFor
+import com.aiassistant.ui.components.modelMarkBodyCenterFraction
 import com.aiassistant.ui.components.StreamingAnimationStyle
 import com.aiassistant.ui.components.EchoTextToolbarHost
 import androidx.compose.ui.layout.onSizeChanged
@@ -981,7 +982,8 @@ internal fun MessageBubble(
                     val headerHeight = with(density) { headerHeightPx.toDp() }
                     // 关闭思考展示时不保留空头像行；连接、重试和选方向仍有独立提示。
                     if (showThinkingBubbles) {
-                    // 头像与胶囊顶对齐同行：胶囊因文字变高时向下延展，头像相对胶囊位置固定
+                    // Align the body center with the capsule center, including expanded text.
+                    // The independent upper-right decoration never participates in this anchor.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top
@@ -992,7 +994,7 @@ internal fun MessageBubble(
                                 avatarRevision = assistantAvatarRevision,
                                 apiConfigId = assistantApiConfigId,
                                 customAvatarUri = customAvatarUri,
-                                modifier = Modifier.offset(y = (-1).dp)
+                                modifier = Modifier.alignBy { it.measuredHeight / 2 }
                             )
                         } else {
                             EchoModelMark(
@@ -1003,9 +1005,11 @@ internal fun MessageBubble(
                                 completionEvent = if (modelMarkCompleted || modelMarkCompletionNow) message.id else 0L,
                                 completionOwner = modelMarkCompletionOwner,
                                 idleEffects = modelMarkIdleEffects,
-                                // Keep the bot and its upper-right status symbol readable beside
-                                // the taller thinking/status capsule.
-                                modifier = Modifier.padding(top = 3.dp).size(if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 38.dp else 34.dp),
+                                modifier = run {
+                                    val markSize = if (personalizationSettings.modelMarkStyle in EchoModelMarkStyle.botStyles) 38.dp else 34.dp
+                                    Modifier.alignBy { (it.measuredHeight *
+                                        modelMarkBodyCenterFraction(personalizationSettings.modelMarkStyle)).roundToInt() }.size(markSize)
+                                },
                                 reducedMotion = reducedMotion,
                                 description = modelMarkDescription
                             )
@@ -1013,6 +1017,7 @@ internal fun MessageBubble(
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                         modifier = Modifier
+                            .alignBy { it.measuredHeight / 2 }
                             // v2.7.7 需求 4：胶囊宽度随实际内容自适应（weight fill=false）——文字未超过
                             // 显示范围时收缩到内容宽度；文字超限时仍占满剩余宽度（横向滚动/换行逻辑
                             // 不变）。右缩 44dp（头像36+间距8）：撑满时右缘仍与用户输入气泡右缘对齐
@@ -1046,8 +1051,8 @@ internal fun MessageBubble(
                             if (isStatusError) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else glass.outlineSelected.copy(alpha = 0.72f)
                         )
                     ) {
-                        // Both states share the SAME wrapped text layout and first-line slot.
-                        // Expansion only reveals the portion below it; alignment never changes.
+                        // A collapsed capsule measures its visible single line. Measuring hidden
+                        // wrapped lines leaves their maximum width behind after optional tokens vanish.
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.Top,
@@ -1143,13 +1148,13 @@ internal fun MessageBubble(
                                                 text = phaseText,
                                                 style = capsuleTextStyle,
                                                 color = if (phaseError) MaterialTheme.colorScheme.error else thinkingHeaderColor,
-                                                maxLines = maxLinesCount,
+                                                maxLines = if (isStatusExpanded) maxLinesCount else 1,
                                                 softWrap = true,
-                                                overflow = TextOverflow.Clip
+                                                overflow = if (isStatusExpanded) TextOverflow.Clip else TextOverflow.Ellipsis
                                             )
                                         }
                                     ) { measurables, constraints ->
-                                        val text = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                                        val text = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0, maxHeight = Constraints.Infinity))
                                         val viewport = capsuleTextViewport(headerHeightPx, lineHeightPx, text.height, isStatusExpanded)
                                         layout(text.width, viewport.height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
                                             text.placeRelative(0, viewport.textTop)

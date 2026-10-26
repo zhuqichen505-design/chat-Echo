@@ -26,6 +26,20 @@
 
 ## 本次记录
 
+## 2026-10-26 · 2.8.18 聊天输入 / 滑块 / 自然尺寸候选 / Bot 修复
+
+- 基线 main/`ba0d4e4`；versionName 2.8.18、versionCode 204；Room v37 / 20 个实体不变。仅处理本次明确要求，原未跟踪内容保留，不读不采信归档任务书。
+- 九项修复：思考按钮缩窄且搜索自然宽度 / 居中；恢复无框文字档位滑块；Default 去中文附注；候选按内容自然增高、超限才内部滚动；编辑器旧回传保护及点击唤起输入法；拖选自动滚动限速；暂停闭眼、错误摇头 `><`；本体对齐整个胶囊中心且符号独立；折叠胶囊消除无思考 Token 的尾部空白。四套纸本主题仍仅预览，未应用。
+- 源码 / 测试清单与根因见本轮 UPDATE_LOG、walkthrough；覆盖 ReasoningControls、EchoModelMark / ExpressiveBotMotion、共享编辑器、ChatInput / Message / PendingReview，以及 MotionRoundTests / ReasoningControlsTest / RetryPreferencesTest / UiPolishRegressionTest。构建配置只递增版本，不改 Room 或数据格式。
+- 最终 verify `20261026-141333-381`：标准脚本 / Gradle 退出 0，290.776 秒；88 套件 / 1,013 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。浏览器参数重建预览的 4 种宽度和 37 帧过渡检查通过，错误 0。
+- Release `assembleRelease --no-daemon --build-cache` 退出 0，391.35 秒；`Echo-v2.8.18.apk` 为 25,472,501 字节，SHA256 `1ace8d21fe20874f46e941d39a531e18838bbbe5bf3f67879b91beaed5d0e491`，`com.aiassistant`、2.8.18/204、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug，aapt 退出 0。apksigner v2 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与项目 JKS / 旧包一致，Android Debug **非正式生产签名**。指定目录排他复制退出 0，原 214 文件（213 APK）名称 / 大小 / SHA256 均未变，无覆盖或删除。
+- 收敛中修正首轮测试编译 API 不匹配、补齐 Robolectric 环境，修正像素取样窗口及符号层隔离，并实际修复小尺寸闭眼线条可见性；未删测试或放宽像素阈值，重新冻结后完整验收通过。
+- APK 隐私核查通过：446 个 ZIP 条目 CRC、31,512 条 DEX / 10,617 条资源字符串、已知私人标记、签名块 / 图片元数据扫描未决 0；新增结构性标识符分类，203 条可读项逐条人工关联 UI / 依赖源码审阅，无用户数据 / 凭据。186 张图片与已审基线内容及元数据一致，changedImage 为 0。未知混淆私人值、设备数据和平台缓存不在保证范围。
+- Git / Release 尚未执行。源码 / 测试 / 文档 / 预览图与元数据、暂存区、待推历史 / 标签 / 公共维护者元数据仍待主流程完整核查；用户截图未复制入仓库。原未跟踪素材、本机报告、配置、签名、缓存和构建输出排除，任何候选变化后重查。
+- 未连接设备；自动测试及浏览器样稿不能替代安装启动、输入法 / 拖柄、触控 / 动态视觉或真实接口验收。人工步骤已写本轮 walkthrough。
+
+以下为历史任务记录，状态和验收数字对应当时版本。
+
 ## 2026-10-26 · 2.8.17 Bot 动画 / 主题重做 / APK 发版
 
 - 基线 main/`ba7d6fd`；versionName 2.8.17、versionCode 203；Room v37 / 20 个实体不变。用户明确要求构建 APK，依次完成源码冻结、verify、Release、隐私核查、提交、推送、标签和 Release 附件核验。
