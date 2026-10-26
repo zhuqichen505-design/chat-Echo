@@ -8,7 +8,7 @@
 
 ## 2026-10-26 · 2.8.19 毛边 / 棉纸正式主题
 
-基线 `main/75e40c4`，本轮源码版本 2.8.19/205；Room v37（20 个实体）不变，无数据库迁移。DECKLE（毛边文库）和 COTTON（棉纸诗笺）正式接入并持久化，五个旧主题保留，另外两套新纸本方案继续仅预览。源码冻结验收、Release 构建和 APK 隐私核查已通过；Git / Release 结果待提交阶段完成，不复用旧版摘要。最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。
+基线 `main/75e40c4`，本轮源码版本 2.8.19/205；Room v37（20 个实体）不变，无数据库迁移。DECKLE（毛边文库）和 COTTON（棉纸诗笺）正式接入并持久化，五个旧主题保留，另外两套新纸本方案继续仅预览。源码冻结验收、Release 构建和 APK 隐私核查已通过；版本提交 `bbf04cde5d694ac97d22031b73543c6fdb45a225` 与 `v2.8.19` 已推送且远端一致，核验时无待推提交。[Echo v2.8.19 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.19) 创建并上传唯一手动 APK，GitHub 摘要与匿名下载 SHA256 一致，publish / cleanup 均退出 0；远端仅保留 v2.8.19，本机旧标签与 215 个历史文件（214 APK）保留。 不复用旧版摘要。最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。
 
 临时实施方案：上一轮纸本预览的质感主要停留在配色和装饰，正式 App 没有共享的纸纹、字体和段落排版层。本轮新增固定种子 `EchoPaperTexture`，生成半透明噪点与短 / 长纤维缓存 Shader，并在文字下方绘制；`Theme` / `EchoThemeStyle` / `Type` 统一浅深色、文学字体、纸本行距 / 字距 / 低圆角；首页、聊天、设置和共享卡片 / 面板 / 对话框接入同一纹理入口；设置持久化放在 `PersonalizationManager`；`MarkdownText` 只调整普通段落，列表、代码、表格、引用 / 原文字保持原布局。前轮 Bot 符号右移与颜色引用误判修复随本轮进包。
 
@@ -22,7 +22,7 @@
 4. 检查文学字体、行距、字距、低圆角平面以及大 / 小屏布局；切换深色时纹理噪点透明度和前景对比仍可读。
 5. 回归方方 / 扁扁 Bot 右上符号右移、主题颜色引用和成功回复不误判错误色。
 
-验证边界：完整 verify、Release、隐私、Git 和 Release 数字待本轮结果；未连接真机或模拟器，浏览器预览 / 自动测试 / 构建成功不能替代设备视觉、触控、键盘和真实接口验收。
+验证边界：完整 verify、Release、隐私、Git 和 Release 已核验；未连接真机或模拟器，浏览器预览 / 自动测试 / 构建成功不能替代设备视觉、触控、键盘和真实接口验收。
 
 以下为历史版本与阶段验收记录，不代表本轮结果。
 
