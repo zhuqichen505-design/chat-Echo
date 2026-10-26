@@ -193,10 +193,40 @@ internal fun sampleExpressiveBotEffects(
 ): List<ExpressiveBotEffectPose> {
     if (state == EchoModelMarkState.Neutral && !idleEffects) return emptyList()
     val time = if (elapsedMillis.isFinite()) elapsedMillis.coerceAtLeast(0f) else 0f
-    fun effect(id: Int, kind: ExpressiveBotEffectKind, x: Float, y: Float, size: Float, alpha: Float,
-               progress: Float = 0f) =
-        ExpressiveBotEffectPose(id, kind, x, y, size, alpha.coerceIn(0f, 1f), progress)
     val wide = style == EchoModelMarkStyle.BOT_WIDE
+    // The wide body and tile body occupy more horizontal space than the orb. Keep the
+    // ornament in the same visual corner by moving it past the body's wider right edge.
+    val symbolShift = when (style) {
+        EchoModelMarkStyle.BOT_TILE -> 2.3f
+        EchoModelMarkStyle.BOT_WIDE -> 3f
+        else -> 0f
+    }
+    fun effect(id: Int, kind: ExpressiveBotEffectKind, x: Float, y: Float, size: Float, alpha: Float,
+               progress: Float = 0f): ExpressiveBotEffectPose {
+        // Leave a full normalized unit at the canvas edge. Each ornament has different
+        // right-hand ink: only the Wi-Fi arc points right, while the Z is narrower.
+        val rightInk = when (kind) {
+            // The base and every arc share one center, constrained by the outermost arc.
+            ExpressiveBotEffectKind.Signal, ExpressiveBotEffectKind.SignalDot ->
+                (if (wide) 22.8f else if (symbolShift > 0f) 26f else 28f) / 2f + 1.1f
+            ExpressiveBotEffectKind.Error -> size / 2f
+            ExpressiveBotEffectKind.Pause -> size / 2f
+            ExpressiveBotEffectKind.Thought, ExpressiveBotEffectKind.Spark -> size / 2f + 1.1f
+            ExpressiveBotEffectKind.Speech -> size / 2f + 1.1f * size / 18f
+            ExpressiveBotEffectKind.Z -> size * .36f + 1.1f
+        }
+        val kindShift = if (kind == ExpressiveBotEffectKind.Thought) symbolShift * .6f else symbolShift
+        val rightAligned = when {
+            symbolShift == 0f -> x
+            kind == ExpressiveBotEffectKind.Signal || kind == ExpressiveBotEffectKind.SignalDot ||
+                kind == ExpressiveBotEffectKind.Pause || kind == ExpressiveBotEffectKind.Error ||
+                kind == ExpressiveBotEffectKind.Speech || kind == ExpressiveBotEffectKind.Z ||
+                kind == ExpressiveBotEffectKind.Thought ->
+                (x + kindShift).coerceAtMost(99f - rightInk)
+            else -> x + kindShift
+        }
+        return ExpressiveBotEffectPose(id, kind, rightAligned, y, size, alpha.coerceIn(0f, 1f), progress)
+    }
     val terminalAmount = if (reducedMotion || time <= 0f || time >= TERMINAL_MOTION_MILLIS) 1f
         else smooth(time / TERMINAL_MOTION_MILLIS)
     if (state == EchoModelMarkState.Paused) {
@@ -212,8 +242,21 @@ internal fun sampleExpressiveBotEffects(
             x, y, 5.5f + 10.5f * terminalAmount, .45f + .55f * terminalAmount, terminalAmount))
     }
     val signalX = if (wide) 85.8f else 83f
-    val signalSizes = if (wide) listOf(10f, 18f, 24f) else listOf(10f, 19f, 28f)
-    val thoughtX = if (wide) 87.5f else 87f
+    val signalSizes = when (style) {
+        EchoModelMarkStyle.BOT_WIDE -> listOf(10f, 16.4f, 22.8f)
+        EchoModelMarkStyle.BOT_TILE -> listOf(10f, 18f, 26f)
+        else -> listOf(10f, 19f, 28f)
+    }
+    val thoughtX = when {
+        wide -> 85.6f
+        style == EchoModelMarkStyle.BOT_TILE -> 85.8f
+        else -> 87f
+    }
+    val thoughtTravel = when {
+        wide -> 3f
+        style == EchoModelMarkStyle.BOT_TILE -> 4f
+        else -> 2f
+    }
     val speechX = if (wide) 86.5f else 87f
     val speechSize = if (wide) 19f else 20f
     val sparkX = if (wide) 88f else 85f
@@ -222,7 +265,7 @@ internal fun sampleExpressiveBotEffects(
             effect(3, ExpressiveBotEffectKind.SignalDot, signalX, 16.3f, 3.2f, .88f)) + List(3) { index ->
             effect(index, ExpressiveBotEffectKind.Signal, signalX, 16.3f, signalSizes[index], .88f)
         }
-        EchoModelMarkState.Thinking -> listOf(effect(10, ExpressiveBotEffectKind.Thought, thoughtX + 2f, 7.4f, 16f, .9f, .4f))
+        EchoModelMarkState.Thinking -> listOf(effect(10, ExpressiveBotEffectKind.Thought, thoughtX + thoughtTravel, 7.4f, 16f, .9f, .4f))
         EchoModelMarkState.Replying -> listOf(effect(20, ExpressiveBotEffectKind.Speech, speechX, 8.9f, speechSize, .9f, .4f))
         EchoModelMarkState.Neutral -> listOf(effect(40, ExpressiveBotEffectKind.Z, 87f, 9.3f, 14f, .9f))
         EchoModelMarkState.Completed, EchoModelMarkState.Paused, EchoModelMarkState.Failed -> emptyList()
@@ -244,7 +287,7 @@ internal fun sampleExpressiveBotEffects(
             val position = time % 6400f / 6400f
             val rise = smooth((position - .08f) / .5f)
             // The tail appears first, then the thought grows and travels visibly into the upper-right space.
-            listOf(effect(10, ExpressiveBotEffectKind.Thought, thoughtX + 2f * rise, 9.5f - 2.1f * rise,
+            listOf(effect(10, ExpressiveBotEffectKind.Thought, thoughtX + thoughtTravel * rise, 9.5f - 2.1f * rise,
                 13f + 3f * rise, opacity(position) * .9f, position))
         }
         EchoModelMarkState.Replying -> {

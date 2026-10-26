@@ -243,6 +243,10 @@ class ChatEnhancementsTest {
         assertTrue(detectError("error: 500 internal server error"))
         assertTrue(detectError("合成部分正文\n\n[输出已被中断: HTTP 500]"))
         assertTrue(detectError("请求失败\n\n【连接异常信息记录】合成连接失败"))
+        assertFalse("成功回复引用中断标记不能在落库时把 Bot 染成错误色",
+            detectError("我解释一下这个标记：\n\n[输出已被中断: 这是示例文本]\n\n然后继续正常回复。"))
+        assertFalse("成功回复引用连接记录不能触发终止错误态",
+            detectError("下面是错误记录格式示例：\n\n【连接异常信息记录】仅用于说明\n\n实际请求已经成功。"))
 
         for (content in listOf(
             "生成已停止",

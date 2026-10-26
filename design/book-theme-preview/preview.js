@@ -1,10 +1,10 @@
 (() => {
   'use strict';
   const themes = [
-    {id:'deckle', name:'毛边文库', english:'PAPERBACK', description:'未经裁齐的页边、洇开的砖红印记，消息像叠放的薄书纸。', notes:'毛边与叠页 · 铅印书眉 · 砖红印记', colors:['#f6efdf','#91402d','#3e342a','#eadfca']},
-    {id:'thread', name:'素纸线装', english:'THREADBOUND', description:'可见的线装针脚、方正的双线框，灰白宣纸承接松绿墨色。', notes:'装订针脚 · 双线边框 · 宣纸留白', colors:['#eef1e8','#345a45','#263e34','#d5e2d0']},
-    {id:'field', name:'牛皮手札', english:'FIELD NOTES', description:'活页装订、铅笔页线与胶带便笺，把对话放进随身手札。', notes:'活页装订 · 铅笔横格 · 胶带便笺', colors:['#e6cea9','#345746','#403222','#d7bd94']},
-    {id:'cloth', name:'藏书精装', english:'CLOTHBOUND', description:'梅棕布面包住象牙内页，压金细线与书脊阴影勾出层次。', notes:'布面封边 · 细金压框 · 象牙书纸', colors:['#f3ebd9','#553a45','#66404b','#e9dcc8']}
+    {id:'deckle', name:'毛边文库', english:'RAG PAPER', description:'松软微黄的书纸，短纤维与细小纸屑；首行缩进，像一本文学平装书。', notes:'短纸纤维 · 温润铅墨 · 连续书页排版', colors:['#f2e8d3','#8b3e2d','#382e24','#eadac0']},
+    {id:'thread', name:'棉纸诗笺', english:'COTTON PAPER', description:'冷白长纤维棉纸，字距与段落舒展；让文字在留白里自然呼吸。', notes:'长纤维棉纸 · 舒展字距 · 宽松段落', colors:['#f4f5f1','#375d70','#2a373a','#dde6e6']},
+    {id:'field', name:'旧刊铅印', english:'NEWSPRINT', description:'细密颗粒的旧刊纸，厚实标题与紧凑字面，保留铅字阅读的节奏。', notes:'旧刊纸粒 · 粗细墨线 · 紧凑字面', colors:['#e5dfcb','#384b42','#2d302a','#ced2bf']},
+    {id:'cloth', name:'墨纸夜读', english:'DYED PAPER', description:'深色染纸的细纤维，米白浅墨与大字号；安静而清楚的夜间书页。', notes:'染色纸浆 · 米白浅墨 · 大字阅读', colors:['#28312e','#dbba7d','#e8e2ce','#4b503d']}
   ];
   const paths = {
     back:'<path d="m15 18-6-6 6-6M9 12h12"/>',

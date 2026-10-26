@@ -161,6 +161,24 @@ class MotionRoundTests {
         }
     }
 
+    @Test fun tileAndWideSymbolsClearTheirWiderBodyRightEdge() {
+        val styles = listOf(EchoModelMarkStyle.BOT_ORB, EchoModelMarkStyle.BOT_TILE, EchoModelMarkStyle.BOT_WIDE)
+        val states = listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
+            EchoModelMarkState.Replying, EchoModelMarkState.Paused, EchoModelMarkState.Failed)
+        val minimumRightEdge = styles.associateWith { style ->
+            states.flatMap { state ->
+                (0..12).flatMap { frame ->
+                    sampleExpressiveBotPose(style, state, frame * 80f).effects
+                        .filter { it.alpha > .1f }
+                        .map { expressiveEffectBounds(it)[0] }
+                }
+            }.minOrNull() ?: 0f
+        }
+        assertTrue("圆圆保留基准锚点", minimumRightEdge.getValue(EchoModelMarkStyle.BOT_ORB) < 85f)
+        assertTrue("方方状态符号应整体向右", minimumRightEdge.getValue(EchoModelMarkStyle.BOT_TILE) > minimumRightEdge.getValue(EchoModelMarkStyle.BOT_ORB) + 2f)
+        assertTrue("扁扁状态符号应整体向右", minimumRightEdge.getValue(EchoModelMarkStyle.BOT_WIDE) > minimumRightEdge.getValue(EchoModelMarkStyle.BOT_ORB) + 3f)
+    }
+
     @Test fun expressiveSymbolsUseClearUpperRightSemanticsAndUnhurriedHolds() {
         for (state in listOf(EchoModelMarkState.Connecting, EchoModelMarkState.Thinking,
             EchoModelMarkState.Replying, EchoModelMarkState.Neutral)) {

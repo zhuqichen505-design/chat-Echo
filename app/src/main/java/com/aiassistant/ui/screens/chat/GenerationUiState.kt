@@ -10,9 +10,8 @@ import com.aiassistant.ui.components.EchoModelMarkState
  * 把散落在 isConnecting/isThinkingActive/isGenerating/reconnectStatus 的隐式状态推导收敛为单一枚举，
  * 所有动效（脉冲环/文案交叉/光标/落定）由状态机驱动而非字符串匹配。
  *
- * 行为等价迁移约束：错误文案匹配规则（contains 异常/报错/失败/错误/Error/HTTP）
- * 与 isErrorMessage() 内容判定原样保留，判定结果不变；
- * 后续由数据层输出结构化错误码后替换（属另一任务）。
+ * 错误文案仍兼容既有请求失败与重连提示；正文中引用旧的中断 / 连接记录时，
+ * 只有最后一个生成器尾块才会进入错误态，避免成功回复落库时短暂染成错误色。
  */
 enum class GenerationUiState {
     Idle,        // 无生成进行

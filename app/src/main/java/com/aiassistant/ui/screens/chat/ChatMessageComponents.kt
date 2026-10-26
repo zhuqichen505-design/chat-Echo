@@ -381,6 +381,10 @@ internal fun isGeneratingAnchorHostItem(
 internal fun isErrorMessage(content: String): Boolean {
     val trimmed = content.trim()
     if (GenerationUiStateRules.isStoppedContent(trimmed)) return false
+    // Generated interruption / connection records are terminal blocks. A successful reply may
+    // quote the same wording in its prose; only the final block is allowed to change the Bot
+    // state to Failed, preventing a color jump when the reply is saved.
+    val lastBlock = trimmed.substringAfterLast("\n\n")
     return trimmed.startsWith("请求失败") ||
            trimmed.startsWith("[请求失败]") ||
            trimmed.startsWith("【请求失败】") ||
@@ -393,10 +397,10 @@ internal fun isErrorMessage(content: String): Boolean {
            trimmed.startsWith("连接超时") ||
            trimmed.startsWith("网络异常") ||
            trimmed.startsWith("网络波动") ||
-           trimmed.contains("[输出已被中断") ||
-           trimmed.contains("【连接异常信息记录】") ||
+           lastBlock.startsWith("[输出已被中断") ||
+           lastBlock.startsWith("【连接异常信息记录】") ||
            trimmed.contains("failed to stream request: empty response detected", ignoreCase = true) ||
-           trimmed.contains("(思考已完成，但模型未输出正文内容") ||
+           lastBlock.startsWith("(思考已完成，但模型未输出正文内容") ||
            (trimmed.contains("回复已停止") && trimmed.contains("报错详情"))
 }
 

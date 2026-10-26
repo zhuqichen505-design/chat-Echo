@@ -1,16 +1,165 @@
-/* Echo paper bindings: the real page hierarchy stays intact; only surfaces, edges and type treatment change. */
-.bot-preview-link{font-size:11px;border-bottom:1px solid currentColor;margin-left:auto;margin-right:23px}.introduction h1{letter-spacing:.03em;font-size:36px}.device{border-radius:8px 18px 18px 8px;overflow:hidden;position:relative;box-shadow:3px 3px 0 #bdb7aa,7px 7px 0 #e6e1d4,11px 15px 24px #22251e26}.device::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:13}.device::after{opacity:.58}.device .chat-title{font-family:var(--reader);font-weight:600}.device .assistant-body{line-height:2.06}.device .dialog{width:calc(100% - 32px);max-width:480px;max-height:90%}.device .composer-pills .input-pill{min-width:78px;justify-content:center;height:30px;padding:5px 7px}.device .setting-chips{gap:8px}.device .setting-chips button{border-radius:7px;padding:6px 10px}.no-texture .device::after{display:none}
+/* Paper texture and typography studies. No binding, cover, side rail or faux page UI. */
+:root { --desk:#e4e5e1; --ink:#26312c; --muted:#535d56; --line:#bfc5bd; }
+.masthead,main,.site-footer { max-width:1760px; }
+.bot-preview-link { font-size:11px; margin-left:auto; margin-right:24px; border-bottom:1px solid currentColor; }
+.introduction { padding-block:34px 27px; }
+.introduction h1 { font-size:36px; letter-spacing:.03em; }
+.introduction p { max-width:78ch; line-height:1.9; }
+.study-header h2 { font-size:24px; }
+.study-description { line-height:1.9; min-height:48px; }
+.gallery { gap:28px; }
+.gallery.focus-mode { grid-template-columns:minmax(0,430px); }
+.device {
+  --sheet-texture:url('textures/rag.svg'); --sheet-wash:none;
+  --paper:#f2e8d3; --surface:#f7eedc; --card:#faf2e2; --body:#382e24;
+  --secondary:#695640; --rule:#c7b692; --accent:#8b3e2d; --accent-ink:#fff9ec;
+  --accent-soft:#e7d5ba; --bubble:#eadac0; --error:#982f29; --error-soft:#f1d7cc;
+  --header:transparent; --header-ink:var(--body); --header-muted:var(--secondary);
+  height:850px; border:1px solid #7c7c6d55; border-radius:3px;
+  background-color:var(--paper); background-image:var(--sheet-wash);
+  box-shadow:0 9px 18px #27312719; clip-path:none;
+}
+.device::before { content:""; position:absolute; inset:0; background-image:var(--sheet-texture); background-size:420px; opacity:.82; z-index:0; pointer-events:none; }
+.device::after { display:none; }
+.device .app-surface { margin:0; padding:0; position:relative; z-index:1; }
+.device .system-bar,.device .system-gesture { position:relative; z-index:1; background:transparent; color:var(--body); }
+.device .chat-header { background:transparent; border:0; border-bottom:1px solid var(--rule); border-radius:0; margin:0 18px; }
+.device .chat-title { font:600 18px/1.5 var(--reader); letter-spacing:.03em; }
+.device .chat-scroll { padding:22px 22px 24px; }
+.device .user-avatar { background:transparent; color:var(--secondary); }
+.device .user-bubble { background:var(--bubble); border:0; border-radius:5px; padding:12px 14px; font:13px/1.9 var(--ui); }
+.device .message-user { margin:0 0 29px; }
+.device .assistant-body { color:var(--body); font:17px/2.05 var(--reader); text-align:justify; line-break:strict; }
+.device .assistant-body p { margin:0 0 1em; text-indent:2em; }
+.device .message-meta { opacity:.9; }
+.device .message-metrics { font-size:8px; letter-spacing:.01em; }
+.device .thinking-capsule { border:1px solid var(--rule); border-radius:999px; background:transparent; color:var(--secondary); font:10px/1.55 var(--ui); padding:6px 9px; min-height:30px; }
+.device .assistant-status-row { gap:6px; margin-bottom:18px; }
+.device .chat-composer { background:transparent; border:0; border-top:1px solid var(--rule); border-radius:0; margin:0 18px 3px; padding:13px 0 6px; }
+.device .chat-composer textarea { font:14px/1.8 var(--reader); padding-inline:3px; }
+.device .chat-composer textarea::placeholder { color:var(--secondary); opacity:1; }
+.device .composer-pills .input-pill { width:78px; height:30px; padding:5px 7px; justify-content:center; border-radius:999px; font-size:10px; }
+.device .composer-tools { gap:4px; }
+.device .composer-action-buttons { gap:3px; }
+.device .home-header { background:transparent; color:var(--body); margin:0 18px 7px; padding:0; border-bottom:1px solid var(--rule); }
+.device .home-brand strong { font-family:Georgia,var(--reader); letter-spacing:.1em; }
+.device .home-search { padding-inline:18px; }
+.device .home-search-input { background:transparent; border:0; border-bottom:1px solid var(--rule); border-radius:0; padding:9px 3px; }
+.device .home-folders { padding-inline:18px; }
+.device .home-folders button { background:transparent; border:0; border-bottom:1px solid transparent; border-radius:0; padding:7px 8px; }
+.device .home-folders [aria-pressed=true] { border-color:var(--accent); color:var(--accent); }
+.device .home-list { padding:14px 20px 22px; }
+.device .home-new-chat { min-height:44px; border-radius:4px; font-family:var(--reader); }
+.device .home-configure { border-radius:4px; }
+.device .home-story { border:0; border-block:1px solid var(--rule); border-radius:0; background:transparent; padding:15px 0; margin-block:18px; }
+.device .conversation-row { background:transparent; border:0; border-bottom:1px solid var(--rule); border-radius:0; box-shadow:none; padding:16px 0; margin:0; }
+.device .conversation-title strong { font:600 16px/1.6 var(--reader); }
+.device .model-pill { background:transparent; border:0; padding:0; font-size:9px; color:var(--secondary); }
+.device .root-nav { background:transparent; border-top:1px solid var(--rule); }
+.device .root-nav [aria-current=page]>svg { background:var(--accent-soft); }
+.device .dialog { width:calc(100% - 32px); max-width:480px; max-height:90%; border:1px solid var(--rule); border-radius:6px; outline:0; background-color:var(--surface); background-image:var(--sheet-texture); background-size:420px; box-shadow:0 12px 24px #28261d2e; }
+.device .settings-heading { padding-bottom:16px; }
+.device .settings-heading h3 { font-family:var(--reader); letter-spacing:.07em; }
+.device .settings-tabs { margin-inline:18px; }
+.device .settings-tabs button { font-size:9px; }
+.device .setting-field select,.device .setting-field input,.device .setting-field textarea,.device .model-select,.device .number-field,.device .context-limit { background:transparent; border-radius:4px; }
+.device .setting-chips { gap:8px; }
+.device .setting-chips button { border-radius:3px; }
+.device .thinking-detail { background:var(--surface); border-radius:4px; }
+.device .thinking-capsule.capsule-failed { border-color:var(--error); color:var(--error); background:var(--error-soft); }
+.no-texture .device::before { display:none; }
+.no-texture .device,.no-texture .device .dialog { background-image:none; }
 
-/* 毛边文库：继续保留暖纸与砖红，但增加真正的毛边、叠页、页眉印刷和纸张错位。 */
-.deckle{--paper:#f4e8cf;--surface:#faf0dc;--card:#fff8e9;--rule:#b89d70;--bubble:#ead9b9;--body:#403326;--secondary:#736047;--accent:#9a432c;--accent-soft:#efd0b6;background-image:radial-gradient(ellipse at 0 0,#dfc28b66,transparent 62%),repeating-linear-gradient(0deg,transparent 0 31px,#8b6c3a0c 31px 32px);border-radius:3px 15px 15px 3px;border-left:7px solid #966f43}.deckle::before{background:linear-gradient(90deg,#6b4d2826 0,transparent 14px,transparent calc(100% - 5px),#8e704126),repeating-linear-gradient(0deg,transparent 0 47px,#8b6c3a14 47px 48px);box-shadow:inset 4px 0 #c2a27333}.deckle .system-bar{background:transparent}.deckle .chat-header{margin:4px 10px 5px;border:0;border-bottom:3px double var(--rule);border-radius:2px;background:transparent}.deckle .home-header{height:59px;margin:0 15px;background:transparent;border-bottom:3px double var(--rule);padding-inline:0}.deckle .home-brand strong{font-family:Georgia,serif;letter-spacing:.12em}.deckle .home-search-input{border-radius:2px;border:0;border-bottom:1px solid var(--rule);background:#fff6e370}.deckle .home-folders button{border-radius:2px;border-color:#c3a77a;background:transparent}.deckle .home-new-chat{border-radius:2px;border:1px solid var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--accent),inset 0 0 0 4px #fff0d055;font-family:var(--reader);letter-spacing:.08em}.deckle .home-configure{border-radius:2px}.deckle .home-story{border-block:1px solid var(--rule);border-radius:2px;background:transparent;padding-inline:7px}.deckle .conversation-row{border-radius:3px 7px 7px 3px;background:#fff8e9;border-color:#c9af82;box-shadow:2px 3px #ceb99166;margin-bottom:13px}.deckle .model-pill{border:1px solid #ab7659;border-radius:2px;background:transparent;font-family:var(--reader);padding:2px 5px}.deckle .user-bubble{border:0;border-radius:2px;background:#fff6df;box-shadow:2px 3px #d2bb8e88,3px 6px 6px #6b4b1b12;clip-path:polygon(0 2%,16% 0,34% 2%,52% 0,74% 2%,100% 0,99% 22%,100% 45%,99% 100%,77% 98%,55% 100%,31% 98%,0 100%,1% 70%,0 40%);padding:16px 14px}.deckle .thinking-capsule{border-radius:3px;border-color:#b99b6a;background:transparent;font-family:var(--reader)}.deckle .chat-composer{border:1px solid var(--rule);border-top:3px double var(--rule);border-radius:3px;background:#fbf2df}.deckle .input-pill{border-radius:3px}.deckle .root-nav{border-top:3px double var(--rule);background:#f4e8cf}.deckle .dialog{border-radius:4px;border-top:4px double #ae9368;box-shadow:3px 4px #c7ad7c,7px 8px #f4e8cf,0 16px 30px #30241633}
+/* 毛边文库：松软的未涂布书纸、短纤维、温润铅墨，首行缩进连续阅读。 */
+.device.deckle { --sheet-texture:url('textures/rag.svg'); --sheet-wash:radial-gradient(ellipse at 17% 20%,#fff6de55,transparent 62%),radial-gradient(ellipse at 88% 68%,#ae8b4d12,transparent 65%); }
+.deckle .chat-header,.deckle .home-header { border-bottom:3px double #b49a71; }
+.deckle .assistant-body { letter-spacing:.035em; text-shadow:.16px .12px #6a493c24; }
+.deckle .assistant-body p { margin-bottom:.75em; }
+.deckle .thinking-capsule { border-color:#bb9a75; color:#715139; }
+.deckle .home-brand strong { color:#743b2d; }
+.deckle .chat-composer { border-top:3px double #b49a71; }
+.deckle .settings-heading h3 { font-weight:600; }
 
-/* 素纸线装（重做）：所有边缘像穿过装订线，使用墨线、针脚和宣纸折痕，不再是普通卡片网格。 */
-.thread{--paper:#edf0e5;--surface:#f7f8f0;--card:#fafbf5;--rule:#93aa91;--body:#253a2e;--secondary:#526957;--accent:#35624d;--accent-soft:#d8e4d5;--bubble:#e3eadc;background:#eef1e8;border:0;border-left:12px solid #41634d;border-radius:0;box-shadow:2px 1px #b3c1ad,5px 4px #e6eadf,8px 7px #a0b09e,12px 17px 24px #273b2c22}.thread::before{inset:30px auto 24px 0;width:18px;background:repeating-linear-gradient(0deg,transparent 0 31px,#6f876d 31px 33px,transparent 33px 46px);opacity:.75}.thread .app-surface{padding-left:10px}.thread .system-bar{padding-left:25px;background:transparent}.thread .home-header{margin:0 17px;height:59px;background:transparent;border-bottom:1px solid var(--rule);padding-inline:0}.thread .chat-header{margin:7px 13px 7px 16px;background:transparent;border:1px solid var(--rule);border-radius:0;outline:1px solid #afbfaa;outline-offset:-5px}.thread .home-brand strong,.thread .chat-title{font-family:var(--reader);letter-spacing:.08em}.thread .home-search-input{border-radius:0;background:transparent;border:0;border-bottom:1px solid var(--rule)}.thread .home-folders button{border-radius:0;background:transparent}.thread .home-new-chat{border-radius:0;border:1px solid var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--accent),inset 0 0 0 4px #dbe7d566;font-family:var(--reader);letter-spacing:.12em}.thread .home-configure{border-radius:0}.thread .home-story{border-radius:0;border-block:1px solid var(--rule);background:transparent}.thread .conversation-row{border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent;padding:15px 4px;box-shadow:none;margin:0}.thread .model-pill{border:1px solid var(--rule);border-radius:0;background:transparent;padding:2px 4px}.thread .user-bubble{border:1px solid var(--rule);outline:1px solid #b7c6b0;outline-offset:-5px;border-radius:0;background:#fafcf6}.thread .thinking-capsule{border-radius:0;background:transparent;border-color:var(--rule)}.thread .chat-composer{border:1px solid var(--rule);outline:1px solid var(--rule);outline-offset:-5px;background:#f8faef;border-radius:0;margin-left:15px}.thread .input-pill{border-radius:0}.thread .root-nav{background:transparent;border-top:1px solid var(--rule)}.thread .root-nav button+button{border-left:1px solid #c1cdbb}.thread .dialog{border-radius:0;border:1px solid #718c76;outline:1px solid #a2b59c;outline-offset:-6px;box-shadow:5px 5px #d7e3d0,8px 8px #9daf9b}
+/* 棉纸诗笺：冷白长纤维与大留白，舒展字距、独立段落。 */
+.device.thread {
+  --sheet-texture:url('textures/cotton.svg'); --sheet-wash:radial-gradient(ellipse at 75% 23%,#d5dfdf36,transparent 57%);
+  --paper:#f4f5f1; --surface:#fafbf7; --card:#ffffff; --body:#2a373a;
+  --secondary:#57696a; --rule:#c6cfcb; --accent:#375d70; --accent-ink:#faffff;
+  --accent-soft:#dde6e6; --bubble:#e7ece8; --header:transparent; --header-ink:#2a373a; --header-muted:#57696a;
+}
+.thread .chat-scroll { padding:27px 28px; }
+.thread .assistant-body { font-size:17px; line-height:2.25; letter-spacing:.075em; }
+.thread .assistant-body p { margin-bottom:1.3em; text-indent:0; }
+.thread .chat-title { font-weight:400; letter-spacing:.18em; }
+.thread .chat-header { border:0; }
+.thread .user-bubble { background:transparent; border-block:1px solid var(--rule); border-radius:0; padding:13px 1px; }
+.thread .thinking-capsule { border:0; border-bottom:1px solid var(--rule); border-radius:0; padding-inline:2px; }
+.thread .home-header { border:0; }
+.thread .home-list { padding-inline:26px; }
+.thread .conversation-row { padding-block:21px; }
+.thread .home-new-chat { background:transparent; border:1px solid var(--accent); color:var(--accent); }
+.thread .home-story { padding-block:20px; }
+.thread .chat-composer { margin-inline:24px; }
+.thread .settings-heading h3 { font-weight:400; letter-spacing:.18em; }
 
-/* 牛皮手札（重做）：活页孔、铅笔横格和可撕便笺，把真实控件变成手札页上的工具。 */
-.field{--paper:#e2c18f;--surface:#f0d5a6;--card:#f4dfb8;--rule:#987a4e;--body:#403323;--secondary:#5b472c;--accent:#3c5d48;--accent-soft:#d5d5ad;--bubble:#ecd1a0;background:#e2c18f;border-left:38px solid #74593a;border-radius:2px 14px 14px 2px;box-shadow:2px 2px #aa8a59,6px 5px #eed4aa,9px 8px #9b7a49,13px 17px 25px #4436202b;background-image:repeating-linear-gradient(0deg,transparent 0 28px,#856b4428 28px 29px),linear-gradient(90deg,transparent 0 27px,#a44e3b45 27px 28px,transparent 28px)}.field::before{inset:0 auto 0 -30px;width:26px;background:radial-gradient(circle at 13px 13px,#d6be91 0 4px,transparent 4.5px) 0 0/26px 42px repeat-y;opacity:.95}.field .app-surface{padding-left:9px}.field .system-bar{background:#d0ac73;padding-left:19px}.field .home-header{background:#d1ac74;border-bottom:1px dashed #8e6b43}.field .chat-header{background:#e7cb9d;border:1px dashed #8b6a43;border-radius:2px;margin-top:6px}.field .chat-title{font-family:var(--ui);font-size:16px}.field .home-search-input,.field .home-folders button{border-radius:4px;background:#efd5a5;border-color:#a08152}.field .home-new-chat{border-radius:3px;box-shadow:2px 3px #52654466;font-family:var(--ui)}.field .home-configure{border-radius:3px}.field .home-story{border:1px solid #9b7a4d;border-radius:0;background:#f2dcb1;box-shadow:2px 3px #ac8d5b55;transform:rotate(-.4deg)}.field .conversation-row{border:1px solid #a38658;border-radius:2px;background:#f2d9ab;box-shadow:2px 3px #ae8a4f55;margin-bottom:13px}.field .model-pill{border:1px dashed #758560;border-radius:1px;background:transparent;padding:2px 4px}.field .user-bubble{position:relative;border:0;border-radius:0;background:#f8e8c4;box-shadow:2px 3px 5px #58441e24;transform:rotate(-.7deg);padding:18px 14px}.field .user-message-content::before{content:"";position:absolute;width:48px;height:13px;top:-6px;left:37%;background:repeating-linear-gradient(90deg,#d0bd8580 0 2px,#e5d9b29c 2px 4px);z-index:1;pointer-events:none;transform:rotate(4deg)}.field .chat-scroll{padding-left:18px}.field .assistant-body{line-height:28px;font-family:var(--reader)}.field .thinking-capsule{background:#ebd0a1;border-style:dashed;border-radius:3px}.field .chat-composer{border:1px solid #8e7048;border-radius:3px;background:#efd6a8;box-shadow:2px 3px #9e7b4e66;margin-left:13px}.field .input-pill{border-radius:4px}.field .root-nav{background:#d0ac73;border-top:1px dashed #896d43}.field .root-nav button>svg{border-radius:3px}.field .dialog{background:#efd5a6;border-radius:3px;border:1px solid #896d43;box-shadow:4px 5px #a88a5e,7px 8px #e4cba2,0 16px 30px #30241633}
+/* 旧刊铅印：细密旧报纸颗粒，粗细墨线与紧凑字面。 */
+.device.field {
+  --sheet-texture:url('textures/news.svg'); --sheet-wash:radial-gradient(ellipse at 30% 20%,#f4e9bf66,transparent 66%);
+  --paper:#e5dfcb; --surface:#eee8d6; --card:#f1ecd9; --body:#2d302a;
+  --secondary:#5b6054; --rule:#a7aa97; --accent:#384b42; --accent-ink:#f5f3df;
+  --accent-soft:#ced2bf; --bubble:#d5d2bf; --header:transparent; --header-ink:#2d302a; --header-muted:#5b6054;
+}
+.field::before { background-size:340px; opacity:.95; }
+.field .chat-header,.field .home-header { border-bottom:3px solid #424b3f; margin-inline:16px; }
+.field .chat-title { font-size:19px; font-weight:900; letter-spacing:.08em; }
+.field .chat-scroll { padding:17px 18px; }
+.field .assistant-body { font-size:16px; line-height:1.82; letter-spacing:.015em; font-weight:500; }
+.field .assistant-body p { margin-bottom:.85em; text-indent:2em; }
+.field .user-bubble { background:transparent; border-block:1px solid #8f9784; border-radius:0; padding:10px 0; font-size:12px; line-height:1.85; }
+.field .message-user { margin-bottom:20px; }
+.field .thinking-capsule { border-color:#89937f; border-radius:2px; font-size:9px; padding:5px 7px; }
+.field .assistant-status-row { margin-bottom:13px; }
+.field .chat-composer { border-top:3px double #77816e; }
+.field .home-brand strong { font-weight:900; letter-spacing:.16em; }
+.field .conversation-title strong { font-weight:900; font-size:15px; }
+.field .conversation-row { padding-block:13px; border-bottom:1px solid #a7ad98; }
+.field .home-story { border-top:3px double #77816e; border-bottom:3px double #77816e; }
+.field .home-new-chat { border-radius:0; background:transparent; border-block:1px solid var(--accent); color:var(--accent); font-weight:900; }
+.field .dialog { border-radius:0; }
+.field .settings-heading { border-bottom:3px double #77816e; margin-inline:18px; padding-inline:0; }
+.field .settings-heading h3 { font-weight:900; }
 
-/* 藏书精装（重做）：织布封面、金线书脊、压印内框和象牙页块；不只是深色主题。 */
-.cloth{--paper:#efe3c9;--surface:#f8eedc;--card:#fcf5e5;--rule:#ae8b51;--body:#40302d;--secondary:#725a4f;--accent:#713e4b;--accent-soft:#ead6c8;--bubble:#e7d6bf;--header:#4b303c;border:7px solid #4b303c;border-left-width:17px;border-radius:4px 12px 12px 4px;box-shadow:2px 2px #a88d68,5px 4px #e6d3ae,8px 7px #4b303c,13px 17px 25px #25172033;background-image:repeating-linear-gradient(88deg,#fff2c309 0 1px,transparent 1px 4px),repeating-linear-gradient(0deg,#190c160d 0 1px,transparent 1px 3px)}.cloth::before{background:linear-gradient(90deg,#4b303c33 0 14px,transparent 14px calc(100% - 6px),#a9874c55);box-shadow:inset -3px 0 #eadcc2,inset -4px 0 #ad8b54}.cloth .system-bar,.cloth .home-header,.cloth .chat-header{background-color:#4b303c;background-image:repeating-linear-gradient(88deg,#fff2c308 0 1px,transparent 1px 4px),repeating-linear-gradient(0deg,#190c160d 0 1px,transparent 1px 3px);color:#f0ddbd}.cloth .home-header{border-block:1px solid #b39158;margin:2px 8px 6px}.cloth .chat-header{margin:3px 7px 6px;border:1px solid #b18d51;outline:1px solid #b18d5166;outline-offset:-5px;border-radius:4px}.cloth .home-brand strong,.cloth .chat-title{font-family:var(--reader);letter-spacing:.08em}.cloth .home-search-input{border-radius:5px;border-color:#b08e57}.cloth .home-folders button{border-radius:4px;border-color:#b08e57}.cloth .home-new-chat{border-radius:4px;background:#713e4b;box-shadow:inset 0 0 0 3px #713e4b,inset 0 0 0 4px #d1ad68;font-family:var(--reader);letter-spacing:.1em}.cloth .home-configure{border-radius:4px}.cloth .home-story{border:1px solid #b18d55;outline:1px solid #b18d5577;outline-offset:-5px;border-radius:4px;background:#eee0c5}.cloth .conversation-row{border-radius:4px;border:1px solid #b69863;background:#fbf2df;box-shadow:inset 0 0 0 3px #f4e9d0,inset 0 0 0 4px #d6c19b66;margin-bottom:12px}.cloth .model-pill{border:1px solid #b69863;border-radius:2px;background:transparent}.cloth .user-bubble{background:#f5e9d0;border:1px solid #b69863;border-radius:4px;box-shadow:inset 0 0 0 3px #f0e6d0,inset 0 0 0 4px #b6986355}.cloth .thinking-capsule{border-radius:3px;border-color:#b69863;background:transparent;font-family:var(--reader)}.cloth .chat-composer{border:1px solid #a98854;border-radius:4px;background:#f7edda;box-shadow:inset 0 0 0 3px #f7edda,inset 0 0 0 4px #d0b989,0 -4px 0 #b99b6712;margin-inline:7px}.cloth .input-pill{border-radius:4px}.cloth .root-nav{background:#4b303c;border-top:1px solid #b18d55}.cloth .root-nav button{color:#ead8b9}.cloth .root-nav [aria-current=page]{color:#ffe3a3}.cloth .root-nav [aria-current=page]>svg{background:#73505a;border-radius:4px}.cloth .dialog{border-radius:5px;border:1px solid #a48854;outline:1px solid #bda06a;outline-offset:-6px;background:#f7edda;box-shadow:5px 6px #4b303c,7px 8px #bca16e,0 15px 30px #20121b40}
+/* 墨纸夜读：染色纸浆上的浅色墨，较大的正文与松弛段距。 */
+.device.cloth {
+  --sheet-texture:url('textures/ink.svg'); --sheet-wash:radial-gradient(ellipse at 70% 30%,#8b957519,transparent 65%);
+  --paper:#28312e; --surface:#333d37; --card:#3b453d; --body:#e8e2ce;
+  --secondary:#bebdaa; --rule:#596355; --accent:#dbba7d; --accent-ink:#28312e;
+  --accent-soft:#4b503d; --bubble:#3b443b; --error:#f2aaa0; --error-soft:#543b37;
+  --header:transparent; --header-ink:#e8e2ce; --header-muted:#bebdaa;
+}
+.cloth::before { opacity:.8; }
+.cloth .chat-header { border-bottom:1px solid #6e745b; }
+.cloth .chat-title { font-weight:500; font-size:18px; letter-spacing:.08em; }
+.cloth .chat-scroll { padding:25px 25px; }
+.cloth .assistant-body { font-size:18px; line-height:2; letter-spacing:.02em; }
+.cloth .assistant-body p { text-indent:0; margin-bottom:1.25em; }
+.cloth .user-bubble { background:#414a3b; border-radius:6px; color:#e8e2ce; }
+.cloth .thinking-capsule { color:#d3c395; border-color:#717456; }
+.cloth .home-brand strong { color:#e1c795; font-weight:400; }
+.cloth .conversation-title strong { font-size:17px; font-weight:500; }
+.cloth .home-new-chat { background:transparent; color:var(--accent); border:1px solid #8c8961; }
+.cloth .home-configure { background:transparent; }
+.cloth .root-nav { background:transparent; }
+.cloth .system-bar,.cloth .system-gesture { color:#e8e2ce; }
+.cloth .settings-heading h3 { font-weight:500; color:#e1c795; }
 
-@media(max-width:650px){.bot-preview-link{font-size:9px;margin-inline:auto 8px;max-width:95px;line-height:1.6}.brand{gap:8px}.brand span{padding-left:8px;font-size:10px}.preview-tag{font-size:8px;max-width:82px;line-height:1.6;text-align:center}.introduction h1{font-size:28px}.field .assistant-body{font-size:15px}.device .composer-pills .input-pill{min-width:74px}.device .chat-composer{padding-inline:9px}.device .composer-tools{gap:3px}}
+@media(max-width:650px) {
+  .bot-preview-link { font-size:9px; margin-inline:auto 8px; max-width:90px; line-height:1.6; }
+  .brand { gap:8px; }.brand span { padding-left:8px; font-size:10px; }
+  .preview-tag { font-size:8px; max-width:82px; line-height:1.6; text-align:center; }
+  .introduction h1 { font-size:28px; }
+  .device { height:850px; }
+  .device .composer-pills .input-pill { width:76px; }
+  .device .composer-tools { gap:2px; }
+  .device .composer-action-buttons .icon-button { width:34px; height:34px; }
+}
