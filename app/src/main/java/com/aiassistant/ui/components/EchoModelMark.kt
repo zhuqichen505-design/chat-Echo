@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -72,6 +73,37 @@ internal class ModelMarkCompletionMotion {
     }
 }
 
+/** The logical reply owns its tint, so a streaming/saved or layout handoff keeps the current frame. */
+internal class ModelMarkColorMotion {
+    private var from = Color.Unspecified
+    private var target = Color.Unspecified
+    private var elapsedMillis = EchoMotion.Duration.slow.toFloat()
+    var value by mutableStateOf(Color.Unspecified)
+        private set
+
+    val needsFrames: Boolean get() = elapsedMillis < EchoMotion.Duration.slow
+
+    fun update(color: Color, reducedMotion: Boolean = false) {
+        if (!value.isSpecified || reducedMotion) {
+            from = color
+            target = color
+            value = color
+            elapsedMillis = EchoMotion.Duration.slow.toFloat()
+        } else if (target != color) {
+            from = value
+            target = color
+            elapsedMillis = 0f
+        }
+    }
+
+    fun advance(deltaMillis: Float) {
+        if (!needsFrames || !deltaMillis.isFinite() || deltaMillis <= 0f) return
+        elapsedMillis = (elapsedMillis + deltaMillis).coerceAtMost(EchoMotion.Duration.slow.toFloat())
+        value = if (!needsFrames) target else lerp(from, target,
+            EchoMotion.Easing.standard.transform(elapsedMillis / EchoMotion.Duration.slow))
+    }
+}
+
 /** 保留主题色倾向，必要时向黑/白收敛，避免自定义背景吞掉细线。 */
 fun modelMarkColorFor(accent: Color, backdrop: Color): Color {
     val surface = backdrop.compositeOver(Color.White)
@@ -104,7 +136,8 @@ internal fun EchoModelMark(
     state: EchoModelMarkState = if (animated) EchoModelMarkState.Replying else EchoModelMarkState.Neutral,
     completionEvent: Long = 0L,
     completionOwner: ModelMarkCompletionMotion? = null,
-    idleEffects: Boolean = false
+    idleEffects: Boolean = false,
+    colorOwner: ModelMarkColorMotion? = null
 ) {
     val resolvedStyle = EchoModelMarkStyle.sanitize(style)
     val isBot = resolvedStyle in EchoModelMarkStyle.botStyles
@@ -175,14 +208,16 @@ internal fun EchoModelMark(
     Canvas(modifier.size(if (isBot) 38.dp else 26.dp).semantics {
         description?.let { contentDescription = it }
     }) {
+        // This is the only observation of the changing tint; text never recomposes per color frame.
+        val drawColor = colorOwner?.value?.takeIf { it.isSpecified } ?: color
         if (isExpressiveBot) {
-            drawExpressiveBot(color, expressiveFrame.value)
+            drawExpressiveBot(drawColor, expressiveFrame.value)
             return@Canvas
         }
         val progress = phase?.value ?: 0f
         val pulse = if (phase == null) 0f else sin((progress * 2f * PI).toFloat())
         if (isBot) {
-            drawModelBot(color, resolvedStyle, state, progress,
+            drawModelBot(drawColor, resolvedStyle, state, progress,
                 moving = phase != null, completionProgress = completionProgress.value,
                 terminalProgress = terminalProgress.value)
             return@Canvas
@@ -191,13 +226,13 @@ internal fun EchoModelMark(
         val stroke = (size.minDimension * 0.065f).coerceAtLeast(1.dp.toPx())
         when (resolvedStyle) {
             EchoModelMarkStyle.ORBIT -> {
-                drawCircle(color.copy(alpha = color.alpha * 0.48f), radius, style = Stroke(stroke * 0.8f))
-                drawCircle(color, radius * 0.24f)
+                drawCircle(drawColor.copy(alpha = drawColor.alpha * 0.48f), radius, style = Stroke(stroke * 0.8f))
+                drawCircle(drawColor, radius * 0.24f)
                 val angle = progress * 2f * PI.toFloat() - PI.toFloat() / 2f
                 val orbitRadius = radius - stroke * 0.3f
-                drawCircle(color, stroke * 1.15f,
+                drawCircle(drawColor, stroke * 1.15f,
                     center + Offset(cos(angle) * orbitRadius, sin(angle) * orbitRadius))
-                drawCircle(color.copy(alpha = color.alpha * 0.65f), stroke * 0.85f,
+                drawCircle(drawColor.copy(alpha = drawColor.alpha * 0.65f), stroke * 0.85f,
                     center - Offset(cos(angle) * orbitRadius, sin(angle) * orbitRadius))
             }
             EchoModelMarkStyle.PRISM -> {
@@ -208,13 +243,13 @@ internal fun EchoModelMark(
                         center + Offset(0f, radius), center + Offset(-radius, 0f)
                     )
                     corners.indices.forEach { index ->
-                        drawLine(color, corners[index], corners[(index + 1) % corners.size], stroke, StrokeCap.Round)
+                        drawLine(drawColor, corners[index], corners[(index + 1) % corners.size], stroke, StrokeCap.Round)
                     }
                     val inner = radius * (0.44f + 0.04f * pulse)
-                    drawLine(color.copy(alpha = color.alpha * 0.6f), center - Offset(inner, 0f), center - Offset(0f, inner), stroke)
-                    drawLine(color.copy(alpha = color.alpha * 0.6f), center - Offset(0f, inner), center + Offset(inner, 0f), stroke)
-                    drawLine(color.copy(alpha = color.alpha * 0.6f), center + Offset(inner, 0f), center + Offset(0f, inner), stroke)
-                    drawLine(color.copy(alpha = color.alpha * 0.6f), center + Offset(0f, inner), center - Offset(inner, 0f), stroke)
+                    drawLine(drawColor.copy(alpha = drawColor.alpha * 0.6f), center - Offset(inner, 0f), center - Offset(0f, inner), stroke)
+                    drawLine(drawColor.copy(alpha = drawColor.alpha * 0.6f), center - Offset(0f, inner), center + Offset(inner, 0f), stroke)
+                    drawLine(drawColor.copy(alpha = drawColor.alpha * 0.6f), center + Offset(inner, 0f), center + Offset(0f, inner), stroke)
+                    drawLine(drawColor.copy(alpha = drawColor.alpha * 0.6f), center + Offset(0f, inner), center - Offset(inner, 0f), stroke)
                 }
             }
             EchoModelMarkStyle.WAVEFORM -> {
@@ -224,14 +259,14 @@ internal fun EchoModelMark(
                         0.18f * sin((progress * 2f * PI + index * 0.8f).toFloat())
                     val halfHeight = radius * (restingHeight + variation)
                     val x = center.x + (index - 2) * radius * 0.4f
-                    drawLine(color, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
+                    drawLine(drawColor, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
                         stroke * 1.15f, StrokeCap.Round)
                 }
             }
             else -> {
                 // 两条完整圆线保持预览的双环结构，仅轻微相向舒展，无额外加载点。
-                drawCircle(color, radius * (1f + 0.025f * pulse), style = Stroke(stroke))
-                drawCircle(color.copy(alpha = color.alpha * (0.86f + 0.10f * pulse)),
+                drawCircle(drawColor, radius * (1f + 0.025f * pulse), style = Stroke(stroke))
+                drawCircle(drawColor.copy(alpha = drawColor.alpha * (0.86f + 0.10f * pulse)),
                     radius * (0.60f - 0.045f * pulse), style = Stroke(stroke))
             }
         }

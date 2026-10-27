@@ -108,6 +108,7 @@ import com.aiassistant.ui.components.SideAnchorNavigator
 import com.aiassistant.ui.components.TransientLazyListScrollbar
 import com.aiassistant.ui.components.EchoScrollableTextEditor
 import com.aiassistant.ui.components.EchoPillSlider
+import com.aiassistant.ui.components.ModelMarkColorMotion
 import androidx.compose.runtime.CompositionLocalProvider
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
@@ -152,6 +153,38 @@ import androidx.compose.runtime.produceState
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.MutableTransitionState
+
+internal fun chatModelMarkColorKey(rowKey: String, groupId: String?, variantIndex: Int = 1): String =
+    groupId?.let { "chat_model_variant:$it:$variantIndex" } ?: rowKey
+
+/** Survives the four bubble call sites, while historical variants keep independent final colors. */
+internal class ChatModelMarkColorOwners {
+    private val owners = mutableMapOf<String, ModelMarkColorMotion>()
+    private var streamingRound: Any? = null
+    private var streamingOwner: ModelMarkColorMotion? = null
+    private var streamingKey: String? = null
+
+    fun saved(key: String): ModelMarkColorMotion = owners.getOrPut(key) { ModelMarkColorMotion() }
+
+    fun streaming(key: String, round: Any?, anchorReady: Boolean = true): ModelMarkColorMotion {
+        if (streamingOwner == null || (round != null && round !== streamingRound)) {
+            streamingRound = round
+            streamingOwner = if (anchorReady) saved(key) else ModelMarkColorMotion()
+        }
+        // A new send initially has no user id. Bind only after its actual anchor exists, so
+        // the previous turn's saved reply cannot share the new send's changing tint.
+        if (round != null && anchorReady) {
+            streamingKey = key
+            owners[key] = streamingOwner!!
+        }
+        return streamingOwner!!
+    }
+
+    fun retain(savedKeys: Set<String>) {
+        // Keep one pending handoff even when a connection-only pause has no streamed text.
+        owners.keys.retainAll(savedKeys + listOfNotNull(streamingKey))
+    }
+}
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -285,6 +318,24 @@ fun ChatScreen(
     val replyRowKeys = remember(displayMessages, generatingAnchor) {
         chatReplyRowKeys(displayMessages, generatingAnchor?.userMessageId, generatingAnchor?.userGroupId)
     }
+    val modelMarkColorOwners = remember(conversationId) { ChatModelMarkColorOwners() }
+    val modelMarkColorKeys = remember(messages, displayMessages, replyRowKeys) {
+        val displayedKeys = displayMessages.mapIndexed { index, item ->
+            item.message.id to replyRowKeys.messageKeys[index]
+        }.toMap()
+        messages.filter { it.role == "assistant" }.map { message ->
+            chatModelMarkColorKey(displayedKeys[message.id] ?: "chat_message:${message.id}",
+                message.variantGroupId, message.variantIndex)
+        }.toSet()
+    }
+    SideEffect { modelMarkColorOwners.retain(modelMarkColorKeys) }
+    val colorSession = if (isGenerating) com.aiassistant.data.repository.ChatGenerationManager.getSession(conversationId) else null
+    val streamingMarkColorOwner = if (isGenerating || currentResponse.isNotEmpty() || currentThinking.isNotEmpty()) {
+        modelMarkColorOwners.streaming(
+            chatModelMarkColorKey(replyRowKeys.streamingKey, colorSession?.assistantVariantGroupId,
+                colorSession?.assistantVariantIndex ?: 1), colorSession,
+            anchorReady = colorSession?.anchorUserMessageId != null || colorSession?.assistantVariantGroupId != null)
+    } else null
     LaunchedEffect(isGenerating, generatingAnchor, replyRowKeys.hasPersistedReply) {
         if (isGenerating) {
             // A new round can start while the source flows are already empty (no new empty emission).
@@ -927,6 +978,7 @@ fun ChatScreen(
                                 // 在原位以正在生成的最新版本渲染
                                 MessageBubble(
                                     isStory = uiState.isRoleplay,
+                                    modelMarkColorOwner = streamingMarkColorOwner,
                                     message = Message(
                                         conversationId = conversationId,
                                         role = "assistant",
@@ -989,6 +1041,8 @@ fun ChatScreen(
                                     displayItem == displayMessages.lastOrNull { it.message.role == "assistant" }
                                 MessageBubble(
                                     isStory = uiState.isRoleplay,
+                                    modelMarkColorOwner = if (isUser) null else modelMarkColorOwners.saved(chatModelMarkColorKey(
+                                        replyRowKeys.messageKeys[index], message.variantGroupId, message.variantIndex)),
                                     message = message,
                                     hazeState = hazeState,
                                     readableBackdrop = readableBackdrops.content,
@@ -1104,6 +1158,7 @@ fun ChatScreen(
                                 Spacer(modifier = Modifier.height(14.dp))
                                 MessageBubble(
                                     isStory = uiState.isRoleplay,
+                                    modelMarkColorOwner = streamingMarkColorOwner,
                                     message = Message(
                                         conversationId = conversationId,
                                         role = "assistant",
@@ -1157,6 +1212,7 @@ fun ChatScreen(
                         item(key = streamingBranchGroupId?.let { "chat_streaming_branch:$it" } ?: replyRowKeys.streamingKey) {
                             MessageBubble(
                                     isStory = uiState.isRoleplay,
+                                modelMarkColorOwner = streamingMarkColorOwner,
                                 message = Message(
                                     conversationId = conversationId,
                                     role = "assistant",

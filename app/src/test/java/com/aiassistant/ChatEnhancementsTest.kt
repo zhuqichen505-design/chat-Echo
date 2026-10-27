@@ -235,6 +235,41 @@ class ChatEnhancementsTest {
     }
 
     @Test
+    fun errorDiagnosisQuotesRemainSuccessfulAndLegacyFailuresRemainVisible() {
+        val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
+        for (content in listOf(
+            "这个错误的原文是 failed to stream request: empty response detected，通常表示服务端返回空响应。",
+            "界面中的“回复已停止”表示用户主动暂停，“报错详情”用于查看连接记录。"
+        )) {
+            assertFalse("正常解释错误文案不能变成失败回复", isErrorMessage(content))
+            assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.Idle,
+                rules.derive(false, content, false, null, contentIsError = isErrorMessage(content)))
+            assertTrue("正常解释文本仍允许成功完成", rules.modelMarkHasSuccessfulBody(content))
+        }
+        for (content in listOf(
+            "failed to stream request: empty response detected",
+            "FAILED TO STREAM REQUEST: EMPTY RESPONSE DETECTED\n合成诊断信息",
+            "请求失败\n\nAPI错误 (500): failed to stream request: empty response detected",
+            "合成部分正文\n\n[输出已被中断: 合成连接异常]"
+        )) {
+            assertTrue("真实失败及旧版裸错误仍需识别", isErrorMessage(content))
+            assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.Failed,
+                rules.derive(false, content, false, null, contentIsError = isErrorMessage(content)))
+            assertFalse(rules.modelMarkHasSuccessfulBody(content))
+        }
+        for (content in listOf(
+            "回复已停止 (用户已暂停)\n\n【连接异常信息记录】：\n• 报错详情: 合成旧连接异常",
+            "合成部分正文\n\n*(回复已被暂停)*\n\n【连接异常信息记录】：\n• 报错详情: 合成旧连接异常",
+            rules.stoppedReplyContent("合成部分正文", listOf("合成连接异常"))
+        )) {
+            assertFalse("停止时保留的诊断信息不能覆盖暂停状态", isErrorMessage(content))
+            assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.Cancelled,
+                rules.derive(false, content, true, null, contentIsError = isErrorMessage(content)))
+            assertFalse(rules.modelMarkHasSuccessfulBody(content))
+        }
+    }
+
+    @Test
     fun testErrorMessageDetection() {
         val detectError = ::isErrorMessage
         assertTrue(detectError("请求失败\n\n网络超时，请检查网络设置"))

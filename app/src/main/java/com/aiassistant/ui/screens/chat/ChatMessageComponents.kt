@@ -86,6 +86,7 @@ import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.ModelMarkCompletionMotion
+import com.aiassistant.ui.components.ModelMarkColorMotion
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.modelMarkBodyCenterFraction
 import com.aiassistant.ui.components.StreamingAnimationStyle
@@ -399,9 +400,8 @@ internal fun isErrorMessage(content: String): Boolean {
            trimmed.startsWith("网络波动") ||
            lastBlock.startsWith("[输出已被中断") ||
            lastBlock.startsWith("【连接异常信息记录】") ||
-           trimmed.contains("failed to stream request: empty response detected", ignoreCase = true) ||
-           lastBlock.startsWith("(思考已完成，但模型未输出正文内容") ||
-           (trimmed.contains("回复已停止") && trimmed.contains("报错详情"))
+           trimmed.startsWith("failed to stream request: empty response detected", ignoreCase = true) ||
+           lastBlock.startsWith("(思考已完成，但模型未输出正文内容")
 }
 
 // v2.7.3 流畅度：自定义头像（角色/会话专属，时间戳命名不可变文件）解码缓存，预算 8MB——
@@ -444,7 +444,8 @@ internal fun MessageBubble(
     thinkingEffort: String? = null,
     /** P0-3 落定信号：生成结束落库后的持久化气泡置 true，首次组合播放一次光标淡出+落定脉冲 */
     settleSignal: Boolean = false,
-    latestAssistantIdentity: Boolean = false
+    latestAssistantIdentity: Boolean = false,
+    modelMarkColorOwner: ModelMarkColorMotion? = null
 ) {
     val isUser = message.role == "user"
     val personalizationSettings = rememberChatPersonalizationSettings()
@@ -572,6 +573,18 @@ internal fun MessageBubble(
         EchoModelMarkState.Failed -> MaterialTheme.colorScheme.error
         EchoModelMarkState.Paused -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
+    }
+    val markColorMotion = modelMarkColorOwner ?: remember(message.id) { ModelMarkColorMotion() }
+    val markTargetColor = modelMarkColorFor(modelMarkAccent, resolvedReadableBackdrop)
+    LaunchedEffect(markColorMotion, markTargetColor, reducedMotion) {
+        markColorMotion.update(markTargetColor, reducedMotion)
+        var lastFrame = 0L
+        while (markColorMotion.needsFrames) {
+            withFrameNanos { now ->
+                if (lastFrame != 0L) markColorMotion.advance((now - lastFrame) / 1_000_000f)
+                lastFrame = now
+            }
+        }
     }
     LaunchedEffect(modelMarkState, modelMarkCompleted, modelMarkCompletionNow, personalizationSettings.showModelAvatar) {
         if (personalizationSettings.showModelAvatar) {
@@ -1002,7 +1015,8 @@ internal fun MessageBubble(
                             )
                         } else {
                             EchoModelMark(
-                                color = modelMarkColorFor(modelMarkAccent, resolvedReadableBackdrop),
+                                color = markTargetColor,
+                                colorOwner = markColorMotion,
                                 style = personalizationSettings.modelMarkStyle,
                                 animated = GenerationUiStateRules.animateModelMark(generationState),
                                 state = modelMarkState,
@@ -1209,7 +1223,8 @@ internal fun MessageBubble(
                                 )
                             } else {
                                 EchoModelMark(
-                                    color = modelMarkColorFor(modelMarkAccent, resolvedReadableBackdrop),
+                                    color = markTargetColor,
+                                    colorOwner = markColorMotion,
                                     style = personalizationSettings.modelMarkStyle,
                                     animated = GenerationUiStateRules.animateModelMark(generationState),
                                     state = modelMarkState,

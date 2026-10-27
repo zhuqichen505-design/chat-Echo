@@ -6,6 +6,7 @@ import com.aiassistant.ui.components.computeStableSegments
 import com.aiassistant.ui.components.modelMarkColorFor
 import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.ModelMarkCompletionMotion
+import com.aiassistant.ui.components.ModelMarkColorMotion
 import com.aiassistant.ui.components.ExpressiveBotMotionController
 import com.aiassistant.ui.components.ExpressiveBotPose
 import com.aiassistant.ui.components.ExpressiveBotEffectKind
@@ -33,6 +34,135 @@ import org.junit.Test
  * - P0-4：GenerationUiState 状态机派生行为等价
  */
 class MotionRoundTests {
+
+    @Test fun modelMarkTintMovesThroughIntermediateFramesAndSettlesWithinTheSharedDuration() {
+        val primary = Color(0xFFD6BB83)
+        val paused = Color(0xFFAECBD0)
+        val failed = Color(0xFFFCA5A5)
+        val motion = ModelMarkColorMotion()
+        motion.update(primary)
+        assertEquals("首次挂载直接使用当前主题色", primary, motion.value)
+        assertFalse(motion.needsFrames)
+        var previous = primary
+        for (target in listOf(paused, failed, primary)) {
+            motion.update(target)
+            assertEquals("状态切换的第一帧必须保留当前颜色", previous, motion.value)
+            assertTrue(motion.needsFrames)
+            val samples = (1..4).map {
+                motion.advance(com.aiassistant.ui.theme.EchoMotion.Duration.slow / 5f)
+                motion.value
+            }
+            assertEquals("500ms 内要实际经过多个渐变色", 4, samples.toSet().size)
+            assertTrue(samples.all { it != previous && it != target && it.alpha == 1f })
+            motion.advance(com.aiassistant.ui.theme.EchoMotion.Duration.slow / 5f)
+            assertEquals(target, motion.value)
+            assertFalse(motion.needsFrames)
+            motion.advance(60_000f)
+            assertEquals("完成后保持终色", target, motion.value)
+            previous = target
+        }
+    }
+
+    @Test fun modelMarkTintRetargetsFromTheCurrentFrameAndSameTargetDoesNotRestartItsClock() {
+        val primary = Color(0xFFD6BB83)
+        val paused = Color(0xFFAECBD0)
+        val failed = Color(0xFFFCA5A5)
+        val motion = ModelMarkColorMotion()
+        motion.update(primary)
+        motion.update(paused)
+        motion.advance(180f)
+        val interruptedFrame = motion.value
+        motion.update(failed)
+        assertEquals("尚未变完就出错时不能跳到旧目标色", interruptedFrame, motion.value)
+        motion.advance(100f)
+        val failureFrame = motion.value
+        assertTrue(failureFrame != interruptedFrame && failureFrame != failed)
+        motion.update(primary)
+        assertEquals("重试恢复要从当前错误渐变帧接续", failureFrame, motion.value)
+        motion.advance(220f)
+        val remountedFrame = motion.value
+        motion.update(primary)
+        assertEquals("同目标重挂载不能重置当前颜色", remountedFrame, motion.value)
+        motion.advance(com.aiassistant.ui.theme.EchoMotion.Duration.slow - 220f)
+        assertEquals("同目标重挂载不能延长本次渐变", primary, motion.value)
+        assertFalse(motion.needsFrames)
+    }
+
+    @Test fun reducedMotionAndFirstHistoricalMountUseTheFinalTintWithoutAFrameLoop() {
+        for (terminal in listOf(Color(0xFFAECBD0), Color(0xFFFCA5A5))) {
+            val historical = ModelMarkColorMotion()
+            historical.update(terminal)
+            assertEquals(terminal, historical.value)
+            assertFalse("历史暂停或错误首次挂载不能补播旧状态变化", historical.needsFrames)
+            val active = ModelMarkColorMotion()
+            active.update(Color(0xFFD6BB83))
+            active.update(terminal)
+            active.advance(120f)
+            active.update(terminal, reducedMotion = true)
+            assertEquals("减弱动态立即落到终色", terminal, active.value)
+            assertFalse(active.needsFrames)
+            active.update(terminal, reducedMotion = false)
+            assertFalse("恢复动态不能重播已消费的颜色变化", active.needsFrames)
+        }
+    }
+
+    @Test fun modelMarkTintOwnershipSurvivesNormalBranchAnchorAndFallbackPersistencePaths() {
+        val user = com.aiassistant.domain.model.Message(id = 1L, conversationId = 1L,
+            role = "user", content = "合成用户正文", createdAt = 1L)
+        val before = listOf(com.aiassistant.ui.screens.chat.DisplayMessageItem(user, null))
+        for ((group, variant) in listOf(null to 1, "synthetic-branch" to 4,
+            "synthetic-anchor" to 1, "synthetic-fallback" to 7)) {
+            val saved = com.aiassistant.domain.model.Message(id = 2L, conversationId = 1L,
+                role = "assistant", content = "生成已停止", createdAt = 2L,
+                variantGroupId = group, variantIndex = variant)
+            val after = before + com.aiassistant.ui.screens.chat.DisplayMessageItem(saved, group)
+            val beforeKeys = com.aiassistant.ui.screens.chat.chatReplyRowKeys(before, user.id)
+            val afterKeys = com.aiassistant.ui.screens.chat.chatReplyRowKeys(after)
+            val streamKey = com.aiassistant.ui.screens.chat.chatModelMarkColorKey(beforeKeys.streamingKey, group, variant)
+            val savedKey = com.aiassistant.ui.screens.chat.chatModelMarkColorKey(afterKeys.messageKeys.last(), group, variant)
+            val pool = com.aiassistant.ui.screens.chat.ChatModelMarkColorOwners()
+            val round = Any()
+            val live = pool.streaming(streamKey, round)
+            live.update(Color(0xFFD6BB83))
+            pool.retain(emptySet()) // 连接阶段无正文，暂停后尚未收到 Room 消息。
+            val persisted = pool.saved(savedKey)
+            assertTrue("流式挂载位置改变后仍必须交接同一颜色所有者", live === persisted)
+            persisted.update(Color(0xFFAECBD0))
+            persisted.advance(160f)
+            val handoffFrame = persisted.value
+            val remounted = pool.saved(savedKey)
+            remounted.update(Color(0xFFAECBD0))
+            assertEquals(handoffFrame, remounted.value)
+            remounted.advance(com.aiassistant.ui.theme.EchoMotion.Duration.slow - 160f)
+            assertEquals(Color(0xFFAECBD0), remounted.value)
+            assertFalse(remounted.needsFrames)
+            assertTrue(live === pool.streaming("unused-ended-round", null))
+            if (group != null) {
+                val otherVariant = com.aiassistant.ui.screens.chat.chatModelMarkColorKey(
+                    afterKeys.messageKeys.last(), group, variant + 1)
+                assertTrue("历史回复分支不能共用当前分支的颜色进度", pool.saved(otherVariant) !== live)
+            }
+        }
+    }
+
+    @Test fun modelMarkTintPoolBindsOnlyTheActualNewUserAnchorAndReleasesDeletedRows() {
+        val pool = com.aiassistant.ui.screens.chat.ChatModelMarkColorOwners()
+        val previous = pool.saved("previous-reply")
+        previous.update(Color(0xFFAECBD0))
+        val round = Any()
+        val live = pool.streaming("previous-reply", round, anchorReady = false)
+        assertTrue("新消息尚未获得锚点时不能复用上一轮历史颜色", previous !== live)
+        live.update(Color(0xFFD6BB83))
+        val bound = pool.streaming("new-reply", round)
+        assertTrue("实际用户锚点到达时保留已显示的流式颜色", live === bound)
+        pool.retain(setOf("previous-reply", "new-reply"))
+        assertTrue(previous === pool.saved("previous-reply"))
+        assertTrue(bound === pool.saved("new-reply"))
+        pool.streaming("next-reply", Any())
+        pool.retain(setOf("next-reply"))
+        assertTrue("已删除且不再等待落库的行应释放所有者", previous !== pool.saved("previous-reply"))
+        assertTrue(bound !== pool.saved("new-reply"))
+    }
 
     @Test fun pausedAndFailedRepliesKeepDistinctVisibleSymbolsWithoutHistoricalFrameLoops() {
         for (style in EchoModelMarkStyle.expressiveBotStyles) {

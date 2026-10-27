@@ -1,5 +1,13 @@
 # 当前版本说明
 
+## Echo 2.8.20
+
+- Bot 连接、回复、暂停和出错时逐渐变色，保留状态符号与主题颜色含义。
+- 修复正常解释中引用英文错误或“回复已停止 / 报错详情”时被误判为失败的问题。
+- 纳入输入法重复唤起与输入栏稳定性修复。
+
+版本 2.8.20/206，Room v37（20 个实体）不变；最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git / Release 待最终核查与发布。
+
 ## Echo 2.8.19
 
 - 正式接入毛边文库（DECKLE）与棉纸诗笺（COTTON），提供完整浅深配色、设置选择和持久化；五个旧主题保留，另外两套纸本方案仍仅供预览。
