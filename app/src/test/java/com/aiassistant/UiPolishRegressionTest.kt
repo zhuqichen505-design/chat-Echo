@@ -30,6 +30,112 @@ import androidx.compose.ui.graphics.luminance
 @org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34], application = android.app.Application::class, manifest = org.robolectric.annotation.Config.NONE)
 class UiPolishRegressionTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun repeatedImeReopenSeparatesFocusSessionsAcrossFrames() = runTest {
+        val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+        val events = mutableListOf<String>()
+        var focused = true
+        repeat(3) {
+            events.clear()
+            transaction.launch(this) {
+                com.aiassistant.ui.components.reopenEditorKeyboard(
+                    restartFocus = true,
+                    clearFocus = { focused = false; events += "clear" },
+                    requestFocus = { focused = true; events += "focus" },
+                    isFocused = { focused },
+                    isActive = { true },
+                    nextFrame = { delay(16) },
+                    showKeyboard = { events += "show" }
+                )
+            }
+            runCurrent()
+            assertEquals(listOf("clear"), events)
+            advanceTimeBy(16)
+            runCurrent()
+            assertEquals(listOf("clear", "focus"), events)
+            advanceTimeBy(16)
+            runCurrent()
+            assertEquals(listOf("clear", "focus", "show"), events)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun sendOrHideCancelsKeyboardRequestInEitherFrameGap() = runTest {
+        for (cancelAfterMs in listOf(1L, 17L)) {
+            val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+            var focused = true
+            var shows = 0
+            var requests = 0
+            transaction.launch(this) {
+                com.aiassistant.ui.components.reopenEditorKeyboard(
+                    restartFocus = true,
+                    clearFocus = { focused = false },
+                    requestFocus = { focused = true; requests++ },
+                    isFocused = { focused },
+                    isActive = { true },
+                    nextFrame = { delay(16) },
+                    showKeyboard = { shows++ }
+                )
+            }
+            runCurrent()
+            advanceTimeBy(cancelAfterMs)
+            runCurrent()
+            transaction.cancel()
+            focused = false
+            advanceTimeBy(100)
+            runCurrent()
+            assertEquals("发送或隐藏后不应被延迟请求重新聚焦", if (cancelAfterMs < 16) 0 else 1, requests)
+            assertEquals(0, shows)
+            assertTrue(!focused)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun rapidEditorAndHandleTapsKeepOnlyTheLatestKeyboardRequest() = runTest {
+        val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+        val shown = mutableListOf<Int>()
+        repeat(4) { tap ->
+            transaction.launch(this) {
+                com.aiassistant.ui.components.reopenEditorKeyboard(
+                    restartFocus = false,
+                    clearFocus = { error("普通聚焦不应重启焦点") },
+                    requestFocus = {},
+                    isFocused = { true },
+                    isActive = { true },
+                    nextFrame = { delay(16) },
+                    showKeyboard = { shown += tap }
+                )
+            }
+            runCurrent()
+            advanceTimeBy(4)
+        }
+        advanceTimeBy(32)
+        runCurrent()
+        assertEquals(listOf(3), shown)
+    }
+
+    @Test fun keyboardRequestCannotShowAfterFocusLossOrHideDuringRestart() = runTest {
+        for (hideDuringRestart in listOf(false, true)) {
+            var active = true
+            var focused = true
+            var requests = 0
+            var shows = 0
+            com.aiassistant.ui.components.reopenEditorKeyboard(
+                restartFocus = hideDuringRestart,
+                clearFocus = { focused = false },
+                requestFocus = { focused = true; requests++ },
+                isFocused = { focused },
+                isActive = { active },
+                nextFrame = {
+                    if (hideDuringRestart) active = false else focused = false
+                },
+                showKeyboard = { shows++ }
+            )
+            assertEquals(if (hideDuringRestart) 0 else 1, requests)
+            assertEquals(0, shows)
+        }
+    }
+
     @Test fun paperParagraphsUseDifferentIndentAndKeepTextOutsideTheStyle() {
         val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp))
         val deckle = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Deckle)

@@ -264,7 +264,7 @@ fun ChatScreen(
     var preserveScrollForBranchGeneration by remember { mutableStateOf(false) }
     var streamingBranchGroupId by remember(viewModel) { mutableStateOf(activeStreamingBranchGroupId(conversationId)) }
     var autoFollowOutput by remember { mutableStateOf(true) }
-    var isBarsHidden by remember { mutableStateOf(false) }
+    var isBarsHidden by remember(conversationId) { mutableStateOf(false) }
     var branchSuccessDialog by remember { mutableStateOf<BranchSuccessDialogState?>(null) }
     val messageQueue by viewModel.messageQueue.collectAsState()
     val isQueuePaused by viewModel.isQueuePaused.collectAsState()
@@ -739,6 +739,8 @@ fun ChatScreen(
                 }
                 },
                 input = {
+                // IME session, selection and editor scroll belong to this conversation only.
+                key(conversationId) {
                 ChatInputBar(
                     hazeState = hazeState,
                     inputText = inputText,
@@ -831,6 +833,7 @@ fun ChatScreen(
                     isBarsHidden = isBarsHidden,
                     onBarsHiddenChange = { isBarsHidden = it }
                 )
+                }
                 }
             )
         }

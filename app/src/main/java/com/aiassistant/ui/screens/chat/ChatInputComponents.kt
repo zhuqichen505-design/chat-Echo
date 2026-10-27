@@ -208,6 +208,20 @@ fun ChatInputBar(
     // v2.7.4 需求 2：TextFieldValue 承载选区/焦点/布局以支持自绘光标；对外仍保持 String API，
     // 声明在 AnimatedContent 之外，输入栏隐藏/恢复切换不丢内部状态
     var inputFieldValue by remember { mutableStateOf(TextFieldValue(inputText)) }
+    var inputFocused by remember { mutableStateOf(false) }
+    val (keyboardRequest, requestKeyboard) = com.aiassistant.ui.components.rememberEditorKeyboardRequest(
+        inputFocusRequester, inputFocused, active = !isBarsHidden
+    )
+    val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
+    LaunchedEffect(isBarsHidden) {
+        if (isBarsHidden) {
+            keyboardRequest.cancel()
+            focusManager.clearFocus(force = true)
+            inputKeyboard?.hide()
+            customInputHeightDp = null
+            isInputExpanded = false
+        }
+    }
     val inputAcknowledgements = remember { com.aiassistant.ui.components.EditorTextAcknowledgements(inputText) }
     // Reconcile before rendering, never from a delayed effect that can race an IME edit.
     // Parent echoes preserve selection/composition; actual external replacements land at the end.
@@ -216,9 +230,9 @@ fun ChatInputBar(
     }
     // v2.7.8 需求 1：软键盘收起即回到最小高度（与失焦重置双保险）——
     // 部分机型按返回键收起键盘时焦点可能仍留在输入框，仅靠失焦重置无法覆盖
-    val imeBottomPx = WindowInsets.ime.getBottom(density)
-    LaunchedEffect(imeBottomPx) {
-        if (imeBottomPx == 0) {
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (!imeVisible) {
             customInputHeightDp = null
             isInputExpanded = false
         }
@@ -374,6 +388,7 @@ fun ChatInputBar(
 
                     EchoNativeTextField(
                         focusRequester = inputFocusRequester,
+                        onRequestKeyboard = requestKeyboard,
                         value = inputFieldValue,
                         onValueChange = {
                             inputFieldValue = it
@@ -388,6 +403,7 @@ fun ChatInputBar(
                             )
                             .background(Color.Transparent)
                             .onFocusChanged {
+                                inputFocused = it.isFocused
                                 // v2.7.8 需求 1：输入框高度只在聚焦编辑期间允许（拖拽手柄）改变——
                                 // 失焦（键盘收起/点击其他区域/发送）即回到最小高度，
                                 // 任何来源造成的非最小状态都不会跨编辑会话残留
@@ -682,6 +698,7 @@ fun ChatInputBar(
                                         if (isGenerating) {
                                             onStopGeneration()
                                         } else {
+                                            keyboardRequest.cancel()
                                             focusManager.clearFocus()
                                             onSend()
                                         }
@@ -725,6 +742,7 @@ fun ChatInputBar(
                                         enabled = true,
                                         onClick = {
                                             // v2.7.4 需求 4：排队发送同样清除焦点收起键盘
+                                            keyboardRequest.cancel()
                                             focusManager.clearFocus()
                                             onSend()
                                         }
@@ -761,10 +779,9 @@ fun ChatInputBar(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .size(handleBoxSize)
-                        .pointerInput(inputFocusRequester, inputKeyboard) {
+                        .pointerInput(Unit) {
                             detectTapGestures {
-                                inputFocusRequester.requestFocus()
-                                inputKeyboard?.show()
+                                latestRequestKeyboard()
                             }
                         }
                         // v2.7.7 需求 1：移除手柄的点按展开/收起切换——点击输入框（含手柄热区）
