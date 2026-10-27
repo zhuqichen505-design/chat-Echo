@@ -1,6 +1,6 @@
 # 维护记录
 
-## 2026-10-27 · 2.8.20 Bot 状态颜色渐变与误判修复（源码与产物已验收，待发布）
+## 2026-10-27 · 2.8.20 Bot 状态颜色渐变与误判修复（已发布）
 
 基线 `main/572fcc7`；版本递增为 2.8.20/206，Room v37 / 20 个实体不变。只使用当前仓库源码，既有未跟踪目录和图片保留且排除；此前已提交的输入法重复唤起修复随包进入。
 
@@ -8,7 +8,7 @@
 
 涉及 `EchoModelMark.kt`、`ChatMessageComponents.kt`、`ChatScreen.kt`、`MotionRoundTests.kt`、`ChatEnhancementsTest.kt`；新增 6 项领域回归，覆盖颜色中间帧、转向、交接、减弱动态和误判；构建配置只递增版本。影响限于模型标识颜色和错误识别，不改数据库、请求协议或用户数据格式；保留暂停 / 错误符号与姿态。颜色帧只在绘制阶段读取，避免驱动流式正文逐帧重组。
 
-历史首次挂载直接显示终色；同轮布局切换或短暂离屏若尚未变完，则接续当前进度，不从头重播。前两轮验收分别因 Wrapper 默认缓存不可写、沙箱 Android 用户目录不可写而退出 1（0.341 秒 / 45.006 秒，均未执行测试）；本次进程设置 GRADLE_USER_HOME 并经审批使用实际本机环境后重新验收，未改源码。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 完整暂存区、待推提交 / 标签与发布附件仍须上传前复核，Git / Release 结果随后补全。未连接真机或模拟器，安装启动、真实接口及动态视觉仍需人工验收。
+历史首次挂载直接显示终色；同轮布局切换或短暂离屏若尚未变完，则接续当前进度，不从头重播。前两轮验收分别因 Wrapper 默认缓存不可写、沙箱 Android 用户目录不可写而退出 1（0.341 秒 / 45.006 秒，均未执行测试）；本次进程设置 GRADLE_USER_HOME 并经审批使用实际本机环境后重新验收，未改源码。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20)。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。未连接真机或模拟器，安装启动、真实接口及动态视觉仍需人工验收。
 
 ## 2026-10-27 · 输入法重复唤起与输入框稳定性修复（未发版）
 

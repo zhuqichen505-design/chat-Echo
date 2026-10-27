@@ -13,6 +13,8 @@
 
 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。
 
+Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20)。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。
+
 ## 设备验收边界
 
 未连接真机或模拟器，自动测试与构建不能替代设备安装启动、触控、输入法、动态视觉与真实接口验收。
