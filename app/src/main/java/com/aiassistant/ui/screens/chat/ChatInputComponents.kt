@@ -114,6 +114,8 @@ import com.aiassistant.ui.components.TransientLazyListScrollbar
 import com.aiassistant.ui.components.EchoPillSlider
 import androidx.compose.runtime.CompositionLocalProvider
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoModelMark
+import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.echoFilterChipBorder
@@ -153,6 +155,7 @@ import com.aiassistant.ui.components.EchoPrimaryButton
 import com.aiassistant.ui.components.EchoGlassButton
 import com.aiassistant.ui.screens.roleplay.ConflictAction
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.utils.EchoModelMarkStyle
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.scaleIn
@@ -257,9 +260,10 @@ fun ChatInputBar(
             .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // A bounded modal keeps strength choices independent of input/keyboard height.
+        // 先保证输入区高度；思考卡片在剩余空间内自然收缩，紧贴输入框上方。
         if (showThinkingPopover && hasIntensityChoice && !isBarsHidden) {
             ReasoningEffortPopupCard(
+                modifier = Modifier.weight(1f, fill = false),
                 enableThinking = enableThinking,
                 thinkingEffort = thinkingEffort,
                 modelName = modelName,
@@ -976,15 +980,11 @@ internal fun QuotedTextPreviewCard(
 
 
 
-data class ThinkingEffortLevel(
-    val step: Int,
+private data class ThinkingEffortLevel(
     val key: String,
     val enabled: Boolean,
     val name: String,
-    val subtitle: String,
-    val detail: String,
-    val primaryColor: Color,
-    val gradientColors: List<Color>
+    val primaryColor: Color
 )
 
 @Composable
@@ -995,84 +995,24 @@ internal fun ReasoningEffortPopupCard(
     apiType: String = "openai",
     reasoningCapability: com.aiassistant.domain.model.ReasoningCapabilityEvidence? = null,
     onEffortSelected: (Boolean, String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    var showParamsExplanationDialog by remember { mutableStateOf(false) }
-
-    val levels = run {
-        listOf(
-            ThinkingEffortLevel(
-                step = 0,
-                key = "none",
-                enabled = false,
-                name = "关闭思考",
-                subtitle = "关闭思考 · 极速直答",
-                detail = "跳过深度思维链推演，以模型最高速度直接生成最终回复（若模型强制要求思考则保持原生工作）。",
-                primaryColor = EchoThinkingColors.none,
-                gradientColors = EchoThinkingColors.noneGradient
-            ),
-            ThinkingEffortLevel(
-                step = 1,
-                key = "default",
-                enabled = true,
-                name = "Default",
-                subtitle = "Default · 交给服务端",
-                detail = "不固定指定强度，保留思考开关；实际思考量由当前模型服务的默认策略决定。",
-                primaryColor = EchoThinkingColors.medium,
-                gradientColors = EchoThinkingColors.mediumGradient
-            ),
-            ThinkingEffortLevel(
-                step = 2,
-                key = "low",
-                enabled = true,
-                name = "low",
-                subtitle = "low · 基础轻度思考",
-                detail = "分配少量思考预算进行轻度推理，适合常规闲聊、基础问答与快速响应。",
-                primaryColor = EchoThinkingColors.low,
-                gradientColors = EchoThinkingColors.lowGradient
-            ),
-            ThinkingEffortLevel(
-                step = 3,
-                key = "medium",
-                enabled = true,
-                name = "medium",
-                subtitle = "medium · 均衡标准思考",
-                detail = "平衡逻辑严谨性与响应耗时，应对大多数日常工作、深度分析与创作场景（推荐）。",
-                primaryColor = EchoThinkingColors.medium,
-                gradientColors = EchoThinkingColors.mediumGradient
-            ),
-            ThinkingEffortLevel(
-                step = 4,
-                key = "high",
-                enabled = true,
-                name = "high",
-                subtitle = "high · 深度严密思考",
-                detail = "投入充足思考预算进行多步论证、边界检查与严密推演，适合复杂技术任务与代码分析。",
-                primaryColor = EchoThinkingColors.high,
-                gradientColors = EchoThinkingColors.highGradient
-            ),
-            ThinkingEffortLevel(
-                step = 5,
-                key = "max",
-                enabled = true,
-                name = "max",
-                subtitle = "max · 极限最大思考",
-                detail = "释放最大思考预算上限，全力攻坚高难度逻辑推演、数学证明与复杂长文思考。",
-                primaryColor = EchoThinkingColors.max,
-                gradientColors = EchoThinkingColors.maxGradient
-            )
-        ).let { templates ->
-            com.aiassistant.domain.model.ReasoningControls.options(modelName, apiType, reasoningCapability).mapIndexed { index, option ->
-                val template = templates.firstOrNull { it.key == option.value } ?: templates[if (option.enabled) 3 else 0]
-                template.copy(step = index, key = option.value, enabled = option.enabled, name = option.label,
-                    subtitle = option.label, detail = when {
-                        option.value == "default" -> "不固定指定强度，跟随模型服务默认策略。保留思考开关设置，实际思考量由服务决定；不等于固定的 Medium。"
-                        !option.enabled -> "关闭当前模型可选的思考过程；强制思考的模型保持原生行为。"
-                        option.value.startsWith("budget:") -> "使用所选数值作为思考预算；当前接口需要明确的预算档位。"
-                        else -> "采用 ${option.label} 强度。实际速度、消耗与支持范围以当前模型服务为准。"
-                    })
+    val levels = com.aiassistant.domain.model.ReasoningControls.options(
+        modelName, apiType, reasoningCapability
+    ).map { option ->
+        ThinkingEffortLevel(
+            key = option.value,
+            enabled = option.enabled,
+            name = option.label,
+            primaryColor = when {
+                !option.enabled -> EchoThinkingColors.none
+                option.value == "low" -> EchoThinkingColors.low
+                option.value == "high" -> EchoThinkingColors.high
+                option.value == "max" -> EchoThinkingColors.max
+                else -> EchoThinkingColors.medium
             }
-        }
+        )
     }
 
     val selected = com.aiassistant.domain.model.ReasoningControls.selected(
@@ -1080,54 +1020,60 @@ internal fun ReasoningEffortPopupCard(
     )
     val currentStep = levels.indexOfFirst { it.key == selected.value }.coerceAtLeast(0)
     val currentLevel = levels[currentStep]
-    EchoGlassDialog(
-        onDismissRequest = onClose,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Default.Psychology, null, tint = currentLevel.primaryColor, modifier = Modifier.size(24.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("深度思考强度", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(currentLevel.subtitle, style = MaterialTheme.typography.bodySmall, color = currentLevel.primaryColor)
-                }
-                IconButton(onClick = { showParamsExplanationDialog = true }) {
-                    Icon(Icons.Default.Info, "思考参数说明", tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+    EchoGlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(max = 220.dp)
+            .padding(bottom = 8.dp),
+        shape = RoundedCornerShape(18.dp),
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        borderColor = currentLevel.primaryColor.copy(alpha = 0.42f),
+        elevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    "选择适合当前任务的思考强度。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                EchoModelMark(
+                    color = currentLevel.primaryColor,
+                    style = EchoModelMarkStyle.BOT_ORB,
+                    state = EchoModelMarkState.Thinking,
+                    animated = true,
+                    modifier = Modifier.size(30.dp),
+                    description = "正在思考"
                 )
-                ReasoningEffortSlider(
-                    levels = levels,
-                    currentStep = currentStep,
-                    onEffortSelected = onEffortSelected
-                )
-                Text(currentLevel.detail, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (apiType == "anthropic" && com.aiassistant.domain.model.ReasoningControls.wireThinkingType(
-                        modelName, apiType, true, reasoningCapability) == "enabled") {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        "当前接口需要数值思考预算，不能省略为服务端默认强度。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "深度思考强度",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        currentLevel.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = currentLevel.primaryColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.Close, "关闭思考强度调整", modifier = Modifier.size(18.dp))
+                }
             }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("完成", fontWeight = FontWeight.Bold) } }
-    )
-
-    if (showParamsExplanationDialog) {
-        ThinkingParamsExplanationDialog(
-            onDismiss = { showParamsExplanationDialog = false }
-        )
+            ReasoningEffortSlider(
+                levels = levels,
+                currentStep = currentStep,
+                onEffortSelected = onEffortSelected
+            )
+        }
     }
 }
 
@@ -1195,219 +1141,6 @@ private fun ReasoningEffortSlider(
                             index, levels.size, constraints.maxWidth.toFloat(), inset.toFloat()
                         )
                         label.placeRelative((center - label.width / 2f).roundToInt(), slider.height + gap)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ThinkingParamsExplanationDialog(
-    onDismiss: () -> Unit
-) {
-    val containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-    val contentColor = readableTextColorFor(containerColor, MaterialTheme.colorScheme.background)
-    val secondaryColor = contentColor.copy(alpha = 0.72f)
-
-    EchoGlassDialog(
-        onDismissRequest = onDismiss,
-        tint = containerColor,
-        containerColor = containerColor,
-        contentColor = contentColor,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Column {
-                    Text(
-                        text = "思考强度与实际参数说明",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = contentColor
-                    )
-                    Text(
-                        text = "各档位在不同模型与 API 架构中传入的底层参数",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = secondaryColor
-                    )
-                }
-            }
-        },
-        content = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                ThinkingParamCard(
-                    title = "Default",
-                    badge = "跟随服务端",
-                    badgeColor = EchoThinkingColors.medium,
-                    desc = "不固定选择强度，由当前模型服务采用默认策略。客户端保留思考开关设置；服务端默认可能采用不同的思考量，Default 不代表 Medium。",
-                    params = listOf(
-                        "兼容接口" to "不发送 reasoning_effort",
-                        "自适应思考" to "保留思考模式，不发送 output_config.effort",
-                        "原生数值预算接口" to "必须提供 budget_tokens，因此保留明确预算，不提供 Default 档"
-                    )
-                )
-
-                ThinkingParamCard(
-                    title = "关闭思考 (None)",
-                    badge = "无思考预算",
-                    badgeColor = EchoThinkingColors.none,
-                    desc = "跳过思维链推演，以模型原生最高速度直接生成最终回复内容（强制思考模型保持原生工作）。",
-                    params = listOf(
-                        "支持关闭的 GPT" to "reasoning_effort = none",
-                        "可关闭的 Claude / Anthropic" to "thinking.type = disabled",
-                        "DeepSeek V4" to "thinking.type = disabled（省略 effort 不代表关闭）"
-                    )
-                )
-
-                ThinkingParamCard(
-                    title = "Low",
-                    badge = "精简推演",
-                    badgeColor = EchoThinkingColors.low,
-                    desc = "分配精简思考预算进行关键逻辑检查，低延迟极速响应。",
-                    params = listOf(
-                        "OpenAI GPT-5.6/6" to "reasoning_effort = \"low\"",
-                        "支持 effort 的 Claude / Anthropic" to "output_config.effort = low",
-                        "未知兼容 API" to "保持服务端默认，不推定支持 low"
-                    )
-                )
-
-                ThinkingParamCard(
-                    title = "Medium",
-                    badge = "固定中档",
-                    badgeColor = EchoThinkingColors.medium,
-                    desc = "显式选择中等强度，与跟随服务端的 Default 档位不同。",
-                    params = listOf(
-                        "OpenAI GPT-5.6/6" to "reasoning_effort = \"medium\"",
-                        "支持 effort 的 Claude / Anthropic" to "output_config.effort = medium",
-                        "DeepSeek V4 / Kimi K3 / GLM-5.3" to "无独立 medium 档位"
-                    )
-                )
-
-                ThinkingParamCard(
-                    title = "High",
-                    badge = "深度推理",
-                    badgeColor = EchoThinkingColors.high,
-                    desc = "投入大量思考预算进行多步论证、边界检查与复杂代码推演。",
-                    params = listOf(
-                        "OpenAI GPT-5.6/6" to "reasoning_effort = \"high\"",
-                        "支持 effort 的 Claude / Anthropic" to "output_config.effort = high",
-                        "旧版 Claude" to "显示并发送数值 budget_tokens"
-                    )
-                )
-
-                ThinkingParamCard(
-                    title = "Max",
-                    badge = "极限预算",
-                    badgeColor = EchoThinkingColors.max,
-                    desc = "释放最大思考预算上限，全力攻坚高难算法、数学定理与复杂多维哲学推理。",
-                    params = listOf(
-                        "OpenAI GPT-6" to "reasoning_effort = \"max\"（原生支持 xhigh/max）",
-                        "支持 max 的 Claude / Anthropic" to "output_config.effort = max",
-                        "xhigh" to "独立参数值；仅模型明确支持时提供"
-                    )
-                )
-            }
-        },
-        buttons = {
-            Button(
-                onClick = onDismiss,
-                shape = RoundedCornerShape(999.dp)
-            ) {
-                Text("我知道了")
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ThinkingParamCard(
-    title: String,
-    badge: String,
-    badgeColor: Color,
-    desc: String,
-    params: List<Pair<String, String>>
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = badgeColor.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.4f))
-                ) {
-                    Text(
-                        text = badge,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = badgeColor,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                params.forEach { (label, value) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = value,
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
                     }
                 }
             }

@@ -21,6 +21,22 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import androidx.compose.ui.graphics.luminance
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import org.robolectric.Robolectric
 
 /**
  * UI 细节统一修复回归：
@@ -30,6 +46,101 @@ import androidx.compose.ui.graphics.luminance
 @org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34], application = android.app.Application::class, manifest = org.robolectric.annotation.Config.NONE)
 class UiPolishRegressionTest {
+
+    @Test
+    fun chatReviewPanelStackShrinksShortReviewsAndKeepsInputAdjacent() {
+        val bounds = measureReviewInput(statusHeight = 30) {
+            Box(Modifier.fillMaxWidth().height(48.dp))
+        }
+
+        assertEquals(48f, bounds.getValue("pending").height, .01f)
+        assertEquals("短审阅内容不应撑满 440dp 上限", 78f, bounds.getValue("review").height, .01f)
+        assertReviewAdjacentToInput(bounds)
+    }
+
+    @Test
+    fun chatReviewInputLayoutCapsLongReviewAndKeepsInputImmediatelyBelowIt() {
+        val bounds = measureReviewInput(statusHeight = 30) {
+            Box(Modifier.fillMaxWidth().height(900.dp))
+        }
+
+        assertEquals("长审阅内容必须使用 440dp 上限", 440f, bounds.getValue("review").height, .01f)
+        assertEquals(410f, bounds.getValue("pending").height, .01f)
+        assertReviewAdjacentToInput(bounds)
+    }
+
+    @Test
+    fun chatReviewInputLayoutReservesConversationSpaceOnSmallScreensAndWithTallInput() {
+        for ((screenHeight, inputHeight, reviewHeight) in listOf(
+            Triple(400, 80, 200), Triple(640, 360, 160), Triple(300, 180, 0)
+        )) {
+            val bounds = measureReviewInput(height = screenHeight, inputHeight = inputHeight, statusHeight = 24) {
+                Box(Modifier.fillMaxWidth().height(900.dp))
+            }
+
+            assertEquals(reviewHeight.toFloat(), bounds.getValue("review").height, .01f)
+            assertEquals("输入栏始终保有请求高度", inputHeight.toFloat(), bounds.getValue("input").height, .01f)
+            assertReviewAdjacentToInput(bounds)
+        }
+        for (statusHeight in listOf(0, 30)) {
+            val bounds = measureReviewInput(statusHeight = statusHeight) {}
+
+            assertEquals(0f, bounds.getValue("pending").height, .01f)
+            assertEquals(statusHeight.toFloat(), bounds.getValue("review").height, .01f)
+            assertReviewAdjacentToInput(bounds)
+        }
+    }
+
+    @Test
+    fun realPendingMemoryAndTimelinePanelsStayBoundedAndAdjacentWithStatus() {
+        val memory = com.aiassistant.domain.model.PendingMemoryCandidate(
+            id = "synthetic-review-memory", distilledContent = "合成设定候选", originalSnippet = "合成来源", conversationId = 1
+        )
+        val timeline = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = "合成日程", newEvent = null, summaryNotice = "合成摘要", proposalId = "synthetic-review-timeline"
+        )
+        val bounds = measureReviewInput(statusHeight = 32) {
+            com.aiassistant.ui.screens.chat.ChatPendingReviewPanels(
+                memory = memory, timeline = timeline, onDismissMemory = {}, onAcceptMemory = { _, _ -> },
+                onDismissTimeline = {}, onApplyTimeline = {}
+            )
+        }
+
+        assertTrue("双候选应有实际可见高度", bounds.getValue("pending").height > 100f)
+        assertTrue("短候选不应耗尽 440dp 限额", bounds.getValue("review").height < 440f)
+        assertEquals(bounds.getValue("pending").bottom, bounds.getValue("status").top, .01f)
+        assertReviewAdjacentToInput(bounds)
+    }
+
+    @Test
+    fun realLongTimelinePanelScrollsWithinSmallScreenBudget() {
+        val timeline = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = null, newEvent = null, summaryNotice = "合成摘要", proposalId = "synthetic-long-review-timeline",
+            atemporalSettings = (1..12).map { index ->
+                com.aiassistant.utils.AtemporalSettingItem(id = "synthetic-setting-$index", content = "合成长设定条目 $index")
+            }
+        )
+        val bounds = measureReviewInput(height = 480, inputHeight = 100, statusHeight = 24) {
+            com.aiassistant.ui.screens.chat.ChatPendingReviewPanels(
+                memory = null, timeline = timeline, onDismissMemory = {}, onAcceptMemory = { _, _ -> },
+                onDismissTimeline = {}, onApplyTimeline = {}
+            )
+        }
+
+        assertEquals("长正文受屏幕剩余空间约束", 260f, bounds.getValue("review").height, .01f)
+        assertEquals(236f, bounds.getValue("pending").height, .01f)
+        assertReviewAdjacentToInput(bounds)
+    }
+
+    @Test
+    fun reasoningEffortPopupIsAnInputAnchoredCardWithInputImmediatelyBelow() {
+        val bounds = measureReasoningPopup()
+
+        assertTrue("思考强度卡片必须实际显示", bounds.getValue("thinking").height > 0f)
+        assertTrue("思考强度卡片必须受 220dp 上限约束", bounds.getValue("thinking").height <= 220f)
+        assertEquals("思考强度卡片下方应直接接输入区", bounds.getValue("thinking").bottom, bounds.getValue("input").top, .01f)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun repeatedImeReopenSeparatesFocusSessionsAcrossFrames() = runTest {
         val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
@@ -566,5 +677,97 @@ class UiPolishRegressionTest {
         )
 
         assertEquals(listOf(103L, 101L, 102L, 104L), sorted.map { it.id })
+    }
+}
+
+private fun assertReviewAdjacentToInput(bounds: Map<String, Rect>) {
+    assertEquals("输入框必须紧贴审阅区", bounds.getValue("review").bottom, bounds.getValue("input").top, .01f)
+    assertEquals("状态提示必须紧贴候选内容", bounds.getValue("pending").bottom, bounds.getValue("status").top, .01f)
+}
+
+private fun measureReviewInput(
+    width: Int = 360,
+    height: Int = 800,
+    inputHeight: Int = 80,
+    statusHeight: Int = 30,
+    pendingReview: @Composable () -> Unit
+): Map<String, Rect> {
+    val bounds = mutableMapOf<String, Rect>()
+    measureComposeViewport(width, height) {
+        Box(Modifier.fillMaxSize()) {
+                com.aiassistant.ui.screens.chat.ChatReviewInputLayout(
+                    review = {
+                        com.aiassistant.ui.screens.chat.ChatReviewPanelStack(
+                            modifier = Modifier.onGloballyPositioned { bounds["review"] = it.boundsInRoot() },
+                            pendingReview = {
+                                Box(Modifier.fillMaxWidth().onGloballyPositioned { bounds["pending"] = it.boundsInRoot() }) {
+                                    pendingReview()
+                                }
+                            },
+                            status = {
+                                Box(
+                                    Modifier.fillMaxWidth().height(statusHeight.dp)
+                                        .onGloballyPositioned { bounds["status"] = it.boundsInRoot() }
+                                )
+                            }
+                        )
+                    },
+                    input = {
+                        Box(
+                            Modifier.fillMaxWidth().height(inputHeight.dp)
+                                .onGloballyPositioned { bounds["input"] = it.boundsInRoot() }
+                        )
+                    }
+                )
+        }
+    }
+    return bounds.toMap()
+}
+
+private fun measureReasoningPopup(): Map<String, Rect> {
+    val bounds = mutableMapOf<String, Rect>()
+    measureComposeViewport(width = 360, height = 400) {
+        androidx.compose.foundation.layout.Column {
+            com.aiassistant.ui.screens.chat.ReasoningEffortPopupCard(
+                enableThinking = true, thinkingEffort = "medium", modelName = "synthetic-model", apiType = "openai",
+                onEffortSelected = { _, _ -> }, onClose = {},
+                modifier = Modifier.weight(1f, fill = false).onGloballyPositioned { bounds["thinking"] = it.boundsInRoot() }
+            )
+            Box(Modifier.fillMaxWidth().height(120.dp).onGloballyPositioned { bounds["input"] = it.boundsInRoot() })
+        }
+    }
+    return bounds.toMap()
+}
+
+private fun measureComposeViewport(width: Int, height: Int, content: @Composable () -> Unit) {
+    val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+    val activity = controller.get()
+    val composeView = ComposeView(activity)
+    val scaleKey = android.provider.Settings.Global.ANIMATOR_DURATION_SCALE
+    val previousScale = android.provider.Settings.Global.getFloat(activity.contentResolver, scaleKey, 1f)
+    android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, 0f)
+    try {
+        composeView.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                androidx.compose.material3.MaterialTheme { content() }
+            }
+        }
+        // Keep the test viewport explicit even when the synthetic activity decor performs a
+        // follow-up layout using its default display size. One dp equals one pixel in these tests.
+        activity.setContentView(composeView, android.widget.FrameLayout.LayoutParams(width, height))
+        val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        mainLooper.idleFor(java.time.Duration.ofMillis(32))
+        val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY)
+        val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(height, android.view.View.MeasureSpec.EXACTLY)
+        repeat(2) {
+            composeView.measure(widthSpec, heightSpec)
+            composeView.layout(0, 0, width, height)
+        }
+        assertEquals("测量视口宽度必须固定", width, composeView.width)
+        assertEquals("测量视口高度必须固定", height, composeView.height)
+    } finally {
+        composeView.disposeComposition()
+        controller.pause().stop().destroy()
+        android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
     }
 }

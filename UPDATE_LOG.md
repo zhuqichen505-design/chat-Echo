@@ -1,5 +1,19 @@
 # 维护记录
 
+## 2026-10-27 · 2.8.21 对话窗口层级与思考强度窗口修复（源码与构建已验收，发布待核验）
+
+基线为当前 `main/7e176ee`，版本递增为 2.8.21/207；Room v37、20 个实体不变。本轮只核对并修改当前仓库源码，未读取 `APP改进\`，原有未跟踪 `.playwright-cli/` 与 `deepseek.png` 保留且排除。
+
+临时实施方案：统一窗口改造后，设定和时间线捕捉候选区由父级 `weight(1f)` 默认填满可用高度，短内容也占据约 440dp 审阅区，`Scaffold` 再把这段高度计入消息列表底部间距，造成窗口出现在页面上方、正文被抬升和页面上方空白。本轮新增 `ChatReviewPanelStack` 固定候选区 `weight(1f, fill=false)`，状态提示紧跟候选区，整个审阅栈继续由 `ChatReviewInputLayout` 锚在输入框上方并受可用高度上限约束；长内容只在候选正文内部滚动，短内容按自然高度收缩。
+
+思考强度窗口从独立居中的 `EchoGlassDialog` 改为输入栏同一布局中的卡片，固定显示在输入框上方；卡片最大高度 220dp，正文可纵向滚动，删除重复的引导、档位长解释和接口说明，保留当前档位、滑杆和必要关闭操作。“深度思考强度”左侧改用 `BOT_ORB` 思考态动态 Bot 标识，继续遵守减弱动态设置与生命周期边界。
+
+涉及文件：`app/src/main/java/com/aiassistant/ui/screens/chat/ChatPendingReviewPanels.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`，以及 `app/src/test/java/com/aiassistant/UiPolishRegressionTest.kt`。新增 6 项 Compose/Robolectric 几何回归，覆盖短候选自然收缩、440dp 长候选上限、小屏与高输入栏预算、无候选状态、真实设定与时间线双候选、长时间线内部滚动和真实思考强度卡片与输入框相邻。影响限于对话窗口布局和思考强度窗口展示，不改请求协议、模型参数语义、Room schema、消息数据格式或用户数据；数据库仍为 v37 / 20 个实体。
+
+最终冻结验收 `20261027-150815-700`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，415.541 秒；88 个套件 / 1,034 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，验收输入哈希一致；`git diff --check` 退出 0。Release `assembleRelease --no-daemon --build-cache` 使用 `<本机可写缓存>`，退出 0，约 381 秒。候选 APK 为 2.8.21/207、25,472,793 字节、SHA256 `4a726ef1ee506a5292d50f92b4b38eea07933b177d05f905565f47730c2616b0`，`com.aiassistant`、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；aapt / apksigner v2 元数据校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 全通过，31,480 条 DEX 实际字符串 / 10,624 条资源字符串；16 个唯一新增字符串（17 条记录）逐项关联源码、DEX 类型 / 原型和 R8 构建结构复核，未决 0；186 张图片与已审 2.8.20 基线内容及元数据一致。排他复制退出 0，指定本机发布目录原 217 文件（216 APK）的名称 / 大小 / SHA256 保留，无覆盖或删除。 Git / Release 发布待执行。未连接真机或模拟器；安装启动、输入法 / 触控、弹窗位置和动态视觉仍需人工验收。
+
 ## 2026-10-27 · 2.8.20 Bot 状态颜色渐变与误判修复（已发布）
 
 基线 `main/572fcc7`；版本递增为 2.8.20/206，Room v37 / 20 个实体不变。只使用当前仓库源码，既有未跟踪目录和图片保留且排除；此前已提交的输入法重复唤起修复随包进入。

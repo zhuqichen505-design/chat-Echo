@@ -1,8 +1,17 @@
 # Echo
 
+**Echo 2.8.21/207（2026-10-27，源码与产物已验收，发布待核验）**：修复设定与时间线捕捉窗口被错误撑高导致对话文本抬升和上方空白的问题；两个窗口继续显示在输入框上方。思考强度改为输入框上方紧凑卡片，减少无必要说明，标题左侧使用动态思考态 Bot 图标。Room v37 / 20 个实体不变，不改请求协议、模型参数语义或消息格式。
+
+临时实施方案：父级 `weight(1f)` 让短候选占满审阅区并抬高消息列表；新增 `ChatReviewPanelStack` 以 `weight(1f, fill=false)` 固定候选与状态的收缩规则，长内容只在正文内滚动。思考窗口从独立居中 Dialog 改为输入栏同一布局中的最大 220dp 卡片并支持内部滚动。
+
+涉及 `ChatPendingReviewPanels.kt`、`ChatScreen.kt`、`ChatInputComponents.kt` 和 `UiPolishRegressionTest.kt`；新增 6 项 Compose/Robolectric 几何回归。最终冻结验收 `20261027-150815-700`：标准 verify / Gradle 退出 0，88 套件 / 1,034 项测试失败、错误、跳过均 0，Lint 0 Error / 103 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，候选 APK SHA256 `4a726ef1ee506a5292d50f92b4b38eea07933b177d05f905565f47730c2616b0`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 全通过，31,480 条 DEX 实际字符串 / 10,624 条资源字符串；16 个唯一新增字符串（17 条记录）逐项关联源码、DEX 类型 / 原型和 R8 构建结构复核，未决 0；186 张图片与已审 2.8.20 基线内容及元数据一致。排他复制退出 0，指定本机发布目录原 217 文件（216 APK）的名称 / 大小 / SHA256 保留，无覆盖或删除。 Git / Release 发布待执行。未连接真机或模拟器。
+
+
 Android 原生 AI API 客户端，支持多模型对话、角色扮演、长上下文管理和本地备份。
 
-**Echo 2.8.20/206（2026-10-27，源码与产物已验收，已发布）**：Bot 状态切换采用约 500ms 颜色渐变，保留暂停色和错误色；修复正常解释文本误显示错误色，纳入输入法重复唤起修复。Room v37 / 20 个实体不变。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20)。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。设备视觉、输入法和真实接口待人工走查。
+**历史已发布 Echo 2.8.20/206（2026-10-27）**：Bot 状态切换采用约 500ms 颜色渐变，保留暂停色和错误色；修复正常解释文本误显示错误色，纳入输入法重复唤起修复。Room v37 / 20 个实体不变。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20)。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。设备视觉、输入法和真实接口待人工走查。
 
 **已发布 Echo 2.8.19/205（2026-10-26）**。本轮以 `main/75e40c4` 为基线，Room v37（20 个实体）不变。正式接入毛边文库（DECKLE）与棉纸诗笺（COTTON），保留五个旧主题；其余两套纸本方案继续作为预览，不进入正式主题选择。
 
@@ -33,7 +42,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC 全通过，DEX / 资源、已�
 
 下载：[Echo v2.8.18 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.18)。版本提交 `1e16b10028c412bc01912c374b83034451f4b268` 与 `v2.8.18` 已推送，远端一致，核验时无待推提交；发布退出 0，GitHub 附件摘要、匿名下载 SHA256 与上述本机 APK 一致。旧版处理退出 0：仅撤下新仓库旧 v2.8.16 Release 及远端 v2.8.16 / v2.8.17 版本标签，远端仅保留 v2.8.18；本机旧标签及全部历史 APK 保留。发布结果收尾仅更新六份维护文档，公开发布说明保持冻结，不新建或移动版本标签，不重复编译。
 
-以下为历史版本与阶段记录，行为和验收结果仅对应当时版本；当前行为以顶部 2.8.19 说明为准。
+以下为历史版本与阶段记录，行为和验收结果仅对应当时版本；当前行为以顶部 2.8.21 说明为准。
 
 **历史 Echo 2.8.17/203（2026-10-26）**：本轮完成 Bot 暂停 / 错误动态、扁扁右上符号定位、纸本主题重做，并已构建 Release APK。Room v37（20 个实体）不变。
 

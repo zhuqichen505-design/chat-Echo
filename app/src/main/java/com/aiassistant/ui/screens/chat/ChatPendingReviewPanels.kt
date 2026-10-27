@@ -56,6 +56,27 @@ internal fun ChatReviewInputLayout(
     }
 }
 
+/**
+ * Keeps the review candidates attached to the input bar without turning a short review into a
+ * fixed-height spacer. The pending content may consume the remaining bounded height, while the
+ * status row always follows it immediately and stays adjacent to the input field.
+ */
+@Composable
+internal fun ChatReviewPanelStack(
+    pendingReview: @Composable () -> Unit,
+    status: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(modifier = Modifier.weight(1f, fill = false)) {
+            pendingReview()
+        }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            status()
+        }
+    }
+}
+
 /** 同时出现两类候选时只展开一份正文；切换不销毁另一份编辑草稿。 */
 @Composable
 internal fun ChatPendingReviewPanels(

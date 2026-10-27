@@ -595,8 +595,9 @@ fun ChatScreen(
         bottomBar = {
             ChatReviewInputLayout(
                 review = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    val hasPendingReview = pendingMemoryCandidate != null || pendingTimelineProposal != null
+                val hasPendingReview = pendingMemoryCandidate != null || pendingTimelineProposal != null
+                ChatReviewPanelStack(
+                    pendingReview = {
                     if (hasPendingReview) {
                         key(conversationId) {
                             ChatPendingReviewPanels(
@@ -606,10 +607,12 @@ fun ChatScreen(
                                 onAcceptMemory = { scope, content -> viewModel.acceptPendingMemory(scope, content) },
                                 onDismissTimeline = { viewModel.dismissTimelineProposal(it) },
                                 onApplyTimeline = { viewModel.applyTimelineProposal(it) },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
+                    },
+                    status = {
                     // 进度、通知和排队消息单独滚动，不改变候选正文的位置。
                     Column(
                         Modifier.fillMaxWidth().heightIn(max = if (hasPendingReview) 112.dp else 280.dp)
@@ -787,7 +790,8 @@ fun ChatScreen(
                         }
 
                     }
-                }
+                    }
+                )
                 },
                 input = {
                 // IME session, selection and editor scroll belong to this conversation only.
