@@ -814,7 +814,7 @@ fun SettingsMenu(
     val groups = listOf(
         "模型与连接" to listOf(
             SettingsMenuEntry("api_config", "API 配置", "连接、密钥、可用模型", Icons.Default.Key),
-            SettingsMenuEntry("model_retry", "模型失败与重试", "错误类型、重试次数与备用 Key", Icons.Default.Refresh),
+            SettingsMenuEntry("model_retry", "模型失败与重试", "流式输出、错误重试与备用 Key", Icons.Default.Refresh),
             SettingsMenuEntry("http_access", "HTTP 访问", "明文连接与地址白名单", Icons.Default.Security)
         ),
         "使用偏好" to listOf(

@@ -22,10 +22,23 @@ import com.aiassistant.utils.PersonalizationManager
 internal fun SettingsRetryControls(manager: PersonalizationManager) {
     // 这是设置页中的可展开面板，必须保存到配置页生命周期，切换子页或重组时不能自动展开。
     var expanded by rememberSaveable { mutableStateOf(true) }
+    var streamingEnabled by remember { mutableStateOf(manager.isStreamingEnabled()) }
+    var streamingSaveFailed by remember { mutableStateOf(false) }
     var retryEnabled by remember { mutableStateOf(manager.isModelRetryEnabled()) }
     var policy by remember { mutableStateOf(manager.getRetryPolicy()) }
     var backupKeyFallback by remember { mutableStateOf(manager.isBackupKeyFallbackEnabled()) }
     Text("模型连接与错误重试", style = MaterialTheme.typography.titleMedium)
+    EchoSettingRow(title = "流式输出", subtitle = "开启后逐步显示回复；关闭后等待完整回复，适用于不支持流式的服务商。对新请求生效。", contentPaddingHorizontal = 0.dp) {
+        EchoSwitch(checked = streamingEnabled, onCheckedChange = { enabled ->
+            val saved = runCatching { manager.setStreamingEnabled(enabled) }.getOrDefault(false)
+            if (saved) streamingEnabled = enabled
+            streamingSaveFailed = !saved
+        })
+    }
+    if (streamingSaveFailed) {
+        Text("流式输出设置保存失败，请重试。", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+    }
     EchoSettingRow(title = "模型失败后自动重试", subtitle = "总开关：关闭后不自动重连、不自动切换备用 Key；首次失败立即显示原因", contentPaddingHorizontal = 0.dp) {
         EchoSwitch(checked = retryEnabled, onCheckedChange = {
             retryEnabled = it

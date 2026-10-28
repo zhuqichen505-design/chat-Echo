@@ -1,5 +1,21 @@
 # 维护记录
 
+## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（源码验收与 Release 构建完成，Git/Release 待回填）
+
+基线 `main/f886e43`；当前源码版本 2.8.22/208，Room v37 / 20 个实体不变。本轮直接核对当前仓库源码，不读取历史改进归档；原未跟踪内容保留且排除。用户确认同一服务商在其他客户端也返回 `PROXY_GENERATION_DISABLED: streamGenerateContent is not supported`，本轮按上游流式能力限制处理，不修改 API 地址、密钥、模型名称或用户现有配置。关闭流式可避开该调用方式，是否恢复取决于服务商是否继续支持非流式请求，尚无真实服务商验证。
+
+临时实施方案：在“设置 → 模型失败与重试”顶部增加默认开启的全局“流式输出”开关，使用独立偏好键保存，避免其他设置页的旧草稿覆盖；只对新请求生效，同一逻辑请求的重试和备用 Key 保持开始时选定的输出方式。关闭后 OpenAI 兼容请求使用 `stream=false`、`Accept: application/json`，不发送 `stream_options`，等完整响应体返回后解析正文、思考、完成原因和用量；Anthropic 同样发送非流式请求，并完整解析 JSON 响应体中的正文 / 思考内容块、停止原因与缓存用量。消息保存、取消、变体与用量统计继续走原有流程。
+
+关闭流式时同时禁止摘要、命名、翻译和辅助任务自动进入流式保底通道，避免后台请求再次触发服务商的流式限制；重新开启后恢复原有流式行为。首个有效回复的 120 秒等待边界保持，非流式需要等待完整回复，长推理可能触及该边界；本轮不扩大超时、不改请求地址或模型参数语义，无数据库迁移。
+
+涉及文件：`app/build.gradle.kts`；`app/src/main/java/com/aiassistant/utils/PersonalizationManager.kt`、`ui/screens/settings/SettingsRetryControls.kt`、`SettingsScreen.kt`、`data/repository/AiRepository.kt`、`domain/model/Models.kt`；以及 `app/src/test/java/com/aiassistant/RetryPreferencesTest.kt`、`ChatRetryRepositoryTest.kt`。验证覆盖偏好默认值与持久化、旧表单不覆盖、双协议完整 JSON / 思考 / 用量保存、请求头与参数、流式恢复、取消、请求中切换以及辅助流式保底限制；以本轮最终验收实际结果为准。
+
+首轮冻结验收 `20261028-112627-799`：标准 verify 退出 1，609.167 秒；88 套件 / 1,044 项测试中，新增非流式取消回归失败 1，其余 1,043 项通过，错误 / 跳过均 0。最终 Lint 任务未完成，不能记为通过。该回归暴露了真正的取消缺陷：主动 `Call.cancel()` 后 OkHttp 可能以 `Socket closed` 结束，旧错误识别把它当作网络错误继续重试。双协议异常出口现结合本次 `Call.isCanceled()` 规范化主动取消，保持传输异常和 `FirstTokenDeadline` 超时语义，不放宽测试或断言；第二轮完整 verify `20261028-113832-743` 退出 0，454.714 秒；88 套件 / 1,044 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning，输入哈希一致。
+
+验证与构建结果：第二轮完整 verify `20261028-113832-743` 退出 0，454.714 秒；88 套件 / 1,044 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning，输入哈希一致。 `git diff --check` 在源码和文档冻结后退出 0。Release `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，Gradle 报告 8 分 20 秒；`Echo-v2.8.22.apk` 25,472,793 字节，SHA256 `645e3019869f99e6a81963c70e82fb93c4ae351f67288f7a557f7710a9311410`；`com.aiassistant`、2.8.22/208、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。 完整 APK 审计退出 0：446 个 ZIP 条目 CRC 全通过，31,486 条 DEX 字符串、10,624 条资源字符串、186 张图片，较 2.8.21 图片变更 0；新增 13 条记录 / 12 个唯一字符串逐条人工复核未决 0，基线 20 条既有候选复核未决 0。指定发布目录排他复制核验通过：新增包前 218 个文件（217 个 APK）名称 / 大小 / SHA256 全部保留，新增 `Echo-v2.8.22.apk` 未覆盖历史包。 Git 提交 / 推送 / 标签、Release 上传及匿名下载核验待回填。
+
+设备与接口边界：当前无连接设备，未验证安装、启动、触控或真实服务商请求。人工需在上述设置入口关闭流式后重试原谷歌模型，确认完整回复可返回，再检查重新开启、重启持久化、等待期间取消、思考和用量显示；服务商若也禁用非流式，仍需其恢复上游服务。
+
 ## 2026-10-27 · 2.8.21 对话窗口层级与思考强度窗口修复（已发布）
 
 基线为当前 `main/7e176ee`，版本递增为 2.8.21/207；Room v37、20 个实体不变。本轮只核对并修改当前仓库源码，未读取 `APP改进\`，原有未跟踪 `.playwright-cli/` 与 `deepseek.png` 保留且排除。

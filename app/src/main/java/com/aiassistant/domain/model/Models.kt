@@ -678,7 +678,8 @@ data class AnthropicResponse(
 
 data class AnthropicResponseContent(
     val type: String?,
-    val text: String?
+    val text: String?,
+    val thinking: String? = null
 )
 
 data class AnthropicUsage(

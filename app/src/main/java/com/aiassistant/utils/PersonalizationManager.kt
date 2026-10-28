@@ -154,6 +154,17 @@ class PersonalizationManager(private val context: Context) {
 
     fun isModelRetryEnabled(): Boolean = prefs.getBoolean("model_retry_enabled", true)
 
+    fun isStreamingEnabled(): Boolean = prefs.getBoolean("streaming_enabled", true)
+
+    fun setStreamingEnabled(enabled: Boolean): Boolean {
+        val previous = isStreamingEnabled()
+        if (prefs.edit().putBoolean("streaming_enabled", enabled).commit()) return true
+        // A failed commit still changes the in-memory value. Keep new requests on
+        // the previously selected mode when the setting could not be saved.
+        prefs.edit().putBoolean("streaming_enabled", previous).commit()
+        return false
+    }
+
     fun setModelRetryEnabled(enabled: Boolean) {
         prefs.edit(commit = true) { putBoolean("model_retry_enabled", enabled) }
     }

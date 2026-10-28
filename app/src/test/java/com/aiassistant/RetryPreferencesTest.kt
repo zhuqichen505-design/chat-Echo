@@ -37,6 +37,46 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class, manifest = Config.NONE)
 class RetryPreferencesTest {
+    @Test fun streamingOutputDefaultsToEnabledForExistingPreferences() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        assertTrue(prefs.edit().clear().putBoolean("model_retry_enabled", false).commit())
+
+        val manager = PersonalizationManager(context)
+        assertTrue(manager.isStreamingEnabled())
+        assertFalse(manager.isModelRetryEnabled())
+    }
+
+    @Test fun streamingOutputSelectionPersistsAcrossManagerRecreation() {
+        val context = RuntimeEnvironment.getApplication()
+        assertTrue(context.getSharedPreferences("personalization_settings", 0).edit().clear().commit())
+        val manager = PersonalizationManager(context)
+
+        assertTrue(manager.setStreamingEnabled(false))
+        val restored = PersonalizationManager(context)
+        assertFalse(restored.isStreamingEnabled())
+        assertTrue(restored.setStreamingEnabled(true))
+        assertTrue(PersonalizationManager(context).isStreamingEnabled())
+    }
+
+    @Test fun unrelatedSettingsSavedFromOlderDraftCannotOverwriteStreamingSelection() {
+        val context = RuntimeEnvironment.getApplication()
+        assertTrue(context.getSharedPreferences("personalization_settings", 0).edit().clear().commit())
+        val manager = PersonalizationManager(context)
+        val oldDraft = manager.getSettings()
+
+        assertTrue(manager.setStreamingEnabled(false))
+        assertTrue(manager.saveSettings(oldDraft.copy(autoNameEnabled = false)))
+        val restored = PersonalizationManager(context)
+        assertFalse(restored.isStreamingEnabled())
+        assertFalse(restored.getSettings().autoNameEnabled)
+
+        assertTrue(restored.setStreamingEnabled(true))
+        assertTrue(restored.saveSettings(oldDraft.copy(showModelAvatar = false)))
+        assertTrue(PersonalizationManager(context).isStreamingEnabled())
+        assertFalse(PersonalizationManager(context).getSettings().showModelAvatar)
+    }
+
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun paperTexturesHaveDeterministicDistinctTranslucentFibres() {

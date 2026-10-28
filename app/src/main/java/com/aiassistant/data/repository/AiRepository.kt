@@ -1656,6 +1656,8 @@ class AiRepository(
         var hasEmittedTokens = false
         val keyFailures = mutableListOf<KeyAttemptFailure>()
         val retryPolicy = personalizationManager.getRetryPolicy()
+        // Freeze the output mode for this logical request, including retries and backup keys.
+        val streamingEnabled = personalizationManager.isStreamingEnabled()
 
         val wrappedOnToken: (String) -> Unit = { token ->
             if (token.isNotEmpty()) hasEmittedTokens = true
@@ -1680,12 +1682,12 @@ class AiRepository(
                         "anthropic" -> sendAnthropicMessage(
                             keyConfig, conversationId, historyMessages, userMessage, attachments,
                             options, assistantVariantGroupId, assistantVariantIndex,
-                            { deadline.received(it); wrappedOnToken(it) }, { deadline.received(it); wrappedOnThinkingToken(it) }, onComplete, deadline
+                            { deadline.received(it); wrappedOnToken(it) }, { deadline.received(it); wrappedOnThinkingToken(it) }, onComplete, deadline, streamingEnabled
                         )
                         else -> sendOpenAIMessage(
                             keyConfig, conversationId, historyMessages, userMessage, attachments,
                             options, assistantVariantGroupId, assistantVariantIndex,
-                            { deadline.received(it); wrappedOnToken(it) }, { deadline.received(it); wrappedOnThinkingToken(it) }, onComplete, deadline
+                            { deadline.received(it); wrappedOnToken(it) }, { deadline.received(it); wrappedOnThinkingToken(it) }, onComplete, deadline, streamingEnabled
                         )
                     }
                     recordKeySuccess(config, currentKey)
@@ -1877,7 +1879,8 @@ class AiRepository(
         onToken: (String) -> Unit,
         onThinkingToken: (String) -> Unit,
         onComplete: (String, String?, Any?) -> Unit,
-        firstTokenDeadline: FirstTokenDeadline
+        firstTokenDeadline: FirstTokenDeadline,
+        streamingEnabled: Boolean
     ) {
         val contextMessages = historyMessages
             .filter { msg ->
@@ -1999,13 +2002,13 @@ class AiRepository(
             max_completion_tokens = if (capability.usesMaxCompletionTokens) safeMaxTokens else null,
             top_p = if (omitSamplingExtras) null else effectiveOptions.topP,
             top_k = if (providerToggles.includeTopK && !omitSamplingExtras) config.topK else null,
-            stream = true,
+            stream = streamingEnabled,
             frequency_penalty = if (omitSamplingExtras) null else config.frequencyPenalty.takeIf { it != 0.0f },
             presence_penalty = if (omitSamplingExtras) null else config.presencePenalty.takeIf { it != 0.0f },
             stop = parseStopSequences(config.stopSequences),
             seed = config.seed,
             response_format = config.responseFormat?.let { ResponseFormat(it) },
-            stream_options = StreamOptions(include_usage = true),
+            stream_options = if (streamingEnabled) StreamOptions(include_usage = true) else null,
             web_search_options = if (providerToggles.includeOpenAiSearchOptions) WebSearchOptions(
                 search_context_size = config.searchContextSize
             ) else null,
@@ -2024,7 +2027,7 @@ class AiRepository(
         // Context building can suspend for summaries or search. Do not send a
         // payload assembled before a message was edited or deleted meanwhile.
         ensureContextSourcesCurrent(conversationId, historyMessages)
-        // 发送流式请求
+        // Keep the same endpoint and model parameters; only switch the response transport.
         val startTime = System.currentTimeMillis()
         var activeCall: Call? = null
         try {
@@ -2033,7 +2036,7 @@ class AiRepository(
                 path = "chat/completions",
                 headers = mapOf(
                     "Authorization" to auth,
-                    "Accept" to "text/event-stream",
+                    "Accept" to if (streamingEnabled) "text/event-stream" else "application/json",
                     "Cache-Control" to "no-cache"
                 ),
                 json = gson.toJson(request),
@@ -2069,9 +2072,12 @@ class AiRepository(
                 // 健壮读取 SSE / NDJSON 流：兼容 BOM、缺失[DONE]、缺失finish_reason、空行、注释及纯JSON
                 try {
                     responseBody.byteStream().bufferedReader(Charsets.UTF_8).use { reader ->
+                        var completeResponseRead = false
                         while (true) {
                             val nextLine = try {
-                                reader.readLine()
+                                if (streamingEnabled) reader.readLine()
+                                else if (completeResponseRead) null
+                                else reader.readText().also { completeResponseRead = true }
                             } catch (ioEx: Exception) {
                                 if (isRequestCancellation(ioEx)) throw ioEx
                                 streamReadException = ioEx
@@ -2279,6 +2285,13 @@ class AiRepository(
                 throw ApiException(statusCode, "API错误 ($statusCode): $errorMsg", errorBody)
             }
         }
+        } catch (error: Exception) {
+            // OkHttp may report "Socket closed" after an explicit cancel. Use the
+            // actual call state, while preserving transport and first-token timeouts.
+            if (activeCall?.isCanceled() == true && !isTimeoutException(error)) {
+                throw CancellationException("请求已取消", error)
+            }
+            throw error
         } finally {
             activeCall?.let { activeStreamingCalls.remove(conversationId, it) }
         }
@@ -2297,7 +2310,8 @@ class AiRepository(
         onToken: (String) -> Unit,
         onThinkingToken: (String) -> Unit,
         onComplete: (String, String?, Any?) -> Unit,
-        firstTokenDeadline: FirstTokenDeadline
+        firstTokenDeadline: FirstTokenDeadline,
+        streamingEnabled: Boolean
     ) {
         val contextMessages = historyMessages
             .filter { msg ->
@@ -2392,14 +2406,14 @@ class AiRepository(
             temperature = if (adaptive || thinkingEnabled) null else requestTemperature(config, effectiveOptions),
             top_p = if (adaptive || thinkingEnabled) null else effectiveOptions.topP,
             top_k = if (!adaptive && !thinkingEnabled && config.topK != 50) config.topK else null,
-            stream = true,
+            stream = streamingEnabled,
             stop_sequences = parseStopSequences(config.stopSequences),
             output_config = ReasoningControls.wireChatEffort(requestModel, "anthropic", thinkingEnabled, effectiveOptions.thinkingEffort, reasoningEvidence)?.let { AnthropicOutputConfig(it) },
             thinking = thinkingType?.let { AnthropicThinking(type = it, budget_tokens = thinkingBudget) }
         )
 
         ensureContextSourcesCurrent(conversationId, historyMessages)
-        // 发送流式请求
+        // Keep cancellation and accounting shared across both output modes.
         val startTime = System.currentTimeMillis()
         var activeCall: Call? = null
         try {
@@ -2409,7 +2423,7 @@ class AiRepository(
                 headers = mapOf(
                     "x-api-key" to config.apiKey,
                     "anthropic-version" to "2023-06-01",
-                    "Accept" to "text/event-stream",
+                    "Accept" to if (streamingEnabled) "text/event-stream" else "application/json",
                     "Cache-Control" to "no-cache"
                 ),
                 json = gson.toJson(request),
@@ -2437,99 +2451,130 @@ class AiRepository(
 
                 var anthropicStreamReadException: Exception? = null
                 var messageStopped = false
+                var lastStopReason: String? = null
 
-                // 读取SSE流
-                try {
-                    responseBody.byteStream().bufferedReader(Charsets.UTF_8).use { reader ->
-                        while (true) {
-                            val nextLine = try {
-                                reader.readLine()
-                            } catch (ioEx: Exception) {
-                                if (isRequestCancellation(ioEx)) throw ioEx
-                                anthropicStreamReadException = ioEx
-                                Log.w(tag, "Anthropic流式读取遇到IO中断 (${ioEx.javaClass.simpleName}): ${ioEx.message}")
-                                null
-                            } ?: break
-
-                            var lineStr = nextLine
-                            if (lineStr.startsWith("\uFEFF")) {
-                                lineStr = lineStr.removePrefix("\uFEFF")
+                if (!streamingEnabled) {
+                    val body = gson.fromJson(responseBody.string().removePrefix("\uFEFF"), AnthropicResponse::class.java)
+                        ?: throw Exception("响应体为空")
+                    body.error?.let { throw embeddedApiError(it) }
+                    body.content.orEmpty().forEach { block ->
+                        when (block.type) {
+                            "text" -> block.text?.takeIf(String::isNotEmpty)?.let { text ->
+                                contentBuilder.append(text)
+                                onToken(text)
                             }
-                            lineStr = lineStr.trim()
-                            if (lineStr.isEmpty() || lineStr.startsWith(":") || lineStr.startsWith("event: ")) continue
-
-                            if (lineStr.startsWith("data:")) {
-                                val data = lineStr.removePrefix("data:").trimStart()
-                                if (data == "[DONE]") { messageStopped = true; break }
-
-                                try {
-                                    val event = gson.fromJson(data, AnthropicStreamEvent::class.java)
-
-                                    when (event.type) {
-                                        "message_stop" -> { messageStopped = true; break }
-                                        "message_start" -> {
-                                            event.message?.usage?.let { usage ->
-                                                // v2.6.4 真实性：Anthropic 的 input_tokens 不含缓存读写部分，
-                                                // 与 OpenAI（prompt_tokens 含缓存）对齐，将缓存读/写并入输入口径，
-                                                // 修复缓存命中率可能超过 100% 与总量偏低的问题；命中量仅计 cache_read
-                                                hasInputUsage = usage.input_tokens != null
-                                                inputTokens = (usage.input_tokens ?: 0) +
-                                                    (usage.cache_read_input_tokens ?: 0) +
-                                                    (usage.cache_creation_input_tokens ?: 0)
-                                                cachedTokens = usage.cache_read_input_tokens ?: 0
-                                            }
-                                        }
-                                        "content_block_delta" -> {
-                                            // 处理文本内容
-                                            event.delta?.text?.let { text ->
-                                                contentBuilder.append(text)
-                                                onToken(text)
-                                            }
-                                            // 处理思考内容
-                                            event.delta?.thinking?.let { thinking ->
-                                                thinkingBuilder.append(thinking)
-                                                onThinkingToken(thinking)
-                                            }
-                                        }
-                                        "message_delta" -> {
-                                            event.usage?.let { usage ->
-                                                // 与 message_start 同口径：输入含缓存读/写，命中量仅计 cache_read
-                                                val recomputedInput = (usage.input_tokens ?: 0) +
-                                                    (usage.cache_read_input_tokens ?: 0) +
-                                                    (usage.cache_creation_input_tokens ?: 0)
-                                                if (recomputedInput > 0) {
-                                                    inputTokens = recomputedInput
-                                                }
-                                                hasInputUsage = hasInputUsage || usage.input_tokens != null
-                                                hasOutputUsage = hasOutputUsage || usage.output_tokens != null
-                                                outputTokens = usage.output_tokens ?: outputTokens
-                                                cachedTokens = usage.cache_read_input_tokens ?: cachedTokens
-                                                totalTokens = inputTokens + outputTokens
-                                            }
-                                        }
-                                        "error" -> {
-                                            val errDetail = event.error?.message ?: "Anthropic流式返回未知错误"
-                                            if (contentBuilder.isNotEmpty() || thinkingBuilder.isNotEmpty()) {
-                                                anthropicStreamReadException = ApiException(500, "流中断")
-                                                Log.w(tag, "Anthropic流式输出过程中遇到错误: $errDetail，保留已输出内容平稳完成")
-                                                break
-                                            } else {
-                                                throw ApiException(400, "Anthropic错误: $errDetail", data)
-                                            }
-                                        }
-                                    }
-                                } catch (e: ApiException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    Log.w(tag, "解析Anthropic chunk失败: $data", e)
-                                }
+                            "thinking" -> block.thinking?.takeIf(String::isNotEmpty)?.let { thinking ->
+                                thinkingBuilder.append(thinking)
+                                onThinkingToken(thinking)
                             }
                         }
                     }
-                } catch (streamEx: Exception) {
-                    if (isRequestCancellation(streamEx)) throw streamEx
-                    anthropicStreamReadException = streamEx
-                    Log.w(tag, "Anthropic流式读取外层异常: ${streamEx.javaClass.simpleName}: ${streamEx.message}")
+                    body.usage?.let { usage ->
+                        hasInputUsage = usage.input_tokens != null
+                        hasOutputUsage = usage.output_tokens != null
+                        inputTokens = (usage.input_tokens ?: 0) + (usage.cache_read_input_tokens ?: 0) +
+                            (usage.cache_creation_input_tokens ?: 0)
+                        outputTokens = usage.output_tokens ?: 0
+                        cachedTokens = usage.cache_read_input_tokens ?: 0
+                        totalTokens = inputTokens + outputTokens
+                    }
+                    lastStopReason = body.stop_reason
+                    messageStopped = !body.stop_reason.isNullOrBlank()
+                } else {
+                    // 读取SSE流
+                    try {
+                        responseBody.byteStream().bufferedReader(Charsets.UTF_8).use { reader ->
+                            while (true) {
+                                val nextLine = try {
+                                    reader.readLine()
+                                } catch (ioEx: Exception) {
+                                    if (isRequestCancellation(ioEx)) throw ioEx
+                                    anthropicStreamReadException = ioEx
+                                    Log.w(tag, "Anthropic流式读取遇到IO中断 (${ioEx.javaClass.simpleName}): ${ioEx.message}")
+                                    null
+                                } ?: break
+
+                                var lineStr = nextLine
+                                if (lineStr.startsWith("\uFEFF")) {
+                                    lineStr = lineStr.removePrefix("\uFEFF")
+                                }
+                                lineStr = lineStr.trim()
+                                if (lineStr.isEmpty() || lineStr.startsWith(":") || lineStr.startsWith("event: ")) continue
+
+                                if (lineStr.startsWith("data:")) {
+                                    val data = lineStr.removePrefix("data:").trimStart()
+                                    if (data == "[DONE]") { messageStopped = true; break }
+
+                                    try {
+                                        val event = gson.fromJson(data, AnthropicStreamEvent::class.java)
+
+                                        when (event.type) {
+                                            "message_stop" -> { messageStopped = true; break }
+                                            "message_start" -> {
+                                                event.message?.usage?.let { usage ->
+                                                    // v2.6.4 真实性：Anthropic 的 input_tokens 不含缓存读写部分，
+                                                    // 与 OpenAI（prompt_tokens 含缓存）对齐，将缓存读/写并入输入口径，
+                                                    // 修复缓存命中率可能超过 100% 与总量偏低的问题；命中量仅计 cache_read
+                                                    hasInputUsage = usage.input_tokens != null
+                                                    inputTokens = (usage.input_tokens ?: 0) +
+                                                        (usage.cache_read_input_tokens ?: 0) +
+                                                        (usage.cache_creation_input_tokens ?: 0)
+                                                    cachedTokens = usage.cache_read_input_tokens ?: 0
+                                                }
+                                            }
+                                            "content_block_delta" -> {
+                                                // 处理文本内容
+                                                event.delta?.text?.let { text ->
+                                                    contentBuilder.append(text)
+                                                    onToken(text)
+                                                }
+                                                // 处理思考内容
+                                                event.delta?.thinking?.let { thinking ->
+                                                    thinkingBuilder.append(thinking)
+                                                    onThinkingToken(thinking)
+                                                }
+                                            }
+                                            "message_delta" -> {
+                                                event.delta?.stop_reason?.let { lastStopReason = it }
+                                                event.usage?.let { usage ->
+                                                    // 与 message_start 同口径：输入含缓存读/写，命中量仅计 cache_read
+                                                    val recomputedInput = (usage.input_tokens ?: 0) +
+                                                        (usage.cache_read_input_tokens ?: 0) +
+                                                        (usage.cache_creation_input_tokens ?: 0)
+                                                    if (recomputedInput > 0) {
+                                                        inputTokens = recomputedInput
+                                                    }
+                                                    hasInputUsage = hasInputUsage || usage.input_tokens != null
+                                                    hasOutputUsage = hasOutputUsage || usage.output_tokens != null
+                                                    outputTokens = usage.output_tokens ?: outputTokens
+                                                    cachedTokens = usage.cache_read_input_tokens ?: cachedTokens
+                                                    totalTokens = inputTokens + outputTokens
+                                                }
+                                            }
+                                            "error" -> {
+                                                val errDetail = event.error?.message ?: "Anthropic流式返回未知错误"
+                                                if (contentBuilder.isNotEmpty() || thinkingBuilder.isNotEmpty()) {
+                                                    anthropicStreamReadException = ApiException(500, "流中断")
+                                                    Log.w(tag, "Anthropic流式输出过程中遇到错误: $errDetail，保留已输出内容平稳完成")
+                                                    break
+                                                } else {
+                                                    throw ApiException(400, "Anthropic错误: $errDetail", data)
+                                                }
+                                            }
+                                        }
+                                    } catch (e: ApiException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        Log.w(tag, "解析Anthropic chunk失败: $data", e)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (streamEx: Exception) {
+                        if (isRequestCancellation(streamEx)) throw streamEx
+                        anthropicStreamReadException = streamEx
+                        Log.w(tag, "Anthropic流式读取外层异常: ${streamEx.javaClass.simpleName}: ${streamEx.message}")
+                    }
                 }
 
                 val responseTime = firstTokenDeadline.elapsedMillis
@@ -2553,6 +2598,13 @@ class AiRepository(
                     val fallbackMsg = "*(思考已完成，但模型未输出正文内容，可能由于输出 Token 达到上限或被提前截断)*"
                     fullContent = fallbackMsg
                     onToken(fallbackMsg)
+                }
+
+                val isTruncatedByLength = lastStopReason == "max_tokens"
+                if (isTruncatedByLength && fullContent.isNotBlank() && !fullContent.contains("已达单次最大 Token")) {
+                    val truncationHint = "\n\n*(已达到单次最大 Token 输出上限并截断，可在输入框输入“继续”或在设置中调大单次最大 Token)*"
+                    fullContent += truncationHint
+                    onToken(truncationHint)
                 }
 
                 // 检测是否流式网络异常中断
@@ -2613,7 +2665,7 @@ class AiRepository(
                     errorMessage = if (isFinished) null else "输出中断或缺少完成标记",
                     requestKind = if (effectiveOptions.directionPlanningCount != null) "reply_direction" else "chat",
                     tokenSource = counts.source,
-                    completionStatus = if (isFinished) "completed" else "interrupted",
+                    completionStatus = if (!isFinished) "interrupted" else if (isTruncatedByLength) "length_limited" else "completed",
                     firstTokenTimeMs = firstTokenDeadline.firstTokenTimeMs
                 )
                 recordUsage(stat, firstTokenDeadline)
@@ -2626,6 +2678,11 @@ class AiRepository(
                 throw ApiException(statusCode, "API错误 ($statusCode): $errorMsg", errorBody)
             }
         }
+        } catch (error: Exception) {
+            if (activeCall?.isCanceled() == true && !isTimeoutException(error)) {
+                throw CancellationException("请求已取消", error)
+            }
+            throw error
         } finally {
             activeCall?.let { activeStreamingCalls.remove(conversationId, it) }
         }
@@ -3393,7 +3450,7 @@ class AiRepository(
                         }
                     } else {
                         val identity = summaryRequestIdentity(config.copy(apiKey = cleanKey), modelName, summaryWindow)
-                        if (identity in streamingSummaryEndpoints) {
+                        if (personalizationManager.isStreamingEnabled() && identity in streamingSummaryEndpoints) {
                             summaryStreamAttempted = true
                             usingCachedSummaryStream = true
                             val text = executeStreamingCompletion(config.copy(baseUrl = normalizedUrl, modelName = modelName),
@@ -5579,6 +5636,9 @@ class AiRepository(
         kind: String = "auxiliary",
         useShortTimeout: Boolean = false
     ): String? {
+        check(personalizationManager.isStreamingEnabled()) {
+            "流式输出已关闭；服务商未能返回有效的非流式回复，请稍后重试或联系服务商"
+        }
         val started = System.nanoTime()
         val content = StringBuilder()
         val thinking = StringBuilder()

@@ -39,6 +39,281 @@ class ChatRetryRepositoryTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
 
+    @Test fun disablingStreamingRequestsCompleteJsonAndPersistsBodyThinkingAndUsageInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            val remoteText = "合成非流式完整正文 $protocol"
+            val remoteThinking = "合成非流式内部推理 $protocol"
+            Endpoint { socket, _ ->
+                socket.response("200 OK", syntheticCompleteResponse(protocol, remoteText, remoteThinking))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setStreamingEnabled(false)
+                val (config, id) = f.config(endpoint.url, protocol)
+                val emitted = StringBuilder()
+                val thinking = StringBuilder()
+                var completed: String? = null
+                var completedThinking: String? = null
+                var error: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成非流式输入",
+                    assistantVariantGroupId = "synthetic_complete_group", assistantVariantIndex = 2,
+                    onToken = { emitted.append(it) }, onThinkingToken = { thinking.append(it) },
+                    onComplete = { text, thought, _ -> completed = text; completedThinking = thought },
+                    onError = { error = it })
+
+                assertNull("非流式完整响应应成功：$protocol", error)
+                assertEquals(1, endpoint.payloads.size)
+                val payload = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+                assertFalse(payload["stream"].asBoolean)
+                assertEquals("application/json", endpoint.requestHeaders.single()["accept"])
+                if (protocol == "openai") assertFalse("非流式请求不能携带流式专用选项", payload.has("stream_options"))
+                assertEquals(remoteText, emitted.toString())
+                assertEquals(remoteThinking, thinking.toString())
+                assertEquals(remoteText, completed)
+                assertEquals(remoteThinking, completedThinking)
+                val saved = f.db.messageDao().getMessagesList(id).single()
+                assertEquals(remoteText, saved.content)
+                assertEquals(remoteThinking, saved.thinkingContent)
+                assertEquals("synthetic_complete_group", saved.variantGroupId)
+                assertEquals(2, saved.variantIndex)
+                assertEquals(config.modelName, saved.modelName)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertTrue(stat.success)
+                assertNull(stat.errorMessage)
+                assertEquals("completed", stat.completionStatus)
+                assertEquals("chat", stat.requestKind)
+                assertEquals(if (protocol == "openai") 70 else 85, stat.inputTokens)
+                assertEquals("生成量须按现有统计口径包含正文和思考", 15, stat.outputTokens + stat.thinkingTokens)
+                assertEquals(if (protocol == "openai") 85 else 100, stat.totalTokens)
+                assertEquals(12, stat.cachedTokens)
+                if (protocol == "openai") {
+                    assertEquals(10, stat.outputTokens)
+                    assertEquals(5, stat.thinkingTokens)
+                }
+                else assertTrue("Anthropic 可见思考也要参与估算统计", stat.thinkingTokens > 0)
+                assertEquals(stat.totalTokens, saved.tokenCount)
+                assertEquals(stat.thinkingTokens, saved.thinkingTokens)
+            } }
+        }
+    }
+
+    @Test fun streamingRemainsEnabledByDefaultAndUsesTheExistingSsePathInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            Endpoint { socket, _ ->
+                socket.response("200 OK", syntheticStreamResponse(protocol, "合成默认流式正文"), "text/event-stream")
+            }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.config(endpoint.url, protocol)
+                var completed: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成默认流式输入", onToken = {},
+                    onComplete = { text, _, _ -> completed = text }, onError = { fail(it) })
+                assertEquals("合成默认流式正文", completed)
+                val payload = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+                assertTrue(payload["stream"].asBoolean)
+                assertEquals("text/event-stream", endpoint.requestHeaders.single()["accept"])
+                if (protocol == "openai") assertTrue(payload.has("stream_options"))
+                assertTrue(f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single().success)
+            } }
+        }
+    }
+
+    @Test fun serviceStreamingRejectionCanBeRetriedWithoutChangingApiConfiguration() = runBlocking {
+        lateinit var endpoint: Endpoint
+        endpoint = Endpoint { socket, index ->
+            val payload = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject
+            if (payload["stream"].asBoolean) socket.response("400 Bad Request",
+                """{"error":{"code":400,"message":"PROXY_GENERATION_DISABLED: streamGenerateContent is not supported","status":"INVALID_ARGUMENT"}}""")
+            else socket.response("200 OK", syntheticCompleteResponse("openai", "合成代理非流式恢复正文", "合成代理思考"))
+        }
+        endpoint.use { Fixture().use { f ->
+            val (initial, id) = f.config(endpoint.url)
+            val config = initial.copy(modelName = "gemini-synthetic-test-model")
+            f.db.apiConfigDao().updateConfig(config)
+            var firstError: String? = null
+            f.repository.sendChatMessageWithConfig(config, id, "合成服务商兼容输入", onToken = { fail("400 不应输出正文") },
+                onComplete = { _, _, _ -> fail("流式请求应由合成服务商拒绝") }, onError = { firstError = it })
+            assertTrue(firstError.orEmpty().contains("streamGenerateContent is not supported"))
+            assertEquals("不能自动更改协议并隐式重放请求", 1, endpoint.payloads.size)
+            assertTrue(f.db.messageDao().getMessagesList(id).isEmpty())
+
+            f.settings.setStreamingEnabled(false)
+            var completed: String? = null
+            f.repository.sendChatMessageWithConfig(config, id, "合成服务商兼容输入", onToken = {},
+                onComplete = { text, _, _ -> completed = text }, onError = { fail(it) })
+            assertEquals("合成代理非流式恢复正文", completed)
+            assertEquals(2, endpoint.payloads.size)
+            assertEquals(listOf(true, false), endpoint.payloads.map {
+                com.google.gson.JsonParser.parseString(it).asJsonObject["stream"].asBoolean
+            })
+            assertEquals(config, f.db.apiConfigDao().getConfigById(config.id))
+            val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+            assertEquals(2, stats.size)
+            assertEquals(1, stats.count { it.success && it.completionStatus == "completed" })
+            assertEquals(1, stats.count { !it.success && it.completionStatus == "failed" })
+        } }
+    }
+
+    @Test fun pendingNonStreamingRequestCanBeCancelledWithoutSavingOrRetryingInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            Endpoint { socket, _ ->
+                entered.countDown()
+                release.await(10, TimeUnit.SECONDS)
+                socket.response("200 OK", syntheticCompleteResponse(protocol, "不应保存的合成取消正文", "不应保存的合成思考"))
+            }.use { endpoint -> Fixture(timeout = 10_000).use { f ->
+                f.settings.setStreamingEnabled(false)
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.config(endpoint.url, protocol, "synthetic-first\nsynthetic-second")
+                var completions = 0
+                var errors = 0
+                val sending = async(Dispatchers.Default) {
+                    f.repository.sendChatMessageWithConfig(config, id, "合成非流式取消输入",
+                        onToken = { fail("等待完整响应时不应输出正文") },
+                        onThinkingToken = { fail("等待完整响应时不应输出思考") },
+                        onComplete = { _, _, _ -> completions++ }, onError = { errors++ })
+                }
+                try {
+                    assertTrue("必须确认非流式请求已发送后再取消", withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+                    f.repository.cancelActiveRequest(id)
+                    try {
+                        withTimeout(5000) { sending.await() }
+                        fail("取消必须向调用方传播")
+                    } catch (cancelled: CancellationException) {
+                        assertFalse("必须及时取消而非等待超时", cancelled is TimeoutCancellationException)
+                    }
+                    assertEquals(0, completions)
+                    assertEquals(0, errors)
+                    assertEquals("手动停止不得重试或切换备用 Key", 1, endpoint.payloads.size)
+                    assertTrue(f.db.messageDao().getMessagesList(id).isEmpty())
+                    val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                    assertFalse(stat.success)
+                    assertEquals("cancelled", stat.completionStatus)
+                } finally {
+                    release.countDown()
+                    f.repository.cancelActiveRequest(id)
+                    sending.cancelAndJoin()
+                }
+            } }
+        }
+    }
+
+    @Test fun disabledStreamingPreventsAuxiliaryFallbackAfterNonStreamingProtocolRejection() = runBlocking {
+        Endpoint { socket, _ -> socket.response("405 Method Not Allowed",
+            """{"error":{"message":"synthetic endpoint requires streaming"}}""")
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setStreamingEnabled(false)
+            f.settings.setModelRetryEnabled(false)
+            val (config, _) = f.config(endpoint.url)
+            val result = f.repository.executeQuickCompletionWithResult(config, "合成辅助非流式拒绝输入")
+            assertTrue(result.isFailure)
+            assertEquals("关闭流式后仅可发起一次非流式辅助请求", 1, endpoint.payloads.size)
+            val payload = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
+            assertFalse("辅助保底不得绕过全局开关", payload["stream"].asBoolean)
+            assertFalse(payload.has("stream_options"))
+        } }
+    }
+
+    @Test fun nonStreamingLengthLimitsAndThinkingOnlyRepliesPreserveUsefulOutputInBothProtocols() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (thinkingOnly in listOf(false, true)) {
+            val text = if (thinkingOnly) "" else "合成达到输出上限的正文"
+            val thought = "合成可保留的非流式思考"
+            val reason = if (thinkingOnly) null else if (protocol == "openai") "length" else "max_tokens"
+            Endpoint { socket, _ -> socket.response("200 OK", syntheticCompleteResponse(protocol, text, thought, reason))
+            }.use { endpoint -> Fixture().use { f ->
+                f.settings.setStreamingEnabled(false)
+                val (config, id) = f.config(endpoint.url, protocol)
+                val emitted = StringBuilder()
+                var completed: String? = null
+                f.repository.sendChatMessageWithConfig(config, id, "合成非流式边界输入", onToken = { emitted.append(it) },
+                    onComplete = { reply, thinking, _ -> completed = reply; assertEquals(thought, thinking) }, onError = { fail(it) })
+                assertEquals(1, endpoint.payloads.size)
+                val saved = f.db.messageDao().getMessagesList(id).single()
+                assertEquals(completed, emitted.toString())
+                assertEquals(completed, saved.content)
+                assertEquals(thought, saved.thinkingContent)
+                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
+                assertTrue(stat.success)
+                if (thinkingOnly) {
+                    assertTrue(saved.content.contains("思考已完成，但模型未输出正文内容"))
+                    assertEquals("completed", stat.completionStatus)
+                } else {
+                    assertTrue(saved.content.startsWith(text))
+                    assertTrue(saved.content.contains("已达到单次最大 Token 输出上限并截断"))
+                    assertEquals("length_limited", stat.completionStatus)
+                }
+            } }
+        }
+    }
+
+    @Test fun switchingStreamingDuringAnAttemptOnlyAffectsTheNextChatDispatch() = runBlocking {
+        for (protocol in listOf("openai", "anthropic")) for (initiallyStreaming in listOf(true, false)) {
+            lateinit var endpoint: Endpoint
+            endpoint = Endpoint { socket, index ->
+                if (index == 1) socket.response("401 Unauthorized", """{"error":{"message":"synthetic first key unavailable"}}""")
+                else {
+                    val streaming = com.google.gson.JsonParser.parseString(endpoint.payloads[index - 1]).asJsonObject["stream"].asBoolean
+                    if (streaming) socket.response("200 OK", syntheticStreamResponse(protocol, "合成切换模式回复"), "text/event-stream")
+                    else socket.response("200 OK", syntheticCompleteResponse(protocol, "合成切换模式回复", "合成切换模式思考"))
+                }
+            }
+            endpoint.use { Fixture().use { f ->
+                f.settings.setStreamingEnabled(initiallyStreaming)
+                f.settings.setBackupKeyFallbackEnabled(true)
+                val (config, id) = f.config(endpoint.url, protocol, "synthetic-unavailable\nsynthetic-healthy")
+                f.repository.sendChatMessageWithConfig(config, id, "合成模式切换首轮", onToken = {},
+                    onKeyAttemptError = { _, _, _ -> f.settings.setStreamingEnabled(!initiallyStreaming) },
+                    onComplete = { _, _, _ -> }, onError = { fail(it) })
+                assertEquals("当前轮备用 Key 必须保留发起时的模式", listOf(initiallyStreaming, initiallyStreaming),
+                    endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject["stream"].asBoolean })
+                f.repository.sendChatMessageWithConfig(config, id, "合成模式切换次轮", onToken = {},
+                    onComplete = { _, _, _ -> }, onError = { fail(it) })
+                assertEquals(listOf(initiallyStreaming, initiallyStreaming, !initiallyStreaming),
+                    endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject["stream"].asBoolean })
+            } }
+        }
+    }
+
+    private fun syntheticCompleteResponse(protocol: String, text: String, thinking: String, stopReason: String? = null): String {
+        val gson = com.google.gson.Gson()
+        return if (protocol == "openai") """
+            {
+              "id": "synthetic-complete-response",
+              "choices": [
+                {
+                  "message": {
+                    "role": "assistant",
+                    "content": ${gson.toJson(text)},
+                    "reasoning_content": ${gson.toJson(thinking)}
+                  },
+                  "finish_reason": ${gson.toJson(stopReason ?: "stop")}
+                }
+              ],
+              "usage": {
+                "prompt_tokens": 70,
+                "completion_tokens": 15,
+                "total_tokens": 85,
+                "prompt_tokens_details": { "cached_tokens": 12 },
+                "completion_tokens_details": { "reasoning_tokens": 5 }
+              }
+            }
+        """.trimIndent() else """
+            {
+              "id": "synthetic-complete-response",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                { "type": "thinking", "thinking": ${gson.toJson(thinking)} },
+                { "type": "text", "text": ${gson.toJson(text)} }
+              ],
+              "stop_reason": ${gson.toJson(stopReason ?: "end_turn")},
+              "usage": {
+                "input_tokens": 70,
+                "output_tokens": 15,
+                "cache_read_input_tokens": 12,
+                "cache_creation_input_tokens": 3
+              }
+            }
+        """.trimIndent()
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class, DelicateCoroutinesApi::class)
     @Test fun manuallyEditedSessionMemorySurvivesSourceDeletionWhileUnchangedAndToggledMemoriesKeepTheirSources() = runBlocking {
         newSingleThreadContext("manual-memory-source-main").use { main ->
