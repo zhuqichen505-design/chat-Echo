@@ -1,6 +1,6 @@
 # Echo 当前源码与已发布版本验收走查
 
-## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（源码验收与 Release 构建完成，Git/Release 待回填）
+## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（已发布）
 
 基线 `main/f886e43`；版本 2.8.22/208；Room v37 / 20 个实体不变。本轮依据当前仓库源码处理，原未跟踪内容保留并排除，不读取历史改进归档。用户确认其他客户端也出现谷歌上游 `streamGenerateContent is not supported`，本轮不修改 API 地址、密钥、模型名称或原有配置。
 
@@ -8,9 +8,11 @@
 
 源码 / 测试范围：`app/build.gradle.kts`、`PersonalizationManager.kt`、`SettingsRetryControls.kt`、`SettingsScreen.kt`、`AiRepository.kt`、`Models.kt`；领域回归位于 `RetryPreferencesTest.kt` 和 `ChatRetryRepositoryTest.kt`，覆盖偏好持久化、旧草稿不覆盖、双协议 JSON 正文 / 思考 / 用量、请求参数和响应头、模式切换、取消与辅助流式限制。数据库无迁移，消息数据格式不变。
 
-首轮冻结验收 `20261028-112627-799` 退出 1，609.167 秒；88 套件 / 1,044 项测试中，新增非流式取消回归失败 1，其余 1,043 项通过，错误 / 跳过 0。最终 Lint 任务未完成，不能记为通过。根因是主动 `Call.cancel()` 后 OkHttp 可能以 `Socket closed` 结束，旧分类将其作为网络错误继续重试；双协议异常出口已结合本次 `Call.isCanceled()` 规范化主动取消，保留传输异常及 `FirstTokenDeadline` 超时语义，未放宽回归或断言。第二轮完整 verify `20261028-113832-743` 退出 0，454.714 秒；88 套件 / 1,044 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning，输入哈希一致。
+首轮冻结验收 `20261028-112627-799` 退出 1，609.167 秒；88 套件 / 1,044 项测试中，新增非流式取消回归失败 1，其余 1,043 项通过，错误 / 跳过 0。最终 Lint 任务未完成，不能记为通过。根因是主动 `Call.cancel()` 后 OkHttp 可能以 `Socket closed` 结束，旧分类将其作为网络错误继续重试；双协议异常出口已结合本次 `Call.isCanceled()` 规范化主动取消，保留传输异常及 `FirstTokenDeadline` 超时语义，未放宽回归或断言。修复后重新冻结，最终结果见本轮验证记录。
 
-验证与构建记录：第二轮完整 verify `20261028-113832-743` 退出 0，454.714 秒；88 套件 / 1,044 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning，输入哈希一致。 `git diff --check` 退出 0。Release `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，Gradle 报告 8 分 20 秒；`Echo-v2.8.22.apk` 25,472,793 字节，SHA256 `645e3019869f99e6a81963c70e82fb93c4ae351f67288f7a557f7710a9311410`；`com.aiassistant`、2.8.22/208、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。 完整 APK 审计退出 0：446 个 ZIP 条目 CRC 全通过，31,486 条 DEX 字符串、10,624 条资源字符串、186 张图片，较 2.8.21 图片变更 0；新增 13 条记录 / 12 个唯一字符串逐条人工复核未决 0，基线 20 条既有候选复核未决 0。指定发布目录排他复制核验通过：新增包前 218 个文件（217 个 APK）名称 / 大小 / SHA256 全部保留，新增 `Echo-v2.8.22.apk` 未覆盖历史包。 Git / 标签 / Release 上传及匿名下载结果待回填。
+验证与构建记录：第二轮完整 verify `20261028-113832-743` 退出 0，454.714 秒；88 套件 / 1,044 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning，输入哈希一致。 `git diff --check` 退出 0。Release `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，Gradle 报告 8 分 20 秒；`Echo-v2.8.22.apk` 25,472,793 字节，SHA256 `645e3019869f99e6a81963c70e82fb93c4ae351f67288f7a557f7710a9311410`；`com.aiassistant`、2.8.22/208、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。 完整 APK 审计退出 0：446 个 ZIP 条目 CRC 全通过，31,486 条 DEX 字符串、10,624 条资源字符串、186 张图片，较 2.8.21 图片变更 0；新增 13 条记录 / 12 个唯一字符串逐条人工复核未决 0，基线 20 条既有候选复核未决 0。指定发布目录排他复制核验通过：新增包前 218 个文件（217 个 APK）名称 / 大小 / SHA256 全部保留，新增 `Echo-v2.8.22.apk` 未覆盖历史包。 版本提交 `4487fbf14ad82a1d026643fb49626add0d28d257` 与 `v2.8.22` 已推送，push 退出 0，远端版本标签已核验指向该版本提交。GitHub Release 已发布唯一附件 `Echo-v2.8.22.apk`，上传摘要及匿名下载 SHA256 均为 `645e3019869f99e6a81963c70e82fb93c4ae351f67288f7a557f7710a9311410`，publish 脚本退出 0，Release 正文与 `release-notes/latest.md` 一致。cleanup 退出 0，远端仅保留 v2.8.22，已撤下旧 v2.8.21 Release / 远端标签；本机历史标签和全部 APK 保留，原 218 个文件（217 个 APK）的名称 / 大小 / SHA256 均未改变。
+
+上传前已核查完整 15 份暂存文件及提交 / 标签元数据：5 个候选均为公开链接、协议文案或 TEST-NET-1 合成测试夹具，人工复核全部通过，元数据未决 0；私有核查报告未上传。本轮发布后文档另行提交，提交与推送前须按变化后的完整候选再次核查。
 
 设备与真实接口走查（尚未执行；当前无连接设备）：
 
