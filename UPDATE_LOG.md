@@ -1,5 +1,31 @@
 # 维护记录
 
+## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
+
+基线 `main/6e9db7e`；版本由 2.8.23/209 递增到 2.8.24/210；Room v37 / 20 个实体不变。原有未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本轮只修改当前仓库源码、测试与文档。
+
+用户问题：在 Windows 端 Android 运行环境（应用宝电脑版 / Androws）安装 2.8.23 后，选中备份文件导入即崩溃，普通页面可正常打开。宿主日志 `Androws.log` 记录三次相同的 `java.lang.OutOfMemoryError`（02:06:08、02:07:22、02:23:23），均为 `Failed to allocate a 134250504 byte allocation`，`growth limit 201326592`（192 MiB）。堆栈经仓库 `mapping.txt` 反混淆：`StringWriter.write → kotlin.io.TextStreamsKt.readText → kotlin.io.FilesKt.readText → BackupManager.restoreBackup`，映射区间对应源码第 120 行 `snapshot.readText(Charsets.UTF_8)`。
+
+临时实施方案与根因：恢复时把整份 `snapshot.json` 读成单个 String，`StringWriter` 容量增长到约 6710 万字符后需一次 128 MB 连续分配，在 192 MiB 堆上必然失败；随后 `JsonParser.parseString` 还会构建完整树，二次放大。写入侧 `writeFullSnapshot` 本是逐行流式（注释明确“never a whole-database JSON tree/string”），读取侧却整体读入，属设计不对称；`OutOfMemoryError` 是 `Error`，原 `catch (e: Exception)` 无法兜底，因此表现为进程崩溃而非“导入失败”提示。按用户确认实施 A+B：A 流式恢复，B 预检与真实失败原因。
+
+A 实现：`BackupGraphStore` 新增 `restoreStream(database, openReader)`，用 `JsonReader` 两遍顺序读取同一文件——第一遍经 `CountingReader` 只解析 `id`、`_uuid`、注入关系与 API/标签自然键，其余字段 `skipValue` 不分配；第二遍逐行 `Gson.fromJson` 后写入。ID 分配仍先于写入，保证前向引用与环可翻译；会话取消/join 保持在事务外，避免与生成协程的写库死锁。原 `restore()` 的逐行默认字段补齐、引用映射、`variantGroupId` 改写、内嵌角色/场景改写、`apiKey` 处理、目标端陈余行清理与外键检查抽成共享函数，整树入口（旧格式转换与测试）与流式入口复用同一语义。身份映射在每个表分配后立即释放，内存只与行数线性相关。未知表名按前向兼容跳过，不再因新版本多出的表拒绝导入。
+
+B 实现：`guardSnapshot(snapshotBytes, availableHeap)` 纯函数按 ZIP 中央目录的未压缩大小（解压前读取，不落盘）与可用堆判定，超限返回具体原因；扫描时记录单行峰值，`requireRowsFitHeap` 在写入前拒绝“单行超大”的备份而非触发 OOM；`restoreBackup` / `restoreBackupFromUri` 返回 `RestoreResult.Success / Failure(message)`，导入与备份列表恢复的 Snackbar 显示真实原因（过大、内存不足、文件不存在、未找到可导入数据、需先配置 API 等）。
+
+涉及文件：`app/src/main/java/com/aiassistant/utils/BackupGraphStore.kt`、`utils/BackupManager.kt`、`ui/screens/settings/SettingsSecurityAndBackupTab.kt`、`AiAssistantApp.kt`、`app/build.gradle.kts`；测试 `app/src/test/java/com/aiassistant/BackupGraphStoreTest.kt`。不新增依赖，不改 Room schema、数据库版本、API 地址、消息格式或备份文件格式；导出与单对话备份链路未改。
+
+新增回归：约 3.3 MB 快照（1201 行 + 1.5 MB 单行内容）连续导入两次后行数、正文、`messageCount` 与外键一致；`complete=false` 的快照在写库前被拒绝且本地数据不变；`guardSnapshot` 对空文件、超限体积、低可用堆与正常输入的边界。既有重复 ID / 重复身份、引用缺失回滚、旧版单对话兼容、注入目标校验、分支与世界书重映射测试全部保留并通过。
+
+最终源码冻结验收 `20261101-025055-996`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，631.915 秒；88 套件 / 1,049 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon` 退出 0，386 秒；`Echo-v2.8.24.apk` 25,489,173 字节，SHA256 `70d92de1794243970cb654246dbdebfd4d0cd1fe5c50254a215ebd17c388ad86`；`com.aiassistant`、2.8.24/210、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 验证退出 0（v1 false / v2 true），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。
+
+APK 审计：446 个 ZIP 条目 CRC 全通过；`classes.dex` 字符串池 31,554 条，较 2.8.23 新增 60 / 移除 28；新增可读中文 16 条全部为本轮预检、失败原因与版本号文案，新增非中文 44 条为 R8 类型描述符、日志标签与构建元数据，未出现联系方式、私有地址、本机路径或凭据模式；`resources.arsc` 与上一版逐字节一致，新增资源字符串 0；186 张图片名称与 CRC 全部一致。发布目录排他复制：复制前 220 文件（219 APK）名称 / 大小全部保留，复制后 221 文件（220 APK），未覆盖或删除任何历史包。
+
+发布结果：版本提交 `fad54d49576d0900fa6bcfa455e52cc89937f6b4` 与 annotated 标签 `v2.8.24` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo v2.8.24](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.24) 为 Latest，唯一附件 `Echo-v2.8.24.apk`，GitHub digest 与本机 SHA256 一致；匿名直链下载退出 0，25,489,173 字节且 SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.23 Release 与远端标签，远端仅剩 v2.8.24；本机历史标签与全部历史 APK 保留。
+
+设备边界：当前无连接设备，未验证安装启动与真实导入。需人工用此前崩溃的大备份（约 60 MB 以上）复验导入完成、对话与附件完整、重启后设置加载，并回归单对话备份、旧版备份与普通小备份。
+
 ## 2026-10-31 · 2.8.23 三套全场景主题与文字选择滚动优化（已发布）
 
 基线 `main/90df051`；版本由 2.8.22/208 递增到 2.8.23/209；Room v37 / 20 个实体不变。原有未跟踪 `.playwright-cli/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本轮只修改当前仓库源码与测试。

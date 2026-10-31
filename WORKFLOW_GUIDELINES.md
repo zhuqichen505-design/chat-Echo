@@ -26,6 +26,18 @@
 
 ## 本次记录
 
+## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
+
+- 基线 `main/6e9db7e`；版本 2.8.24/210；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取归档。
+- 现象与根因：Windows 端 Androws 环境导入备份崩溃；宿主日志三次 `OutOfMemoryError`（单次 134,250,504 字节，堆上限 192 MiB），反混淆定位到 `BackupManager.restoreBackup` 第 120 行 `snapshot.readText`——整份快照读成单字符串，随后再建整树；写入侧是流式，读取侧整体读入属设计不对称，`Error` 不被 `catch (Exception)` 兜底。
+- 临时方案 A：`BackupGraphStore.restoreStream` 以 `JsonReader` 两遍顺序读同一文件，第一遍仅取身份 / 注入字段并跳过其他内容，第二遍逐行写入；ID 先分配、会话取消留在事务外、身份映射按表释放；逐行改写与清理抽为共享函数，整树入口语义不变，未知表前向兼容跳过。
+- 临时方案 B：`guardSnapshot` 解压前按 ZIP 中央目录大小与可用堆判定，扫描期记录单行峰值并在写入前拦截；`restoreBackup` / `restoreBackupFromUri` 返回 `RestoreResult`，界面显示真实失败原因。
+- 文件：`BackupGraphStore.kt`、`BackupManager.kt`、`SettingsSecurityAndBackupTab.kt`、`AiAssistantApp.kt`、版本配置、`BackupGraphStoreTest.kt`；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：新增 3 项回归（3.3 MB 快照两次导入一致、`complete=false` 写库前拒绝、预检纯函数边界）；首版 6 MB 单行夹具触发 Robolectric `SQLiteBlobTooBigException`（Android CursorWindow 2 MB 行上限），改为真实可存储行宽后通过。最终 verify `20261101-025055-996` 退出 0，631.915 秒；88 套件 / 1,049 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，386 秒；APK 25,489,173 字节，SHA256 `70d92de1794243970cb654246dbdebfd4d0cd1fe5c50254a215ebd17c388ad86`，v2 签名与上版一致，Android Debug 非正式生产签名。
+- 隐私：446 ZIP 条目 CRC 通过，31,554 DEX 字符串（新增 60 / 移除 28），新增可读中文 16 条均为预检与失败原因，隐私新增命中 0；`resources.arsc` 逐字节一致，186 张图片不变。发布目录 220→221 文件（219→220 APK），历史包保留。
+- 发布：版本提交 `fad54d49576d0900fa6bcfa455e52cc89937f6b4` 与 `v2.8.24` 已推送到远端 main / 标签；GitHub Release 为 Latest，唯一附件 digest 和匿名直链下载 SHA256 与本机一致。按策略仅远端撤下旧 v2.8.23 Release / 标签，本机历史保留。
+- 待办：无设备，安装启动、真实大备份导入、旧版 / 单对话备份回归待人工验收。详见本轮 UPDATE_LOG / walkthrough。
+
 ## 2026-10-31 · 2.8.23 三套全场景主题与文字选择滚动优化
 
 - 基线 `main/90df051`；版本 2.8.23/209；Room v37 / 20 个实体不变。原有未跟踪内容保留排除，不读取归档。

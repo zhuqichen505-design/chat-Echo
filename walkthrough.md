@@ -1,5 +1,34 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
+
+基线 `main/6e9db7e`；版本 2.8.24/210；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
+
+问题与根因：用户在应用宝电脑版（Androws）安装 2.8.23 后导入备份崩溃。宿主日志 `Androws.log` 三次相同 `OutOfMemoryError`（02:06:08 / 02:07:22 / 02:23:23），`Failed to allocate a 134250504 byte allocation`，`growth limit 201326592`；堆栈经 `mapping.txt` 反混淆为 `StringWriter.write → kotlin.io.readText → BackupManager.restoreBackup`，对应源码第 120 行 `snapshot.readText`。整份 `snapshot.json` 被读成单个 String，`StringWriter` 容量增至约 6710 万字符后申请 128 MB 连续内存，192 MiB 堆无法满足；后续 `JsonParser` 还会构建整棵树二次放大。写入侧 `writeFullSnapshot` 本为逐行流式，读取侧整体读入形成设计不对称；`OutOfMemoryError` 是 `Error`，`catch (Exception)` 无法兜底，故表现为崩溃而非失败提示。
+
+临时实施方案：A 流式恢复 `restoreStream(database, openReader)`——`JsonReader` 两遍顺序读同一文件，第一遍经 `CountingReader` 只解析 `id`、`_uuid`、注入关系与 API / 标签自然键，其余 `skipValue`；第二遍逐行 `Gson.fromJson` 写入。所有 ID 先分配再写入，保证前向引用与环；会话取消 / join 保持在事务外，避免与生成协程写库死锁；身份映射按表释放。原整树 `restore()` 的默认字段补齐、引用映射、`variantGroupId`、内嵌角色 / 场景、`apiKey`、陈余行清理与外键检查抽为共享函数，两条入口语义一致；未知表按前向兼容跳过。B 预检：`guardSnapshot` 在解压前按 ZIP 中央目录未压缩大小与可用堆判定，扫描期记录单行峰值并在写入前拦截超大行；`restoreBackup` / `restoreBackupFromUri` 返回 `RestoreResult`，Snackbar 显示真实原因。
+
+源码 / 测试范围：`utils/BackupGraphStore.kt`、`utils/BackupManager.kt`、`ui/screens/settings/SettingsSecurityAndBackupTab.kt`、`AiAssistantApp.kt`、`app/build.gradle.kts`、`BackupGraphStoreTest.kt`。不新增依赖，不改 Room schema、数据库版本、API、消息格式或备份格式；导出与单对话备份链路未改。
+
+新增回归（3 项）：
+- 约 3.3 MB 快照（1201 行，含 1.5 MB 单行正文）通过文件流连续导入两次，行数、正文、`messageCount` 与 `foreign_key_check` 一致；测试同时确定夹具超过单行缓存，且夹具单行保持在 CursorWindow 上限内（首版 6 MB 夹具在 Robolectric `SQLiteBlobTooBigException` 失败，属平台 2 MB 行上限而非产品缺陷，已改为真实可存储行宽）。
+- `complete=false` 快照在写库前被拒绝（`IllegalArgumentException`），本地会话与数据不变。
+- `guardSnapshot` 对空文件、超限体积、低可用堆返回原因，正常输入返回 null。
+
+既有测试全部保留并通过：重复 ID / 重复身份、引用缺失整单回滚、旧版单对话 JSON 幂等、注入目标校验、分支 / 世界书 / 标签重映射、Room 迁移与 schema 校验。
+
+最终冻结验收 `20261101-025055-996`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，631.915 秒；88 套件 / 1,049 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon` 退出 0，386 秒；`Echo-v2.8.24.apk` 25,489,173 字节，SHA256 `70d92de1794243970cb654246dbdebfd4d0cd1fe5c50254a215ebd17c388ad86`；`com.aiassistant`、2.8.24/210、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0（v1 false / v2 true），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目 CRC 通过；DEX 字符串 31,554（新增 60 / 移除 28，新增可读中文 16 条均为预检、失败原因与版本号）；`resources.arsc` 逐字节一致；186 张图片 CRC 全部一致。发布目录 220 文件（219 APK）→ 221 文件（220 APK），历史包名称 / 大小全部保留。
+
+发布：版本提交 `fad54d49576d0900fa6bcfa455e52cc89937f6b4` 与 `v2.8.24` 已推送，远端 main / peeled 标签核验一致；GitHub Release 为 Latest，唯一附件 digest 与匿名直链下载 SHA256 均与本机一致；按策略仅撤下远端旧 v2.8.23 Release / 标签，本机历史保留。
+
+设备与真实导入走查（尚未执行；`adb devices` 无连接设备）：
+- 用此前崩溃的大备份（约 60 MB 以上）导入，确认完成提示、对话 / 消息 / 附件数量与正文一致。
+- 重启应用，确认设置、主题与 API 配置加载正常。
+- 回归单对话备份、旧版备份（含 `database/` 旧格式）与普通小备份导入。
+- 构造损坏文件、超大文件与不可读 URI，确认提示为具体原因且应用不退出。
+
 ## 2026-10-31 · 2.8.23 三套全场景主题与文字选择滚动优化（已发布）
 
 基线 `main/90df051`；版本 2.8.23/209；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`deepseek.png` 保留排除，不读取 `APP改进\`。本轮只修改当前仓库。
