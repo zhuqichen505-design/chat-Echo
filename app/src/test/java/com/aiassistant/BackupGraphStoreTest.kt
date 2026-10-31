@@ -538,4 +538,51 @@ class BackupGraphStoreTest {
             }
         }
     }
+
+    @Test fun streamingFileRestoreHandlesLargeRowsAndRepeatedImportsWithoutWholeText() = runBlocking {
+        database().use { source -> database().use { target ->
+            val conversation = seed(source, "stream file")
+            // One 1.5 MB row stays inside the Android CursorWindow limit; the rest adds row count.
+            val large = "ascii-" + "x".repeat(1536 * 1024)
+            source.messageDao().insertMessage(Message(conversationId = conversation, role = "assistant", content = large, createdAt = 100))
+            repeat(1200) { source.messageDao().insertMessage(Message(conversationId = conversation, role = "user", content = "row-$it-" + "y".repeat(2048), createdAt = 200L + it)) }
+            val file = java.io.File.createTempFile("echo-snapshot-", ".json")
+            try {
+                file.writer(Charsets.UTF_8).buffered().use { BackupGraphStore.writeFullSnapshot(source, it, { key -> key }) }
+                assertTrue("fixture must span many rows", file.length() > 3L * 1024 * 1024)
+                repeat(2) {
+                    BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) }, encryptKey = { it }, cancelRequest = {})
+                }
+                val restoredId = target.conversationDao().getAllConversations().first().single().id
+                val restored = target.messageDao().getMessagesList(restoredId)
+                assertEquals(1201, restored.size)
+                assertEquals(large, restored.first { it.content.startsWith("ascii-") }.content)
+                assertEquals(1201, target.conversationDao().getConversationById(restoredId)!!.messageCount)
+                target.openHelper.readableDatabase.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            } finally { file.delete() }
+        } }
+    }
+
+    @Test fun streamingRestoreRejectsIncompleteSnapshotBeforeTouchingDatabase() = runBlocking {
+        database().use { target ->
+            val existing = seed(target, "keep")
+            val file = java.io.File.createTempFile("echo-bad-", ".json")
+            try {
+                file.writeText("""{"formatVersion":2,"complete":false,"tables":{}}""")
+                try {
+                    BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) }, encryptKey = { it }, cancelRequest = {})
+                    fail("incomplete snapshot accepted")
+                } catch (_: IllegalArgumentException) { }
+                assertEquals(listOf("keep"), target.conversationDao().getAllConversations().first().map { it.title })
+                assertNotNull(target.conversationDao().getConversationById(existing))
+            } finally { file.delete() }
+        }
+    }
+
+    @Test fun restoreGuardRejectsEmptyOversizedAndLowHeapSnapshots() {
+        assertNull(com.aiassistant.utils.BackupManager.guardSnapshot(16L * 1024 * 1024, 128L * 1024 * 1024))
+        assertNotNull(com.aiassistant.utils.BackupManager.guardSnapshot(0L, 128L * 1024 * 1024))
+        assertNotNull(com.aiassistant.utils.BackupManager.guardSnapshot(600L * 1024 * 1024, 512L * 1024 * 1024))
+        assertNotNull(com.aiassistant.utils.BackupManager.guardSnapshot(4L * 1024 * 1024, 16L * 1024 * 1024))
+    }
 }

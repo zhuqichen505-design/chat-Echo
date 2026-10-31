@@ -118,7 +118,7 @@ class AiAssistantApp : Application() {
             val backups = BackupManager.getBackupList(this)
             if (backups.isNotEmpty()) {
                 val latestBackup = backups.first()
-                if (BackupManager.restoreBackup(this, latestBackup.filePath)) {
+                if (BackupManager.restoreBackup(this, latestBackup.filePath) is BackupManager.RestoreResult.Success) {
                     database = AppDatabase.getDatabase(this)
                     repository = AiRepository(
                         folderDao = database.folderDao(),

@@ -20,17 +20,42 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object BackupManager {
     private const val DB_NAME = "ai_assistant_database"
 
+    /** A snapshot beyond this size cannot be imported on a phone even row by row. */
+    private const val MAX_SNAPSHOT_BYTES = 512L * 1024 * 1024
+
+    /** Restoring below this much free heap fails with a reason instead of dying with an OutOfMemoryError. */
+    private const val MIN_RESTORE_HEAP_BYTES = 48L * 1024 * 1024
+
+    /** Restore outcome carried to the UI; the message is shown instead of a generic failure. */
+    sealed interface RestoreResult {
+        data object Success : RestoreResult
+        data class Failure(val message: String) : RestoreResult
+    }
+
     private fun getBackupDir(context: Context): File = File(
         context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir, "Echo_Backups"
     ).apply { check(exists() || mkdirs()) }
 
     private fun timestamp() = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.ROOT).format(Date())
+
+    private fun availableHeap(): Long = Runtime.getRuntime().let {
+        it.maxMemory() - (it.totalMemory() - it.freeMemory())
+    }
+
+    /** Pure pre-check so the guard itself is unit-testable; null means the import may proceed. */
+    internal fun guardSnapshot(snapshotBytes: Long, availableHeap: Long): String? = when {
+        snapshotBytes <= 0 -> "备份内容为空"
+        snapshotBytes > MAX_SNAPSHOT_BYTES -> "备份过大（${snapshotBytes / (1024 * 1024)} MB），请改用单对话备份分批导入"
+        availableHeap < MIN_RESTORE_HEAP_BYTES -> "可用内存不足（剩余约 ${availableHeap / (1024 * 1024)} MB），请关闭其他应用后重试"
+        else -> null
+    }
 
     fun createBackup(context: Context): String? = try {
         runBlocking(Dispatchers.IO) {
@@ -96,56 +121,83 @@ object BackupManager {
     } catch (e: Exception) { Log.e("BackupManager", "single export failed", e); null }
 
     /** Only conversations present in the complete snapshot are replaced. */
-    fun restoreBackup(context: Context, backupPath: String): Boolean = try {
+    fun restoreBackup(context: Context, backupPath: String): RestoreResult = try {
         val file = File(backupPath)
-        if (isJsonBackup(file)) restoreSingleConversationFromJson(context, file.readText(Charsets.UTF_8))
-        else {
-            val temp = File(context.cacheDir, "restore_${UUID.randomUUID()}").apply { check(mkdirs()) }
-            try {
-                ZipInputStream(file.inputStream()).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        val target = File(temp, entry.name)
-                        require(target.canonicalPath.startsWith(temp.canonicalPath + File.separator)) { "无效备份路径" }
-                        if (!entry.isDirectory) {
-                            target.parentFile?.mkdirs()
-                            target.outputStream().use { zip.copyTo(it) }
-                        }
-                        entry = zip.nextEntry
-                    }
-                }
-                val snapshot = File(temp, "snapshot.json")
-                val legacy = File(temp, "database/$DB_NAME")
-                val success = when {
-                    snapshot.exists() -> restoreSingleConversationFromJson(context, snapshot.readText(Charsets.UTF_8))
-                    legacy.exists() -> runBlocking(Dispatchers.IO) {
-                        SQLiteDatabase.openDatabase(legacy.path, null, SQLiteDatabase.OPEN_READWRITE).use { old ->
-                            old.rawQuery("PRAGMA integrity_check", null).use { check(it.moveToFirst() && it.getString(0) == "ok") }
-                            BackupGraphStore.restore(AppDatabase.getDatabase(context), BackupGraphStore.legacy(old))
-                        }
-                        true
-                    }
-                    else -> temp.walkTopDown().firstOrNull { it.extension == "json" && it.name != "backup_info.json" }
-                        ?.let { restoreSingleConversationFromJson(context, it.readText(Charsets.UTF_8)) } ?: false
-                }
-                if (success) {
-                    File(temp, "files").listFiles()?.filter { it.isFile && MediaHistoryBackup.isMediaFile(it.name) }?.forEach { source ->
-                        source.copyTo(File(context.filesDir, source.name), overwrite = true)
-                    }
-                    File(temp, "media_history.json").takeIf { it.isFile }?.let { metadata ->
-                        MediaHistoryBackup.importDeleted(context, JsonParser.parseString(metadata.readText(Charsets.UTF_8)).asJsonObject)
-                    }
-                    val prefs = File(temp, "shared_prefs/personalization_settings.xml")
-                    if (prefs.exists()) {
-                        val target = File(context.applicationInfo.dataDir, "shared_prefs/personalization_settings.xml")
-                        target.parentFile?.mkdirs()
-                        prefs.copyTo(target, overwrite = true)
-                    }
-                }
-                success
-            } finally { temp.deleteRecursively() }
+        when {
+            !file.isFile -> RestoreResult.Failure("备份文件不存在")
+            isJsonBackup(file) -> guardSnapshot(file.length(), availableHeap())?.let { RestoreResult.Failure(it) }
+                ?: restoreSnapshotFile(context, file)
+            else -> restoreZip(context, file)
         }
-    } catch (e: Exception) { Log.e("BackupManager", "restoreBackup failed", e); false }
+    } catch (e: OutOfMemoryError) {
+        Log.e("BackupManager", "restoreBackup out of memory", e)
+        RestoreResult.Failure("内存不足，备份过大；请改用单对话备份分批导入")
+    } catch (e: Exception) {
+        Log.e("BackupManager", "restoreBackup failed", e)
+        RestoreResult.Failure(e.message?.takeIf { it.isNotBlank() } ?: "导入失败，请确认文件格式有效")
+    }
+
+    private fun restoreZip(context: Context, file: File): RestoreResult {
+        declaredSnapshotSize(file)?.let { size ->
+            guardSnapshot(size, availableHeap())?.let { return RestoreResult.Failure(it) }
+        }
+        val temp = File(context.cacheDir, "restore_${UUID.randomUUID()}").apply { check(mkdirs()) }
+        try {
+            ZipInputStream(file.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val target = File(temp, entry.name)
+                    require(target.canonicalPath.startsWith(temp.canonicalPath + File.separator)) { "无效备份路径" }
+                    if (!entry.isDirectory) {
+                        target.parentFile?.mkdirs()
+                        target.outputStream().use { zip.copyTo(it) }
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+            val snapshot = File(temp, "snapshot.json")
+            val legacy = File(temp, "database/$DB_NAME")
+            return when {
+                snapshot.isFile -> restoreSnapshotFile(context, snapshot)
+                legacy.isFile -> restoreLegacyDatabase(context, legacy)
+                else -> temp.walkTopDown().firstOrNull { it.extension == "json" && it.name != "backup_info.json" }
+                    ?.let { restoreSnapshotFile(context, it) } ?: RestoreResult.Failure("备份中未找到可导入数据")
+            }
+        } finally { temp.deleteRecursively() }
+    }
+
+    /** Uncompressed size recorded in the ZIP directory, read before anything is extracted. */
+    private fun declaredSnapshotSize(file: File): Long? = try {
+        ZipFile(file).use { zip -> zip.getEntry("snapshot.json")?.size?.takeIf { it > 0 } }
+    } catch (e: Exception) { Log.e("BackupManager", "cannot read zip directory", e); null }
+
+    /** Streams the snapshot from disk so a large backup never becomes one string or one JSON tree. */
+    private fun restoreSnapshotFile(context: Context, file: File): RestoreResult = try {
+        runBlocking(Dispatchers.IO) {
+            BackupGraphStore.restoreStream(AppDatabase.getDatabase(context), openReader = { file.reader(Charsets.UTF_8) })
+        }
+        RestoreResult.Success
+    } catch (e: OutOfMemoryError) {
+        throw e
+    } catch (e: Exception) {
+        Log.e("BackupManager", "stream restore failed", e)
+        RestoreResult.Failure(e.message?.takeIf { it.isNotBlank() } ?: "导入失败，请确认文件格式有效")
+    }
+
+    private fun restoreLegacyDatabase(context: Context, legacy: File): RestoreResult = try {
+        runBlocking(Dispatchers.IO) {
+            SQLiteDatabase.openDatabase(legacy.path, null, SQLiteDatabase.OPEN_READWRITE).use { old ->
+                old.rawQuery("PRAGMA integrity_check", null).use { check(it.moveToFirst() && it.getString(0) == "ok") }
+                BackupGraphStore.restore(AppDatabase.getDatabase(context), BackupGraphStore.legacy(old))
+            }
+        }
+        RestoreResult.Success
+    } catch (e: OutOfMemoryError) {
+        throw e
+    } catch (e: Exception) {
+        Log.e("BackupManager", "legacy restore failed", e)
+        RestoreResult.Failure(e.message?.takeIf { it.isNotBlank() } ?: "旧版备份恢复失败")
+    }
 
     fun restoreSingleConversationFromJson(context: Context, jsonString: String): Boolean = try {
         runBlocking(Dispatchers.IO) {
@@ -157,15 +209,21 @@ object BackupManager {
         }
     } catch (e: Exception) { Log.e("BackupManager", "JSON restore failed", e); false }
 
-    fun restoreBackupFromUri(context: Context, uri: Uri): Boolean = try {
+    fun restoreBackupFromUri(context: Context, uri: Uri): RestoreResult = try {
         val file = File(context.cacheDir, "import_${UUID.randomUUID()}")
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 file.outputStream().use { input.copyTo(it) }
-            } ?: error("无法读取备份")
+            } ?: error("无法读取备份文件")
             restoreBackup(context, file.path)
         } finally { file.delete() }
-    } catch (e: Exception) { Log.e("BackupManager", "URI restore failed", e); false }
+    } catch (e: OutOfMemoryError) {
+        Log.e("BackupManager", "URI restore out of memory", e)
+        RestoreResult.Failure("内存不足，备份过大；请改用单对话备份分批导入")
+    } catch (e: Exception) {
+        Log.e("BackupManager", "URI restore failed", e)
+        RestoreResult.Failure(e.message?.takeIf { it.isNotBlank() } ?: "导入失败，请确认文件格式有效")
+    }
 
     fun getBackupList(context: Context): List<BackupItem> = getBackupDir(context).listFiles()
         ?.filter { it.isFile && it.extension.lowercase() in setOf("zip", "json") }
