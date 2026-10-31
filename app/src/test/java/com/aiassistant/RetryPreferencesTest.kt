@@ -81,7 +81,11 @@ class RetryPreferencesTest {
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun paperTexturesHaveDeterministicDistinctTranslucentFibres() {
         val hashes = mutableSetOf<Int>()
-        for (material in listOf(com.aiassistant.ui.theme.EchoPaperMaterial.Deckle, com.aiassistant.ui.theme.EchoPaperMaterial.Cotton)) {
+        for (material in listOf(
+            com.aiassistant.ui.theme.EchoPaperMaterial.Deckle,
+            com.aiassistant.ui.theme.EchoPaperMaterial.Cotton,
+            com.aiassistant.ui.theme.EchoPaperMaterial.Folio
+        )) {
             for (dark in listOf(false, true)) {
                 val first = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
                 val second = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
@@ -96,7 +100,7 @@ class RetryPreferencesTest {
                 first.recycle(); second.recycle()
             }
         }
-        assertEquals("两种纸张及浅深模式必须实际区别", 4, hashes.size)
+        assertEquals("三种纸张及浅深模式必须实际区别", 6, hashes.size)
     }
 
     @Test
@@ -724,7 +728,13 @@ class RetryPreferencesTest {
     @Test fun paperAppearancePresetsRemainValidAndPersistAcrossManagerRecreation() {
         val context = RuntimeEnvironment.getApplication()
         val manager = PersonalizationManager(context)
-        for (preset in listOf(EchoAppearancePreset.DECKLE, EchoAppearancePreset.COTTON)) {
+        for (preset in listOf(
+            EchoAppearancePreset.DECKLE,
+            EchoAppearancePreset.COTTON,
+            EchoAppearancePreset.FOLIO,
+            EchoAppearancePreset.SONAR,
+            EchoAppearancePreset.BAUHAUS
+        )) {
             assertTrue("纸本主题必须是可持久化的有效预设", preset in EchoAppearancePreset.values)
             assertTrue(manager.saveSettings(manager.getSettings().copy(appearancePreset = preset)))
             assertEquals(preset, PersonalizationManager(context).getSettings().appearancePreset)

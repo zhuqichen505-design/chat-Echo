@@ -38,10 +38,10 @@ internal class EditorTextAcknowledgements(initialText: String) {
     }
 }
 
-/** Slow near an edge, at most 88dp/s farther out; independent of document length and frame rate. */
+/** Precise near an edge, at most 144dp/s farther out; independent of document length and frame rate. */
 internal fun editorSelectionScrollStep(distancePx: Float, density: Float, seconds: Float): Float {
     if (!distancePx.isFinite() || !density.isFinite() || !seconds.isFinite() || density <= 0f || seconds <= 0f) return 0f
-    val speed = (40f + abs(distancePx) / density * .6f).coerceAtMost(88f) * density
+    val speed = (48f + abs(distancePx) / density * .8f).coerceAtMost(144f) * density
     return sign(distancePx) * minOf(abs(distancePx), speed * seconds.coerceAtMost(.05f))
 }
 

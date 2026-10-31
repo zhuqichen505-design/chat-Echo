@@ -45,6 +45,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
@@ -79,15 +80,31 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 
+@Composable
+private fun echoPanelShape(radius: Dp): Shape =
+    if (LocalEchoThemeStyle.current.cutCorners) CutCornerShape(radius)
+    else RoundedCornerShape(radius)
+
 val EchoGlassDialogShape: Shape
     @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
-        RoundedCornerShape(LocalEchoThemeStyle.current.dialogCornerRadius) else EchoTokens.Radius.shapeXl
+        echoPanelShape(LocalEchoThemeStyle.current.dialogCornerRadius) else EchoTokens.Radius.shapeXl
 val EchoGlassPagePanelShape: Shape
     @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
-        RoundedCornerShape(LocalEchoThemeStyle.current.panelCornerRadius) else EchoTokens.Radius.shapeLg
+        echoPanelShape(LocalEchoThemeStyle.current.panelCornerRadius) else EchoTokens.Radius.shapeLg
 val EchoGlassControlShape: Shape
     @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
-        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapePill
+        echoPanelShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapePill
+
+/** Bauhaus uses a displaced solid block instead of a blurred elevation shadow. */
+@Composable
+fun Modifier.echoThemeHardShadow(offset: Dp = 4.dp): Modifier {
+    if (!LocalEchoThemeStyle.current.hardShadow) return this
+    val shadow = MaterialTheme.colorScheme.onSurface.copy(alpha = .82f)
+    return drawBehind {
+        val shift = offset.toPx()
+        drawRect(color = shadow, topLeft = Offset(shift, shift), size = size)
+    }
+}
 
 data class EchoGlassPalette(
     val panel: Color,
@@ -115,8 +132,11 @@ fun echoGlassPalette(): EchoGlassPalette {
             panel = colors.surface, panelStrong = colors.surface,
             panelSoft = colors.surfaceContainerLow, control = colors.surfaceContainer,
             controlSelected = colors.primaryContainer, input = colors.surfaceContainerLow,
-            userBubble = colors.surfaceContainerHigh, assistantBubble = Color.Transparent,
-            outline = colors.outlineVariant, outlineSelected = colors.primary,
+            userBubble = if (LocalEchoThemeStyle.current.hardShadow) colors.primaryContainer
+                else colors.surfaceContainerHigh,
+            assistantBubble = Color.Transparent,
+            outline = if (LocalEchoThemeStyle.current.strongOutline) colors.outline else colors.outlineVariant,
+            outlineSelected = colors.primary,
             textPrimary = colors.onSurface, textSecondary = colors.onSurfaceVariant,
             textMuted = colors.onSurfaceVariant, iconPrimary = colors.primary,
             iconSecondary = colors.onSurfaceVariant
@@ -186,11 +206,21 @@ fun Modifier.echoHazePanel(
 ): Modifier {
     val colorScheme = MaterialTheme.colorScheme
     if (LocalEchoThemeStyle.current.flatSurfaces) {
+        val style = LocalEchoThemeStyle.current
         val surface = if (tint == Color.Unspecified) colorScheme.surface
             else tint.compositeOver(colorScheme.surface).copy(alpha = 1f)
-        return this.clip(shape).background(surface, shape).echoPaperTexture().then(
-            if (showBorder) Modifier.border(1.dp, colorScheme.outlineVariant, shape) else Modifier
-        )
+        return this
+            .echoThemeHardShadow()
+            .clip(shape)
+            .background(surface, shape)
+            .echoPaperTexture()
+            .then(
+                if (showBorder) Modifier.border(
+                    if (style.strongOutline) 1.6.dp else 1.dp,
+                    if (style.strongOutline) colorScheme.outline else colorScheme.outlineVariant,
+                    shape
+                ) else Modifier
+            )
     }
     val isDark = colorScheme.background.luminance() < 0.5f
     val resolvedTint = if (tint != Color.Unspecified) {
@@ -301,6 +331,7 @@ fun EchoWallpaperBackground(
             modifier = Modifier
                 .matchParentSize()
                 .background(MaterialTheme.colorScheme.background)
+                .echoPaperTexture(pageRuling = true)
                 .echoHazeSource(hazeState)
         ) {
             backgroundBitmap?.let { bitmap ->
@@ -546,13 +577,16 @@ fun EchoGlassDropdownMenu(
                 exit = fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
             ) {
                 Surface(
-                    modifier = modifier,
+                    modifier = modifier.echoThemeHardShadow(),
                     shape = menuShape,
                     color = containerColor,
                     contentColor = colors.onSurface,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
-                    border = BorderStroke(1.dp, glass.outline)
+                    border = BorderStroke(
+                        if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
+                        glass.outline
+                    )
                 ) {
                     Column(
                         modifier = Modifier

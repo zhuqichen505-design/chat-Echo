@@ -638,7 +638,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .matchParentSize()
                 .background(MaterialTheme.colorScheme.background)
-                .echoPaperTexture()
+                .echoPaperTexture(pageRuling = true)
                 .echoHazeSource(hazeState)
         ) {
             settingsBackgroundBitmap?.let { bitmap ->

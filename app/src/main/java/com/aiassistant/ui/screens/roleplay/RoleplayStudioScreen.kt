@@ -67,7 +67,7 @@ fun RoleplayStudioScreen(
     }
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
 
-    Scaffold(topBar = {
+    Scaffold(containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = {
         Column {
             TopAppBar(title = { Text("创作", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
                 navigationIcon = { if (showBackButton) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },

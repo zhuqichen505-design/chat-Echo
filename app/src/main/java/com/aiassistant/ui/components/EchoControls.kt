@@ -3,7 +3,6 @@ package com.aiassistant.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -34,8 +33,9 @@ fun echoFilterChipColors(): SelectableChipColors {
 @Composable
 fun echoFilterChipBorder(selected: Boolean): BorderStroke {
     val glass = echoGlassPalette()
+    val strong = LocalEchoThemeStyle.current.strongOutline
     return BorderStroke(
-        width = if (selected) EchoTokens.Glass.activeBorderWidth else EchoTokens.Glass.borderWidth,
+        width = if (selected || strong) 1.6.dp else EchoTokens.Glass.borderWidth,
         color = if (selected) glass.outlineSelected else glass.outline
     )
 }
@@ -71,8 +71,9 @@ fun echoSegmentedButtonColors(): SegmentedButtonColors {
 @Composable
 fun echoSegmentedButtonBorder(selected: Boolean): BorderStroke {
     val glass = echoGlassPalette()
+    val strong = LocalEchoThemeStyle.current.strongOutline
     return BorderStroke(
-        width = if (selected) EchoTokens.Glass.activeBorderWidth else EchoTokens.Glass.borderWidth,
+        width = if (selected || strong) 1.6.dp else EchoTokens.Glass.borderWidth,
         color = if (selected) glass.outlineSelected else glass.outline
     )
 }
@@ -91,14 +92,13 @@ fun EchoPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: androidx.compose.ui.graphics.Shape = if (LocalEchoThemeStyle.current.flatSurfaces)
-        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapeMd,
+    shape: androidx.compose.ui.graphics.Shape = EchoGlassControlShape,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.echoThemeHardShadow(),
         enabled = enabled,
         shape = shape,
         contentPadding = contentPadding,
@@ -118,15 +118,14 @@ fun EchoGlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: androidx.compose.ui.graphics.Shape = if (LocalEchoThemeStyle.current.flatSurfaces)
-        RoundedCornerShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapeMd,
+    shape: androidx.compose.ui.graphics.Shape = EchoGlassControlShape,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit
 ) {
     val glass = echoGlassPalette()
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.echoThemeHardShadow(),
         enabled = enabled,
         shape = shape,
         contentPadding = contentPadding,
@@ -134,7 +133,10 @@ fun EchoGlassButton(
             containerColor = glass.control,
             contentColor = MaterialTheme.colorScheme.onSurface
         ),
-        border = BorderStroke(EchoTokens.Glass.borderWidth, glass.outline),
+        border = BorderStroke(
+            if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else EchoTokens.Glass.borderWidth,
+            glass.outline
+        ),
         content = content
     )
 }

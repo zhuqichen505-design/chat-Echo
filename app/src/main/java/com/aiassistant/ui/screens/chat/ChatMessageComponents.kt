@@ -40,7 +40,10 @@ import com.aiassistant.domain.model.ToolCallRecord
 import com.aiassistant.domain.model.QueuedMessage
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.EchoPaperMaterial
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -464,10 +467,14 @@ internal fun MessageBubble(
         background = textBackground,
         fallbackSurface = resolvedReadableBackdrop
     )
-    val bubbleShape = if (isUser) {
-        RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
-    } else {
-        RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
+    val themeStyle = LocalEchoThemeStyle.current
+    val bubbleShape = when {
+        themeStyle.cutCorners -> CutCornerShape(if (isUser) 10.dp else 8.dp)
+        themeStyle.hardShadow -> RoundedCornerShape(if (isUser) 3.dp else 2.dp)
+        themeStyle.paperMaterial != EchoPaperMaterial.None ->
+            RoundedCornerShape(if (isUser) 5.dp else 3.dp)
+        isUser -> RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
+        else -> RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
     }
     val hasThinkingContent = !message.thinkingContent.isNullOrBlank()
     val hasThinking = hasThinkingContent || message.thinkingTokens > 0

@@ -63,6 +63,7 @@ fun ScenarioEditorScreen(
     val scrollState = rememberScrollState()
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text(if (scenario == null) "创建场景" else "编辑场景") },

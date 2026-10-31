@@ -26,6 +26,7 @@ import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.echoPaperTexture
 import dev.chrisbanes.haze.HazeState
 
+
 /**
  * 卡片视觉强调级别 (CardEmphasis)
  * - Standard：完整四层玻璃效果（高光 + 顶部微光线 + 渐变边框 + 阴影），用于视觉焦点区
@@ -54,11 +55,20 @@ fun EchoGlassCard(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     if (LocalEchoThemeStyle.current.flatSurfaces) {
+        val style = LocalEchoThemeStyle.current
         val surface = (containerColor ?: colorScheme.surface).compositeOver(colorScheme.surface).copy(alpha = 1f)
-        Box(modifier = modifier.clip(shape).background(surface, shape).echoPaperTexture().then(
-            if (showBorder && borderWidth > 0.dp) Modifier.border(borderWidth, borderColor ?: colorScheme.outlineVariant, shape)
-            else Modifier
-        ), content = content)
+        Box(modifier = modifier
+            .echoThemeHardShadow()
+            .clip(shape)
+            .background(surface, shape)
+            .echoPaperTexture()
+            .then(
+                if (showBorder && borderWidth > 0.dp) Modifier.border(
+                    if (style.strongOutline) 1.6.dp else borderWidth,
+                    borderColor ?: if (style.strongOutline) colorScheme.outline else colorScheme.outlineVariant,
+                    shape
+                ) else Modifier
+            ), content = content)
         return
     }
     val isDark = colorScheme.background.luminance() < 0.5f

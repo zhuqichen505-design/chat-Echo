@@ -39,6 +39,7 @@ fun RoleplayMemoryScreen(
     }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("记忆管理") },

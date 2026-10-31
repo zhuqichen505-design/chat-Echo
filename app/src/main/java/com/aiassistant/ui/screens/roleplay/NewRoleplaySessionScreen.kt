@@ -46,7 +46,7 @@ fun NewRoleplaySessionScreen(
             model = models.firstOrNull { option -> apiConfigs.any { it.id == option.apiConfigId && it.isDefault } } ?: models.firstOrNull()
         }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("创建作品", style = MaterialTheme.typography.titleMedium) },
+    Scaffold(containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = { TopAppBar(title = { Text("创建作品", style = MaterialTheme.typography.titleMedium) },
         navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } }) },
         bottomBar = {
             Surface(tonalElevation = 2.dp) {

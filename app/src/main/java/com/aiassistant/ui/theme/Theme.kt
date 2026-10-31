@@ -3,6 +3,7 @@ package com.aiassistant.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -250,6 +251,90 @@ private fun lightColorSchemeFor(appearancePreset: String): ColorScheme = when (E
         surfaceContainerHigh = Color(0xFFEAEFEC),
         surfaceContainerHighest = Color(0xFFE1E9E5)
     )
+    EchoAppearancePreset.FOLIO -> LightColorScheme.copy(
+        primary = Color(0xFF6F3345),
+        onPrimary = Color(0xFFFFF9F2),
+        primaryContainer = Color(0xFFE8D4D5),
+        onPrimaryContainer = Color(0xFF401B28),
+        secondary = Color(0xFF765B38),
+        onSecondary = Color(0xFFFFFAF0),
+        secondaryContainer = Color(0xFFE7DAC4),
+        onSecondaryContainer = Color(0xFF3D2C17),
+        tertiary = Color(0xFF385D5A),
+        onTertiary = Color.White,
+        tertiaryContainer = Color(0xFFD4E1DB),
+        onTertiaryContainer = Color(0xFF193531),
+        background = Color(0xFFF3EDDF),
+        onBackground = Color(0xFF2D2A26),
+        surface = Color(0xFFFAF5E9),
+        onSurface = Color(0xFF2D2A26),
+        surfaceVariant = Color(0xFFE9E0CE),
+        onSurfaceVariant = Color(0xFF625A4D),
+        outline = Color(0xFF817665),
+        outlineVariant = Color(0xFFCFC2AC),
+        surfaceTint = Color(0xFF6F3345),
+        surfaceContainerLowest = Color(0xFFFFFDF7),
+        surfaceContainerLow = Color(0xFFFCF7EC),
+        surfaceContainer = Color(0xFFF5EEDF),
+        surfaceContainerHigh = Color(0xFFEDE3D1),
+        surfaceContainerHighest = Color(0xFFE4D8C3)
+    )
+    EchoAppearancePreset.SONAR -> LightColorScheme.copy(
+        primary = Color(0xFF007C69),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFFC5E8DF),
+        onPrimaryContainer = Color(0xFF073C33),
+        secondary = Color(0xFF236477),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFC8E0E6),
+        onSecondaryContainer = Color(0xFF113944),
+        tertiary = Color(0xFF596B45),
+        onTertiary = Color.White,
+        tertiaryContainer = Color(0xFFDCE5D2),
+        onTertiaryContainer = Color(0xFF2D3B20),
+        background = Color(0xFFEAF1EE),
+        onBackground = Color(0xFF132824),
+        surface = Color(0xFFF4F8F5),
+        onSurface = Color(0xFF132824),
+        surfaceVariant = Color(0xFFD9E5E0),
+        onSurfaceVariant = Color(0xFF48625B),
+        outline = Color(0xFF5E7870),
+        outlineVariant = Color(0xFFB3C8C0),
+        surfaceTint = Color(0xFF007C69),
+        surfaceContainerLowest = Color(0xFFFBFDFC),
+        surfaceContainerLow = Color(0xFFF1F7F4),
+        surfaceContainer = Color(0xFFE5EFEB),
+        surfaceContainerHigh = Color(0xFFDAE7E2),
+        surfaceContainerHighest = Color(0xFFCFDFD8)
+    )
+    EchoAppearancePreset.BAUHAUS -> LightColorScheme.copy(
+        primary = Color(0xFFC93F32),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFFF2C2B8),
+        onPrimaryContainer = Color(0xFF531710),
+        secondary = Color(0xFF1668B4),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFC4DCF2),
+        onSecondaryContainer = Color(0xFF0B355E),
+        tertiary = Color(0xFFE2AC18),
+        onTertiary = Color(0xFF211B08),
+        tertiaryContainer = Color(0xFFF3DF9A),
+        onTertiaryContainer = Color(0xFF423208),
+        background = Color(0xFFF2EDDF),
+        onBackground = Color(0xFF22221E),
+        surface = Color(0xFFFFFBEF),
+        onSurface = Color(0xFF22221E),
+        surfaceVariant = Color(0xFFE7DFCE),
+        onSurfaceVariant = Color(0xFF565249),
+        outline = Color(0xFF292924),
+        outlineVariant = Color(0xFF777166),
+        surfaceTint = Color(0xFFC93F32),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceContainerLow = Color(0xFFFFFBEF),
+        surfaceContainer = Color(0xFFF3EBD9),
+        surfaceContainerHigh = Color(0xFFE9DFC9),
+        surfaceContainerHighest = Color(0xFFDCD1BA)
+    )
     else -> LightColorScheme
 }
 
@@ -422,6 +507,90 @@ private fun darkColorSchemeFor(appearancePreset: String): ColorScheme = when (Ec
         surfaceContainerHigh = Color(0xFF334246),
         surfaceContainerHighest = Color(0xFF3B4D51)
     )
+    EchoAppearancePreset.FOLIO -> DarkColorScheme.copy(
+        primary = Color(0xFFE6B3BD),
+        onPrimary = Color(0xFF401B28),
+        primaryContainer = Color(0xFF61313F),
+        onPrimaryContainer = Color(0xFFF4DDE0),
+        secondary = Color(0xFFD6BB8F),
+        onSecondary = Color(0xFF382912),
+        secondaryContainer = Color(0xFF52432C),
+        onSecondaryContainer = Color(0xFFEEE0C5),
+        tertiary = Color(0xFFA8C8BD),
+        onTertiary = Color(0xFF193531),
+        tertiaryContainer = Color(0xFF354E48),
+        onTertiaryContainer = Color(0xFFD8E8E0),
+        background = Color(0xFF26221E),
+        onBackground = Color(0xFFF0E6D4),
+        surface = Color(0xFF322C26),
+        onSurface = Color(0xFFF0E6D4),
+        surfaceVariant = Color(0xFF453B31),
+        onSurfaceVariant = Color(0xFFD0C1AA),
+        outline = Color(0xFFAA9980),
+        outlineVariant = Color(0xFF5B4D3E),
+        surfaceTint = Color(0xFFE6B3BD),
+        surfaceContainerLowest = Color(0xFF1D1A17),
+        surfaceContainerLow = Color(0xFF2B2621),
+        surfaceContainer = Color(0xFF352E27),
+        surfaceContainerHigh = Color(0xFF40372D),
+        surfaceContainerHighest = Color(0xFF4B4034)
+    )
+    EchoAppearancePreset.SONAR -> DarkColorScheme.copy(
+        primary = Color(0xFF63F5D2),
+        onPrimary = Color(0xFF04352C),
+        primaryContainer = Color(0xFF125648),
+        onPrimaryContainer = Color(0xFFC9F9E9),
+        secondary = Color(0xFF82D7E8),
+        onSecondary = Color(0xFF103943),
+        secondaryContainer = Color(0xFF1C4B56),
+        onSecondaryContainer = Color(0xFFD1EEF3),
+        tertiary = Color(0xFFC0D798),
+        onTertiary = Color(0xFF2D3B20),
+        tertiaryContainer = Color(0xFF3E5031),
+        onTertiaryContainer = Color(0xFFE0EBCF),
+        background = Color(0xFF071411),
+        onBackground = Color(0xFFD8EAE3),
+        surface = Color(0xFF10211C),
+        onSurface = Color(0xFFD8EAE3),
+        surfaceVariant = Color(0xFF1B342C),
+        onSurfaceVariant = Color(0xFFA8C4B9),
+        outline = Color(0xFF71958A),
+        outlineVariant = Color(0xFF315248),
+        surfaceTint = Color(0xFF63F5D2),
+        surfaceContainerLowest = Color(0xFF040D0B),
+        surfaceContainerLow = Color(0xFF0C1B17),
+        surfaceContainer = Color(0xFF122720),
+        surfaceContainerHigh = Color(0xFF19332B),
+        surfaceContainerHighest = Color(0xFF213F35)
+    )
+    EchoAppearancePreset.BAUHAUS -> DarkColorScheme.copy(
+        primary = Color(0xFFFF796B),
+        onPrimary = Color(0xFF46130D),
+        primaryContainer = Color(0xFF793027),
+        onPrimaryContainer = Color(0xFFFFDAD3),
+        secondary = Color(0xFF79BBFF),
+        onSecondary = Color(0xFF0B355E),
+        secondaryContainer = Color(0xFF254F78),
+        onSecondaryContainer = Color(0xFFD6E8FF),
+        tertiary = Color(0xFFFFD552),
+        onTertiary = Color(0xFF423208),
+        tertiaryContainer = Color(0xFF6C571E),
+        onTertiaryContainer = Color(0xFFFFEDB2),
+        background = Color(0xFF191915),
+        onBackground = Color(0xFFF2EBDD),
+        surface = Color(0xFF27271F),
+        onSurface = Color(0xFFF2EBDD),
+        surfaceVariant = Color(0xFF3B392E),
+        onSurfaceVariant = Color(0xFFD0C7B5),
+        outline = Color(0xFFF0E7D5),
+        outlineVariant = Color(0xFF918876),
+        surfaceTint = Color(0xFFFF796B),
+        surfaceContainerLowest = Color(0xFF10100D),
+        surfaceContainerLow = Color(0xFF20201A),
+        surfaceContainer = Color(0xFF2B2A22),
+        surfaceContainerHigh = Color(0xFF38362B),
+        surfaceContainerHighest = Color(0xFF454135)
+    )
     else -> DarkColorScheme
 }
 
@@ -439,6 +608,27 @@ internal fun echoColorScheme(appearancePreset: String, darkTheme: Boolean): Colo
     )
 }
 
+internal fun echoShapesFor(appearancePreset: String): Shapes {
+    val style = echoThemeStyleFor(appearancePreset)
+    return when {
+        style.cutCorners -> Shapes(
+            extraSmall = CutCornerShape(4.dp),
+            small = CutCornerShape(6.dp),
+            medium = CutCornerShape(8.dp),
+            large = CutCornerShape(12.dp),
+            extraLarge = CutCornerShape(16.dp)
+        )
+        style.flatSurfaces -> Shapes(
+            extraSmall = RoundedCornerShape(2.dp),
+            small = RoundedCornerShape(style.controlCornerRadius),
+            medium = RoundedCornerShape(style.panelCornerRadius),
+            large = RoundedCornerShape(style.dialogCornerRadius),
+            extraLarge = RoundedCornerShape(style.dialogCornerRadius)
+        )
+        else -> Shapes()
+    }
+}
+
 @Composable
 fun AiApiAssistantTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -448,7 +638,8 @@ fun AiApiAssistantTheme(
 ) {
     val themeStyle = echoThemeStyleFor(appearancePreset)
     val colorScheme = when {
-        dynamicColor && !themeStyle.isMonochrome && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor && EchoAppearancePreset.sanitize(appearancePreset) == EchoAppearancePreset.EXISTING &&
+            !themeStyle.isMonochrome && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
@@ -474,13 +665,7 @@ fun AiApiAssistantTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = echoTypographyFor(appearancePreset),
-            shapes = if (themeStyle.isMonochrome) Shapes(
-                extraSmall = RoundedCornerShape(4.dp),
-                small = RoundedCornerShape(6.dp),
-                medium = RoundedCornerShape(8.dp),
-                large = RoundedCornerShape(10.dp),
-                extraLarge = RoundedCornerShape(12.dp)
-            ) else Shapes(),
+            shapes = echoShapesFor(appearancePreset),
             content = content
         )
     }

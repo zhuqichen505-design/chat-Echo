@@ -576,7 +576,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .matchParentSize()
                     .background(MaterialTheme.colorScheme.background)
-                    .echoPaperTexture()
+                    .echoPaperTexture(pageRuling = true)
                     .echoHazeSource(hazeState)
             ) {
                 chatBackgroundBitmap?.let { bitmap ->

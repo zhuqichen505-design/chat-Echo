@@ -14,7 +14,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,6 +54,7 @@ import com.aiassistant.ui.screens.roleplay.ScenarioEditorScreen
 import com.aiassistant.ui.screens.settings.SettingsScreen
 import com.aiassistant.ui.screens.stats.StatsScreen
 import com.aiassistant.ui.theme.AiApiAssistantTheme
+import com.aiassistant.ui.theme.echoPaperTexture
 import com.aiassistant.utils.AppThemeMode
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -78,22 +81,29 @@ class MainActivity : ComponentActivity() {
             }
 
             AiApiAssistantTheme(darkTheme = useDarkTheme, appearancePreset = appearance.appearancePreset) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .echoPaperTexture(pageRuling = true)
                 ) {
-                    androidx.compose.runtime.CompositionLocalProvider(
-                        androidx.compose.foundation.LocalOverscrollConfiguration provides null
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = androidx.compose.ui.graphics.Color.Transparent
                     ) {
-                        AiAssistantNavigation(
-                            themeMode = themeMode,
-                            onThemeModeChange = { mode ->
-                                if (themeManager.saveThemeMode(mode)) {
-                                    themeMode = mode
-                                }
-                            },
-                            appearance = appearance
-                        )
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.foundation.LocalOverscrollConfiguration provides null
+                        ) {
+                            AiAssistantNavigation(
+                                themeMode = themeMode,
+                                onThemeModeChange = { mode ->
+                                    if (themeManager.saveThemeMode(mode)) {
+                                        themeMode = mode
+                                    }
+                                },
+                                appearance = appearance
+                            )
+                        }
                     }
                 }
             }

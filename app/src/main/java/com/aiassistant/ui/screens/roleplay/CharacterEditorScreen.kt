@@ -77,6 +77,7 @@ fun CharacterEditorScreen(
     val scrollState = rememberScrollState()
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text(if (character == null) "创建角色" else "编辑角色") },

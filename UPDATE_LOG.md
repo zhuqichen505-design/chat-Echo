@@ -1,5 +1,27 @@
 # 维护记录
 
+## 2026-10-31 · 2.8.23 三套全场景主题与文字选择滚动优化（构建与本地验收完成，待 Git / Release 核验）
+
+基线 `main/90df051`；版本由 2.8.22/208 递增到 2.8.23/209；Room v37 / 20 个实体不变。原有未跟踪 `.playwright-cli/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本轮只修改当前仓库源码与测试。
+
+用户三项需求：确认拾页 / 声呐 / 构型三套主题在全场景的适配；正式加入主题选择；在既有“过快→过慢”修复基础上继续优化文字选择拖动的自动滚动。前序预览不是设备截图，本轮将预览中的纸张、深空网格与切角、几何硬投影落实为真实 Compose token 和共享组件行为。
+
+临时实施方案与根因：原主题系统已有统一 `ColorScheme`、`EchoThemeStyle`、`Typography` 和 `EchoGlassCard / EchoHaze / EchoControls` 出口，但材质只支持纸张，形状只支持统一圆角；本轮扩展 `EchoSurfacePattern`、`cutCorners`、`hardShadow`、`strongOutline` 与 FOLIO 纸材，由全局 theme 生成 Material Shapes / Typography，首页、聊天、设置、历史、统计、文件夹、角色编辑、世界书和共享弹窗 / 菜单 / 输入 / Markdown 使用同一语义出口。声呐在角色页无自绘背景时由应用根背景提供网格，相关 Scaffold 使用透明容器；构型对共享卡片、按钮、筛选边框和菜单使用粗描边与偏置硬投影；拾页使用纸纤维、低圆角、文学字体与普通段落首行缩进。
+
+滚动根因：共享 `editorSelectionScrollStep` 将远距离速度钳制在 88dp/s，输入框、模型回复编辑、用户消息编辑和提示词编辑都复用它，因此用户感觉“修复后过慢”。本轮保持近边缘的精细位移、密度换算、50ms 卡帧上限和 100ms 空闲释放，将速度曲线调整为 48dp/s 基线 + 0.8 × 距离，远距离上限 144dp/s；没有改成瞬移或固定长步长。
+
+涉及源码：`PersonalizationManager.kt`、`Theme.kt`、`EchoThemeStyle.kt`、`Type.kt`、`EchoPaperTexture.kt`、`MainActivity.kt`；共享 `EchoGlassCard.kt`、`EchoHaze.kt`、`EchoControls.kt`、`EchoScrollableTextEditor.kt`、`EditorInteractionPolicy.kt`、`MarkdownText.kt`、`markdown/SyntaxHighlighter.kt`；页面 `HomeScreen.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`、`ChatMessageComponents.kt`、`SettingsScreen.kt`、`SettingsAppearanceTab.kt`、`FolderManagerScreen.kt`、`RoleplayStudioScreen.kt`、`RoleplayMemoryScreen.kt`、`CharacterEditorScreen.kt`、`ScenarioEditorScreen.kt`、`NewRoleplaySessionScreen.kt`；测试 `RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`；版本配置 `app/build.gradle.kts`。不新增依赖，不修改 API 地址、密钥、模型、消息格式或数据库。
+
+主题兼容性证据：三套预设均可 sanitize / SharedPreferences 持久化；浅色和深色都覆盖 background / surface / container / outline / inverse 与主、次、第三容器、错误角色，正文、辅助文字和状态容器对比度以单元测试校验 ≥4.5:1。声呐切角、构型硬投影、拾页纸纹和三种 Typography 均有 token 断言；Robolectric 以真实 Compose 组合渲染三套主题 × 明暗，共 6 张共享组件矩阵，包含卡片、按钮、筛选、Markdown、输入编辑器和背景材质，逐张 >80 种颜色且人工检查未发现裁切 / 重叠。浏览器样稿不作为设备验收，仍保留在预览目录之外，不进入 APK。
+
+滚动验证：先冻结新契约运行旧实现，失败信息为远距离每帧 1.4666667dp（88dp/s），目标 2.4dp（144dp/s），确认可复现；修复后覆盖正反向、density 缩放、短距离不越过剩余距离、NaN、50ms 卡帧和 30/60fps 线性，并保留“选区高频更新仍滚动、空闲释放锁、手动滚动不取消观察、后续选区继续限速”既有测试。
+
+最终源码冻结验收 `20261031-230059-368`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，583.941 秒；88 套件 / 1,046 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致。`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon --build-cache` 退出 0，454 秒；`Echo-v2.8.23.apk` 25,472,793 字节，SHA256 `0c192a5543948a34a91390c1aa4bb037b7622d45f5cd6212b8daf5b6eefa257d`；`com.aiassistant`、2.8.23/209、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。 完整 APK 审计：446 个 ZIP 条目 CRC 全通过，31,516 条 DEX 字符串、8,072 条资源值为本轮解析口径、39,559 条合计；24 条新增可读 DEX 字符串（其余为 R8 类型 / 布局结构标识）逐条人工复核，无用户路径、邮箱、私有 IP、Bearer / OpenAI / GitHub 凭据；新增资源字符串 0。186 张图片（179 个唯一内容哈希）与 2.8.22 内容和数量完全一致。排他复制退出 0：新增前发布目录 219 个文件（218 APK），复制后 220 个文件（219 APK），新包未覆盖历史包。
+
+设备边界：`adb devices` 无连接设备，未验证安装启动、主题字体 / 动态材质、输入法触控或真实服务商。需人工在设置 → 外观检查三套主题与明暗切换、重启持久化、首页 / 对话 / 设置 / 历史 / 统计 / 文件夹 / 创作及弹窗菜单的对比与交互，并重点拖选长文本验证滚动速度、松手停止和手动滚动。Git 提交、标签、推送与 GitHub Release 结果见本轮交付及后续发布记录；未完成远端核验前不得视为已备份或已发布。
+
 ## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（已发布）
 
 基线 `main/f886e43`；当前源码版本 2.8.22/208，Room v37 / 20 个实体不变。本轮直接核对当前仓库源码，不读取历史改进归档；原未跟踪内容保留且排除。用户确认同一服务商在其他客户端也返回 `PROXY_GENERATION_DISABLED: streamGenerateContent is not supported`，本轮按上游流式能力限制处理，不修改 API 地址、密钥、模型名称或用户现有配置。关闭流式可避开该调用方式，是否恢复取决于服务商是否继续支持非流式请求，尚无真实服务商验证。

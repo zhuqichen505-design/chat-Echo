@@ -1,5 +1,37 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-10-31 · 2.8.23 三套全场景主题与文字选择滚动优化（构建与本地验收完成，待 Git / Release）
+
+基线 `main/90df051`；版本 2.8.23/209；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`deepseek.png` 保留排除，不读取 `APP改进\`。本轮只修改当前仓库。
+
+临时实施方案：把此前仅存在于预览的三套方案转为真实共享主题契约。`EchoThemeStyle` 扩展纸材（FOLIO）、声呐网格（SonarGrid）、切角（cutCorners）、硬投影（hardShadow）与强描边；`Theme` 提供三套完整浅深 ColorScheme / Material Shapes，`Type` 提供拾页文学字体、声呐等宽标题、构型粗字重；`EchoPaperTexture` 以固定低速材质层绘制书页线或网格，不拦截输入；共享卡片、弹窗、菜单、按钮、筛选与编辑器统一读取。首页、聊天、设置自绘背景加入材质；历史、统计、文件夹经 `EchoWallpaperBackground`；创作、角色、场景、记忆、新作品页使用根主题背景与透明 Scaffold。
+滚动过慢的根因是共享函数将远距离速度上限设为 88dp/s；本轮仅调整共享曲线为 48dp/s + 0.8×距离、上限 144dp/s，保留近边精确、density、50ms 帧上限、100ms 空闲释放和用户手动滚动优先。
+
+源码 / 测试范围：`PersonalizationManager.kt`；`ui/theme/Theme.kt`、`EchoThemeStyle.kt`、`Type.kt`、`EchoPaperTexture.kt`；`MainActivity.kt`；`EchoGlassCard.kt`、`EchoHaze.kt`、`EchoControls.kt`、`EchoScrollableTextEditor.kt`、`EditorInteractionPolicy.kt`、`MarkdownText.kt`、`markdown/SyntaxHighlighter.kt`；`HomeScreen.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`、`ChatMessageComponents.kt`、`SettingsScreen.kt`、`SettingsAppearanceTab.kt`、`FolderManagerScreen.kt`、五个 `roleplay` Screen；`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`；版本配置。不新增依赖，不改 API、消息、数据库或签名配置。
+
+主题兼容验证：
+- FOLIO / SONAR / BAUHAUS 均可 sanitize 和跨 manager 持久化；旧偏好与未知值仍回退 `existing`。
+- 三主题浅深色均断言正文、主操作、次操作、主 / 次 / 第三容器、错误和辅助文字对比度 ≥4.5:1；主色、背景和表面层级互不相同。
+- token 测试断言拾页纸张 / 低圆角 / 文学字体、声呐网格 / 切角 / 等宽标题、构型低圆角 / 强描边 / 硬投影 / 粗字重；旧 DECKLE / COTTON 行为保持。
+- Robolectric 以真实 Compose 渲染三主题×明暗的共享组件矩阵（卡片、按钮、筛选、Markdown、输入编辑器、材质背景及分区色），每张 >80 种颜色，6 张人工检查无裁切 / 重叠；临时探针与资源测试配置已移除，不为验收保留生产测试配置。
+- 静态复核全部 11 个 Screen、主应用壳、共享 Dialog / Menu / Card / Button / Native editor 均消费 Material 或 `EchoGlass*` 语义；主题专属颜色用于强调，紧急 / 状态颜色仍保留可读对比。
+
+滚动验证：旧实现契约红测 `editorSelectionScrollStep(1000,1,1/60)` 实得 1.4666667dp（88dp/s），目标 2.4dp（144dp/s）；修复后正反向、3× density、短距离、NaN、卡帧 50ms 和 30/60fps 线性通过。既有高频选区、空闲释放、手动滚动恢复和延迟回传测试均通过。
+
+最终冻结验收 `20261031-230059-368`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，583.941 秒；88 套件 / 1,046 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致。`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon --build-cache` 退出 0，454 秒。`Echo-v2.8.23.apk` 25,472,793 字节，SHA256 `0c192a5543948a34a91390c1aa4bb037b7622d45f5cd6212b8daf5b6eefa257d`；`com.aiassistant`、2.8.23/209、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。完整 APK 审计 446 条目 CRC，31,516 DEX 字符串 / 8,072 资源值；新增 24 条可读 DEX 字符串均关联主题 / 滚动 / 版本，隐私模式新增命中 0，新增资源字符串 0；186 张图片（179 个唯一哈希）与 2.8.22 完全一致。发布目录由 219 文件（218 APK）增加到 220 文件（219 APK），未覆盖历史包。
+
+设备与真实接口走查（尚未执行；`adb devices` 无连接设备）：
+
+1. 设置 → 外观 → 主题预设依次选择拾页、声呐、构型，切换系统 / 浅色 / 深色并重启，确认选择持久化；旧主题与自定义壁纸仍可组合，背景历史可恢复。
+2. 首页检查标题 / 搜索 / 文件夹 / 卡片 / 新对话按钮；对话检查用户气泡、模型正文、思考、输入栏、编辑回复、选择拖柄和发送 / 队列；设置检查卡片、主题列表、筛选、下拉菜单和输入框。
+3. 历史、统计、文件夹、创作、人物与世界、场景编辑、记忆管理与新作品页检查页面背景、顶栏、列表、表单、空状态和弹窗；确认声呐切角不侵入内容、构型硬投影不遮挡点击、拾页书页线不影响正文。
+4. 长文本输入和模型回复编辑中各拖选至少 10 秒：近边缘应缓慢精确，向屏幕外扩展时明显快于 2.8.22 但仍连续；松手立即停止，不继续追赶远端选区；手动滚动后再次拖选仍恢复跟随，IME 组合输入和选区不被回写重置。
+5. 检查自定义纯白 / 纯黑背景、浅 / 深模式和最大字体下文字对比、按钮热区、弹窗高度、输入法遮挡；真实服务商请求只做回归，预期无协议变化。
+
+Git 提交、标签、推送与 Release 上传尚待执行和独立核验；无设备结果不能写成安装、启动、触控、字体或真实接口已验收。
+
 ## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（已发布）
 
 基线 `main/f886e43`；版本 2.8.22/208；Room v37 / 20 个实体不变。本轮依据当前仓库源码处理，原未跟踪内容保留并排除，不读取历史改进归档。用户确认其他客户端也出现谷歌上游 `streamGenerateContent is not supported`，本轮不修改 API 地址、密钥、模型名称或原有配置。

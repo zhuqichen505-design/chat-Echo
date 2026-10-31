@@ -232,7 +232,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
-                    .echoPaperTexture()
+                    .echoPaperTexture(pageRuling = true)
                     .echoHazeSource(hazeState)
             ) {
                 homeBackgroundBitmap?.let { bitmap ->
@@ -706,7 +706,7 @@ private fun NewConversationGlassButton(
     onLongClick: (() -> Unit)? = null,
     onLongClickLabel: String? = null
 ) {
-    val buttonShape = com.aiassistant.ui.theme.EchoTokens.Radius.shapePill
+    val buttonShape = com.aiassistant.ui.components.EchoGlassControlShape
     val glass = echoGlassPalette()
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val primary = MaterialTheme.colorScheme.primary
@@ -883,7 +883,7 @@ private fun HomeSearchRow(
             modifier = Modifier
                 .weight(1f)
                 .height(46.dp),
-            shape = RoundedCornerShape(22.dp),
+            shape = com.aiassistant.ui.components.EchoGlassControlShape,
             color = searchTint,
             border = BorderStroke(0.8.dp, glass.outline),
             tonalElevation = 0.dp,

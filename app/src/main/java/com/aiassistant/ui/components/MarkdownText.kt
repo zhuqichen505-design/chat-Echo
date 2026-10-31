@@ -708,6 +708,7 @@ private fun hasUnclosedInlineFormatting(text: String): Boolean {
 internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial): TextStyle = when (material) {
     EchoPaperMaterial.Deckle -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 2.em))
     EchoPaperMaterial.Cotton -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent.None)
+    EchoPaperMaterial.Folio -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = .8.em))
     EchoPaperMaterial.None -> style
 }
 

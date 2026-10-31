@@ -251,8 +251,11 @@ class UiPolishRegressionTest {
         val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp))
         val deckle = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Deckle)
         val cotton = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Cotton)
+        val folio = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Folio)
         assertEquals(androidx.compose.ui.unit.TextUnit(2f, androidx.compose.ui.unit.TextUnitType.Em), deckle.textIndent?.firstLine)
         assertEquals(androidx.compose.ui.text.style.TextIndent.None, cotton.textIndent)
+        assertEquals(androidx.compose.ui.unit.TextUnit(.8f, androidx.compose.ui.unit.TextUnitType.Em), folio.textIndent?.firstLine)
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Justify, folio.textAlign)
         assertEquals(base.fontSize, deckle.fontSize)
         assertEquals(base, com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.None))
     }
@@ -270,6 +273,73 @@ class UiPolishRegressionTest {
         assertTrue("毛边文库和棉纸诗笺应有不同背景", deckleLight.background != cottonLight.background)
         assertTrue("纸张主题使用较平的面板形状", com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.DECKLE).flatSurfaces)
         assertTrue(com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.COTTON).flatSurfaces)
+    }
+
+    @Test fun folioSonarAndBauhausArePersistableAndHaveCompleteDistinctSchemes() {
+        val presets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.FOLIO,
+            com.aiassistant.utils.EchoAppearancePreset.SONAR,
+            com.aiassistant.utils.EchoAppearancePreset.BAUHAUS
+        )
+        assertEquals(presets, presets.map { com.aiassistant.utils.EchoAppearancePreset.sanitize(it) })
+        assertTrue(com.aiassistant.utils.EchoAppearancePreset.values.containsAll(presets))
+
+        fun contrast(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color): Float {
+            val lighter = maxOf(fg.luminance(), bg.luminance())
+            val darker = minOf(fg.luminance(), bg.luminance())
+            return (lighter + .05f) / (darker + .05f)
+        }
+
+        val light = presets.associateWith { com.aiassistant.ui.theme.echoColorScheme(it, false) }
+        val dark = presets.associateWith { com.aiassistant.ui.theme.echoColorScheme(it, true) }
+        assertEquals("三套主题浅色主色必须不同", 3, light.values.map { it.primary }.toSet().size)
+        assertEquals("三套主题深色背景必须不同", 3, dark.values.map { it.background }.toSet().size)
+        for ((preset, scheme) in light + dark) {
+            assertTrue("$preset 必须有独立的面板层级", scheme.surface != scheme.background || scheme.surfaceContainer != scheme.surface)
+            assertTrue("$preset 正文对比度不足", contrast(scheme.onBackground, scheme.background) >= 4.5f)
+            assertTrue("$preset 主操作对比度不足", contrast(scheme.onPrimary, scheme.primary) >= 4.5f)
+            assertTrue("$preset 次操作对比度不足", contrast(scheme.onSecondary, scheme.secondary) >= 4.5f)
+            assertTrue("$preset 主容器文字对比度不足", contrast(scheme.onPrimaryContainer, scheme.primaryContainer) >= 4.5f)
+            assertTrue("$preset 次容器文字对比度不足", contrast(scheme.onSecondaryContainer, scheme.secondaryContainer) >= 4.5f)
+            assertTrue("$preset 第三容器文字对比度不足", contrast(scheme.onTertiaryContainer, scheme.tertiaryContainer) >= 4.5f)
+            assertTrue("$preset 错误状态对比度不足", contrast(scheme.onError, scheme.error) >= 4.5f)
+            assertTrue("$preset 辅助文字对比度不足", contrast(scheme.onSurfaceVariant, scheme.surface) >= 4.5f)
+        }
+    }
+
+    @Test fun newThemesCarryDifferentMaterialsShapesAndTypographyAcrossSharedComponents() {
+        val folio = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.FOLIO)
+        val sonar = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.SONAR)
+        val bauhaus = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.BAUHAUS)
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.Folio, folio.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.SonarGrid, sonar.surfacePattern)
+        assertTrue(sonar.cutCorners)
+        assertTrue(bauhaus.hardShadow)
+        assertTrue(bauhaus.strongOutline)
+        assertTrue(
+            "声呐的面板必须使用切角而非普通圆角",
+            com.aiassistant.ui.theme.echoShapesFor(com.aiassistant.utils.EchoAppearancePreset.SONAR).medium
+                is androidx.compose.foundation.shape.CutCornerShape
+        )
+        assertTrue(
+            "构型的面板必须使用低圆角几何轮廓",
+            com.aiassistant.ui.theme.echoShapesFor(com.aiassistant.utils.EchoAppearancePreset.BAUHAUS).medium
+                is androidx.compose.foundation.shape.RoundedCornerShape
+        )
+        assertEquals(
+            androidx.compose.ui.text.font.FontFamily.Monospace,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.SONAR).titleMedium.fontFamily
+        )
+        assertEquals(
+            androidx.compose.ui.text.font.FontWeight.Bold,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.BAUHAUS).titleLarge.fontWeight
+        )
+        assertTrue(
+            "拾页正文应使用纸本字体",
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.FOLIO).bodyLarge.fontFamily
+                != androidx.compose.ui.text.font.FontFamily.Default
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -294,7 +364,7 @@ class UiPolishRegressionTest {
             }
             assertTrue(follower.isActive)
             assertTrue(position > 0f)
-            assertTrue(position <= 88f * testScheduler.currentTime / 1_000f + .001f)
+            assertTrue(position <= 144f * testScheduler.currentTime / 1_000f + .001f)
             advanceTimeBy(180)
             runCurrent()
             assertTrue("空闲选区必须释放滚动锁", !scrollState.isScrollInProgress)
@@ -382,13 +452,14 @@ class UiPolishRegressionTest {
     @Test fun selectionScrollSpeedIsBoundedByTimeDensityAndDistance() {
         fun step(distance: Float, density: Float = 1f, seconds: Float = 1f / 60f) =
             com.aiassistant.ui.components.editorSelectionScrollStep(distance, density, seconds)
-        assertTrue(step(1000f) <= 88f / 60f)
+        assertEquals("远距离选区应提速到 144dp/s，避免旧版 88dp/s 过慢", 144f / 60f, step(1000f), .001f)
+        assertTrue("近边缘仍应保留精细跟随", step(24f) < 72f / 60f)
         assertEquals(step(1000f) * 3, step(3000f, 3f), .001f)
         assertEquals(-step(1000f), step(-1000f), .001f)
         assertEquals(.1f, step(.1f), .001f)
         assertEquals(0f, step(0f), 0f)
         assertEquals(0f, step(Float.NaN), 0f)
-        assertTrue("卡帧后不应追赶跳滚", step(1000f, seconds = 1f) <= 4.4f)
+        assertTrue("卡帧后不应追赶跳滚", step(1000f, seconds = 1f) <= 7.2001f)
         assertEquals(step(1000f, seconds = 1f / 30f), 2 * step(1000f), .001f)
     }
 

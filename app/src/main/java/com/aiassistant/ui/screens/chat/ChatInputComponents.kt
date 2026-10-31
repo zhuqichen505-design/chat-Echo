@@ -124,6 +124,7 @@ import com.aiassistant.ui.components.rememberSmoothReorderState
 import com.aiassistant.ui.components.reorderItem
 import com.aiassistant.ui.components.reorderDragHandle
 import com.aiassistant.ui.components.echoFilterChipElevation
+import com.aiassistant.ui.components.EchoGlassControlShape
 import com.aiassistant.ui.components.echoGlassPalette
 import com.aiassistant.ui.components.echoSegmentedButtonBorder
 import com.aiassistant.ui.components.echoSegmentedButtonColors
@@ -242,7 +243,7 @@ fun ChatInputBar(
     }
     val effectiveMinHeight = customInputHeightDp?.dp ?: if (isInputExpanded) 180.dp else 42.dp
     val effectiveMaxHeight = if (customInputHeightDp != null) 360.dp else if (isInputExpanded) 320.dp else 112.dp
-    val inputShape = RoundedCornerShape(22.dp)
+    val inputShape = EchoGlassControlShape
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }

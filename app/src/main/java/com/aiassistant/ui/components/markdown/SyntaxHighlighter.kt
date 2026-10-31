@@ -44,16 +44,19 @@ fun CodeBlock(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = if (isDark) Color(0xFF1E293B).copy(alpha = 0.95f) else Color(0xFFF1F5F9),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        shape = com.aiassistant.ui.components.EchoGlassControlShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            if (com.aiassistant.ui.theme.LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f)
+        )
     ) {
         Column {
             // 顶部栏：语言标签与复制按钮
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (isDark) Color(0xFF0F172A).copy(alpha = 0.7f) else Color(0xFFE2E8F0).copy(alpha = 0.7f))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically

@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text2.TextFieldDecorator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -76,7 +75,7 @@ fun EchoScrollableTextEditor(
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     var fieldHeightPx by remember { mutableIntStateOf(0) }
-    val shape = RoundedCornerShape(14.dp)
+    val shape = com.aiassistant.ui.components.EchoGlassControlShape
     val borderColor = if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.62f)
         else secondaryColor.copy(alpha = 0.28f)
     val viewport = scrollState.viewportSize
