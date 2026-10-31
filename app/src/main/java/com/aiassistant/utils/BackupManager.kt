@@ -35,7 +35,8 @@ object BackupManager {
 
     /** Restore outcome carried to the UI; the message is shown instead of a generic failure. */
     sealed interface RestoreResult {
-        data object Success : RestoreResult
+        /** [warning] describes references cleared or rows skipped by a tolerant retry, null when nothing was lost. */
+        data class Success(val warning: String? = null) : RestoreResult
         data class Failure(val message: String) : RestoreResult
     }
 
@@ -173,10 +174,19 @@ object BackupManager {
 
     /** Streams the snapshot from disk so a large backup never becomes one string or one JSON tree. */
     private fun restoreSnapshotFile(context: Context, file: File): RestoreResult = try {
-        runBlocking(Dispatchers.IO) {
-            BackupGraphStore.restoreStream(AppDatabase.getDatabase(context), openReader = { file.reader(Charsets.UTF_8) })
+        val report = runBlocking(Dispatchers.IO) {
+            val database = AppDatabase.getDatabase(context)
+            try {
+                BackupGraphStore.restoreStream(database, openReader = { file.reader(Charsets.UTF_8) })
+            } catch (e: IllegalStateException) {
+                // Columns such as api_usage_stats.apiConfigId carry no foreign key, so a device can keep
+                // references to rows deleted earlier. Retry once, clearing those links instead of failing.
+                if (e.message?.startsWith("备份关联缺失") != true) throw e
+                Log.w("BackupManager", "snapshot has dangling references, retrying tolerantly", e)
+                BackupGraphStore.restoreStream(database, openReader = { file.reader(Charsets.UTF_8) }, tolerant = true)
+            }
         }
-        RestoreResult.Success
+        RestoreResult.Success(report.describe())
     } catch (e: OutOfMemoryError) {
         throw e
     } catch (e: Exception) {
@@ -191,7 +201,7 @@ object BackupManager {
                 BackupGraphStore.restore(AppDatabase.getDatabase(context), BackupGraphStore.legacy(old))
             }
         }
-        RestoreResult.Success
+        RestoreResult.Success()
     } catch (e: OutOfMemoryError) {
         throw e
     } catch (e: Exception) {

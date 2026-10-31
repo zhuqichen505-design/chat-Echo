@@ -585,4 +585,64 @@ class BackupGraphStoreTest {
         assertNotNull(com.aiassistant.utils.BackupManager.guardSnapshot(600L * 1024 * 1024, 512L * 1024 * 1024))
         assertNotNull(com.aiassistant.utils.BackupManager.guardSnapshot(4L * 1024 * 1024, 16L * 1024 * 1024))
     }
+
+    @Test fun tolerantRestoreClearsDanglingNullableReferenceAndKeepsData() = runBlocking {
+        database().use { source -> database().use { target ->
+            val id = seed(source, "dangling folder")
+            source.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "kept"))
+            val snapshot = BackupGraphStore.export(source, null, { it })
+            snapshot.getAsJsonObject("tables").getAsJsonArray("conversations")[0].asJsonObject.addProperty("folderId", 999)
+            val file = java.io.File.createTempFile("echo-dangling-", ".json")
+            try {
+                file.writeText(snapshot.toString(), Charsets.UTF_8)
+                try {
+                    BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) }, encryptKey = { it }, cancelRequest = {})
+                    fail("strict restore accepted a dangling reference")
+                } catch (_: IllegalStateException) { }
+                assertTrue(target.conversationDao().getAllConversations().first().isEmpty())
+                val report = BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) },
+                    tolerant = true, encryptKey = { it }, cancelRequest = {})
+                assertEquals(1, report.clearedRefs)
+                assertEquals(0, report.skippedRows)
+                assertTrue(report.describe()!!.contains("conversations.folderId"))
+                val restored = target.conversationDao().getAllConversations().first().single()
+                assertNull(restored.folderId)
+                assertEquals(listOf("kept"), target.messageDao().getMessagesList(restored.id).map { it.content })
+            } finally { file.delete() }
+        } }
+    }
+
+    @Test fun tolerantRestoreSkipsRowsWhoseRequiredReferenceIsGone() = runBlocking {
+        database().use { source -> database().use { target ->
+            val id = seed(source, "dangling stat")
+            source.messageDao().insertMessage(Message(conversationId = id, role = "user", content = "kept"))
+            // api_usage_stats.apiConfigId carries no foreign key, so a deleted config leaves a dangling row.
+            source.openHelper.writableDatabase.execSQL(
+                "INSERT INTO api_usage_stats(id,apiConfigId,provider,modelName,inputTokens,outputTokens,thinkingTokens," +
+                    "totalTokens,cachedTokens,responseTime,success,timestamp,requestKind,tokenSource,completionStatus,firstTokenTimeMs) " +
+                    "VALUES(1,999,'synthetic','model-test',0,0,0,0,0,0,1,100,'chat','exact','completed',0)"
+            )
+            val snapshot = BackupGraphStore.export(source, null, { it })
+            val file = java.io.File.createTempFile("echo-orphan-", ".json")
+            try {
+                file.writeText(snapshot.toString(), Charsets.UTF_8)
+                try {
+                    BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) }, encryptKey = { it }, cancelRequest = {})
+                    fail("strict restore accepted a dangling required reference")
+                } catch (_: IllegalStateException) { }
+                val report = BackupGraphStore.restoreStream(target, openReader = { file.reader(Charsets.UTF_8) },
+                    tolerant = true, encryptKey = { it }, cancelRequest = {})
+                assertEquals(1, report.skippedRows)
+                assertEquals(0, report.clearedRefs)
+                assertTrue(report.describe()!!.contains("api_usage_stats.apiConfigId"))
+                val restored = target.conversationDao().getAllConversations().first().single()
+                assertEquals("dangling stat", restored.title)
+                assertEquals(listOf("kept"), target.messageDao().getMessagesList(restored.id).map { it.content })
+                target.openHelper.readableDatabase.query("SELECT COUNT(*) FROM api_usage_stats").use {
+                    it.moveToFirst(); assertEquals(0, it.getInt(0))
+                }
+                target.openHelper.readableDatabase.query("PRAGMA foreign_key_check").use { assertFalse(it.moveToFirst()) }
+            } finally { file.delete() }
+        } }
+    }
 }

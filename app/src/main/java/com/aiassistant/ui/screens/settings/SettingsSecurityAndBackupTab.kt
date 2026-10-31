@@ -617,7 +617,9 @@ fun BackupTab(
                 val result = withContext(Dispatchers.IO) { BackupManager.restoreBackupFromUri(context, it) }
                 isBackingUp = false
                 showMessage = when (result) {
-                    is BackupManager.RestoreResult.Success -> "导入成功，已合并备份数据；请重启应用以加载恢复的设置"
+                    is BackupManager.RestoreResult.Success ->
+                        result.warning?.let { "导入成功（$it）；请重启应用以加载恢复的设置" }
+                            ?: "导入成功，已合并备份数据；请重启应用以加载恢复的设置"
                     is BackupManager.RestoreResult.Failure -> result.message
                 }
                 backups = BackupManager.getBackupList(context)
@@ -729,8 +731,10 @@ fun BackupTab(
                                 BackupManager.restoreBackup(context, backup.filePath)
                             }
                             showMessage = when (result) {
-                                is BackupManager.RestoreResult.Success ->
-                                    if (backup.fileName.endsWith(".json", ignoreCase = true)) "恢复成功！已成功导入该对话" else "恢复成功！请重启应用"
+                                is BackupManager.RestoreResult.Success -> {
+                                    val done = if (backup.fileName.endsWith(".json", ignoreCase = true)) "恢复成功！已成功导入该对话" else "恢复成功！请重启应用"
+                                    result.warning?.let { "$done（$it）" } ?: done
+                                }
                                 is BackupManager.RestoreResult.Failure -> result.message
                             }
                         }

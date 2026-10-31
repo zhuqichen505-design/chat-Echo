@@ -235,12 +235,14 @@ object BackupGraphStore {
     /**
      * Streaming restore for files: the snapshot is read twice from [openReader] instead of being copied into a
      * single string and parsed into one tree, so memory stays proportional to one row plus identity maps.
+     * With [tolerant] enabled, references to rows the device no longer holds are cleared or their rows skipped.
      */
-    suspend fun restoreStream(database: AppDatabase, openReader: () -> Reader,
+    suspend fun restoreStream(database: AppDatabase, openReader: () -> Reader, tolerant: Boolean = false,
         encryptKey: (String) -> String = { com.aiassistant.AiAssistantApp.instance.cryptoManager.encrypt(it) },
         cancelRequest: (Long) -> Unit = { com.aiassistant.AiAssistantApp.instance.repository.cancelActiveRequest(it) }
-    ) {
+    ): RestoreReport {
         val state = RestoreState(database, encryptKey, cancelRequest)
+        state.tolerant = tolerant
         CountingReader(openReader()).use { counting ->
             scanSnapshot(JsonReader(counting).apply { isLenient = true }, state, counting)
         }
@@ -252,6 +254,23 @@ object BackupGraphStore {
             finishRestore(state)
         }
         database.invalidationTracker.refreshAsync()
+        return state.report()
+    }
+
+    /** What a tolerant import had to clear or drop because the referenced rows are not in the snapshot. */
+    data class RestoreReport(
+        val skippedRows: Int = 0,
+        val clearedRefs: Int = 0,
+        val details: List<String> = emptyList()
+    ) {
+        val isEmpty: Boolean get() = skippedRows == 0 && clearedRefs == 0
+
+        fun describe(): String? {
+            if (isEmpty) return null
+            val sample = details.take(3).joinToString("、")
+            val suffix = if (details.size > 3) " 等" else ""
+            return "已清理 $clearedRefs 处失效关联、跳过 $skippedRows 条失效记录（$sample$suffix）"
+        }
     }
 
     /** One row plus its tree and ContentValues must still fit; refuse with a reason instead of dying with OOM. */
@@ -284,6 +303,11 @@ object BackupGraphStore {
         var type: String? = null
         var maxRowChars = 0L
         var conversationIds: Set<Long> = emptySet()
+        /** Tolerant mode nulls nullable references and drops rows whose required reference is gone. */
+        var tolerant = false
+        var skippedRows = 0
+        var clearedRefs = 0
+        val details = LinkedHashSet<String>()
 
         private val identities = HashMap<String, LinkedHashMap<Long, String>>()
         private val hints = HashMap<String, HashMap<Long, Array<String?>>>()
@@ -291,6 +315,7 @@ object BackupGraphStore {
         private val maps = HashMap<String, MutableMap<Long, Long>>()
         private val existing = HashMap<String, MutableSet<Long>>()
         private val columnCache = HashMap<String, Set<String>>()
+        private val notNullCache = HashMap<String, Set<String>>()
         val messageRoles = HashMap<Long, String>()
         val messageConversations = HashMap<Long, Long>()
         val injections = ArrayList<LongArray>()
@@ -305,6 +330,14 @@ object BackupGraphStore {
                 buildSet { while (cursor.moveToNext()) add(cursor.getString(1)) }
             }
         }
+
+        fun notNullColumns(table: String): Set<String> = notNullCache.getOrPut(table) {
+            db.query("PRAGMA table_info(`$table`)").use { cursor ->
+                buildSet { while (cursor.moveToNext()) if (cursor.getInt(3) != 0) add(cursor.getString(1)) }
+            }
+        }
+
+        fun report(): RestoreReport = RestoreReport(skippedRows, clearedRefs, details.toList())
     }
 
     private fun observeRow(state: RestoreState, table: String, item: JsonObject) {
@@ -451,15 +484,26 @@ object BackupGraphStore {
         val local = id(item)?.let { state.idMap(table).getValue(it) }
         if (local != null) item.addProperty("id", local)
         fun mapped(target: String, old: Long?): Long? = old?.let { state.idMap(target)[it] }
-        references[table].orEmpty().forEach { (field, target) ->
+        val notNull = state.notNullColumns(table)
+        var dropRow = false
+        for ((field, target) in references[table].orEmpty()) {
             val old = id(item, field)
             var replacement = mapped(target, old)
             if (replacement == null && table == "conversations" && field == "apiConfigId") {
                 replacement = db.query("SELECT id FROM api_configs WHERE isEnabled=1 ORDER BY isDefault DESC LIMIT 1").use { if (it.moveToFirst()) it.getLong(0) else null }
                 require(replacement != null) { "请先配置可用的 API，再导入旧备份" }
             }
-            if (old != null && replacement == null && !state.legacy && field !in setOf("sourceMessageId", "summaryUpdatedMessageId")) error("备份关联缺失：$table.$field")
+            if (old != null && replacement == null && !state.legacy && field !in setOf("sourceMessageId", "summaryUpdatedMessageId")) {
+                if (!state.tolerant) error("备份关联缺失：$table.$field")
+                // These columns carry no foreign key, so a device can hold references to rows deleted earlier.
+                state.details += "$table.$field"
+                if (field in notNull) dropRow = true else state.clearedRefs++
+            }
             if (replacement == null) item.add(field, com.google.gson.JsonNull.INSTANCE) else item.addProperty(field, replacement)
+        }
+        if (dropRow) {
+            state.skippedRows++
+            return
         }
         listOf("activeWorldBookIds" to "world_books", "characterIds" to "character_profiles").forEach { (field, target) ->
             item.get(field)?.takeUnless { it.isJsonNull }?.let { value -> item.addProperty(field, ids(value.asString).mapNotNull { if (field == "characterIds" && it < 0) it else mapped(target, it) }.joinToString(",")) }
