@@ -84,6 +84,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -196,7 +197,8 @@ fun ChatInputBar(
     apiType: String = "openai",
     reasoningCapability: com.aiassistant.domain.model.ReasoningCapabilityEvidence? = null,
     isBarsHidden: Boolean = false,
-    onBarsHiddenChange: (Boolean) -> Unit = {}
+    onBarsHiddenChange: (Boolean) -> Unit = {},
+    horizontalInset: Dp = 12.dp,
 ) {
     var showToolMenu by remember { mutableStateOf(false) }
     var isInputExpanded by remember { mutableStateOf(false) }
@@ -259,7 +261,7 @@ fun ChatInputBar(
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = horizontalInset, vertical = 8.dp)
     ) {
         // 先保证输入区高度；思考卡片在剩余空间内自然收缩，紧贴输入框上方。
         if (showThinkingPopover && hasIntensityChoice && !isBarsHidden) {

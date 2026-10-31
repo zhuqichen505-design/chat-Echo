@@ -1,6 +1,8 @@
 package com.aiassistant
 
 import com.aiassistant.ui.components.SmoothReorderState
+import com.aiassistant.ui.components.echoContentInset
+import com.aiassistant.ui.components.echoContentInsetFor
 import com.aiassistant.ui.screens.settings.cleanModelNames
 import com.aiassistant.ui.screens.settings.parseModelList
 import com.aiassistant.ui.screens.settings.apiModelDiscoveryEntries
@@ -25,6 +27,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -46,6 +49,37 @@ import org.robolectric.Robolectric
 @org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34], application = android.app.Application::class, manifest = org.robolectric.annotation.Config.NONE)
 class UiPolishRegressionTest {
+
+    @Test
+    fun adaptiveContentInsetKeepsPhoneGutterAndCentresWideContent() {
+        assertEquals("手机宽度保持基础留白", 12f, echoContentInsetFor(411.dp, 12.dp, 720.dp).value, 0.01f)
+        assertEquals("平板宽度按 720dp 内容列居中", 292f, echoContentInsetFor(1280.dp, 12.dp, 720.dp).value, 0.01f)
+        assertEquals("临界宽度不产生额外留白", 12f, echoContentInsetFor(720.dp, 12.dp, 720.dp).value, 0.01f)
+        assertEquals("超宽窗口仍按 720dp 居中", 652f, echoContentInsetFor(2000.dp, 12.dp, 720.dp).value, 0.01f)
+    }
+
+    @Test
+    fun wideWindowAppliesSymmetricAdaptiveGutters() {
+        val bounds = mutableMapOf<String, Rect>()
+        var windowWidth = 0
+        measureComposeViewport(1280, 800) {
+            windowWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+            Box(Modifier.fillMaxSize().padding(horizontal = echoContentInset(base = 12.dp))) {
+                Box(
+                    Modifier.fillMaxWidth().height(40.dp)
+                        .onGloballyPositioned { bounds["row"] = it.boundsInRoot() }
+                )
+            }
+        }
+        val row = bounds.getValue("row")
+        assertEquals("左右留白必须对称", row.left, 1280f - row.right, 1f)
+        assertEquals(
+            "留白应与窗口宽度对应的内容列一致",
+            echoContentInsetFor(windowWidth.dp, 12.dp, 720.dp).value,
+            row.left,
+            1f
+        )
+    }
 
     @Test
     fun chatReviewPanelStackShrinksShortReviewsAndKeepsInputAdjacent() {

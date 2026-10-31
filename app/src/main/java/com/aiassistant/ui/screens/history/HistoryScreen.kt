@@ -30,6 +30,7 @@ import com.aiassistant.BuildConfig
 import com.aiassistant.domain.model.Conversation
 import com.aiassistant.domain.model.Message
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.EchoGlassPagePanelShape
 import com.aiassistant.ui.components.EchoWallpaperBackground
@@ -244,7 +245,7 @@ fun HistoryScreen(
                 } else {
                     LazyColumn(
                         modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(horizontal = echoContentInset(base = 16.dp), vertical = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(
@@ -269,7 +270,7 @@ fun HistoryScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(horizontal = echoContentInset(base = 16.dp), vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                         items(

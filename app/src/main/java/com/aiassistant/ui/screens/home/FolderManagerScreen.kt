@@ -24,6 +24,7 @@ import com.aiassistant.ui.theme.EchoFolderColors
 import com.aiassistant.AiAssistantApp
 import com.aiassistant.domain.model.Folder
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.EchoGlassPagePanelShape
 import com.aiassistant.ui.components.EchoWallpaperBackground
@@ -105,7 +106,7 @@ fun FolderManagerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(horizontal = echoContentInset(base = 16.dp), vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // "全部"选项

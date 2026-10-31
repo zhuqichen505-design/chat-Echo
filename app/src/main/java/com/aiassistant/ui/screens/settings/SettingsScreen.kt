@@ -73,6 +73,7 @@ import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoConfirmDialog
 import com.aiassistant.ui.components.EchoBadge
 import com.aiassistant.ui.components.EchoBadgeType
+import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
@@ -660,7 +661,12 @@ fun SettingsScreen(
 
         val topBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val topBarHeight = topBarPadding + 48.dp + 8.dp
-        val tabContentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = topBarHeight + 6.dp, bottom = 16.dp)
+        val tabContentPadding = PaddingValues(
+            start = echoContentInset(base = 12.dp),
+            end = echoContentInset(base = 12.dp),
+            top = topBarHeight + 6.dp,
+            bottom = 16.dp
+        )
 
         Box(
             modifier = Modifier

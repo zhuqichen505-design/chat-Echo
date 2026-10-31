@@ -119,6 +119,7 @@ import com.aiassistant.ui.components.reorderItem
 import com.aiassistant.ui.components.reorderDragHandle
 import com.aiassistant.ui.components.echoFilterChipElevation
 import com.aiassistant.ui.components.echoGlassPalette
+import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.echoSegmentedButtonBorder
 import com.aiassistant.ui.components.echoSegmentedButtonColors
 import com.aiassistant.ui.components.echoShapeClick
@@ -588,6 +589,8 @@ fun ChatScreen(
                     )
                 }
             }
+            // 平板 / 模拟器：消息列与输入栏共用同一内容列，避免整行拉伸
+            val chatGutter = echoContentInset(base = 12.dp, maxContentWidth = 900.dp)
             Scaffold(
                 containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onBackground,
@@ -886,7 +889,8 @@ fun ChatScreen(
                     apiType = currentModelOption?.apiType ?: "openai",
                     reasoningCapability = currentModelOption?.reasoningCapability,
                     isBarsHidden = isBarsHidden,
-                    onBarsHiddenChange = { isBarsHidden = it }
+                    onBarsHiddenChange = { isBarsHidden = it },
+                    horizontalInset = chatGutter
                 )
                 }
                 }
@@ -918,8 +922,8 @@ fun ChatScreen(
                     // v2.7.4 需求 1：水平 contentPadding 与底部输入栏/顶部工具栏统一为 12dp——
                     // 状态胶囊右缘与输入气泡右缘精确对齐（原先列表 14dp 与界面骨架 12dp 不一致）
                     contentPadding = PaddingValues(
-                        start = 12.dp,
-                        end = 12.dp,
+                        start = chatGutter,
+                        end = chatGutter,
                         top = statusBarTopPadding + topFloatingBarHeight +
                             if (showStoryContext && !showContextBesideText) compactContextPadding else 0.dp,
                         bottom = listBottomPadding
