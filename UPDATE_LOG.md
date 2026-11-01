@@ -18,7 +18,7 @@ Release `assembleRelease --no-daemon` 退出 0，339 秒；`Echo-v2.8.25.apk` 25
 
 APK 审计：446 个 ZIP 条目 CRC 全通过；`classes.dex` 字符串池 31,571 条（较 2.8.24 新增 33 / 移除 16），新增 8 条可读中文均为导入容错提示与版本号，新增 25 条非中文为 R8 类型描述符、日志标签与构建元数据，未出现联系方式、私有地址、本机路径或凭据模式；`resources.arsc` 与上一版逐字节一致（新增资源字符串 0）；186 张图片名称与 CRC 全部一致。发布目录排他复制：复制前 220 文件（219 APK）名称 / 大小全部保留，复制后 221 文件（220 APK）。
 
-发布结果：待推送的三个提交（`9f615d0` 容错导入、`b83178b` 宽屏排版、`a8b83a3` 版本递增）与 annotated 标签 `v2.8.25` 已推送，push 退出 0；`git ls-remote` 核验 main 指向 `a8b83a3e0b91c63db64433bad595f727128124b7`、peeled 标签同指。GitHub Release [Echo v2.8.25](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.25) 为 Latest，唯一附件 `Echo-v2.8.25.apk`，GitHub digest 为 `sha256:730079c6…26aad` 与本机一致，正文与 `release-notes/latest.md` 一致。匿名浏览器直链在本机经本地代理返回 502（代理侧问题，非 Release 故障），改用 GitHub API 资产通道 `gh release download` 核验：25,489,177 字节、SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.24 Release 与远端标签，远端仅剩 v2.8.25；本机历史标签与全部历史 APK 保留。
+发布结果：待推送的三个提交（`9f615d0` 容错导入、`b83178b` 宽屏排版、`a8b83a3` 版本递增）与 annotated 标签 `v2.8.25` 已推送，push 退出 0；推送时 `git ls-remote` 核验 main 与 peeled 标签同指 `a8b83a3`，其后发布记录提交 `b8bdfbb` 已推送，远端 main 以最新发布记录提交为准（`git ls-remote origin main` 可复核），标签 `v2.8.25` 始终指向版本提交 `a8b83a3`。GitHub Release [Echo v2.8.25](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.25) 为 Latest，唯一附件 `Echo-v2.8.25.apk`，GitHub digest 为 `sha256:730079c6…26aad` 与本机一致，正文与 `release-notes/latest.md` 一致。匿名浏览器直链在本机经本地代理返回 502（代理侧问题，非 Release 故障），改用 GitHub API 资产通道 `gh release download` 核验：25,489,177 字节、SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.24 Release 与远端标签，远端仅剩 v2.8.25；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，未验证安装启动、真实备份导入与平板视觉。需人工复验：此前报“备份关联缺失”的备份应导入成功并列出清理项；普通备份与单对话备份行为不变；在平板 / 模拟器检查设置、首页、历史、文件夹、聊天的内容列居中，手机布局与上一版一致。
 
