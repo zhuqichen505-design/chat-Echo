@@ -26,6 +26,18 @@
 
 ## 本次记录
 
+## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
+
+- 基线 `main/33f6cbd`；版本 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。
+- 备份问题根因：删除 API 配置只删配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等无外键列保留悬空 ID，导出后被严格引用校验拒绝；此前版本在 OOM 阶段崩溃，未走到该校验。
+- 临时方案一：严格优先，仅命中“备份关联缺失”时回滚并以容错模式重试；可空列置空计数，NOT NULL 列派生行跳过计数，成功提示列出清理项；结构 / 必需引用损坏仍失败回滚。
+- 临时方案二：新增 `EchoAdaptiveLayout`（窗口分级 + 对称留白），设置 / 首页 / 历史 / 文件夹 ≤720dp，聊天消息列与输入栏共用 ≤900dp，手机布局不变。
+- 文件：`BackupGraphStore.kt`、`BackupManager.kt`、`SettingsSecurityAndBackupTab.kt`、`EchoAdaptiveLayout.kt`（新增）、`SettingsScreen.kt`、`HomeScreen.kt`、`FolderManagerScreen.kt`、`HistoryScreen.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`、版本配置、两个测试文件；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：新增 4 项回归（悬空可空引用严格回滚与容错置空、悬空非空引用容错跳过、留白分级、Compose 实测对称）。最终 verify `20261101-104659-583` 退出 0，509.388 秒；88 套件 / 1,053 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，339 秒；APK 25,489,177 字节，SHA256 `730079c6aa1c159c08d3b3535524189db84fb210be3c87c79b2bd764f8426aad`，v2 签名与上版一致，Android Debug 非正式生产签名。
+- 隐私：446 ZIP 条目 CRC 通过，31,571 DEX 字符串（新增 33 / 移除 16），新增可读中文 8 条均为容错提示与版本号，隐私新增命中 0；`resources.arsc` 逐字节一致，186 张图片不变。发布目录 220→221 文件（219→220 APK），历史包保留。
+- 发布：提交 `9f615d0`、`b83178b`、`a8b83a3` 与 `v2.8.25` 已推送到远端 main / 标签；GitHub Release 为 Latest，唯一附件 digest 与 API 通道下载 SHA256 与本机一致（浏览器直链经本地代理 502，属代理侧问题）。按策略仅远端撤下旧 v2.8.24 Release / 标签，本机历史保留。
+- 待办：无设备，安装启动、真实备份导入与平板视觉待人工验收。详见本轮 UPDATE_LOG / walkthrough。
+
 ## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
 
 - 基线 `main/6e9db7e`；版本 2.8.24/210；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取归档。

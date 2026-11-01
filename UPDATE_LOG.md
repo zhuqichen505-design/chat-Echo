@@ -1,5 +1,27 @@
 # 维护记录
 
+## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
+
+基线 `main/33f6cbd`；版本由 2.8.24/210 递增到 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+需求一（备份导入）：2.8.24 流式恢复上线后，用户导入同一份 ZIP 备份提示“备份关联缺失”而无法完成。根因为数据本身含失效引用：删除 API 配置时只删除配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等列没有外键约束，旧行保留悬空 ID；导出原样写入，导入的严格引用校验据此中止整单。此前版本在 OOM 阶段即崩溃，从未走到该校验，故该问题在本轮才显形。临时方案：严格校验优先，仅当失败原因为“备份关联缺失”时回滚后以容错模式重试一次；可空列置空并计数，NOT NULL 列的派生行（使用统计、已选模型、分支等）跳过并计数，成功提示列出清理数量与字段；结构损坏、必需引用缺失、`conversations.apiConfigId` 无可用 API 仍明确失败，不产生孤立数据。
+
+需求二（平板 / 模拟器排版）：主页面内容列原无最大宽度，宽屏下整行拉伸。临时方案：新增 `EchoAdaptiveLayout`，按窗口宽度分级（<600 / 600–839 / ≥840dp）并以 `echoContentInset(base, maxContentWidth)` 计算对称留白，手机保持原留白，宽屏把多余宽度转为居中留白；设置页 12dp 基准、列宽 ≤720dp，首页 / 历史 / 文件夹 16dp 基准、列宽 ≤720dp，聊天页消息列与输入栏共用 900dp 内容列（`ChatInputBar` 新增 `horizontalInset` 参数，避免“消息收窄、输入框仍满屏”）。弹窗已有宽度上限、气泡已有 720dp 限制、≥720dp 故事侧栏逻辑均未改动。
+
+涉及文件：`utils/BackupGraphStore.kt`、`utils/BackupManager.kt`、`ui/screens/settings/SettingsSecurityAndBackupTab.kt`、`ui/components/EchoAdaptiveLayout.kt`（新增）、`ui/screens/settings/SettingsScreen.kt`、`ui/screens/home/HomeScreen.kt`、`ui/screens/home/FolderManagerScreen.kt`、`ui/screens/history/HistoryScreen.kt`、`ui/screens/chat/ChatScreen.kt`、`ui/screens/chat/ChatInputComponents.kt`、`app/build.gradle.kts`；测试 `BackupGraphStoreTest.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema、API 地址、消息格式或备份文件格式。
+
+新增回归 4 项：悬空可空引用在严格模式整单回滚、容错模式置空且会话与消息保留；悬空 NOT NULL 引用在容错模式跳过该行、外键检查通过；内容列留白的宽度分级与对称性；Compose 实际测量留白对称且与窗口宽度一致。既有导入、旧版兼容、注入校验与 UI 回归全部保留并通过。
+
+最终源码冻结验收 `20261101-104659-583`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，509.388 秒；88 套件 / 1,053 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon` 退出 0，339 秒；`Echo-v2.8.25.apk` 25,489,177 字节，SHA256 `730079c6aa1c159c08d3b3535524189db84fb210be3c87c79b2bd764f8426aad`；`com.aiassistant`、2.8.25/211、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 验证退出 0（v1 false / v2 true），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。
+
+APK 审计：446 个 ZIP 条目 CRC 全通过；`classes.dex` 字符串池 31,571 条（较 2.8.24 新增 33 / 移除 16），新增 8 条可读中文均为导入容错提示与版本号，新增 25 条非中文为 R8 类型描述符、日志标签与构建元数据，未出现联系方式、私有地址、本机路径或凭据模式；`resources.arsc` 与上一版逐字节一致（新增资源字符串 0）；186 张图片名称与 CRC 全部一致。发布目录排他复制：复制前 220 文件（219 APK）名称 / 大小全部保留，复制后 221 文件（220 APK）。
+
+发布结果：待推送的三个提交（`9f615d0` 容错导入、`b83178b` 宽屏排版、`a8b83a3` 版本递增）与 annotated 标签 `v2.8.25` 已推送，push 退出 0；`git ls-remote` 核验 main 指向 `a8b83a3e0b91c63db64433bad595f727128124b7`、peeled 标签同指。GitHub Release [Echo v2.8.25](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.25) 为 Latest，唯一附件 `Echo-v2.8.25.apk`，GitHub digest 为 `sha256:730079c6…26aad` 与本机一致，正文与 `release-notes/latest.md` 一致。匿名浏览器直链在本机经本地代理返回 502（代理侧问题，非 Release 故障），改用 GitHub API 资产通道 `gh release download` 核验：25,489,177 字节、SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.24 Release 与远端标签，远端仅剩 v2.8.25；本机历史标签与全部历史 APK 保留。
+
+设备边界：当前无连接设备，未验证安装启动、真实备份导入与平板视觉。需人工复验：此前报“备份关联缺失”的备份应导入成功并列出清理项；普通备份与单对话备份行为不变；在平板 / 模拟器检查设置、首页、历史、文件夹、聊天的内容列居中，手机布局与上一版一致。
+
 ## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
 
 基线 `main/6e9db7e`；版本由 2.8.23/209 递增到 2.8.24/210；Room v37 / 20 个实体不变。原有未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本轮只修改当前仓库源码、测试与文档。

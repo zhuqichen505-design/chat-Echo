@@ -4,11 +4,17 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.8.24（versionCode 210）
+**当前源码版本**：v2.8.25（versionCode 211）
 
 **数据库版本**：37（20 个实体），本版无迁移。
 
-**当前版本（2026-11-01，已发布）**：2.8.24/210 修复大备份导入崩溃，恢复改为流式读取并新增导入预检与真实失败原因；基线 `main/6e9db7e`。现象为选中备份文件后进程直接退出，宿主日志三次 `OutOfMemoryError`（`StringWriter` 一次申请 134,250,504 字节，堆上限 192 MiB），反混淆后定位到 `BackupManager.restoreBackup` 第 120 行 `snapshot.readText`：整份 `snapshot.json` 读成单字符串，随后再构建完整 JSON 树。写入侧本是逐行流式，读取侧整体读入属设计不对称；`OutOfMemoryError` 为 `Error`，原 `catch (Exception)` 无法兜底。
+**当前版本（2026-11-01，已发布）**：2.8.25/211 备份导入容错与宽屏内容列适配；基线 `main/33f6cbd`。备份侧：删除 API 配置只删配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等无外键列会保留悬空 ID，导出后被严格引用校验拒绝（2.8.24 才能走到该步）。现改为严格优先、命中“备份关联缺失”才回滚重试容错：可空列置空、NOT NULL 列的派生行跳过并计数，成功提示列出清理项；结构性引用缺失仍明确失败。宽屏侧：新增 `EchoAdaptiveLayout`，按窗口宽度分级并以对称留白形成居中内容列，设置 / 首页 / 历史 / 文件夹 ≤720dp，聊天消息列与输入栏共用 ≤900dp，手机布局不变。
+
+涉及 `utils/BackupGraphStore.kt`、`utils/BackupManager.kt`、`ui/screens/settings/SettingsSecurityAndBackupTab.kt`、`ui/components/EchoAdaptiveLayout.kt`、`SettingsScreen.kt`、`HomeScreen.kt`、`FolderManagerScreen.kt`、`HistoryScreen.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`、版本配置与 `BackupGraphStoreTest.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、消息格式或备份格式。新增 4 项回归：悬空可空引用严格回滚 / 容错置空、悬空非空引用容错跳过、留白分级与对称性、Compose 实际测量。最终冻结验收 `20261101-104659-583` 脚本 / Gradle 退出 0，509.388 秒；88 套件 / 1,053 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，339 秒；`Echo-v2.8.25.apk` 25,489,177 字节，SHA256 `730079c6aa1c159c08d3b3535524189db84fb210be3c87c79b2bd764f8426aad`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目 CRC、31,571 DEX 字符串（新增 33 / 移除 16，新增可读中文 8 条均为容错提示与版本号），`resources.arsc` 逐字节不变，186 张图片一致。发布目录由 220 文件（219 APK）排他复制为 221 文件（220 APK）。
+
+设备边界：无连接设备，未验证安装启动、真实备份导入与平板视觉；需人工复验容错导入提示、普通与单对话备份行为，以及平板 / 模拟器下各页面内容列居中。版本提交 `a8b83a3e0b91c63db64433bad595f727128124b7`（含 `9f615d0`、`b83178b`）与 `v2.8.25` 已推送并核验远端一致；[Echo v2.8.25 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.25) 唯一 APK 附件的 GitHub digest 与 API 通道下载 SHA256 均与本机一致（匿名浏览器直链经本地代理返回 502，属代理侧问题）。按最新版策略已删除远端旧 v2.8.24 Release / 标签，本机历史标签和 APK 保留。
+
+**历史已发布 2.8.24/210（2026-11-01）**：修复大备份导入 OOM，恢复改为 `restoreStream` 双遍流式读取（第一遍仅取身份与注入字段，第二遍逐行写入），新增 `guardSnapshot` 预检与 `RestoreResult` 真实失败原因；基线 `main/6e9db7e`。现象为选中备份文件后进程直接退出，宿主日志三次 `OutOfMemoryError`（`StringWriter` 一次申请 134,250,504 字节，堆上限 192 MiB），定位到 `BackupManager.restoreBackup` 第 120 行 `snapshot.readText`。
 
 临时实施方案：A 新增 `BackupGraphStore.restoreStream`，`JsonReader` 两遍顺序读取同一文件——第一遍只取 `id`、`_uuid`、注入关系与自然键，其余 `skipValue`；第二遍逐行写入。ID 分配先于写入，会话取消仍在事务外；逐行默认值、引用映射、`variantGroupId` 与内嵌角色/场景改写、`apiKey` 处理、陈余行清理和外键检查抽为共享函数，整树入口与流式入口语义一致；身份映射按表释放，内存只与行数线性相关，未知表按前向兼容跳过。B 用 `guardSnapshot` 在解压前按 ZIP 中央目录大小与可用堆判定，扫描期记录单行峰值并在写入前拦截超大行；`restoreBackup` / `restoreBackupFromUri` 返回 `RestoreResult.Success / Failure(message)`，界面显示真实原因。
 
@@ -225,6 +231,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC、DEX / 资源与已知私人标
 
 | 版本 | 数据库 | 主要更新 |
 |------|--------|----------|
+| 2.8.25（已发布） | 37 | 备份导入容错（清理失效关联 / 跳过派生行并报告）；平板与宽屏内容列居中适配 |
 | 2.8.24（已发布） | 37 | 大备份导入改为流式恢复，内存与备份体积解耦；新增导入预检与真实失败原因，消除 OOM 闪退 |
 | 2.8.23（已发布） | 37 | 拾页 / 声呐 / 构型三套全场景主题；文字拖选远距离自动滚动由 88dp/s 优化至 144dp/s |
 | 2.8.15（已发布） | 37 | 修复启动 HTTP 状态正则的 Android ICU 字符类兼容问题，补实际正则及状态分类回归；同签名覆盖升级 |

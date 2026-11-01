@@ -1,5 +1,34 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
+
+基线 `main/33f6cbd`；版本 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
+
+问题一：2.8.24 上线流式恢复后，同一份 ZIP 备份提示“备份关联缺失”而无法导入。根因是数据本身含失效引用——删除 API 配置只删除配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等列没有外键约束，旧行保留悬空 ID；导出原样写出，导入的严格引用校验据此中止整单。更早版本在 OOM 阶段崩溃，从未执行到该校验，所以问题在 2.8.24 才显形。
+
+问题二：主页面内容列缺少最大宽度，平板与模拟器上整行拉伸。
+
+临时实施方案：
+- 恢复侧：严格校验优先；仅当失败信息以“备份关联缺失”开头时，在同一事务回滚后以 `tolerant` 重试一次。容错模式下按 `PRAGMA table_info` 判定列可空性：可空列置空并计数，NOT NULL 列的派生行（使用统计、已选模型、分支等）跳过并计数；成功后由 `RestoreReport.describe()` 在提示中列出清理数量与最多三个字段。`conversations.apiConfigId` 仍要求本机存在可用 API；注入关联仍严格校验；结构与必需引用损坏仍失败并回滚。
+- 布局侧：新增 `ui/components/EchoAdaptiveLayout.kt`（窗口分级 <600 / 600–839 / ≥840dp + `echoContentInsetFor` 纯函数与 `echoContentInset` 组合函数）。设置页 12dp 基准、首页 / 历史 / 文件夹 16dp 基准，内容列 ≤720dp；聊天消息列与输入栏共用 900dp 内容列（`ChatInputBar` 新增 `horizontalInset` 参数）。弹窗宽度上限、气泡 720dp 限制、≥720dp 故事侧栏均未改动。
+
+新增回归 4 项：
+- 悬空可空引用（`conversations.folderId=999`）：严格模式整单回滚且本地数据不变；容错模式置空、`clearedRefs=1`、会话与消息保留。
+- 悬空非空引用（`api_usage_stats.apiConfigId=999`）：严格模式失败；容错模式跳过该行，会话、消息与外键检查正常。
+- 留白分级：411dp 保持 12dp、1280dp 得 292dp、临界 720dp 不额外留白、2000dp 仍按 720dp 居中。
+- Compose 实测：宽窗口下左右留白对称，且与窗口宽度对应的内容列一致。
+
+最终冻结验收 `20261101-104659-583`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，509.388 秒；88 套件 / 1,053 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon` 退出 0，339 秒；`Echo-v2.8.25.apk` 25,489,177 字节，SHA256 `730079c6aa1c159c08d3b3535524189db84fb210be3c87c79b2bd764f8426aad`；`com.aiassistant`、2.8.25/211、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0（v1 false / v2 true），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目 CRC 通过；DEX 字符串 31,571（新增 33 / 移除 16，新增可读中文 8 条均为容错提示与版本号）；`resources.arsc` 逐字节一致；186 张图片 CRC 全部一致。发布目录 220 文件（219 APK）→ 221 文件（220 APK），历史包名称 / 大小全部保留。
+
+发布：提交 `9f615d0`、`b83178b`、`a8b83a3` 与 `v2.8.25` 已推送，`git ls-remote` 核验 main 与 peeled 标签一致；GitHub Release 为 Latest，唯一附件 digest 与本机一致；匿名浏览器直链在本机经本地代理返回 502（代理侧问题），改用 GitHub API 资产通道下载核验，25,489,177 字节与 SHA256 一致。按策略仅撤下远端旧 v2.8.24 Release / 标签，本机历史保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 用此前报“备份关联缺失”的备份导入，确认成功提示列出清理项，对话、消息与附件完整。
+- 普通备份、单对话备份、旧版备份各导入一次，确认行为不变。
+- 平板 / 模拟器检查设置、首页、历史、文件夹、聊天的内容列是否居中；手机布局与上一版一致。
+
 ## 2026-11-01 · 2.8.24 大备份导入流式恢复与预检（已发布）
 
 基线 `main/6e9db7e`；版本 2.8.24/210；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
