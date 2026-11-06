@@ -16,7 +16,7 @@ Release `assembleRelease --no-daemon` 退出 0，4 分 12 秒；`Echo-v2.8.28.ap
 
 APK 审计：446 个 ZIP 条目结构不变，`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,108,980 字节（较上版 +708），可读差异仅版本号 2.8.28 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 223 文件（222 APK）保留，复制后 224 文件（223 APK）。
 
-发布结果：待推送与 Release 上传后补充。
+发布结果：版本提交 `5c428fab21989c5377343542b8919d6e4cb7fb08` 与 annotated 标签 `v2.8.28` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.28](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.28) 为 Latest，唯一附件 `Echo-v2.8.28.apk`，GitHub digest `sha256:a56839e2…b5d8` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.27 Release 与远端标签，远端仅剩 v2.8.28；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：正常点击输入、按返回隐藏键盘后再次点击、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板；并确认 2.8.27 的编辑器 / 搜索框 / 代码块固定形状。若仍出现无法输入或闪烁，请记录输入法名称 / 版本与操作序列。
 

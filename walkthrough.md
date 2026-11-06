@@ -18,6 +18,8 @@
 
 Release：`assembleRelease --no-daemon` 退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`；`com.aiassistant`、2.8.28/214、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项 CRC 变化；DEX +708 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 223 文件（222 APK）→ 224 文件（223 APK），历史包名称 / 大小保留。
 
+发布：版本提交 `5c428fab21989c5377343542b8919d6e4cb7fb08` 与 annotated 标签 `v2.8.28` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签同指该提交。GitHub Release [Echo 2.8.28](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.28) 为 Latest，唯一附件 `Echo-v2.8.28.apk`，GitHub digest 与本机一致；`gh release download` 复核 25,489,177 字节、SHA256 一致，正文与 `release-notes/latest.md` 一致（仅平台尾部换行）。按策略仅撤下远端旧 v2.8.27 Release / 标签，远端仅剩 v2.8.28；本机历史标签与 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 - 正常点击输入框输入；按返回隐藏键盘后再次点击；发送后立即点击输入；快速连续点击输入区；切换会话后返回；切换输入法 / 表情面板。
 - 确认每次点击都能弹出键盘并恢复输入，不出现“有光标但无键盘”；若仍复现，记录输入法名称 / 版本、Android 版本和操作序列。

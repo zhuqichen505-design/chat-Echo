@@ -6,7 +6,7 @@
 - 保留 2.8.27 的窗口形状修复：“编辑模型回复”“仅修改消息内容”、系统提示词编辑器为 14dp 圆角，首页搜索框 22dp，Markdown 代码块 10dp；这些内容形状不随主题控件圆角变化。
 - 不修改数据库结构、请求协议、消息格式或备份格式。版本 2.8.28/214，Room v37（20 个实体）不变。
 
-最终冻结验收 `20261107-001738-718`：脚本 / Gradle 退出 0，517.513 秒；88 套件 / 1,055 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`；v2 签名连续，Android Debug **非正式生产签名**。446 个 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项变化，DEX 可读差异仅版本号与 UA，无新增可读文案，隐私扫描命中 0，资源表与 186 张图片不变。当前无连接设备，输入法行为与编辑器形状仍待人工验收。
+最终冻结验收 `20261107-001738-718`：脚本 / Gradle 退出 0，517.513 秒；88 套件 / 1,055 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`；v2 签名连续，Android Debug **非正式生产签名**。446 个 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项变化，DEX 可读差异仅版本号与 UA，无新增可读文案，隐私扫描命中 0，资源表与 186 张图片不变。提交 `5c428fa` 与标签 `v2.8.28` 已推送；[Echo 2.8.28 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.28) 为 Latest，唯一附件 digest 与资产通道下载 SHA256 与本机一致，远端仅保留最新版。当前无连接设备，输入法行为与编辑器形状仍待人工验收。
 
 ## Echo 2.8.27（已发布）
 

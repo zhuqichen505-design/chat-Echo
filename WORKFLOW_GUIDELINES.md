@@ -34,6 +34,7 @@
 - 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`、版本配置；新增 1 项跨帧焦点回归，测试总数 1,055；不新增依赖，不改 Room / API / 消息 / 备份格式。
 - 验证：最终 verify `20261107-001738-718` 退出 0，517.513 秒；88 套件 / 1,055 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，4 分 12 秒；APK 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`，v2 签名与上版一致，Android Debug 非正式生产签名。
 - 隐私：446 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项变化，DEX 可读差异仅版本号与 UA，隐私模式命中 0；`resources.arsc` 与 186 张图片不变。发布目录 223→224 文件（222→223 APK），历史包保留。
+- 发布：提交 `5c428fa` 与标签 `v2.8.28` 已推送到远端 main / 标签；GitHub Release 为 Latest，唯一附件 digest 与资产通道下载 SHA256 / 大小与本机一致，正文与 latest 一致（仅平台尾部换行）。按策略仅远端撤下旧 v2.8.27 Release / 标签，本机历史保留。
 - 待办：无设备，输入法行为与 2.8.27 编辑器形状待人工验收。详见本轮 UPDATE_LOG / walkthrough。
 
 ## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
