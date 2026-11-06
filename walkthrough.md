@@ -1,5 +1,28 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
+
+基线 `main/f79d291`；版本 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
+
+问题：用户反馈输入框偶现无法输入。复核发现键盘重开事务存在焦点状态竞态：原实现通过 `rememberUpdatedState` 保存组合快照中的 `focused` / IME 可见性；系统收起 IME 后点击输入框，事务跨帧 `clearFocus → requestFocus`，随后 `isFocused()` 仍可能读到旧快照（false），从而跳过 `showKeyboard()`；IME 可见性快照滞后也会让“已显示则跳过”判断误判。表现为输入框看似有焦点但键盘不再弹出。
+
+临时实施方案：
+- `rememberEditorKeyboardRequest` 改为接收实时焦点读取 lambda：聊天输入栏传 `{ inputFocused }`，通用编辑器传 `{ focused }`。
+- IME 可见性通过 `ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())` 实时查询，查询失败才回退组合状态。
+- `reopenEditorKeyboard` 在 `requestFocus` 后最多再等两帧确认焦点落地，再决定是否 `showKeyboard()`；保留“已聚焦且输入法确实可见不重复重开”的防闪烁保护。
+- 2.8.27 的编辑器 14dp、输入框 / 首页搜索 22dp、代码块 10dp 固定内容形状随本版保留。
+
+新增回归 1 项（`keyboardReopenWaitsForFocusToSettleAcrossFrames`），原有快捷重开、取消、失焦不弹键盘、已显示不重复重开等测试全部保留；总数 1,055。
+
+最终冻结验收 `20261107-001738-718`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，517.513 秒；88 套件 / 1,055 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon` 退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`；`com.aiassistant`、2.8.28/214、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项 CRC 变化；DEX +708 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 223 文件（222 APK）→ 224 文件（223 APK），历史包名称 / 大小保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 正常点击输入框输入；按返回隐藏键盘后再次点击；发送后立即点击输入；快速连续点击输入区；切换会话后返回；切换输入法 / 表情面板。
+- 确认每次点击都能弹出键盘并恢复输入，不出现“有光标但无键盘”；若仍复现，记录输入法名称 / 版本、Android 版本和操作序列。
+- 复查 2.8.27 的形状：编辑模型回复 / 用户消息 / 系统提示词编辑器 14dp，首页搜索框 22dp，代码块 10dp，通用胶囊按钮不变。
+
 ## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
 
 基线 `main/7186073`；版本 2.8.27/213；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。

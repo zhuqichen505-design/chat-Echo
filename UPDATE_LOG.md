@@ -1,18 +1,24 @@
 # 维护记录
 
-## 2026-11-06 · 输入框偶发无法输入修复（未发版）
+## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
 
-基线 `main/c8c7829`；源码版本仍为 2.8.27/213；Room v37 / 20 个实体不变。本轮只做源码修复，未构建或发布 APK，2.8.27 安装包不包含本修复。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+基线 `main/f79d291`；版本由 2.8.27/213 递增到 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
 
 问题：用户反馈输入框偶现无法输入。复核后发现键盘重开事务存在焦点状态竞态：`rememberEditorKeyboardRequest` 通过 `rememberUpdatedState` 保存组合快照中的 `focused` 与 `isImeVisible`；系统收起 IME 后点击输入框时，事务先 `clearFocus`，跨帧再 `requestFocus`，但随后用于确认的 `isFocused()` 仍可能读到旧的组合快照（false），于是跳过 `showKeyboard()`；同理，组合快照中的 IME 可见性也可能滞后，导致 2.8.27 新增的“已聚焦且已显示则跳过”判断误判。表现为输入框看似有焦点但键盘不再弹出、无法继续输入。
 
-临时修复方案：`rememberEditorKeyboardRequest` 改为接收实时焦点读取 lambda（`ChatInputBar` 传 `{ inputFocused }`，`EchoNativeTextField` 传 `{ focused }`），不再使用组合快照布尔值；IME 可见性改为通过 `ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())` 查询实时系统 Insets，查询失败才回退到组合状态；`reopenEditorKeyboard` 在 `requestFocus` 后最多再等待两帧确认焦点落地，避免慢设备上一帧未完成重组就放弃唤起。已有的“已聚焦且输入法已显示不重复重开”保护保留，消除重复 `requestFocus` 造成的闪烁。
+临时修复方案：`rememberEditorKeyboardRequest` 改为接收实时焦点读取 lambda（`ChatInputBar` 传 `{ inputFocused }`，`EchoNativeTextField` 传 `{ focused }`），不再使用组合快照布尔值；IME 可见性改为通过 `ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())` 查询实时系统 Insets，查询失败才回退到组合状态；`reopenEditorKeyboard` 在 `requestFocus` 后最多再等待两帧确认焦点落地，避免慢设备上一帧未完成重组就放弃唤起。已有的“已聚焦且输入法已显示不重复重开”保护保留，消除重复 `requestFocus` 造成的闪烁。2.8.27 的编辑窗口固定形状（编辑器 14dp、输入框 / 首页搜索 22dp、代码块 10dp）随本版继续保留。
 
-涉及文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。新增回归 1 项（`keyboardReopenWaitsForFocusToSettleAcrossFrames`），测试总数由 1,054 增至 1,055；快捷重开、取消、失焦不弹键盘、已显示不重复重开等既有测试全部保留。
+涉及文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`、`app/build.gradle.kts`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。新增回归 1 项（`keyboardReopenWaitsForFocusToSettleAcrossFrames`），测试总数由 1,054 增至 1,055；快捷重开、取消、失焦不弹键盘、已显示不重复重开等既有测试全部保留。
 
-最终冻结验收 `20261106-233335-284`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，558.803 秒；88 套件 / 1,055 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+最终冻结验收 `20261107-001738-718`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，517.513 秒；88 套件 / 1,055 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
 
-设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：正常点击输入、按返回隐藏键盘后再次点击、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板；若仍出现，请记录输入法版本与操作序列。未构建 APK，现有 2.8.27 安装包不含本修复。
+Release `assembleRelease --no-daemon` 退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`；`com.aiassistant`、2.8.28/214、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。
+
+APK 审计：446 个 ZIP 条目结构不变，`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,108,980 字节（较上版 +708），可读差异仅版本号 2.8.28 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 223 文件（222 APK）保留，复制后 224 文件（223 APK）。
+
+发布结果：待推送与 Release 上传后补充。
+
+设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：正常点击输入、按返回隐藏键盘后再次点击、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板；并确认 2.8.27 的编辑器 / 搜索框 / 代码块固定形状。若仍出现无法输入或闪烁，请记录输入法名称 / 版本与操作序列。
 
 ## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
 

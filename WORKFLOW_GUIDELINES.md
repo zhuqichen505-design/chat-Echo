@@ -26,14 +26,15 @@
 
 ## 本次记录
 
-## 2026-11-06 · 输入框偶发无法输入修复（未发版）
+## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
 
-- 基线 `main/c8c7829`；源码版本仍 2.8.27/213；Room v37 / 20 个实体不变。未构建 APK，2.8.27 安装包不含本修复。
+- 基线 `main/f79d291`；版本 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。
 - 根因：键盘重开事务用组合快照判断 `focused` / IME 可见性；跨帧 `clearFocus → requestFocus` 后快照可能仍为旧值，导致跳过 `showKeyboard()`，或 2.8.27 的“已显示则跳过”误判，输入框看似聚焦但键盘不再弹出。
 - 临时方案：焦点判断改为实时 State lambda；IME 可见性改为 `ViewCompat.getRootWindowInsets(...).isVisible(IME)` 实时查询（失败回退组合状态）；`requestFocus` 后最多再等两帧确认焦点落地；保留“已聚焦且已显示不重复重开”保护。
-- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`；新增 1 项跨帧焦点回归，测试总数 1,055；不新增依赖，不改 Room / API / 消息 / 备份格式。
-- 验证：最终 verify `20261106-233335-284` 退出 0，558.803 秒；88 套件 / 1,055 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。
-- 待办：无设备，输入法行为待人工复验；如需包含本修复的 APK，需用户明确要求构建并递增版本。
+- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`、版本配置；新增 1 项跨帧焦点回归，测试总数 1,055；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261107-001738-718` 退出 0，517.513 秒；88 套件 / 1,055 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，4 分 12 秒；APK 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`，v2 签名与上版一致，Android Debug 非正式生产签名。
+- 隐私：446 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项变化，DEX 可读差异仅版本号与 UA，隐私模式命中 0；`resources.arsc` 与 186 张图片不变。发布目录 223→224 文件（222→223 APK），历史包保留。
+- 待办：无设备，输入法行为与 2.8.27 编辑器形状待人工验收。详见本轮 UPDATE_LOG / walkthrough。
 
 ## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
 

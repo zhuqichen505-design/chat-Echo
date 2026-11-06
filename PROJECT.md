@@ -4,17 +4,19 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.8.27（versionCode 213）
+**当前源码版本**：v2.8.28（versionCode 214）
 
 **数据库版本**：37（20 个实体），本版无迁移。
 
-**当前版本（2026-11-06，已发布）**：2.8.27/213 编辑窗口形状还原、内容形状统一与输入法防重复唤起；基线 `main/7186073`。v2.8.19 主题提交 `9febfaf` 将 `EchoScrollableTextEditor` 的固定 14dp 圆角替换为 `EchoGlassControlShape`，影响“编辑模型回复”、编辑用户消息与系统提示词窗口；同一批误改还包括首页搜索框（22dp）与 Markdown 代码块（10dp）。现于 `EchoTokens.Radius` 新增固定内容形状 `shapeInput = 22dp`、`shapeEditor = 14dp`、`shapeCodeBlock = 10dp`，分别用于对话输入框、首页搜索框、文本编辑器与代码块；通用按钮 / FAB / 首页主行动按钮仍跟随主题控件形状。输入法侧静态复核确认文字变更路径不调用焦点或键盘显示 / 隐藏；仅点击已聚焦且已显示输入法的输入区会重复 `requestFocus + show`，已在 `reopenEditorKeyboard` 中跳过该冗余重开并补回归测试；纯打字闪烁未找到应用侧触发点，需真机与输入法日志确认。
+**当前版本（2026-11-07，已发布）**：2.8.28/214 输入框偶发无法输入修复；基线 `main/f79d291`。根因为键盘重开事务用组合快照判断 `focused` / IME 可见性，跨帧 `clearFocus → requestFocus` 后快照可能仍为旧值，导致跳过 `showKeyboard()`，或 2.8.27 的“已显示则跳过”误判，表现为输入框看似聚焦但键盘不再弹出。现 `rememberEditorKeyboardRequest` 读取实时焦点 lambda（聊天输入栏 `{ inputFocused }`、通用编辑器 `{ focused }`），IME 可见性用 `ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())` 查询（失败回退组合状态），`requestFocus` 后最多再等两帧确认焦点落地；保留“已聚焦且输入法确实可见时不重复重开”的防闪烁保护。2.8.27 的编辑窗口形状修复（编辑器 14dp、输入框 / 首页搜索 22dp、代码块 10dp 固定内容形状令牌）仍包含在本版。新增回归 `keyboardReopenWaitsForFocusToSettleAcrossFrames`，测试总数 1,055。
+
+涉及 `ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`UiPolishRegressionTest.kt`、版本配置，以及 2.8.27 已发布的主题令牌、`EchoScrollableTextEditor`、`SyntaxHighlighter`、`HomeScreen`；不新增依赖，不改 Room schema（37 / 20 个实体）、API 地址、请求协议、消息格式或备份格式。最终冻结验收 `20261107-001738-718` 脚本 / Gradle 退出 0，517.513 秒；88 套件 / 1,055 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，4 分 12 秒；`Echo-v2.8.28.apk` 25,489,177 字节，SHA256 `a56839e2f4f7de9a5ae4cbe91d82c6b81f4c6e8da7daddb85c5054ed4c22b5d8`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目结构不变，仅清单、版本控制信息、两个 baseline profile 与 DEX 5 项变化，DEX 可读差异仅版本号与 UA，`resources.arsc` 与 186 张图片不变，隐私扫描命中 0。发布目录由 223 文件（222 APK）排他复制为 224 文件（223 APK）。
+
+设备边界：无连接设备，未验证输入法行为与编辑器形状；需人工复验正常点击输入、返回隐藏键盘后再点、发送后立即点击、快速连续点击、切换会话后返回、切换输入法 / 表情面板；并确认编辑模型回复 / 用户消息 / 系统提示词编辑器 14dp、首页搜索框 22dp、代码块 10dp。若仍偶现无法输入或闪烁，请记录输入法名称 / 版本与操作序列。
+
+**历史已发布 2.8.27/213（2026-11-06）**：2.8.27/213 编辑窗口形状还原、内容形状统一与输入法防重复唤起；基线 `main/7186073`。v2.8.19 主题提交 `9febfaf` 将 `EchoScrollableTextEditor` 的固定 14dp 圆角替换为 `EchoGlassControlShape`，影响“编辑模型回复”、编辑用户消息与系统提示词窗口；同一批误改还包括首页搜索框（22dp）与 Markdown 代码块（10dp）。现于 `EchoTokens.Radius` 新增固定内容形状 `shapeInput = 22dp`、`shapeEditor = 14dp`、`shapeCodeBlock = 10dp`，分别用于对话输入框、首页搜索框、文本编辑器与代码块；通用按钮 / FAB / 首页主行动按钮仍跟随主题控件形状。输入法侧静态复核确认文字变更路径不调用焦点或键盘显示 / 隐藏；仅点击已聚焦且已显示输入法的输入区会重复 `requestFocus + show`，已在 `reopenEditorKeyboard` 中跳过该冗余重开并补回归测试；纯打字闪烁未找到应用侧触发点，需真机与输入法日志确认。
 
 涉及 `ui/theme/EchoDesignTokens.kt`、`ui/components/EchoScrollableTextEditor.kt`、`ui/components/markdown/SyntaxHighlighter.kt`、`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`ui/screens/home/HomeScreen.kt`、`UiPolishRegressionTest.kt` 与版本配置；不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、请求协议、消息格式或备份格式。最终冻结验收 `20261106-231321-141` 脚本 / Gradle 退出 0，435.416 秒；88 套件 / 1,054 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 10 秒；`Echo-v2.8.27.apk` 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，`resources.arsc` 与 186 张图片不变，隐私扫描命中 0。发布目录由 222 文件（221 APK）排他复制为 223 文件（222 APK）。版本提交 `cdeff252dc65161443cca3777c328e732d66aa53` 与 `v2.8.27` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.27 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.27) 为 Latest，唯一 APK 附件的 GitHub digest 与资产通道下载 SHA256 / 大小均与本机一致，正文与已提交的 `release-notes/latest.md` 一致；按仅保留最新版策略已删除远端旧 v2.8.26 Release / 标签，本机历史标签和 APK 保留。
-
-**源码后修复（2026-11-06，未发版）**：输入框偶发无法输入。根因为键盘重开事务用组合快照判断 `focused` / IME 可见性，跨帧 `clearFocus → requestFocus` 后快照可能仍为旧值，导致跳过 `showKeyboard()`，或 2.8.27 的“已显示则跳过”误判。现 `rememberEditorKeyboardRequest` 读取实时焦点 lambda，IME 可见性用 `ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())` 查询（失败回退组合状态），`requestFocus` 后最多再等两帧确认焦点；新增 `keyboardReopenWaitsForFocusToSettleAcrossFrames`。最终验收 `20261106-233335-284` 退出 0，558.803 秒；88 套件 / 1,055 项测试，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning。**未构建 APK，2.8.27 安装包不含本修复。**
-
-设备边界：无连接设备，未验证编辑器 / 搜索框 / 代码块形状与输入法行为；需人工确认编辑模型回复、编辑用户消息、系统提示词窗口为 14dp 圆角，首页搜索框 22dp、代码块 10dp，通用胶囊按钮不变；若输入法仍偶现闪烁或无法输入，记录发生场景与输入法版本。
 
 **历史已发布 2.8.26/212（2026-11-06）**：2.8.26/212 深色模式文字颜色修复与输入框形状还原；基线 `main/72a2c39`。深色黑字根因为 v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从主题背景色改为透明，Compose `LocalContentColor` 退回黑色；同时首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台等透明 `Scaffold` 未显式指定 `contentColor`，未单独设定颜色的文字（如首页会话标题）按黑色绘制。现根 `Surface` 与上述所有透明 `Scaffold` 显式提供 `onBackground`，聊天页原有设置不变；输入框 `inputShape` 从主题化 `EchoGlassControlShape` 恢复为原始 `RoundedCornerShape(22.dp)`，与右上拖拽手柄 22dp 同心圆角重新吻合，其他控件继续使用主题形状。
 
