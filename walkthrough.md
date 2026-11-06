@@ -18,6 +18,8 @@
 
 Release：`assembleRelease --no-daemon` 首次 BUILD SUCCESSFUL（8 分 10 秒），复核增量 23 秒、退出 0；`Echo-v2.8.26.apk` 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`；`com.aiassistant`、2.8.26/212、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，仅 `AndroidManifest.xml`、版本控制信息、baseline.prof 与 `classes.dex` 4 项 CRC 变化；DEX +204 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 221 文件（220 APK）→ 222 文件（221 APK），历史包名称 / 大小保留。
 
+发布：版本提交 `1aa0dda682fd65fcb6cf8f931d23b2221adb3fc6` 与 annotated 标签 `v2.8.26` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签同指该提交。GitHub Release [Echo 2.8.26](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.26) 为 Latest，唯一附件 `Echo-v2.8.26.apk`，GitHub digest `sha256:154aa64a…c9dc` 与本机一致；`gh release download` 复核 25,489,177 字节、SHA256 一致，正文与 `release-notes/latest.md` 一致（仅平台尾部换行）。按策略仅撤下远端旧 v2.8.25 Release / 标签，远端仅剩 v2.8.26；本机历史标签与 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 - 深色模式下检查首页会话标题、空状态说明、置顶 / 其他分组文字，以及历史、文件夹、创作工作室、角色与场景编辑、记忆管理、故事工作台的主标题与正文，应均为浅色且清晰可读。
 - 深色 / 浅色各检查对话输入框为 22dp 圆角矩形，右上拖拽手柄与边框同心；发送、智能搜索、思考、附件按钮仍为胶囊 / 圆形。

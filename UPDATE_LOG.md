@@ -16,7 +16,7 @@ Release `assembleRelease --no-daemon` 首次 BUILD SUCCESSFUL（8 分 10 秒）�
 
 APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,107,960 字节（较上版 +204），可读差异仅版本号 2.8.26 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片逐字节 / CRC 不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 221 文件（220 APK）名称 / 大小全部保留，复制后 222 文件（221 APK）。
 
-发布结果：待推送与 Release 上传后补充。
+发布结果：版本提交 `1aa0dda682fd65fcb6cf8f931d23b2221adb3fc6` 与 annotated 标签 `v2.8.26` 已推送，push 退出 0；`git ls-remote origin main refs/tags/v2.8.26` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.26](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.26) 为 Latest，唯一附件 `Echo-v2.8.26.apk`，GitHub digest `sha256:154aa64a…c9dc` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.25 Release 与远端标签，远端仅剩 v2.8.26；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，未验证安装启动与深色模式视觉。需人工在深色模式确认首页会话标题 / 说明、历史、文件夹、创作工作室、角色与场景编辑、记忆管理及故事工作台文字均为浅色且可读；确认对话输入框恢复 22dp 圆角矩形，发送、搜索、思考等胶囊按钮形状不变。
 
