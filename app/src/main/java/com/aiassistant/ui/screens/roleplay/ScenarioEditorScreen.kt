@@ -64,6 +64,7 @@ fun ScenarioEditorScreen(
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text(if (scenario == null) "创建场景" else "编辑场景") },

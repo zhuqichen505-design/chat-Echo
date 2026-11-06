@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
+
+- 基线 `main/72a2c39`；版本 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。
+- 深色黑字根因：v2.8.19 提交 `9febfaf` 将根 `Surface` 改为透明，`LocalContentColor` 退回黑色；首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理与故事工作台的透明 `Scaffold` 未显式提供 `contentColor`，未单独着色的文字按黑色绘制。
+- 临时方案一：根 `Surface` 与上述透明 `Scaffold` 统一提供 `onBackground` 内容色；不改布局、字号与配色值。
+- 临时方案二：`ChatInputBar.inputShape` 由 `EchoGlassControlShape` 还原为原始 `RoundedCornerShape(22.dp)`；其他控件保持主题形状。
+- 文件：`MainActivity.kt`、首页 / 历史 / 文件夹 / 角色与场景编辑 / 记忆管理 / 创作工作室 / 故事工作台、`ChatInputComponents.kt`、版本配置；不新增依赖，不改 Room / API / 消息 / 备份格式，无新增测试。
+- 验证：最终 verify `20261106-172737-879` 退出 0，481.276 秒；88 套件 / 1,053 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0（首次 8 分 10 秒，复核增量 23 秒）；APK 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`，v2 签名与上版一致，Android Debug 非正式生产签名。
+- 隐私：446 ZIP 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，隐私模式命中 0；`resources.arsc` 与 186 张图片不变。发布目录 221→222 文件（220→221 APK），历史包保留。
+- 待办：无设备，深色模式文字对比度与输入框形状待人工验收。详见本轮 UPDATE_LOG / walkthrough。
+
 ## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
 
 - 基线 `main/33f6cbd`；版本 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。

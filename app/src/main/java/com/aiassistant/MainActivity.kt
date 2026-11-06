@@ -89,7 +89,8 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
-                        color = androidx.compose.ui.graphics.Color.Transparent
+                        color = androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.onBackground
                     ) {
                         androidx.compose.runtime.CompositionLocalProvider(
                             androidx.compose.foundation.LocalOverscrollConfiguration provides null

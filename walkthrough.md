@@ -1,5 +1,28 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
+
+基线 `main/72a2c39`；版本 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
+
+问题一：深色模式下首页及部分页面部分文字仍为黑色，可读性差。根因为 v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从 `MaterialTheme.colorScheme.background` 改为 `Color.Transparent`；Compose 的 `LocalContentColor` 默认是黑色，透明容器无法派生内容色。首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台的透明 `Scaffold` 也未显式指定 `contentColor`，`contentColorFor(Transparent)` 返回 `Color.Unspecified`，未单独指定颜色的文字（如首页会话标题）最终按黑色绘制。聊天页此前已设置 `contentColor = onBackground`，不在缺陷范围。
+
+问题二：对话输入框形状被主题化。原始实现为 `RoundedCornerShape(22.dp)`，主题改造后改为 `EchoGlassControlShape`——玻璃主题为全胶囊，拾页 / 棉纸 / 墨白 / 声呐 / 构型等平面主题为 3–8dp 小圆角，与右上拖拽手柄的 22dp 同心圆角基准不再吻合。
+
+临时实施方案：
+- 颜色：根 `Surface` 与上述全部透明 `Scaffold` 显式提供 `MaterialTheme.colorScheme.onBackground`；不新增颜色常量，不改变任何布局、字号或现有配色值。聊天页保持既有设置。
+- 形状：仅将 `ChatInputBar` 的 `inputShape` 恢复为 `RoundedCornerShape(22.dp)`；发送、智能搜索、思考、附件等胶囊控件继续使用主题形状，输入框拖拽、展开、隐藏与 IME 行为未改。
+
+本轮无新增测试：改动为 Compose 内容色传播补全与单一形状常量还原，无新增纯逻辑或数据分支；既有 88 套件 / 1,053 项全部保留并通过。涉及 `MainActivity.kt`、`HomeScreen.kt`、`HistoryScreen.kt`、`FolderManagerScreen.kt`、角色 / 场景编辑、记忆管理、创作工作室、故事工作台、`ChatInputComponents.kt` 与版本配置；不新增依赖，不改 Room、API、消息或备份格式。
+
+最终冻结验收 `20261106-172737-879`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，481.276 秒；88 套件 / 1,053 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon` 首次 BUILD SUCCESSFUL（8 分 10 秒），复核增量 23 秒、退出 0；`Echo-v2.8.26.apk` 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`；`com.aiassistant`、2.8.26/212、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，仅 `AndroidManifest.xml`、版本控制信息、baseline.prof 与 `classes.dex` 4 项 CRC 变化；DEX +204 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 221 文件（220 APK）→ 222 文件（221 APK），历史包名称 / 大小保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 深色模式下检查首页会话标题、空状态说明、置顶 / 其他分组文字，以及历史、文件夹、创作工作室、角色与场景编辑、记忆管理、故事工作台的主标题与正文，应均为浅色且清晰可读。
+- 深色 / 浅色各检查对话输入框为 22dp 圆角矩形，右上拖拽手柄与边框同心；发送、智能搜索、思考、附件按钮仍为胶囊 / 圆形。
+- 切换受影响的主题预设（默认玻璃、墨白、拾页、棉纸、札记、声呐、构型）确认无新的文字对比度回归。
+
 ## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
 
 基线 `main/33f6cbd`；版本 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。

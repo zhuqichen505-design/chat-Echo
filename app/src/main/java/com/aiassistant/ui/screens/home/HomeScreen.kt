@@ -213,6 +213,7 @@ fun HomeScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         floatingActionButton = {
             if (!isSelectionMode && (!showPresentation || presentationScrolledAway)) {
                 NewConversationFab(

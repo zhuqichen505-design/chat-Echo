@@ -1,5 +1,25 @@
 # 维护记录
 
+## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
+
+基线 `main/72a2c39`；版本由 2.8.25/211 递增到 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+需求一（深色模式黑字）：用户反馈深色模式下首页及部分页面部分文字仍为黑色，可读性差。根因两层：v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从 `MaterialTheme.colorScheme.background` 改为 `Color.Transparent`，而 Compose 的 `LocalContentColor` 默认是黑色，透明容器无法派生内容色；首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台等透明 `Scaffold` 未显式指定 `contentColor`，其 `contentColorFor(Transparent)` 为 `Color.Unspecified`，未单独指定颜色的文字（例如首页会话标题）因此按黑色绘制。临时方案：根 `Surface` 显式提供 `onBackground`；上述透明 `Scaffold` 全部补充 `contentColor = MaterialTheme.colorScheme.onBackground`，聊天页已有该设置保持不变。仅修复颜色传播，不改布局、字号、配色值或任何业务逻辑。
+
+需求二（输入框形状）：`ChatInputBar` 的 `inputShape` 在主题改造中由原始 `RoundedCornerShape(22.dp)` 改为 `EchoGlassControlShape`（玻璃主题为全胶囊，平面主题为 3–8dp 小圆角），与用户预期不符。现恢复为 `RoundedCornerShape(22.dp)`，输入框右上拖拽手柄的 22dp 同心圆角基准随之重新吻合；其他控件继续使用主题形状，不受影响。
+
+涉及文件：`MainActivity.kt`、`HomeScreen.kt`、`HistoryScreen.kt`、`FolderManagerScreen.kt`、`CharacterEditorScreen.kt`、`NewRoleplaySessionScreen.kt`、`RoleplayMemoryScreen.kt`、`RoleplayStudioScreen.kt`、`ScenarioEditorScreen.kt`、`StoryUnifiedSettingsDialog.kt`、`ChatInputComponents.kt`、`app/build.gradle.kts`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式；本轮无新增测试，既有 1,053 项全部保留并通过。
+
+最终冻结验收 `20261106-172737-879`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，481.276 秒；88 套件 / 1,053 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon` 首次 BUILD SUCCESSFUL（8 分 10 秒），复核增量 23 秒、退出 0；`Echo-v2.8.26.apk` 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`；`com.aiassistant`、2.8.26/212、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。
+
+APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,107,960 字节（较上版 +204），可读差异仅版本号 2.8.26 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片逐字节 / CRC 不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 221 文件（220 APK）名称 / 大小全部保留，复制后 222 文件（221 APK）。
+
+发布结果：待推送与 Release 上传后补充。
+
+设备边界：当前无连接设备，未验证安装启动与深色模式视觉。需人工在深色模式确认首页会话标题 / 说明、历史、文件夹、创作工作室、角色与场景编辑、记忆管理及故事工作台文字均为浅色且可读；确认对话输入框恢复 22dp 圆角矩形，发送、搜索、思考等胶囊按钮形状不变。
+
 ## 2026-11-01 · 2.8.25 备份导入容错与宽屏内容列适配（已发布）
 
 基线 `main/33f6cbd`；版本由 2.8.24/210 递增到 2.8.25/211；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。

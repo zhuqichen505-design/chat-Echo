@@ -4,11 +4,17 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.8.25（versionCode 211）
+**当前源码版本**：v2.8.26（versionCode 212）
 
 **数据库版本**：37（20 个实体），本版无迁移。
 
-**当前版本（2026-11-01，已发布）**：2.8.25/211 备份导入容错与宽屏内容列适配；基线 `main/33f6cbd`。备份侧：删除 API 配置只删配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等无外键列会保留悬空 ID，导出后被严格引用校验拒绝（2.8.24 才能走到该步）。现改为严格优先、命中“备份关联缺失”才回滚重试容错：可空列置空、NOT NULL 列的派生行跳过并计数，成功提示列出清理项；结构性引用缺失仍明确失败。宽屏侧：新增 `EchoAdaptiveLayout`，按窗口宽度分级并以对称留白形成居中内容列，设置 / 首页 / 历史 / 文件夹 ≤720dp，聊天消息列与输入栏共用 ≤900dp，手机布局不变。
+**当前版本（2026-11-06，已发布）**：2.8.26/212 深色模式文字颜色修复与输入框形状还原；基线 `main/72a2c39`。深色黑字根因为 v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从主题背景色改为透明，Compose `LocalContentColor` 退回黑色；同时首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台等透明 `Scaffold` 未显式指定 `contentColor`，未单独设定颜色的文字（如首页会话标题）按黑色绘制。现根 `Surface` 与上述所有透明 `Scaffold` 显式提供 `onBackground`，聊天页原有设置不变；输入框 `inputShape` 从主题化 `EchoGlassControlShape` 恢复为原始 `RoundedCornerShape(22.dp)`，与右上拖拽手柄 22dp 同心圆角重新吻合，其他控件继续使用主题形状。
+
+涉及 `MainActivity.kt`、`HomeScreen.kt`、`HistoryScreen.kt`、`FolderManagerScreen.kt`、`CharacterEditorScreen.kt`、`NewRoleplaySessionScreen.kt`、`RoleplayMemoryScreen.kt`、`RoleplayStudioScreen.kt`、`ScenarioEditorScreen.kt`、`StoryUnifiedSettingsDialog.kt`、`ChatInputComponents.kt` 与版本配置；不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、请求协议、消息格式或备份格式，本轮无新增测试、既有 1,053 项全部保留。最终冻结验收 `20261106-172737-879` 脚本 / Gradle 退出 0，481.276 秒；88 套件 / 1,053 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0（首次 8 分 10 秒，复核增量 23 秒）；`Echo-v2.8.26.apk` 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，`resources.arsc` 与 186 张图片不变，隐私扫描命中 0。发布目录由 221 文件（220 APK）排他复制为 222 文件（221 APK）。
+
+设备边界：无连接设备，未验证安装启动与深色视觉；需人工确认深色下首页会话标题 / 说明、历史、文件夹、创作工作室、角色与场景编辑、记忆管理及故事工作台文字均为浅色可读，对话输入框恢复 22dp 圆角矩形，发送 / 搜索 / 思考等胶囊按钮形状不变。
+
+**历史已发布 2.8.25/211（2026-11-01）**：2.8.25/211 备份导入容错与宽屏内容列适配；基线 `main/33f6cbd`。备份侧：删除 API 配置只删配置行，`api_usage_stats.apiConfigId`、`selected_models.apiConfigId`、`conversations.folderId` 等无外键列会保留悬空 ID，导出后被严格引用校验拒绝（2.8.24 才能走到该步）。现改为严格优先、命中“备份关联缺失”才回滚重试容错：可空列置空、NOT NULL 列的派生行跳过并计数，成功提示列出清理项；结构性引用缺失仍明确失败。宽屏侧：新增 `EchoAdaptiveLayout`，按窗口宽度分级并以对称留白形成居中内容列，设置 / 首页 / 历史 / 文件夹 ≤720dp，聊天消息列与输入栏共用 ≤900dp，手机布局不变。
 
 涉及 `utils/BackupGraphStore.kt`、`utils/BackupManager.kt`、`ui/screens/settings/SettingsSecurityAndBackupTab.kt`、`ui/components/EchoAdaptiveLayout.kt`、`SettingsScreen.kt`、`HomeScreen.kt`、`FolderManagerScreen.kt`、`HistoryScreen.kt`、`ChatScreen.kt`、`ChatInputComponents.kt`、版本配置与 `BackupGraphStoreTest.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、消息格式或备份格式。新增 4 项回归：悬空可空引用严格回滚 / 容错置空、悬空非空引用容错跳过、留白分级与对称性、Compose 实际测量。最终冻结验收 `20261101-104659-583` 脚本 / Gradle 退出 0，509.388 秒；88 套件 / 1,053 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，339 秒；`Echo-v2.8.25.apk` 25,489,177 字节，SHA256 `730079c6aa1c159c08d3b3535524189db84fb210be3c87c79b2bd764f8426aad`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目 CRC、31,571 DEX 字符串（新增 33 / 移除 16，新增可读中文 8 条均为容错提示与版本号），`resources.arsc` 逐字节不变，186 张图片一致。发布目录由 220 文件（219 APK）排他复制为 221 文件（220 APK）。
 

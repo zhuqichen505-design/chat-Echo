@@ -115,6 +115,7 @@ fun StoryUnifiedSettingsDialog(
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.onBackground) {
             Scaffold(
+                contentColor = MaterialTheme.colorScheme.onBackground,
                 topBar = {
                     Column {
                         TopAppBar(
