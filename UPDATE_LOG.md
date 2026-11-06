@@ -18,7 +18,7 @@ Release `assembleRelease --no-daemon` 退出 0，5 分 10 秒；`Echo-v2.8.27.ap
 
 APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,108,272 字节（较上版 +312），可读差异仅版本号 2.8.27 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 222 文件（221 APK）保留，复制后 223 文件（222 APK）。
 
-发布结果：待推送与 Release 上传后补充。
+发布结果：版本提交 `cdeff252dc65161443cca3777c328e732d66aa53` 与 annotated 标签 `v2.8.27` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.27](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.27) 为 Latest，唯一附件 `Echo-v2.8.27.apk`，GitHub digest `sha256:9abdc71f…e950` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.26 Release 与远端标签，远端仅剩 v2.8.27；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备。“编辑模型回复 / 用户消息 / 系统提示词”编辑器、首页搜索框与代码块形状无法实机目视；输入法闪烁无法复现。需人工确认上述窗口为 14dp / 22dp / 10dp 圆角矩形，通用胶囊按钮不变；若输入法闪烁仍出现，请记录发生场景（纯打字 / 点击定位光标 / 切换表情或候选栏）与输入法版本，以便进一步定位。
 

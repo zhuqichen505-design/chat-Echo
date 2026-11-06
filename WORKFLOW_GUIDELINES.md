@@ -35,6 +35,7 @@
 - 文件：`EchoDesignTokens.kt`、`EchoScrollableTextEditor.kt`、`SyntaxHighlighter.kt`、`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`HomeScreen.kt`、`UiPolishRegressionTest.kt`、版本配置；不新增依赖，不改 Room / API / 消息 / 备份格式。
 - 验证：最终 verify `20261106-231321-141` 退出 0，435.416 秒；88 套件 / 1,054 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 10 秒；APK 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`，v2 签名与上版一致，Android Debug 非正式生产签名。
 - 隐私：446 ZIP 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，隐私模式命中 0；`resources.arsc` 与 186 张图片不变。发布目录 222→223 文件（221→222 APK），历史包保留。
+- 发布：提交 `cdeff25` 与标签 `v2.8.27` 已推送到远端 main / 标签；GitHub Release 为 Latest，唯一附件 digest 与资产通道下载 SHA256 / 大小与本机一致，正文与 latest 一致（仅平台尾部换行）。按策略仅远端撤下旧 v2.8.26 Release / 标签，本机历史保留。
 - 待办：无设备，编辑器 / 搜索框 / 代码块形状与输入法闪烁待人工验收。详见本轮 UPDATE_LOG / walkthrough。
 
 ## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）

@@ -19,6 +19,8 @@
 
 Release：`assembleRelease --no-daemon` 退出 0，5 分 10 秒；`Echo-v2.8.27.apk` 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`；`com.aiassistant`、2.8.27/213、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，仅 `AndroidManifest.xml`、版本控制信息、baseline.prof 与 `classes.dex` 4 项 CRC 变化；DEX +312 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 222 文件（221 APK）→ 223 文件（222 APK），历史包名称 / 大小保留。
 
+发布：版本提交 `cdeff252dc65161443cca3777c328e732d66aa53` 与 annotated 标签 `v2.8.27` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签同指该提交。GitHub Release [Echo 2.8.27](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.27) 为 Latest，唯一附件 `Echo-v2.8.27.apk`，GitHub digest `sha256:9abdc71f…e950` 与本机一致；`gh release download` 复核 25,489,177 字节、SHA256 一致，正文与 `release-notes/latest.md` 一致（仅平台尾部换行）。按策略仅撤下远端旧 v2.8.26 Release / 标签，远端仅剩 v2.8.27；本机历史标签与 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 - 分别打开“编辑模型回复”“仅修改消息内容”和系统提示词编辑器，确认文本区为 14dp 圆角矩形，滚动条仍可用。
 - 检查首页搜索框为 22dp 圆角，Markdown 代码块为 10dp 圆角且顶部语言栏贴合；发送、智能搜索、思考、附件等胶囊按钮形状不变。
