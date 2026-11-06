@@ -62,6 +62,11 @@ object EchoTokens {
         val shapeLg: Shape = RoundedCornerShape(lg)
         val shapeXl: Shape = RoundedCornerShape(xl)
         val shapePill: Shape = RoundedCornerShape(pill)
+
+        // 内容类固定形状：输入与编辑容器、代码块不随主题预设的控件圆角改变
+        val shapeInput: Shape = RoundedCornerShape(22.dp)
+        val shapeEditor: Shape = RoundedCornerShape(14.dp)
+        val shapeCodeBlock: Shape = RoundedCornerShape(10.dp)
     }
 
     /**

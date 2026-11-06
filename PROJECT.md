@@ -4,11 +4,17 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.8.26（versionCode 212）
+**当前源码版本**：v2.8.27（versionCode 213）
 
 **数据库版本**：37（20 个实体），本版无迁移。
 
-**当前版本（2026-11-06，已发布）**：2.8.26/212 深色模式文字颜色修复与输入框形状还原；基线 `main/72a2c39`。深色黑字根因为 v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从主题背景色改为透明，Compose `LocalContentColor` 退回黑色；同时首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台等透明 `Scaffold` 未显式指定 `contentColor`，未单独设定颜色的文字（如首页会话标题）按黑色绘制。现根 `Surface` 与上述所有透明 `Scaffold` 显式提供 `onBackground`，聊天页原有设置不变；输入框 `inputShape` 从主题化 `EchoGlassControlShape` 恢复为原始 `RoundedCornerShape(22.dp)`，与右上拖拽手柄 22dp 同心圆角重新吻合，其他控件继续使用主题形状。
+**当前版本（2026-11-06，已发布）**：2.8.27/213 编辑窗口形状还原、内容形状统一与输入法防重复唤起；基线 `main/7186073`。v2.8.19 主题提交 `9febfaf` 将 `EchoScrollableTextEditor` 的固定 14dp 圆角替换为 `EchoGlassControlShape`，影响“编辑模型回复”、编辑用户消息与系统提示词窗口；同一批误改还包括首页搜索框（22dp）与 Markdown 代码块（10dp）。现于 `EchoTokens.Radius` 新增固定内容形状 `shapeInput = 22dp`、`shapeEditor = 14dp`、`shapeCodeBlock = 10dp`，分别用于对话输入框、首页搜索框、文本编辑器与代码块；通用按钮 / FAB / 首页主行动按钮仍跟随主题控件形状。输入法侧静态复核确认文字变更路径不调用焦点或键盘显示 / 隐藏；仅点击已聚焦且已显示输入法的输入区会重复 `requestFocus + show`，已在 `reopenEditorKeyboard` 中跳过该冗余重开并补回归测试；纯打字闪烁未找到应用侧触发点，需真机与输入法日志确认。
+
+涉及 `ui/theme/EchoDesignTokens.kt`、`ui/components/EchoScrollableTextEditor.kt`、`ui/components/markdown/SyntaxHighlighter.kt`、`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`ui/screens/home/HomeScreen.kt`、`UiPolishRegressionTest.kt` 与版本配置；不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、请求协议、消息格式或备份格式。最终冻结验收 `20261106-231321-141` 脚本 / Gradle 退出 0，435.416 秒；88 套件 / 1,054 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 10 秒；`Echo-v2.8.27.apk` 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，`resources.arsc` 与 186 张图片不变，隐私扫描命中 0。发布目录由 222 文件（221 APK）排他复制为 223 文件（222 APK）。
+
+设备边界：无连接设备，未验证编辑器 / 搜索框 / 代码块形状与输入法行为；需人工确认编辑模型回复、编辑用户消息、系统提示词窗口为 14dp 圆角，首页搜索框 22dp、代码块 10dp，通用胶囊按钮不变；若输入法仍偶现闪烁，记录发生场景与输入法版本。
+
+**历史已发布 2.8.26/212（2026-11-06）**：2.8.26/212 深色模式文字颜色修复与输入框形状还原；基线 `main/72a2c39`。深色黑字根因为 v2.8.19 主题提交 `9febfaf` 将根 `Surface` 从主题背景色改为透明，Compose `LocalContentColor` 退回黑色；同时首页、历史、文件夹、创作工作室、角色 / 场景编辑、记忆管理及故事工作台等透明 `Scaffold` 未显式指定 `contentColor`，未单独设定颜色的文字（如首页会话标题）按黑色绘制。现根 `Surface` 与上述所有透明 `Scaffold` 显式提供 `onBackground`，聊天页原有设置不变；输入框 `inputShape` 从主题化 `EchoGlassControlShape` 恢复为原始 `RoundedCornerShape(22.dp)`，与右上拖拽手柄 22dp 同心圆角重新吻合，其他控件继续使用主题形状。
 
 涉及 `MainActivity.kt`、`HomeScreen.kt`、`HistoryScreen.kt`、`FolderManagerScreen.kt`、`CharacterEditorScreen.kt`、`NewRoleplaySessionScreen.kt`、`RoleplayMemoryScreen.kt`、`RoleplayStudioScreen.kt`、`ScenarioEditorScreen.kt`、`StoryUnifiedSettingsDialog.kt`、`ChatInputComponents.kt` 与版本配置；不新增依赖，不改 Room schema（仍为 37 / 20 个实体）、API 地址、请求协议、消息格式或备份格式，本轮无新增测试、既有 1,053 项全部保留。最终冻结验收 `20261106-172737-879` 脚本 / Gradle 退出 0，481.276 秒；88 套件 / 1,053 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0（首次 8 分 10 秒，复核增量 23 秒）；`Echo-v2.8.26.apk` 25,489,177 字节，SHA256 `154aa64a8d1c7b774b66630d4e4b082a9d80d423ff9879544977561f5ea6c9dc`，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**；APK 446 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，`resources.arsc` 与 186 张图片不变，隐私扫描命中 0。发布目录由 221 文件（220 APK）排他复制为 222 文件（221 APK）。版本提交 `1aa0dda682fd65fcb6cf8f931d23b2221adb3fc6` 与 `v2.8.26` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.26 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.26) 为 Latest，唯一 APK 附件的 GitHub digest 与资产通道下载 SHA256 / 大小均与本机一致，正文与已提交的 `release-notes/latest.md` 一致；按仅保留最新版策略已删除远端旧 v2.8.25 Release / 标签，本机历史标签和 APK 保留。
 

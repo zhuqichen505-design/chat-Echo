@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
+
+- 基线 `main/7186073`；版本 2.8.27/213；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。
+- 根因：v2.8.19 主题提交 `9febfaf` 把共享 `EchoScrollableTextEditor` 的 14dp 固定圆角替换为主题控件形状，影响编辑模型回复 / 用户消息 / 系统提示词窗口；同批误改还包括首页搜索框 22dp 与 Markdown 代码块 10dp，对话输入框 22dp 已在 2.8.26 修复。
+- 临时方案：新增固定内容形状令牌 `shapeInput / shapeEditor / shapeCodeBlock`（22 / 14 / 10dp），替换误用的 `EchoGlassControlShape`；通用按钮、FAB 与主行动按钮继续跟随主题。
+- 输入法：文字变更路径无焦点 / 键盘显示隐藏调用；仅点击已聚焦且已显示输入法的输入区会重复 `requestFocus + show`，已在 `reopenEditorKeyboard` 中跳过并新增回归测试。纯打字闪烁未找到应用侧触发点，需真机与输入法日志确认。
+- 文件：`EchoDesignTokens.kt`、`EchoScrollableTextEditor.kt`、`SyntaxHighlighter.kt`、`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`HomeScreen.kt`、`UiPolishRegressionTest.kt`、版本配置；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261106-231321-141` 退出 0，435.416 秒；88 套件 / 1,054 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 10 秒；APK 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`，v2 签名与上版一致，Android Debug 非正式生产签名。
+- 隐私：446 ZIP 条目结构不变，仅 DEX / 清单 / 基线配置 4 项变化，DEX 可读差异仅版本号与 UA，隐私模式命中 0；`resources.arsc` 与 186 张图片不变。发布目录 222→223 文件（221→222 APK），历史包保留。
+- 待办：无设备，编辑器 / 搜索框 / 代码块形状与输入法闪烁待人工验收。详见本轮 UPDATE_LOG / walkthrough。
+
 ## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
 
 - 基线 `main/72a2c39`；版本 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。

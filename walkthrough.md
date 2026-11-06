@@ -1,5 +1,30 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
+
+基线 `main/7186073`；版本 2.8.27/213；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
+
+问题一：用户反馈“编辑模型回复”窗口形状被错误修改。根因为 v2.8.19 主题提交 `9febfaf` 将共享 `EchoScrollableTextEditor` 的 `RoundedCornerShape(14.dp)` 替换为 `EchoGlassControlShape`；该编辑器同时用于编辑模型回复、编辑用户消息与系统提示词窗口，玻璃主题下显示为全胶囊，平面主题下为 3–8dp 小圆角。
+
+问题二（复核所有误改位置）：逐项对照 `9febfaf` 的形状替换，确认同类“内容 / 输入类固定形状”误改还包括首页搜索框（原 22dp）与 Markdown 代码块（原 10dp）；对话输入框（原 22dp）已在 2.8.26 修复。通用按钮、FAB 与首页主行动按钮的变化属于主题控件形状适配，不是误改。
+
+临时实施方案：
+- 在 `EchoTokens.Radius` 新增固定内容形状：`shapeInput = 22dp`、`shapeEditor = 14dp`、`shapeCodeBlock = 10dp`。
+- 对话输入框与首页搜索框使用 `shapeInput`；`EchoScrollableTextEditor` 使用 `shapeEditor`；`CodeBlock` 使用 `shapeCodeBlock`。这些形状不随主题预设变化，通用控件仍使用 `EchoGlassControlShape`。
+- 输入法：静态复核文字变更路径（`TextFieldState` → `onValueChange` → 父状态）不含 `requestFocus`、`clearFocus`、`keyboard.show()` 或 `hide()`；输入栏会话由 `key(conversationId)` 固定，打字不会触发输入区重建。唯一应用侧冗余是点击已聚焦、输入法已显示的输入区仍执行 `requestFocus + show`；已在 `reopenEditorKeyboard` 增加 `isFocused() && isImeVisible()` 直接返回的保护，并新增回归测试“已显示输入法不重复重开”。纯文字输入闪烁未在代码中找到触发点，无法在无设备环境复现，需真机与输入法日志确认是否为系统输入法 / 窗口动画 / `BasicTextField2` 设备差异。
+
+新增测试 1 项（`focusedEditorWithVisibleImeSkipsRedundantReopen`），既有 IME 事务、取消与竞态测试全部保留；总数 1,054。
+
+最终冻结验收 `20261106-231321-141`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，435.416 秒；88 套件 / 1,054 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon` 退出 0，5 分 10 秒；`Echo-v2.8.27.apk` 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`；`com.aiassistant`、2.8.27/213、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，仅 `AndroidManifest.xml`、版本控制信息、baseline.prof 与 `classes.dex` 4 项 CRC 变化；DEX +312 字节，可读差异仅版本号与 UA；`resources.arsc`、186 张图片不变；隐私模式扫描命中 0。发布目录 222 文件（221 APK）→ 223 文件（222 APK），历史包名称 / 大小保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 分别打开“编辑模型回复”“仅修改消息内容”和系统提示词编辑器，确认文本区为 14dp 圆角矩形，滚动条仍可用。
+- 检查首页搜索框为 22dp 圆角，Markdown 代码块为 10dp 圆角且顶部语言栏贴合；发送、智能搜索、思考、附件等胶囊按钮形状不变。
+- 在多种主题（玻璃、墨白、拾页、棉纸、札记、声呐、构型）下重复上述检查，确保内容形状不随主题变化。
+- 输入法：分别测试纯打字、点击输入区定位光标、按返回隐藏后再次点击、切换候选栏；若仍闪烁，记录输入法名称 / 版本与触发场景。
+
 ## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
 
 基线 `main/72a2c39`；版本 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。

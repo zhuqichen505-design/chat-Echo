@@ -75,7 +75,7 @@ fun EchoScrollableTextEditor(
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     var fieldHeightPx by remember { mutableIntStateOf(0) }
-    val shape = com.aiassistant.ui.components.EchoGlassControlShape
+    val shape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeEditor
     val borderColor = if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.62f)
         else secondaryColor.copy(alpha = 0.28f)
     val viewport = scrollState.viewportSize

@@ -281,6 +281,35 @@ class UiPolishRegressionTest {
         }
     }
 
+    @Test fun focusedEditorWithVisibleImeSkipsRedundantReopen() = runTest {
+        var requests = 0
+        var shows = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            restartFocus = false,
+            clearFocus = { error("已显示的输入法不应重启焦点") },
+            requestFocus = { requests++ },
+            isFocused = { true },
+            isActive = { true },
+            nextFrame = { error("已显示的输入法不应等待重开帧") },
+            showKeyboard = { shows++ },
+            isImeVisible = { true }
+        )
+        assertEquals(0, requests)
+        assertEquals(0, shows)
+
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            restartFocus = false,
+            clearFocus = { error("普通聚焦不应重启焦点") },
+            requestFocus = {},
+            isFocused = { true },
+            isActive = { true },
+            nextFrame = { },
+            showKeyboard = { shows++ },
+            isImeVisible = { false }
+        )
+        assertEquals(1, shows)
+    }
+
     @Test fun paperParagraphsUseDifferentIndentAndKeepTextOutsideTheStyle() {
         val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp))
         val deckle = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Deckle)

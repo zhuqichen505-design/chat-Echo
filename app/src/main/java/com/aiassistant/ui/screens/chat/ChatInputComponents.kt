@@ -244,7 +244,7 @@ fun ChatInputBar(
     }
     val effectiveMinHeight = customInputHeightDp?.dp ?: if (isInputExpanded) 180.dp else 42.dp
     val effectiveMaxHeight = if (customInputHeightDp != null) 360.dp else if (isInputExpanded) 320.dp else 112.dp
-    val inputShape = RoundedCornerShape(22.dp)
+    val inputShape = EchoTokens.Radius.shapeInput
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }

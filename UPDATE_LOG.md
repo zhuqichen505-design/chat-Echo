@@ -1,5 +1,27 @@
 # 维护记录
 
+## 2026-11-06 · 2.8.27 编辑窗口形状还原、内容形状统一与输入法防重复唤起（已发布）
+
+基线 `main/7186073`；版本由 2.8.26/212 递增到 2.8.27/213；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+需求一（编辑模型回复窗口形状）：用户反馈“编辑模型回复”窗口形状被错误修改。根因为 v2.8.19 主题提交 `9febfaf` 将 `EchoScrollableTextEditor` 的固定 `RoundedCornerShape(14.dp)` 替换为主题控件形状 `EchoGlassControlShape`，该编辑器同时用于编辑模型回复、编辑用户消息与系统提示词窗口，玻璃主题下因此变成全胶囊，平面主题下则被压成 3–8dp 小圆角。现恢复 14dp 固定圆角。
+
+需求二（复核所有误改位置并统一）：对照 `9febfaf` 的形状替换逐项复核，确认同一批“内容 / 输入类固定形状”被误并入通用控件形状的还有：首页搜索框（原 22dp，编辑模型回复之外的另一输入容器）与 Markdown 代码块（原 10dp，带顶部栏的代码块被拉成胶囊）。对话输入框（原 22dp）已在 2.8.26 修复。临时方案：在 `EchoTokens.Radius` 增加固定内容形状令牌 `shapeInput = 22dp`、`shapeEditor = 14dp`、`shapeCodeBlock = 10dp`，分别用于对话输入框、首页搜索框、`EchoScrollableTextEditor` 与代码块；这些形状不再随主题预设变化。通用按钮、FAB 与首页主行动按钮仍按主题控件圆角适配，属主题设计范围，不恢复。
+
+需求三（输入法偶现闪烁排查）：静态复核所有焦点与输入法调用，文字变更路径（`TextFieldState` → `onValueChange` → 父状态）没有调用 `requestFocus`、`clearFocus`、`keyboard.show()` 或 `keyboard.hide()`；输入栏重组由 `key(conversationId)` 固定，输入区 `AnimatedContent` 只随隐藏状态切换，打字本身不会触发。唯一可能由应用侧造成重复显示的是每次点击输入区（含点击定位光标）都会执行 `requestFocus + show`，即使输入框已聚焦且输入法已显示；部分输入法对重复 `show()` 可能表现为闪一下。已在 `reopenEditorKeyboard` 增加“已聚焦且 `isImeVisible` 为真时直接返回”的保护，并新增回归测试。纯文字输入、无点击时的闪烁在应用代码中未找到触发点，无法在无设备环境复现，报告为更可能来自系统输入法、设备窗口动画或 Compose 1.6.8 实验性 `BasicTextField2` 的设备差异，需真机复现与输入法日志进一步确认。
+
+涉及文件：`ui/theme/EchoDesignTokens.kt`、`ui/components/EchoScrollableTextEditor.kt`、`ui/components/markdown/SyntaxHighlighter.kt`、`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`ui/screens/home/HomeScreen.kt`、`UiPolishRegressionTest.kt`、`app/build.gradle.kts`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式；测试由 1,053 增至 1,054。
+
+最终冻结验收 `20261106-231321-141`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，435.416 秒；88 套件 / 1,054 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon` 退出 0，5 分 10 秒；`Echo-v2.8.27.apk` 25,489,177 字节，SHA256 `9abdc71f5a8424a5b45aa3fd05ab1095edb3933b04af9b0b92432d4e0fd0e950`；`com.aiassistant`、2.8.27/213、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**，与上一版连续。
+
+APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,108,272 字节（较上版 +312），可读差异仅版本号 2.8.27 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 222 文件（221 APK）保留，复制后 223 文件（222 APK）。
+
+发布结果：待推送与 Release 上传后补充。
+
+设备边界：当前无连接设备。“编辑模型回复 / 用户消息 / 系统提示词”编辑器、首页搜索框与代码块形状无法实机目视；输入法闪烁无法复现。需人工确认上述窗口为 14dp / 22dp / 10dp 圆角矩形，通用胶囊按钮不变；若输入法闪烁仍出现，请记录发生场景（纯打字 / 点击定位光标 / 切换表情或候选栏）与输入法版本，以便进一步定位。
+
 ## 2026-11-06 · 2.8.26 深色模式文字颜色与输入框形状还原（已发布）
 
 基线 `main/72a2c39`；版本由 2.8.25/211 递增到 2.8.26/212；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。

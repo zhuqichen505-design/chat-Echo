@@ -69,9 +69,12 @@ internal suspend fun reopenEditorKeyboard(
     isFocused: () -> Boolean,
     isActive: () -> Boolean,
     nextFrame: suspend () -> Unit,
-    showKeyboard: () -> Unit
+    showKeyboard: () -> Unit,
+    isImeVisible: () -> Boolean = { false }
 ) {
     if (!isActive()) return
+    // Tapping an already active editor must not restart focus or re-show a visible IME.
+    if (isFocused() && isImeVisible()) return
     if (restartFocus) {
         clearFocus()
         nextFrame()
@@ -108,7 +111,8 @@ internal fun rememberEditorKeyboardRequest(
                 isFocused = { latestFocused },
                 isActive = { latestActive && windowInfo.isWindowFocused },
                 nextFrame = { withFrameNanos { }; kotlinx.coroutines.yield() },
-                showKeyboard = { keyboard?.show() }
+                showKeyboard = { keyboard?.show() },
+                isImeVisible = { latestImeVisible }
             )
         }
     }

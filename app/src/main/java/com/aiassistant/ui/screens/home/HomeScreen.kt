@@ -890,7 +890,7 @@ private fun HomeSearchRow(
             modifier = Modifier
                 .weight(1f)
                 .height(46.dp),
-            shape = com.aiassistant.ui.components.EchoGlassControlShape,
+            shape = EchoTokens.Radius.shapeInput,
             color = searchTint,
             border = BorderStroke(0.8.dp, glass.outline),
             tonalElevation = 0.dp,

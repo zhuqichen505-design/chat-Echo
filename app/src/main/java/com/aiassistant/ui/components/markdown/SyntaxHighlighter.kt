@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
@@ -26,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aiassistant.ui.theme.EchoTokens
 
 /**
  * 代码块组件（支持语法高亮与复制）
@@ -44,7 +44,7 @@ fun CodeBlock(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = com.aiassistant.ui.components.EchoGlassControlShape,
+        shape = EchoTokens.Radius.shapeCodeBlock,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(
             if (com.aiassistant.ui.theme.LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
