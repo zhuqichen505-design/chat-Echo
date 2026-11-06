@@ -310,6 +310,27 @@ class UiPolishRegressionTest {
         assertEquals(1, shows)
     }
 
+    @Test fun keyboardReopenWaitsForFocusToSettleAcrossFrames() = runTest {
+        var focused = false
+        var shows = 0
+        var frames = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            restartFocus = false,
+            clearFocus = { error("未要求清除焦点") },
+            requestFocus = {},
+            isFocused = { focused },
+            isActive = { true },
+            nextFrame = {
+                frames++
+                if (frames >= 2) focused = true
+            },
+            showKeyboard = { shows++ },
+            isImeVisible = { false }
+        )
+        assertEquals(1, shows)
+        assertEquals(2, frames)
+    }
+
     @Test fun paperParagraphsUseDifferentIndentAndKeepTextOutsideTheStyle() {
         val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp))
         val deckle = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Deckle)

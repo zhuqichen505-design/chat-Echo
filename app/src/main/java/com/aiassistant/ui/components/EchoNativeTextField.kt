@@ -36,6 +36,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.Brush
@@ -43,6 +44,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -82,14 +85,25 @@ internal suspend fun reopenEditorKeyboard(
     }
     requestFocus()
     nextFrame()
-    if (isActive() && isFocused()) showKeyboard()
+    if (isActive() && isFocused()) {
+        showKeyboard()
+        return
+    }
+    // Focus can settle one or two frames after a cross-frame request on slower devices.
+    repeat(2) {
+        nextFrame()
+        if (isActive() && isFocused()) {
+            showKeyboard()
+            return
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun rememberEditorKeyboardRequest(
     focusRequester: FocusRequester,
-    focused: Boolean,
+    isFocused: () -> Boolean,
     active: Boolean = true
 ): Pair<EditorKeyboardRequest, () -> Unit> {
     val scope = rememberCoroutineScope()
@@ -97,22 +111,27 @@ internal fun rememberEditorKeyboardRequest(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val windowInfo = LocalWindowInfo.current
+    val view = LocalView.current
     // Visibility also covers floating IMEs, whose bottom inset can legitimately be zero.
     val imeVisible = WindowInsets.isImeVisible
-    val latestFocused by rememberUpdatedState(focused)
     val latestActive by rememberUpdatedState(active)
     val latestImeVisible by rememberUpdatedState(imeVisible)
+    // Query the live window insets: composition snapshots can lag behind a hide/show transaction.
+    fun imeVisibleNow(): Boolean = runCatching {
+        ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())
+    }.getOrNull() ?: latestImeVisible
     val request = {
+        val currentlyFocused = isFocused()
         transaction.launch(scope) {
             reopenEditorKeyboard(
-                restartFocus = latestFocused && !latestImeVisible,
+                restartFocus = currentlyFocused && !imeVisibleNow(),
                 clearFocus = { focusManager.clearFocus(force = true) },
                 requestFocus = { focusRequester.requestFocus() },
-                isFocused = { latestFocused },
+                isFocused = isFocused,
                 isActive = { latestActive && windowInfo.isWindowFocused },
                 nextFrame = { withFrameNanos { }; kotlinx.coroutines.yield() },
                 showKeyboard = { keyboard?.show() },
-                isImeVisible = { latestImeVisible }
+                isImeVisible = { imeVisibleNow() }
             )
         }
     }
@@ -193,7 +212,7 @@ internal fun EchoNativeTextField(
     val editor = remember { NativeEditorState(value) }
     val density = LocalDensity.current.density
     var focused by remember { mutableStateOf(false) }
-    val requestKeyboard = onRequestKeyboard ?: rememberEditorKeyboardRequest(focusRequester, focused).second
+    val requestKeyboard = onRequestKeyboard ?: rememberEditorKeyboardRequest(focusRequester, isFocused = { focused }).second
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
     var getTextLayout by remember { mutableStateOf<(() -> TextLayoutResult?)?>(null) }
     SideEffect { editor.reconcileExternal(value) }

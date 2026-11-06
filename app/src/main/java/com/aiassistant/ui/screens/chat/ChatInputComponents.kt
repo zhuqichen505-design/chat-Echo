@@ -215,7 +215,7 @@ fun ChatInputBar(
     var inputFieldValue by remember { mutableStateOf(TextFieldValue(inputText)) }
     var inputFocused by remember { mutableStateOf(false) }
     val (keyboardRequest, requestKeyboard) = com.aiassistant.ui.components.rememberEditorKeyboardRequest(
-        inputFocusRequester, inputFocused, active = !isBarsHidden
+        inputFocusRequester, isFocused = { inputFocused }, active = !isBarsHidden
     )
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
     LaunchedEffect(isBarsHidden) {
