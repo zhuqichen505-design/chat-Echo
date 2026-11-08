@@ -18,6 +18,8 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，5 分 28 秒；`E
 
 APK 审计：446 个 ZIP 条目结构不变（无新增 / 移除），`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,109,760 字节，31,573 条 DEX 字符串（新增 11 / 移除 9，可读差异仅版本号 2.8.29 与 UA，另 9 条为 R8 重命名的类型描述符）；`resources.arsc` 逐字节不变，186 张图片集合与内容一致；对本机用户名、邮箱、私有 IP、手机号与仓库账号模式扫描新增命中 0（仅继承 2 条 `/home/...` 路由字符串与 1 条库内置占位邮箱 `android@android.com`，均非用户数据）。发布目录排他复制：原 224 文件（223 APK）名称 / 大小 / SHA256 全部保留，复制后 225 文件（224 APK），源包与副本 SHA256 一致。
 
+发布结果：版本提交 `097775d73cd835bd687586ee21a3a263ad8cff9a`（含源码修复 `2852f2c`）与 annotated 标签 `v2.8.29` 已推送，push 均退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.29](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.29) 为 Latest，唯一附件 `Echo-v2.8.29.apk`，GitHub digest `sha256:dd2c2bfb…` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略删除远端旧 v2.8.28 Release 与远端标签，远端仅剩 v2.8.29；本机历史标签与全部历史 APK 保留。
+
 设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：首次点击输入、按返回隐藏键盘后再点、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板，以及模型回复 / 系统提示词编辑器与首页搜索框。若仍出现，请记录输入法名称 / 版本与操作序列。
 
 ## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）

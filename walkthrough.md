@@ -17,6 +17,8 @@
 
 Release：`assembleRelease --no-daemon --build-cache` 退出 0，5 分 28 秒；`Echo-v2.8.29.apk` 25,489,177 字节，SHA256 `dd2c2bfbf06f4c93c938f798667262342d805306c24c1dc1651d7a2b814c6e9e`；`com.aiassistant`、2.8.29/215、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项 CRC 变化；DEX 31,573 条字符串（新增 11 / 移除 9），可读差异仅版本号与 UA；`resources.arsc` 逐字节不变、186 张图片一致；隐私模式扫描新增命中 0。发布目录 224 文件（223 APK）→ 225 文件（224 APK），历史包名称 / 大小 / SHA256 保留。
 
+发布：版本提交 `097775d73cd835bd687586ee21a3a263ad8cff9a`（含源码修复 `2852f2c`）与 annotated 标签 `v2.8.29` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签同指该提交。GitHub Release [Echo 2.8.29](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.29) 为 Latest，唯一附件 `Echo-v2.8.29.apk`，GitHub digest 与本机一致；`gh release download` 复核 25,489,177 字节、SHA256 一致，正文与 `release-notes/latest.md` 逐字一致。按策略仅撤下远端旧 v2.8.28 Release / 标签，远端仅剩 v2.8.29；本机历史标签与 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 - 首次点击输入框输入；按返回隐藏键盘后再次点击；发送后立即点击输入；快速连续点击输入区；切换会话后返回；切换输入法 / 表情面板。
 - 确认每次都能弹出键盘并立即接受输入，不出现“键盘可见但打不出字”或“有光标但无键盘”；若仍复现，记录输入法名称 / 版本、Android 版本和操作序列。

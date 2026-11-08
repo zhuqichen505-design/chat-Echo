@@ -34,6 +34,7 @@
 - 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`；新增 2 项回归，测试总数 1,057；不新增依赖，不改 Room / API / 消息 / 备份格式。
 - 验证：最终 verify `20261108-213912-107` 退出 0，574.434 秒；88 套件 / 1,057 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 28 秒；APK 25,489,177 字节，SHA256 `dd2c2bfbf06f4c93c938f798667262342d805306c24c1dc1651d7a2b814c6e9e`，v2 签名与上版一致，Android Debug 非正式生产签名。
 - 审计：446 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项变化；DEX 可读差异仅版本号与 UA；`resources.arsc` 与 186 张图片不变；隐私扫描新增命中 0。发布目录 224→225 文件（223→224 APK），历史文件名称 / 大小 / SHA256 保留。
+- 发布：提交 `097775d`（含 `2852f2c`）与 annotated 标签 `v2.8.29` 已推送，`git ls-remote` 核验 main / peeled 标签一致。Release 为 Latest，唯一附件 digest 与资产通道下载 SHA256 / 大小一致，正文与 latest 一致。按策略仅撤下远端旧 v2.8.28 Release / 标签，本机历史标签与 APK 保留。
 - 待办：无设备，输入法行为待人工复验（首次点击、返回隐藏后再点、发送后立即点击、快速连点、切换会话 / 输入法）。
 
 ## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
