@@ -34,6 +34,7 @@
 - 验证：最终 verify `20261109-022755-694` 退出 0，453.334 秒；92 套件 / 1,085 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒；`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；v2 签名连续，Android Debug **非正式生产签名**。
 - APK 审计：446 条目与 2.8.29 条目名集合一致、CRC 全通过；7 项变化（清单、版本控制信息、两个 baseline profile、DEX、两条 R8 重命名的 coroutines 服务描述符）；DEX 31,614 条字符串，新增可读中文 18 条均为本版提示；`resources.arsc` 逐字节不变，186 张图片一致；隐私扫描新增命中 0。发布目录 225 文件（224 APK）→ 226 文件（225 APK），历史包保留。
 - 设备边界：无连接设备，贴底、搜索定位、配置页与输入法行为待人工验收。
+- 发布：版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.30 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.30) 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签，本机历史标签与 APK 保留。
 
 ## 2026-11-09 · 输入框点击时输入法闪烁修复（已随 2.8.30 发布）
 

@@ -9,7 +9,7 @@
 - 修复“输入时点击输入框，输入法闪一下”：点击手势开始时同时采样聚焦与输入法可见性，已聚焦且输入法仍在屏幕上时完全不碰焦点、不重复显示键盘；同时合并三处重复的输入法可见性查询、消除输入框高度的双状态、移除未被生产路径使用的滚动策略函数。
 - 不修改数据库结构、请求协议、消息格式或备份格式。版本 2.8.30/216，Room v37（20 个实体）不变。
 
-最终冻结验收 `20261109-022755-694`：脚本 / Gradle 退出 0，453.334 秒；92 套件 / 1,085 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒；`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；v2 签名连续，Android Debug **非正式生产签名**。446 个 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 与两条 R8 重命名的 coroutines 服务描述符共 7 项变化，新增可读中文 18 条均为本版提示文案，隐私扫描新增命中 0，`resources.arsc` 逐字节不变，186 张图片一致。当前无连接设备，贴底、搜索定位、配置页与输入法行为仍待人工验收。
+最终冻结验收 `20261109-022755-694`：脚本 / Gradle 退出 0，453.334 秒；92 套件 / 1,085 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒；`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；v2 签名连续，Android Debug **非正式生产签名**。446 个 ZIP 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 与两条 R8 重命名的 coroutines 服务描述符共 7 项变化，新增可读中文 18 条均为本版提示文案，隐私扫描新增命中 0，`resources.arsc` 逐字节不变，186 张图片一致。当前无连接设备，贴底、搜索定位、配置页与输入法行为仍待人工验收。 版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.30 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.30) 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签，本机历史标签与 APK 保留。
 
 ## Echo 2.8.29（已发布）
 

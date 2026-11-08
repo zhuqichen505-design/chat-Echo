@@ -36,6 +36,10 @@
 
 APK 审计：446 条目且条目名集合与 2.8.29 完全一致，CRC 全部通过；变化 7 项——清单、版本控制信息、两个 baseline profile、`classes.dex`，以及两条 R8 重命名的 `kotlinx.coroutines` 服务描述符（`r4.b/r4.a` → `s4.b/s4.a`）。DEX 31,614 条字符串（+1,620 / -1,573，差异来自 R8 重编号），新增可读中文 18 条均为本版搜索、定位与配置页提示；`resources.arsc` 与 2.8.29 逐字节一致，186 张图片无变化；隐私扫描新增命中 0（仅有框架常量 `android@android.com` 与路由字符串 `/home/HomeViewModel`、`/home/RecentHomeStory`）。发布目录由 225 文件（224 APK）排他复制为 226 文件（225 APK），历史包名称 / 大小 / SHA256 均保留。
 
+### 发布
+
+版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.30 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.30) 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签，本机历史标签与 APK 保留。
+
 设备边界：无连接设备，未验证安装、启动与贴底、搜索定位、配置页、输入法行为，验收步骤见 `release-notes/latest.md`。
 
 ## 2026-11-09 · 输入框点击时输入法闪烁修复（已随 2.8.30 发布）

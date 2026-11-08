@@ -20,6 +20,8 @@
 
 APK 审计：446 条目、条目名集合与 2.8.29 一致、CRC 全通过；7 项变化（清单、版本控制信息、两个 baseline profile、DEX、两条 R8 重命名的 coroutines 服务描述符 `r4.b/r4.a` → `s4.b/s4.a`）；DEX 31,614 条字符串（+1,620 / -1,573），新增可读中文 18 条均为本版搜索 / 定位 / 配置页提示；`resources.arsc` 与 2.8.29 逐字节一致，186 张图片无变化；隐私扫描新增命中 0。发布目录 225 文件（224 APK）→ 226 文件（225 APK），历史包保留。
 
+发布：版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.30 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.30) 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签，本机历史标签与 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 
 - 发送消息后是否稳定贴底；手指上滑拖动时自动贴底是否立即停止。
