@@ -51,6 +51,7 @@ import com.aiassistant.ui.screens.roleplay.RoleplayMemoryScreen
 import com.aiassistant.ui.screens.roleplay.RoleplayStudioScreen
 import com.aiassistant.ui.screens.roleplay.RoleplayViewModel
 import com.aiassistant.ui.screens.roleplay.ScenarioEditorScreen
+import com.aiassistant.ui.screens.settings.ApiConfigEditorScreen
 import com.aiassistant.ui.screens.settings.SettingsScreen
 import com.aiassistant.ui.screens.stats.StatsScreen
 import com.aiassistant.ui.theme.AiApiAssistantTheme
@@ -110,6 +111,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * 历史页路由：查询词可能包含空格、&、# 等字符，直接拼进 query 会被截断，必须先编码。
+ * 空查询走无参数路由，保持既有 `history` 入口行为不变。
+ */
+internal fun historyRoute(query: String): String {
+    val trimmed = query.trim()
+    return if (trimmed.isEmpty()) "history" else "history?query=${android.net.Uri.encode(trimmed)}"
 }
 
 @Composable
@@ -180,8 +190,13 @@ fun AiAssistantNavigation(
                     onNavigateToSettings = {
                         openDestination(EchoDestination.SETTINGS)
                     },
-                    onNavigateToHistory = {
-                        navController.navigate("history")
+                    onNavigateToHistory = { query ->
+                        navController.navigate(historyRoute(query))
+                    },
+                    onNavigateToMessage = { conversationId, messageId ->
+                        navController.navigate("chat/$conversationId?focus=$messageId") {
+                            launchSingleTop = true
+                        }
                     },
                     onNavigateToStats = {
                         openDestination(EchoDestination.STATISTICS)
@@ -197,16 +212,19 @@ fun AiAssistantNavigation(
 
             // 对话页面
             composable(
-                route = "chat/{conversationId}?workspace={workspace}",
+                route = "chat/{conversationId}?workspace={workspace}&focus={focus}",
                 arguments = listOf(
                     navArgument("conversationId") { type = NavType.LongType },
-                    navArgument("workspace") { type = NavType.StringType; nullable = true; defaultValue = null }
+                    navArgument("workspace") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    // 搜索命中定位：0 表示普通打开（不定位）
+                    navArgument("focus") { type = NavType.LongType; defaultValue = 0L }
                 )
             ) { backStackEntry ->
                 val conversationId = backStackEntry.arguments?.getLong("conversationId") ?: return@composable
                 ChatScreen(
                     conversationId = conversationId,
                     initialStorySection = backStackEntry.arguments?.getString("workspace"),
+                    focusMessageId = backStackEntry.arguments?.getLong("focus")?.takeIf { it > 0L },
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -391,6 +409,9 @@ fun AiAssistantNavigation(
                     onNavigateBack = {
                         navController.popBackStack()
                     },
+                    onNavigateToApiConfig = { configId ->
+                        navController.navigate("api_config?configId=$configId")
+                    },
                     onNavigateToChat = { conversationId ->
                         navController.navigate("chat/$conversationId") {
                             // v2.6.8 需求 4：同一会话只保留一个对话页实例，避免连点会话卡片产生
@@ -403,8 +424,26 @@ fun AiAssistantNavigation(
                 )
             }
 
+            // API 配置编辑页面（configId=0 为新增）
+            composable(
+                route = "api_config?configId={configId}",
+                arguments = listOf(
+                    navArgument("configId") { type = NavType.LongType; defaultValue = 0L }
+                )
+            ) { backStackEntry ->
+                ApiConfigEditorScreen(
+                    configId = backStackEntry.arguments?.getLong("configId") ?: 0L,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
             // 历史记录页面
-            composable("history") {
+            composable(
+                route = "history?query={query}",
+                arguments = listOf(
+                    navArgument("query") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { backStackEntry ->
                 HistoryScreen(
                     onNavigateBack = {
                         navController.popBackStack()
@@ -415,7 +454,13 @@ fun AiAssistantNavigation(
                             // 两个 ChatViewModel 互相取消/清理生成会话，打断正在连接或回复的请求
                             launchSingleTop = true
                         }
-                    }
+                    },
+                    onNavigateToMessage = { conversationId, messageId ->
+                        navController.navigate("chat/$conversationId?focus=$messageId") {
+                            launchSingleTop = true
+                        }
+                    },
+                    initialQuery = backStackEntry.arguments?.getString("query").orEmpty()
                 )
             }
 

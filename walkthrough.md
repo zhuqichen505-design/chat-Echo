@@ -1,5 +1,62 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-09 · 2.8.30 搜索对话、发送贴底、API 配置页面化与停用配置过滤（已发布）
+
+基线 `main/a01f0dc`（已发布 2.8.29/215）；版本 2.8.30/216；Room v37 / 20 个实体不变，无迁移。
+
+本轮范围与实现：
+
+- 搜索对话：原实现有 7 项叠加缺陷（查询词未 trim、标题与内容二选一、多词不分词、`indexOf` 未判 -1 导致错位片段、无高亮与定位、防抖期闪空态、会话未加载即搜索）。现新增 `ConversationSearch` 统一分词 / AND / 相关度 / 片段与高亮区间，DAO 增加四词 AND 查询并以 `LIMIT 201` 判断截断；历史页改为标题 + 内容并集分区展示，消息结果经 `chat/{id}?focus=` 定位，命中未选中的变体时先切换变体组；首页标题无命中时回退检索消息内容。
+- 发送贴底：`sendScrollRequest` 在 0/90/180/270ms 四个时间点调用 `followMeasuredBottom()`，以 `collectIsDraggedAsState()` 判断用户接管后停止；编辑消息仍定位到被编辑消息。
+- API 配置：`ApiConfigDialog` → `ApiConfigEditorScreen` 全屏页，路由 `api_config?configId=`（0 新增）；保存流程内聚，保存中禁用返回，重试沿用已落库 ID。
+- 停用配置与模型：选择器改读 `getEnabledApiConfigs()` 并二次过滤；`AuxiliaryModelPolicy` 统一“跳过停用配置 + 停用模型回退”；删除仓库 / ViewModel / 历史页的停用配置兜底。
+- 代码整理：IME 可见性查询三处合一、两个 `LaunchedEffect(isGenerating)` 合并、输入框高度单状态、删除 `hasNewUserMessage`。
+
+新增 26 项测试，套件 88 → 92、总数 1,059 → 1,085，覆盖搜索策略 13、路由编码 3、真实 SQLite DAO 3、辅助模型策略 7 等。
+
+最终冻结验收 `20261109-022755-694`：脚本 / Gradle 退出 0，453.334 秒；92 套件 / 1,085 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒。
+
+`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；`com.aiassistant`、2.8.30/216、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+APK 审计：446 条目、条目名集合与 2.8.29 一致、CRC 全通过；7 项变化（清单、版本控制信息、两个 baseline profile、DEX、两条 R8 重命名的 coroutines 服务描述符 `r4.b/r4.a` → `s4.b/s4.a`）；DEX 31,614 条字符串（+1,620 / -1,573），新增可读中文 18 条均为本版搜索 / 定位 / 配置页提示；`resources.arsc` 与 2.8.29 逐字节一致，186 张图片无变化；隐私扫描新增命中 0。发布目录 225 文件（224 APK）→ 226 文件（225 APK），历史包保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+
+- 发送消息后是否稳定贴底；手指上滑拖动时自动贴底是否立即停止。
+- 历史搜索：标题与内容同时命中、多关键词 AND、高亮、点击消息定位、变体切换；首页搜索无标题命中时是否出现消息结果并可跳转。
+- API 配置页：新建与编辑、三个页签滚动、键盘避让、保存、保存中返回被拦截。
+- 停用某个 API 配置或模型后，自动命名 / 翻译选择器与执行路径是否都不再出现该项。
+- 输入法：打字中点击输入框、连续快速点击、拖拽手柄、返回后再点、切换输入法 / 表情面板。
+
+## 2026-11-09 · 输入框点击时输入法闪烁修复（已随 2.8.30 发布）
+
+基线 `main/a01f0dc`（已发布 2.8.29/215）；该修复随后随 2.8.30 一并发布（本节记录当时验收状态）。Room v37 / 20 个实体不变。
+
+问题：在输入框输入时点击输入框，输入法闪烁。
+
+根因（对照 Compose 1.6.8 源码核对）：
+- 旧判定 `restartFocus = 已聚焦 && !输入法可见` 依赖窗口 Insets 的单帧读数。显示 / 隐藏动画期间、悬浮输入法、以及 API < 30 的近似实现（`WindowInsetsCompat.Impl20` 用 `systemWindow.bottom > rootStable.bottom` 推断）都可能读到“不可见”。
+- 一旦误判即 `clearFocus()` → `TextFieldDecoratorModifier.onFocusEvent` 的 `disposeInputSession()` → `TextInputServiceAndroid.stopInput()`；该状态机把 `StopInput` 同时置 `showKeyboard = false`，即主动收起键盘，随后 `requestFocus()` → `startInputSession()` 再弹起 —— 表现为闪烁。
+- 输入法可见性此前在点击手势**之后**才读取，而 `detectTextFieldTapGestures` 的 onTap 已先 `requestFocus()` 再 `showKeyboard()`，读数被它改过。
+- 独立第三条路径：Compose 点击手势每次点击已聚焦输入框都会 `show()`，部分输入法对重复 `show()` 重建输入视图。
+
+临时实施方案：
+- 新增 `EditorGestureStart(focused, imeVisible)`，在 `awaitFirstDown`（Initial pass）同时采样聚焦与输入法可见性；请求签名改为 `(EditorGestureStart) -> Unit`，拖拽手柄改读实时 Insets。
+- `EditorTapAction` 三态替换布尔：`AssistFocus` / `RestartSession` / `Ignore`；`Ignore` 时 `reopenEditorKeyboard` 直接返回，不碰焦点、不 `show()`。
+- 新增 `ImeAwareKeyboardController`，仅在 `EchoNativeTextField` 内经 `CompositionLocalProvider` 替换控制器，拦掉输入法可见时的重复 `show()`；`hide()` 与已收起时的唤起不受影响。
+
+新增回归 2 项（`tappingFocusedEditorWithVisibleImeNeverTouchesFocusOrKeyboard`、`keyboardControllerSkipsShowWhileImeIsVisible`），`firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession` 改为覆盖三态判定；原有测试全部保留，总数 1,059。
+
+最终冻结验收 `20261109-001445-130`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，424.386 秒；88 套件 / 1,059 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+验收过程记录：前两次全量运行（`20261109-000144-532`、`20261109-001037-318`）在 `ChatRetryRepositoryTest.acceptingAutoCompressionPersistsTargetTierThenActuallyCallsSummaryModel` 超时（`withTimeout(5000)` 轮询 `pendingAutoTier`）。该用例为 Robolectric 真实计时轮询的上下文压缩测试，不引用本次改动文件，单独运行该测试类通过，第三次全量通过；判定为既有计时敏感波动，未改测试、未放宽断言。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 打字过程中点击输入框定位光标（重点：应无闪烁，光标直接落位）。
+- 连续快速点击输入框；点击右上拖拽手柄；按返回隐藏键盘后再点击；发送后立即点击；切换会话后返回；切换输入法 / 表情面板。
+- 确认输入法保持显示、不出现“收起再弹起”的闪动，也不出现“键盘可见但打不出字”。
+- 若仍复现，记录输入法名称 / 版本、Android 版本和精确操作序列。
+
 ## 2026-11-08 · 2.8.29 输入框“能唤出输入法但无法输入文字”修复（已发布）
 
 基线 `main/81b23c1`（源码修复提交 `2852f2c`）；版本 2.8.29/215；Room v37 / 20 个实体不变。

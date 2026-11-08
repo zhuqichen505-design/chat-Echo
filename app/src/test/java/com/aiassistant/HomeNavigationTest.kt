@@ -153,6 +153,25 @@ class HomeNavigationTest {
         }
     }
 
+    @Test fun apiConfigEditorResolvesAsChildOfSettingsForNewAndExistingConfig() {
+        NavigationFixture().use { fixture ->
+            fixture.open(EchoDestination.SETTINGS)
+            val settingsEntryId = requireNotNull(fixture.controller.currentBackStackEntry).id
+
+            fixture.navigate("api_config?configId=0")
+            assertEquals("api_config?configId={configId}", fixture.controller.currentDestination?.route)
+            assertEquals(0L, fixture.controller.currentBackStackEntry?.arguments?.getLong("configId"))
+            assertEquals(settingsEntryId, fixture.controller.previousBackStackEntry?.id)
+
+            assertTrue(fixture.pop())
+            fixture.navigate("api_config?configId=42")
+            assertEquals(42L, fixture.controller.currentBackStackEntry?.arguments?.getLong("configId"))
+
+            assertTrue(fixture.pop())
+            assertEquals(settingsEntryId, fixture.controller.currentBackStackEntry?.id)
+        }
+    }
+
     private class NavigationFixture(restoredState: Bundle? = null) : AutoCloseable {
         private val owner = NavigationLifecycleOwner()
         private val viewModelStore = ViewModelStore()
@@ -167,6 +186,13 @@ class HomeNavigationTest {
                 composable(
                     route = "chat/{conversationId}",
                     arguments = listOf(navArgument("conversationId") { type = NavType.LongType })
+                ) {}
+                composable(
+                    route = "api_config?configId={configId}",
+                    arguments = listOf(navArgument("configId") {
+                        type = NavType.LongType
+                        defaultValue = 0L
+                    })
                 ) {}
                 composable(
                     route = "roleplay_character_editor?characterId={characterId}",

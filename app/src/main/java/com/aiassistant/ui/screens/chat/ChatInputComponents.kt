@@ -200,8 +200,9 @@ fun ChatInputBar(
     horizontalInset: Dp = 12.dp,
 ) {
     var showToolMenu by remember { mutableStateOf(false) }
-    var isInputExpanded by remember { mutableStateOf(false) }
+    // 单一高度状态：是否“展开”只是高度的派生值，避免两个状态不同步。
     var customInputHeightDp by remember { mutableStateOf<Float?>(null) }
+    val isInputExpanded = (customInputHeightDp ?: 0f) > 60f
     val density = LocalDensity.current
     val reasoningPolicy = com.aiassistant.domain.model.ReasoningControls.policy(modelName, reasoningCapability)
     val thinkingActive = reasoningCapability?.supportsThinking != false && (enableThinking || reasoningPolicy.alwaysThinking)
@@ -218,13 +219,17 @@ fun ChatInputBar(
         inputFocusRequester, isFocused = { inputFocused }, active = !isBarsHidden
     )
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
+    // 手柄点击同样要取“点击前”的输入法可见性；组合快照会滞后，这里读实时窗口 Insets。
+    val inputView = androidx.compose.ui.platform.LocalView.current
+    val latestImeVisible by rememberUpdatedState(WindowInsets.isImeVisible)
+    fun imeVisibleNow(): Boolean =
+        com.aiassistant.ui.components.isImeVisibleNow(inputView, latestImeVisible)
     LaunchedEffect(isBarsHidden) {
         if (isBarsHidden) {
             keyboardRequest.cancel()
             focusManager.clearFocus(force = true)
             inputKeyboard?.hide()
             customInputHeightDp = null
-            isInputExpanded = false
         }
     }
     val inputAcknowledgements = remember { com.aiassistant.ui.components.EditorTextAcknowledgements(inputText) }
@@ -239,11 +244,10 @@ fun ChatInputBar(
     LaunchedEffect(imeVisible) {
         if (!imeVisible) {
             customInputHeightDp = null
-            isInputExpanded = false
         }
     }
-    val effectiveMinHeight = customInputHeightDp?.dp ?: if (isInputExpanded) 180.dp else 42.dp
-    val effectiveMaxHeight = if (customInputHeightDp != null) 360.dp else if (isInputExpanded) 320.dp else 112.dp
+    val effectiveMinHeight = customInputHeightDp?.dp ?: 42.dp
+    val effectiveMaxHeight = if (customInputHeightDp != null) 360.dp else 112.dp
     val inputShape = EchoTokens.Radius.shapeInput
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
@@ -415,7 +419,6 @@ fun ChatInputBar(
                                 // 任何来源造成的非最小状态都不会跨编辑会话残留
                                 if (!it.isFocused) {
                                     customInputHeightDp = null
-                                    isInputExpanded = false
                                 }
                             },
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -425,7 +428,7 @@ fun ChatInputBar(
                         // Native cursor shares the field's scrolling, bidi and IME coordinates.
                         cursorBrush = SolidColor(inputTextColor),
                         lineLimits = TextFieldLineLimits.MultiLine(
-                            maxHeightInLines = if (isInputExpanded || (customInputHeightDp ?: 0f) > 60f) 15 else 5
+                            maxHeightInLines = if (isInputExpanded) 15 else 5
                         ),
                         decorator = TextFieldDecorator { innerTextField ->
                             Box(
@@ -787,8 +790,13 @@ fun ChatInputBar(
                         .size(handleBoxSize)
                         .pointerInput(Unit) {
                             detectTapGestures {
-                                // 手柄不属于输入框手势链，这里的实时焦点就是点击前的状态。
-                                latestRequestKeyboard(inputFocused)
+                                // 手柄不属于输入框手势链，这里的实时焦点与输入法可见性就是点击前的状态。
+                                latestRequestKeyboard(
+                                    com.aiassistant.ui.components.EditorGestureStart(
+                                        focused = inputFocused,
+                                        imeVisible = imeVisibleNow()
+                                    )
+                                )
                             }
                         }
                         // v2.7.7 需求 1：移除手柄的点按展开/收起切换——点击输入框（含手柄热区）
@@ -798,17 +806,15 @@ fun ChatInputBar(
                                 onDragStart = { },
                                 onVerticalDrag = { change, dragAmount ->
                                     change.consume()
-                                    val currentH = customInputHeightDp ?: (if (isInputExpanded) 180f else 42f)
+                                    val currentH = customInputHeightDp ?: 42f
                                     if (currentH <= 46f && dragAmount > 8f) {
                                         // v2.7.8 需求 1：隐藏输入栏时同步回到最小高度，恢复后从最小开始
                                         customInputHeightDp = null
-                                        isInputExpanded = false
                                         onBarsHiddenChange(true)
                                     } else {
                                         val deltaDp = dragAmount / density.density
                                         val newH = (currentH - deltaDp).coerceIn(42f, 360f)
                                         customInputHeightDp = newH
-                                        isInputExpanded = newH > 60f
                                     }
                                 }
                             )

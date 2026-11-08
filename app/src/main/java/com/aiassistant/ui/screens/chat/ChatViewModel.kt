@@ -374,8 +374,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 apiConfig = repository.getApiConfigById(conv.apiConfigId)
                 if (apiConfig == null) {
                     _isModelConfigInvalid.value = true
+                    // 只回退到启用配置，停用配置不得接管会话。
                     val fallback = repository.getDefaultApiConfig()
-                        ?: repository.getAllApiConfigs().first().firstOrNull()
                     if (fallback != null) {
                         apiConfig = fallback
                     }
@@ -2803,7 +2803,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-                val currentConfig = apiConfig ?: repository.getDefaultApiConfig() ?: return@launch
+                val currentConfig = apiConfig?.takeIf { it.isEnabled } ?: repository.getDefaultApiConfig() ?: return@launch
                 val modelToUse = _currentModel.value ?: currentConfig.modelName
                 withContext(Dispatchers.Main) { onProgress("正在结合故事已有设定进行精准分析...") }
                 val currentChars = _uiState.value.roleplayCharacters
@@ -3115,7 +3115,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     }
                 """.trimIndent()
 
-                val config = apiConfig ?: repository.getDefaultApiConfig()
+                val config = apiConfig?.takeIf { it.isEnabled } ?: repository.getDefaultApiConfig()
                 if (config == null) {
                     withContext(Dispatchers.Main) { onError("未找到可用的 API 配置") }
                     return@launch

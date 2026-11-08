@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
@@ -87,6 +88,12 @@ import com.aiassistant.ui.components.rememberReadableBackdropColor
 import com.aiassistant.ui.components.rememberEchoHazeState
 import com.aiassistant.ui.components.rememberLazyListControlsVisible
 import com.aiassistant.ui.components.echoSwitchColors
+import com.aiassistant.ui.search.MessageSearchHit
+import com.aiassistant.ui.search.MessageSearchHitCard
+import com.aiassistant.ui.search.buildSearchSnippet
+import com.aiassistant.ui.search.matchesAllTerms
+import com.aiassistant.ui.search.searchTerms
+import com.aiassistant.ui.search.titleMatchScore
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
 import java.text.SimpleDateFormat
@@ -116,10 +123,11 @@ private val EchoWordmarkPresets = listOf(
 fun HomeScreen(
     onNavigateToChat: (Long) -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToHistory: () -> Unit,
+    onNavigateToHistory: (String) -> Unit,
     onNavigateToStats: () -> Unit,
     onNavigateToFolders: () -> Unit,
     onNavigateToRoleplayStudio: () -> Unit = {},
+    onNavigateToMessage: (Long, Long) -> Unit = { conversationId, _ -> onNavigateToChat(conversationId) },
     homeLayoutStyle: String = "focus",
     compactCards: Boolean = false,
     showRecentStory: Boolean = true
@@ -156,17 +164,44 @@ fun HomeScreen(
     var selectedConversationIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
-    val filteredConversations = remember(conversations, searchQuery) {
-        val query = searchQuery.trim()
-        if (query.isBlank()) {
+    // 标题没有命中时才回退搜索消息内容：既避免每次输入都全表扫描，也保证“搜聊过的内容”能出结果。
+    var homeMessageHits by remember { mutableStateOf<List<MessageSearchHit>>(emptyList()) }
+    var isSearchingHomeMessages by remember { mutableStateOf(false) }
+    val homeTerms = remember(searchQuery) { searchTerms(searchQuery) }
+    val repository = remember { AiAssistantApp.instance.repository }
+    val filteredConversations = remember(conversations, homeTerms) {
+        if (homeTerms.isEmpty()) {
             conversations
         } else {
-            conversations.filter {
-                it.title.contains(query, ignoreCase = true) ||
-                    it.modelName.contains(query, ignoreCase = true) ||
-                    it.systemPrompt?.contains(query, ignoreCase = true) == true
-            }
+            conversations
+                .filter {
+                    matchesAllTerms(it.title, homeTerms) ||
+                        matchesAllTerms(it.modelName, homeTerms) ||
+                        matchesAllTerms(it.systemPrompt.orEmpty(), homeTerms)
+                }
+                .sortedWith(
+                    compareByDescending<Conversation> { titleMatchScore(it.title, homeTerms) }
+                        .thenByDescending { it.updatedAt }
+                )
         }
+    }
+    LaunchedEffect(homeTerms, filteredConversations.isEmpty(), conversations) {
+        if (homeTerms.isEmpty() || filteredConversations.isNotEmpty() || conversations.isEmpty()) {
+            homeMessageHits = emptyList()
+            isSearchingHomeMessages = false
+            return@LaunchedEffect
+        }
+        isSearchingHomeMessages = true
+        delay(220)
+        val byId = conversations.associateBy { it.id }
+        homeMessageHits = repository.searchMessagesForTerms(homeTerms)
+            .take(20)
+            .mapNotNull { message ->
+                val conversation = byId[message.conversationId] ?: return@mapNotNull null
+                val snippet = buildSearchSnippet(message.content, homeTerms) ?: return@mapNotNull null
+                MessageSearchHit(conversation, message, snippet)
+            }
+        isSearchingHomeMessages = false
     }
     val visibleConversationIds = remember(filteredConversations) {
         filteredConversations.map { it.id }.toSet()
@@ -344,22 +379,87 @@ fun HomeScreen(
                             }
                         }
                         if (filteredConversations.isEmpty()) {
-                            item(key = "home_empty") {
-                                Column(Modifier.fillMaxWidth().padding(vertical = 26.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        if (searchQuery.isNotBlank()) "没有找到匹配的会话"
-                                        else if (selectedFolderId != null) "这里还没有会话" else "还没有会话",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = backdropTextColor
-                                    )
-                                    Text(
-                                        if (searchQuery.isNotBlank()) "试试其他关键词，或从历史记录中查找。"
-                                        else if (selectedFolderId != null) "可以切回全部会话，或在这里新建对话。"
-                                        else "点击上方按钮开始，之后可以在这里继续。",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = backdropTextColor.copy(alpha = 0.84f)
-                                    )
+                            when {
+                                // 标题没有命中时回退到消息内容：旧实现只搜标题，聊过的内容永远搜不到。
+                                homeMessageHits.isNotEmpty() -> {
+                                    item(key = "home_message_header") {
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                "对话标题没有匹配",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = backdropTextColor
+                                            )
+                                            Text(
+                                                "以下结果来自消息内容，点击可直接定位到该条消息",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = backdropTextColor.copy(alpha = 0.84f)
+                                            )
+                                        }
+                                    }
+                                    items(
+                                        items = homeMessageHits,
+                                        key = { "home_message_${it.message.id}" }
+                                    ) { hit ->
+                                        MessageSearchHitCard(
+                                            hazeState = hazeState,
+                                            hit = hit,
+                                            readableBackdrop = readableBackdrop,
+                                            onClick = {
+                                                onNavigateToMessage(hit.conversation.id, hit.message.id)
+                                            }
+                                        )
+                                    }
+                                    item(key = "home_message_more") {
+                                        TextButton(onClick = { onNavigateToHistory(searchQuery.trim()) }) {
+                                            Text("在历史记录中查看全部消息搜索")
+                                        }
+                                    }
+                                }
+                                isSearchingHomeMessages -> {
+                                    item(key = "home_searching") {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 26.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text(
+                                                "正在搜索消息内容…",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = backdropTextColor
+                                            )
+                                        }
+                                    }
+                                }
+                                else -> item(key = "home_empty") {
+                                    Column(Modifier.fillMaxWidth().padding(vertical = 26.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            if (homeTerms.isNotEmpty()) "没有找到匹配的会话"
+                                            else if (selectedFolderId != null) "这里还没有会话" else "还没有会话",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = backdropTextColor
+                                        )
+                                        Text(
+                                            if (homeTerms.isNotEmpty()) "已同时搜索标题与消息内容，可换个关键词再试。"
+                                            else if (selectedFolderId != null) "可以切回全部会话，或在这里新建对话。"
+                                            else "点击上方按钮开始，之后可以在这里继续。",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = backdropTextColor.copy(alpha = 0.84f)
+                                        )
+                                        if (homeTerms.isNotEmpty()) {
+                                            TextButton(onClick = { onNavigateToHistory(searchQuery.trim()) }) {
+                                                Text("在历史记录中搜索")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -641,7 +741,7 @@ fun HomeDashboardHeader(
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
     onNavigateToRoleplayStudio: () -> Unit,
-    onNavigateToHistory: () -> Unit,
+    onNavigateToHistory: (String) -> Unit,
     onNavigateToFolders: () -> Unit,
     onConfigureChat: () -> Unit,
     workbench: Boolean
@@ -671,7 +771,7 @@ fun HomeDashboardHeader(
                     DropdownMenuItem(text = { Text("配置新对话") }, leadingIcon = { Icon(Icons.Default.Tune, null) },
                         onClick = { showMoreMenu = false; onConfigureChat() })
                     DropdownMenuItem(text = { Text("历史与隐藏会话") }, leadingIcon = { Icon(Icons.Default.History, null) },
-                        onClick = { showMoreMenu = false; onNavigateToHistory() })
+                        onClick = { showMoreMenu = false; onNavigateToHistory("") })
                     DropdownMenuItem(text = { Text("管理文件夹") }, leadingIcon = { Icon(Icons.Default.Folder, null) },
                         onClick = { showMoreMenu = false; onNavigateToFolders() })
                     HorizontalDivider()
@@ -871,7 +971,7 @@ private fun HomeSearchRow(
     hazeState: dev.chrisbanes.haze.HazeState,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    onNavigateToHistory: () -> Unit,
+    onNavigateToHistory: (String) -> Unit,
     readableBackdrop: Color
 ) {
     val glass = echoGlassPalette()
@@ -919,7 +1019,7 @@ private fun HomeSearchRow(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (searchQuery.isBlank()) {
                                 Text(
-                                    text = "搜索对话、模型或提示词",
+                                    text = "搜索对话、消息内容或模型",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = searchTextColor.copy(alpha = 0.62f),
                                     maxLines = 1,
@@ -951,7 +1051,7 @@ private fun HomeSearchRow(
             hazeState = hazeState,
             icon = Icons.Default.History,
             contentDescription = "历史记录",
-            onClick = onNavigateToHistory,
+            onClick = { onNavigateToHistory(searchQuery.trim()) },
             modifier = Modifier.size(40.dp)
         )
     }

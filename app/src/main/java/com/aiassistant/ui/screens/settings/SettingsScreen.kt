@@ -605,6 +605,7 @@ fun SettingsInputField(
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToChat: (Long) -> Unit,
+    onNavigateToApiConfig: (Long) -> Unit,
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
     onAppearancePresetChange: (String) -> Unit = {},
@@ -684,7 +685,12 @@ fun SettingsScreen(
                         contentPadding = tabContentPadding,
                         onSectionSelected = { selectedSection = it }
                     )
-                    "api_config" -> ApiConfigTab(hazeState = hazeState, modifier = Modifier.fillMaxSize(), contentPadding = tabContentPadding)
+                    "api_config" -> ApiConfigTab(
+                        hazeState = hazeState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = tabContentPadding,
+                        onNavigateToApiConfig = onNavigateToApiConfig
+                    )
                     "http_access" -> {
                         val httpManager = remember(context) { com.aiassistant.utils.HttpAccessSettings(context) }
                         LazyColumn(modifier = Modifier.fillMaxSize().imePadding(), contentPadding = tabContentPadding) {
@@ -967,28 +973,17 @@ fun SettingsMenuItem(
 fun ApiConfigTab(
     hazeState: dev.chrisbanes.haze.HazeState,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(16.dp)
+    contentPadding: PaddingValues = PaddingValues(16.dp),
+    onNavigateToApiConfig: (Long) -> Unit
 ) {
     val repository = AiAssistantApp.instance.repository
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val configsFromDb by repository.getAllApiConfigs().collectAsState(initial = emptyList())
     var localConfigs by remember { mutableStateOf<List<ApiConfig>>(emptyList()) }
     LaunchedEffect(configsFromDb) {
         localConfigs = configsFromDb
     }
     val providerReorderState = rememberSmoothReorderState()
-
-    var showAddDialog by remember { mutableStateOf(false) }
-    var editingConfig by remember { mutableStateOf<ApiConfig?>(null) }
-    var isSaving by remember { mutableStateOf(false) }
-
-    BackHandler(enabled = showAddDialog || editingConfig != null) {
-        if (!isSaving) {
-            showAddDialog = false
-            editingConfig = null
-        }
-    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -1125,7 +1120,7 @@ fun ApiConfigTab(
                         }
                     }
                 } else null,
-                onEdit = { editingConfig = it },
+                onEdit = { onNavigateToApiConfig(it.id) },
                 onDelete = {
                     scope.launch {
                         repository.deleteApiConfig(config)
@@ -1146,7 +1141,7 @@ fun ApiConfigTab(
 
         item {
             OutlinedButton(
-                onClick = { showAddDialog = true },
+                onClick = { onNavigateToApiConfig(0L) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
@@ -1154,73 +1149,6 @@ fun ApiConfigTab(
                 Text("添加API配置")
             }
         }
-    }
-
-    if (showAddDialog || editingConfig != null) {
-        // 后续设置保存失败时保留已落库 ID，重试不会重复新增 API 配置。
-        var persistedConfigId by remember { mutableLongStateOf(editingConfig?.id ?: 0L) }
-        ApiConfigDialog(
-            hazeState = hazeState,
-            config = editingConfig,
-            isSaving = isSaving,
-            onDismiss = {
-                if (!isSaving) {
-                    showAddDialog = false
-                    editingConfig = null
-                }
-            },
-            onSave = { config, modelNames, enabledModelNames, modelCapabilities, modelSettings, apiAvatarUri, clearApiAvatar, rotationSettings ->
-                if (!isSaving) {
-                    isSaving = true
-                    scope.launch {
-                        try {
-                            val persistedConfig = if (persistedConfigId > 0L) repository.getApiConfigById(persistedConfigId) else null
-                            val configToSave = config.copy(
-                                id = persistedConfigId,
-                                isDefault = persistedConfig?.isDefault ?: config.isDefault,
-                                createdAt = persistedConfig?.createdAt ?: config.createdAt
-                            )
-                            val configId = repository.saveApiConfig(configToSave)
-                            persistedConfigId = configId
-                            if (modelNames.isNotEmpty()) {
-                                repository.replaceSelectedModels(
-                                    apiConfigId = configId,
-                                    modelNames = modelNames,
-                                    enabledModelNames = enabledModelNames,
-                                    modelCapabilities = modelCapabilities,
-                                    modelSettings = modelSettings
-                                )
-                            }
-                            if (clearApiAvatar) {
-                                AvatarManager.deleteApiModelAvatar(context, configId)
-                            }
-                            apiAvatarUri?.let { uri ->
-                                AvatarManager.saveApiModelAvatarFromUri(context, configId, uri)
-                            }
-                            val rotationSaved = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    AiAssistantApp.instance.personalizationManager.apiKeyRotationManager.saveSettings(
-                                        config.baseUrl, config.apiType, rotationSettings
-                                    )
-                                }.getOrDefault(false)
-                            }
-                            if (rotationSaved) {
-                                showAddDialog = false
-                                editingConfig = null
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context, "API 配置已保存，但轮询设置保存失败。请点击“保存”重试。", android.widget.Toast.LENGTH_LONG
-                                ).show()
-                            }
-                        } catch (e: Exception) {
-                            android.widget.Toast.makeText(context, "保存失败: ${e.message ?: "未知异常"}", android.widget.Toast.LENGTH_SHORT).show()
-                        } finally {
-                            isSaving = false
-                        }
-                    }
-                }
-            }
-        )
     }
 }
 

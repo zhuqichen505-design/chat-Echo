@@ -199,6 +199,24 @@ interface MessageDao {
     @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON c.id = m.conversationId WHERE (c.tags IS NULL OR (c.tags NOT LIKE '%hidden%' AND c.tags NOT LIKE '%private%')) AND instr(lower(m.content), lower(:query)) > 0 ORDER BY c.updatedAt DESC, m.createdAt ASC LIMIT 200")
     suspend fun searchMessages(query: String): List<Message>
 
+    /**
+     * 多关键词 AND 检索：空关键词跳过，避免依赖 instr(X, '') 的边界行为。
+     * 调用方固定传 4 个已折叠空白、已小写化的词，LIMIT 多取 1 条用于判断结果是否被截断。
+     */
+    @Query(
+        """
+        SELECT m.* FROM messages m INNER JOIN conversations c ON c.id = m.conversationId
+        WHERE (c.tags IS NULL OR (c.tags NOT LIKE '%hidden%' AND c.tags NOT LIKE '%private%'))
+          AND (:q1 = '' OR instr(lower(m.content), lower(:q1)) > 0)
+          AND (:q2 = '' OR instr(lower(m.content), lower(:q2)) > 0)
+          AND (:q3 = '' OR instr(lower(m.content), lower(:q3)) > 0)
+          AND (:q4 = '' OR instr(lower(m.content), lower(:q4)) > 0)
+        ORDER BY m.createdAt DESC
+        LIMIT 201
+        """
+    )
+    suspend fun searchMessagesIn(q1: String, q2: String, q3: String, q4: String): List<Message>
+
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC, id ASC")
     fun getMessagesByConversation(conversationId: Long): Flow<List<Message>>
 

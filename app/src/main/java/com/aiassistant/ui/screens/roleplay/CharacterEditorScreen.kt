@@ -375,7 +375,7 @@ private fun SmartReadCharacterDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = com.aiassistant.AiAssistantApp.instance.repository
-    val apiConfigs by repository.getAllApiConfigs().collectAsState(initial = emptyList())
+    val apiConfigs by repository.getEnabledApiConfigs().collectAsState(initial = emptyList())
     val visibleOptions = remember { mutableStateOf<List<com.aiassistant.domain.model.ChatModelOption>>(emptyList()) }
     LaunchedEffect(Unit) {
         visibleOptions.value = repository.getAllVisibleChatModelOptions()

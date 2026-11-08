@@ -26,6 +26,25 @@
 
 ## 本次记录
 
+## 2026-11-09 · 2.8.30 搜索对话、发送贴底、API 配置页面化与停用配置过滤（已发布）
+
+- 基线 `main/a01f0dc`（已发布 2.8.29/215）；版本由 2.8.29/215 递增到 2.8.30/216；Room v37 / 20 个实体不变，无迁移。原未跟踪内容保留排除。
+- 文件：`MainActivity.kt`、`Daos.kt`、`AiRepository.kt`、`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`ChatScreen.kt`、`ChatScrollPolicy.kt`、`ChatViewModel.kt`、`HistoryScreen.kt`、`HomeScreen.kt`、`HomeViewModel.kt`、角色 / 场景编辑与工作室导入、`SettingsScreen.kt`、`SettingsApiConfigDialog.kt`、`SettingsModelFeaturesTab.kt`、`SettingsUniversalModelPicker.kt`、新增 `helpers/AuxiliaryModelPolicy.kt`、新增 `ui/search/ConversationSearch.kt` / `MessageSearchHitCard.kt`、`ConversationSearchTest.kt`、`MessageSearchDaoTest.kt`、`AuxiliaryModelPolicyTest.kt`、`HomeNavigationTest.kt`、`UiPolishRegressionTest.kt`、`ChatEnhancementsTest.kt`、版本配置与文档；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 方案要点：搜索改为标题 + 消息内容并集，查询词归一化、4 词 AND、高亮、片段时间窗，点击结果经 `chat/{id}?focus=` 定位并兼容变体组；发送后在四个时间点贴底并以拖动状态让出；API 配置编辑改全屏页（`api_config?configId=`）；辅助选择器与执行路径只使用启用配置与启用模型；IME 可见性查询三处合一、输入框高度单状态、删除死代码。
+- 验证：最终 verify `20261109-022755-694` 退出 0，453.334 秒；92 套件 / 1,085 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒；`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；v2 签名连续，Android Debug **非正式生产签名**。
+- APK 审计：446 条目与 2.8.29 条目名集合一致、CRC 全通过；7 项变化（清单、版本控制信息、两个 baseline profile、DEX、两条 R8 重命名的 coroutines 服务描述符）；DEX 31,614 条字符串，新增可读中文 18 条均为本版提示；`resources.arsc` 逐字节不变，186 张图片一致；隐私扫描新增命中 0。发布目录 225 文件（224 APK）→ 226 文件（225 APK），历史包保留。
+- 设备边界：无连接设备，贴底、搜索定位、配置页与输入法行为待人工验收。
+
+## 2026-11-09 · 输入框点击时输入法闪烁修复（已随 2.8.30 发布）
+
+- 基线 `main/a01f0dc`（已发布 2.8.29/215）；Room v37 / 20 个实体不变。本次仅改源码与测试，未递增版本、未构建 APK。
+- 根因：`restartFocus = 已聚焦 && !输入法可见` 依赖窗口 Insets 单帧读数；显示 / 隐藏动画、悬浮输入法、API < 30 近似实现（`WindowInsetsCompat.Impl20` 用 `systemWindow.bottom > rootStable.bottom` 推断）都可能读到“不可见”。误判即 `clearFocus()` → `disposeInputSession()` → `TextInputServiceAndroid.stopInput()`（状态机把 `StopInput` 同时置 `showKeyboard = false`，主动收起键盘）→ `requestFocus()` → `startInputSession()` 弹起，表现为闪烁。可见性此前还在点击手势之后读取，而 onTap 已先 `requestFocus()` + `showKeyboard()`；Compose 点击手势本身每次点击已聚焦输入框也会 `show()`。
+- 临时方案：`EditorGestureStart(focused, imeVisible)` 在 `awaitFirstDown`（Initial pass）同时采样，请求签名改为 `(EditorGestureStart) -> Unit`（拖拽手柄读实时 Insets）；`EditorTapAction` 三态（`AssistFocus` / `RestartSession` / `Ignore`）替换布尔，`Ignore` 时不碰焦点也不 `show()`；新增 `ImeAwareKeyboardController` 仅在 `EchoNativeTextField` 内经 `CompositionLocalProvider` 拦掉可见时的重复 `show()`，`hide()` 与已收起时的唤起不受影响。
+- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`；新增 2 项回归，测试总数 1,057 → 1,059；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261109-001445-130` 退出 0，424.386 秒；88 套件 / 1,059 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。
+- 验收波动：前两次全量运行（`20261109-000144-532`、`20261109-001037-318`）在 `ChatRetryRepositoryTest.acceptingAutoCompressionPersistsTargetTierThenActuallyCallsSummaryModel` 超时（`withTimeout(5000)` 轮询 `pendingAutoTier`）。该用例为 Robolectric 真实计时轮询的上下文压缩测试，不引用本次改动文件，单独运行该测试类通过，第三次全量通过；判定为既有计时敏感波动，未改测试、未放宽断言。
+- 待办：无设备，闪烁是否消失待人工复验（打字中点击定位光标、连续快速点击、点击拖拽手柄、返回隐藏后再点、发送后立即点击、切换会话 / 输入法）。
+
 ## 2026-11-08 · 2.8.29 输入框“能唤出输入法但无法输入文字”修复（已发布）
 
 - 基线 `main/81b23c1`；版本由 2.8.28/214 递增到 2.8.29/215；Room v37 / 20 个实体不变。源码修复提交 `2852f2c`。

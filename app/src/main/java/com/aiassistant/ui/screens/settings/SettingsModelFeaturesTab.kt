@@ -183,7 +183,7 @@ fun ModelFeaturesTab(
 
     var thinkingTemplate by remember(settings) { mutableStateOf(settings.thinkingCapsuleTemplate) }
 
-    val allApiConfigs by repository.getAllApiConfigs().collectAsState(initial = emptyList())
+    val enabledApiConfigs by repository.getEnabledApiConfigs().collectAsState(initial = emptyList())
 
     var connectingTemplate by remember(settings) { mutableStateOf(settings.connectingTextTemplate) }
     var thinkingTextTemplate by remember(settings) { mutableStateOf(settings.thinkingTextTemplate) }
@@ -298,7 +298,7 @@ fun ModelFeaturesTab(
                             subtitle = "直接跨服务商自由选择所有模型，无需先切换服务商",
                             selectedConfigId = autoNameApiConfigId,
                             selectedModel = autoNameModel,
-                            allConfigs = allApiConfigs,
+                            allConfigs = enabledApiConfigs,
                             onSelect = { cfgId, model ->
                                 autoNameApiConfigId = cfgId
                                 autoNameModel = model
@@ -362,7 +362,7 @@ fun ModelFeaturesTab(
                             subtitle = "直接跨服务商自由选择所有模型，无需先切换服务商",
                             selectedConfigId = thinkingTranslationApiConfigId,
                             selectedModel = thinkingTranslationModel,
-                            allConfigs = allApiConfigs,
+                            allConfigs = enabledApiConfigs,
                             onSelect = { cfgId, model ->
                                 thinkingTranslationApiConfigId = cfgId
                                 thinkingTranslationModel = model
@@ -405,7 +405,7 @@ fun ModelFeaturesTab(
                             subtitle = "直接跨服务商自由选择所有模型，无需先切换服务商",
                             selectedConfigId = auxiliaryMemoryConfigId,
                             selectedModel = auxiliaryMemoryModel,
-                            allConfigs = allApiConfigs,
+                            allConfigs = enabledApiConfigs,
                             onSelect = { cfgId, model ->
                                 auxiliaryMemoryConfigId = cfgId
                                 auxiliaryMemoryModel = model

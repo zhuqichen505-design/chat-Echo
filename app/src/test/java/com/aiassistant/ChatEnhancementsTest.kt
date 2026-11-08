@@ -91,14 +91,6 @@ class ChatEnhancementsTest {
         assertFalse(missingAnchor.streamingKey in missingAnchor.messageKeys)
     }
 
-    @Test fun assistantPersistenceDoesNotRequestScrollButNewUserInputDoes() {
-        val user = com.aiassistant.domain.model.Message(id = 30, conversationId = 1, role = "user", content = "question")
-        val reply = com.aiassistant.domain.model.Message(id = 31, conversationId = 1, role = "assistant", content = "reply")
-        assertFalse(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id), listOf(user, reply)))
-        assertFalse(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id, reply.id), listOf(user, reply.copy(content = "updated"))))
-        assertTrue(com.aiassistant.ui.screens.chat.hasNewUserMessage(setOf(user.id, reply.id), listOf(user, reply, user.copy(id = 32))))
-    }
-
     @Test fun directionChoicesHaveDistinctOneRoundSemantics() {
         assertEquals(com.aiassistant.ui.screens.chat.GenerationUiState.ChoosingDirection,
             com.aiassistant.ui.screens.chat.GenerationUiStateRules.derive(true, "", false, "等待选择回复方向"))

@@ -1413,6 +1413,17 @@ class AiRepository(
 
     suspend fun searchMessages(query: String): List<Message> = messageDao.searchMessages(query)
 
+    /**
+     * 多关键词消息检索。关键词由 [com.aiassistant.ui.search.searchTerms] 归一化后传入，
+     * 超过 4 个的部分不参与 SQL 粗筛（UI 侧同时用内存 AND 校验，不会误报）。
+     */
+    suspend fun searchMessagesForTerms(terms: List<String>): List<Message> = messageDao.searchMessagesIn(
+        q1 = terms.getOrElse(0) { "" },
+        q2 = terms.getOrElse(1) { "" },
+        q3 = terms.getOrElse(2) { "" },
+        q4 = terms.getOrElse(3) { "" }
+    )
+
     // ============ AI API调用 ============
 
     suspend fun sendChatMessage(
@@ -4260,20 +4271,19 @@ class AiRepository(
             Log.d(tag, "时间轴分析：优先调度辅助模型 [${targetModel}] (configId=${settings.auxiliaryMemoryApiConfigId})")
         }
 
-        // 2. 若未启用辅助模型，依次寻找：活动配置 -> 会话绑定配置 -> 全局默认配置 -> 首个有效配置
+        // 2. 若未启用辅助模型，依次寻找：活动配置 -> 会话绑定配置 -> 全局默认配置。
+        // 停用配置不参与回退，避免已关闭的 API 继续被辅助任务调用。
         if (rawConfig == null || targetModel.isBlank()) {
             val candidateConfigId = activeConfigId?.takeIf { it > 0L }
                 ?: conversation?.apiConfigId?.takeIf { it > 0L }
                 ?: getDefaultApiConfig()?.id
-                ?: getAllApiConfigs().first().firstOrNull()?.id
                 ?: 0L
 
             if (candidateConfigId > 0L) {
-                rawConfig = getDecryptedConfig(candidateConfigId)
+                rawConfig = getDecryptedConfig(candidateConfigId)?.takeIf { it.isEnabled }
             }
             if (rawConfig == null) {
                 rawConfig = getDefaultApiConfig()?.let { getDecryptedConfig(it.id) }
-                    ?: getAllApiConfigs().first().firstOrNull()?.let { getDecryptedConfig(it.id) }
             }
 
             targetModel = activeModelName?.ifBlank { null }
@@ -5500,12 +5510,22 @@ class AiRepository(
 
             val conversation = getConversationById(conversationId) ?: return@withContext null
 
-            // API 配置选择：若设置了独立自动命名配置则优先使用，否则使用当前对话的配置
-            val targetConfigId = if (settings.autoNameApiConfigId > 0L) settings.autoNameApiConfigId else conversation.apiConfigId
-            val rawConfig = getDecryptedConfig(targetConfigId) ?: getDecryptedConfig(conversation.apiConfigId) ?: return@withContext null
+            // API 配置选择：独立自动命名配置 > 当前对话配置 > 全局默认启用配置。
+            // 任何一层指向已停用的配置都必须跳过，停用配置不得参与辅助起名。
+            val preferredConfig = settings.autoNameApiConfigId
+                .takeIf { it > 0L }
+                ?.let { getDecryptedConfig(it) }
+            val conversationConfig = getDecryptedConfig(conversation.apiConfigId)
+            val rawConfig = firstEnabledConfig(preferredConfig, conversationConfig)
+                ?: getDefaultApiConfig()?.let { getDecryptedConfig(it.id) }
+                ?: return@withContext null
 
-            // 模型选择：若设置了指定自动命名模型则覆盖配置模型，否则沿用配置模型
-            val targetModel = settings.autoNameModel.trim().ifBlank { rawConfig.modelName }
+            // 模型选择：停用模型回退到配置的启用模型，停用模型不得继续被调用。
+            val targetModel = resolveAuxiliaryModel(
+                requestedModel = settings.autoNameModel,
+                configDefaultModel = rawConfig.modelName,
+                selectedModels = getSelectedModels(rawConfig.id).first()
+            )
             val config = rawConfig.copy(modelName = targetModel)
 
             val messages = getMessagesList(conversationId).take(8)
@@ -5550,8 +5570,16 @@ class AiRepository(
         customPrompt: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val rawConfig = getDecryptedConfig(apiConfigId) ?: return@withContext Result.failure(Exception("API配置不存在"))
-            val targetModel = modelName.trim().ifBlank { rawConfig.modelName }
+            val rawConfig = getDecryptedConfig(apiConfigId)?.takeIf { it.isEnabled }
+                ?: return@withContext Result.failure(Exception("该 API 配置已停用，请先启用或选择其他配置"))
+            val requestedModel = modelName.trim()
+            val selectedModels = getSelectedModels(apiConfigId).first()
+            if (requestedModel.isNotBlank() &&
+                selectedModels.any { it.modelName == requestedModel && !it.isEnabled }
+            ) {
+                return@withContext Result.failure(Exception("模型 $requestedModel 已停用，请选择其他模型"))
+            }
+            val targetModel = resolveAuxiliaryModel(requestedModel, rawConfig.modelName, selectedModels)
             val config = rawConfig.copy(modelName = targetModel)
             val promptTemplate = customPrompt.trim().ifBlank {
                 "请根据下面这段用户发言或对话，生成一个简短精炼的中文标题。\n要求：严格在12个字以内，禁止使用任何标点符号、书名号或引号，禁止包含'标题'、'关于'等前缀废话，只直接输出最终标题。"
@@ -5864,12 +5892,19 @@ class AiRepository(
                 return@withContext Result.failure(Exception("待翻译内容为空"))
             }
 
-            val rawConfig = (if (targetApiConfigId > 0L) getDecryptedConfig(targetApiConfigId) else null)
+            // 指定配置/模型都必须处于启用状态；停用项回退到默认启用配置与配置默认模型。
+            val requestedConfig = if (targetApiConfigId > 0L) {
+                getDecryptedConfig(targetApiConfigId)?.takeIf { it.isEnabled }
+            } else null
+            val rawConfig = requestedConfig
                 ?: getDefaultApiConfig()?.let { getDecryptedConfig(it.id) }
-                ?: getAllApiConfigs().first().firstOrNull()?.let { getDecryptedConfig(it.id) }
                 ?: return@withContext Result.failure(Exception("未找到可用的 API 配置用于翻译"))
 
-            val targetModel = targetModelName.trim().ifBlank { rawConfig.modelName }
+            val targetModel = resolveAuxiliaryModel(
+                requestedModel = targetModelName,
+                configDefaultModel = rawConfig.modelName,
+                selectedModels = getSelectedModels(rawConfig.id).first()
+            )
             val effectiveConfig = rawConfig.copy(modelName = targetModel)
 
             val prompt = """

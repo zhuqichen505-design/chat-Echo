@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -195,7 +196,9 @@ fun ChatScreen(
     onNavigateBack: () -> Unit,
     onNavigateToChat: (Long) -> Unit = {},
     onNavigateToRoleplayMemory: (Long) -> Unit = {},
-    initialStorySection: String? = null
+    initialStorySection: String? = null,
+    /** 从搜索结果进入时携带的命中消息 id：加载完成后滚动到该消息，0/null 表示普通打开。 */
+    focusMessageId: Long? = null
 ) {
     val context = LocalContext.current
     val chatBackgroundBitmap = remember(context, BackgroundImageManager.revision) {
@@ -254,6 +257,8 @@ fun ChatScreen(
     val hazeState = rememberEchoHazeState()
     val readableBackdrops = rememberReadableBackdropColors(chatBackgroundBitmap)
     val listState = rememberLazyListState()
+    // 只有用户手指拖动才算“接管滚动”；程序化 scrollToItem 也会短暂置 isScrollInProgress。
+    val isListDragging by listState.interactionSource.collectIsDraggedAsState()
     val scrollControlsVisibilityState = rememberLazyListControlsVisible(listState)
     val showScrollControls by scrollControlsVisibilityState
     val clipboardManager = LocalClipboardManager.current
@@ -316,6 +321,12 @@ fun ChatScreen(
     val displayMessages = remember(messages, variantSelectionSnapshot) {
         buildDisplayMessages(messages, variantSelectionSnapshot)
     }
+    // 搜索命中定位：pending 在完成滚动后清空，避免后续消息更新再次触发滚动。
+    var pendingFocusMessageId by remember(conversationId, focusMessageId) {
+        mutableStateOf(focusMessageId)
+    }
+    // 普通发送后显式贴底：用户消息落库与等待气泡插入都有延迟，只靠 isGenerating 首帧滚动会漏掉。
+    var sendScrollRequest by remember(conversationId) { mutableIntStateOf(0) }
     val replyRowKeys = remember(displayMessages, generatingAnchor) {
         chatReplyRowKeys(displayMessages, generatingAnchor?.userMessageId, generatingAnchor?.userGroupId)
     }
@@ -464,6 +475,45 @@ fun ChatScreen(
     }
 
     var hasInitialScrolledToBottom by remember(conversationId) { mutableStateOf(false) }
+    // 搜索命中定位必须在“初始滚底”之前声明：先占住 hasInitialScrolledToBottom，
+    // 否则打开长对话时两个 effect 会先滚到底再跳回命中位置，出现明显闪跳。
+    LaunchedEffect(pendingFocusMessageId, displayMessages) {
+        val targetId = pendingFocusMessageId ?: return@LaunchedEffect
+        if (messages.isEmpty()) return@LaunchedEffect
+        val target = messages.firstOrNull { it.id == targetId }
+        if (target == null) {
+            // 消息可能在搜索后被删除；放弃定位并回到正常的初始滚底。
+            pendingFocusMessageId = null
+            return@LaunchedEffect
+        }
+        // 命中消息可能属于未选中的变体：先切换变体，displayMessages 重建后本 effect 会再次进入。
+        val groupId = target.variantGroupId
+        if (!groupId.isNullOrBlank() && variantSelections[groupId] != target.variantIndex) {
+            variantSelections[groupId] = target.variantIndex
+            pairedVariantGroupId(groupId)?.let { paired ->
+                if (messages.any { it.variantGroupId == paired }) {
+                    variantSelections[paired] = target.variantIndex
+                }
+            }
+            return@LaunchedEffect
+        }
+        val index = displayMessages.indexOfFirst { it.message.id == targetId }
+        if (index < 0) {
+            pendingFocusMessageId = null
+            return@LaunchedEffect
+        }
+        hasInitialScrolledToBottom = true
+        androidx.compose.runtime.withFrameNanos { }
+        try {
+            listState.scrollToItem(index)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return@LaunchedEffect
+        }
+        pendingFocusMessageId = null
+        Toast.makeText(context, "已定位到搜索命中的消息", Toast.LENGTH_SHORT).show()
+    }
     LaunchedEffect(conversationId, displayMessages.size) {
         if (!hasInitialScrolledToBottom && displayMessages.isNotEmpty()) {
             hasInitialScrolledToBottom = true
@@ -471,6 +521,21 @@ fun ChatScreen(
             try {
                 listState.followMeasuredBottom()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        }
+    }
+
+    // 发送后贴底：分几个时间点跟随，覆盖用户消息落库、等待气泡测量与键盘高度变化。
+    // 用户一旦开始手动滚动就立即让出控制，不在后台抢滚动位置。
+    LaunchedEffect(sendScrollRequest) {
+        if (sendScrollRequest <= 0) return@LaunchedEffect
+        autoFollowOutput = true
+        repeat(4) { attempt ->
+            if (attempt > 0) {
+                kotlinx.coroutines.delay(90L)
+                if (isListDragging) return@LaunchedEffect
+            }
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { listState.followMeasuredBottom() }
         }
     }
 
@@ -508,18 +573,14 @@ fun ChatScreen(
         }
     }
 
+    // 生成开始：恢复流式宿主分支，并在等待气泡完成测量后做一次贴底。
+    // 不要监听自己的滚动/布局再回灌 scrollToItem，那会形成过冲与回弹。
     LaunchedEffect(isGenerating) {
         if (!isGenerating) {
             streamingBranchGroupId = null
-        } else {
-            streamingBranchGroupId = activeStreamingBranchGroupId(conversationId) ?: streamingBranchGroupId
+            return@LaunchedEffect
         }
-    }
-
-    // Connect once after the waiting item is measured. Do not observe our own scrolling/layout
-    // and feed it back into another scrollToItem: that loop caused transient overshoot/rebound.
-    LaunchedEffect(isGenerating) {
-        if (!isGenerating) return@LaunchedEffect
+        streamingBranchGroupId = activeStreamingBranchGroupId(conversationId) ?: streamingBranchGroupId
         androidx.compose.runtime.withFrameNanos { }
         if (autoFollowOutput && !preserveScrollForBranchGeneration && !listState.isScrollInProgress) {
             listState.followMeasuredBottom()
@@ -845,6 +906,7 @@ fun ChatScreen(
                                 preserveScrollForBranchGeneration = false
                                 streamingBranchGroupId = null
                                 autoFollowOutput = true
+                                sendScrollRequest++
                                 viewModel.sendMessage(finalPrompt, selectedAttachments,
                                     displayMessages.lastOrNull { it.message.role == "assistant" && !it.message.isExcluded &&
                                         it.message.content.isNotBlank() && !AiRepository.isErrorPlaceholderMessage(it.message.content) }?.message?.id)

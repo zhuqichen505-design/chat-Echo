@@ -119,23 +119,25 @@ fun UniversalModelPickerCard(
     allConfigs: List<ApiConfig>,
     onSelect: (configId: Long, model: String) -> Unit
 ) {
+    // 防御性过滤：调用方即使传入全部配置，停用配置及其模型也不进入任何候选列表。
+    val usableConfigs = remember(allConfigs) { allConfigs.filter { it.isEnabled } }
     var isExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var manualInputMode by remember { mutableStateOf(false) }
-    var manualModelName by remember { mutableStateOf(selectedModel) }
-    var manualConfigId by remember { mutableLongStateOf(if (selectedConfigId > 0L) selectedConfigId else allConfigs.firstOrNull()?.id ?: 0L) }
+    var manualModelName by remember(selectedModel) { mutableStateOf(selectedModel) }
+    var manualConfigId by remember { mutableLongStateOf(if (selectedConfigId > 0L) selectedConfigId else usableConfigs.firstOrNull()?.id ?: 0L) }
     val repository = AiAssistantApp.instance.repository
     val glass = echoGlassPalette()
 
     // 读取与聊天对话页完全一致的全部已启用模型列表 (跨服务商)
     var visibleChatOptions by remember { mutableStateOf<List<ChatModelOption>>(emptyList()) }
-    LaunchedEffect(allConfigs) {
+    LaunchedEffect(usableConfigs) {
         visibleChatOptions = repository.getAllVisibleChatModelOptions()
     }
 
-    val currentConfig = remember(selectedConfigId, allConfigs) {
-        if (selectedConfigId > 0L) allConfigs.find { it.id == selectedConfigId }
-        else allConfigs.find { it.isDefault } ?: allConfigs.firstOrNull()
+    val currentConfig = remember(selectedConfigId, usableConfigs) {
+        if (selectedConfigId > 0L) usableConfigs.find { it.id == selectedConfigId }
+        else usableConfigs.find { it.isDefault } ?: usableConfigs.firstOrNull()
     }
 
     val displayTitle = remember(selectedConfigId, selectedModel, currentConfig) {
@@ -156,7 +158,7 @@ fun UniversalModelPickerCard(
         }
     }
 
-    val allChoices = remember(allConfigs, visibleChatOptions) {
+    val allChoices = remember(usableConfigs, visibleChatOptions) {
         val list = mutableListOf<FullModelChoice>()
         // 1. 优先加入所有在 API 配置中启用的模型 (和对话页完全一致)
         visibleChatOptions.forEach { opt ->
@@ -171,7 +173,7 @@ fun UniversalModelPickerCard(
             )
         }
         // 2. 补充服务商默认模型和 availableModels 中尚未添加的模型
-        allConfigs.forEach { cfg ->
+        usableConfigs.forEach { cfg ->
             val cfgName = cfg.name.ifBlank { cfg.provider }
             val defaultModel = cleanModelName(cfg.modelName)
             if (!defaultModel.isNullOrBlank() && list.none { it.configId == cfg.id && it.modelName == defaultModel }) {
@@ -324,7 +326,7 @@ fun UniversalModelPickerCard(
                                 )
 
                                 Text("绑定服务商：", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                allConfigs.forEach { cfg ->
+                                usableConfigs.forEach { cfg ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()

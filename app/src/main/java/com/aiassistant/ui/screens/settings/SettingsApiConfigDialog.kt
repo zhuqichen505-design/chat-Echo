@@ -13,27 +13,18 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
 import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import com.aiassistant.domain.model.ChatModelOption
 import com.aiassistant.ui.components.ImageCropEditDialog
 import com.aiassistant.ui.components.CropShapeMode
-import com.aiassistant.ui.components.ExpandableText
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -45,73 +36,43 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aiassistant.AiAssistantApp
-import com.aiassistant.BuildConfig
 import com.aiassistant.R
 import com.aiassistant.data.repository.AiRepository
 import com.aiassistant.data.repository.helpers.ApiEndpointHelper
 import com.aiassistant.domain.model.ApiConfig
 import com.aiassistant.domain.model.ApiKeyRotationSettings
 import com.aiassistant.domain.model.NamedApiKey
-import com.aiassistant.domain.model.Conversation
-import com.aiassistant.domain.model.EnvironmentVariable
-import com.aiassistant.domain.model.MemoryItem
-import com.aiassistant.domain.model.WorldBook
-import com.aiassistant.domain.model.WorldBookEntry
 import com.aiassistant.domain.model.ModelCapabilityEngine
 import com.aiassistant.domain.model.ModelCustomSettings
-import com.aiassistant.domain.model.PromptTemplate
-import com.aiassistant.ui.components.EchoGlassCard
-import com.aiassistant.ui.components.EchoGlassDialog
-import com.aiassistant.ui.components.EchoGlassDropdownMenu
 import com.aiassistant.ui.components.EchoSwitch
 import com.aiassistant.ui.components.EchoSwitchSize
-import com.aiassistant.ui.components.readableTextColorFor
-import com.aiassistant.ui.components.rememberReadableBackdropColors
+import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.echoFilterChipBorder
 import com.aiassistant.ui.components.echoFilterChipColors
 import com.aiassistant.ui.components.echoFilterChipElevation
 import com.aiassistant.ui.components.echoGlassPalette
-import com.aiassistant.ui.components.echoSegmentedButtonBorder
-import com.aiassistant.ui.components.echoSegmentedButtonColors
-import com.aiassistant.ui.components.echoHazePanel
-import com.aiassistant.ui.components.echoHazeSource
-import com.aiassistant.ui.components.echoShapeClick
-import com.aiassistant.ui.components.rememberEchoHazeState
 import com.aiassistant.ui.components.rememberSmoothReorderState
 import com.aiassistant.ui.components.reorderItem
 import com.aiassistant.ui.components.reorderDragHandle
 import com.aiassistant.utils.AvatarManager
-import com.aiassistant.utils.BackgroundImageManager
-import com.aiassistant.utils.BackupManager
-import com.aiassistant.utils.HiddenConversationLock
-import com.aiassistant.utils.TavilySearchSettings
-import com.aiassistant.utils.AppThemeMode
-import com.aiassistant.tools.search.SearchEngineType
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.aiassistant.tools.cloud.OpenMeteoWeatherEngine
-import java.text.SimpleDateFormat
 import java.util.*
 
 
@@ -221,19 +182,56 @@ private fun ApiDiscoveredModelRow(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * API 配置编辑页入口：configId > 0 编辑已有配置，0 新建。
+ * 页面自行加载配置并负责落库，避免长表单被弹窗高度压缩。
+ */
 @Composable
-fun ApiConfigDialog(
-    hazeState: dev.chrisbanes.haze.HazeState,
+fun ApiConfigEditorScreen(
+    configId: Long,
+    onBack: () -> Unit
+) {
+    val repository = AiAssistantApp.instance.repository
+    var config by remember(configId) { mutableStateOf<ApiConfig?>(null) }
+    var loading by remember(configId) { mutableStateOf(configId > 0L) }
+    var missing by remember(configId) { mutableStateOf(false) }
+    LaunchedEffect(configId) {
+        if (configId > 0L) {
+            val loaded = repository.getApiConfigById(configId)
+            config = loaded
+            missing = loaded == null
+        }
+        loading = false
+    }
+    when {
+        loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        missing -> Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("API 配置不存在或已被删除", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onBack) { Text("返回") }
+        }
+        else -> ApiConfigEditorContent(config = config, initialConfigId = configId, onBack = onBack)
+    }
+}
+
+@Composable
+private fun ApiConfigEditorContent(
     config: ApiConfig?,
-    isSaving: Boolean = false,
-    onDismiss: () -> Unit,
-    onSave: (ApiConfig, List<String>, Set<String>, Map<String, String>, Map<String, ModelCustomSettings>, android.net.Uri?, Boolean, ApiKeyRotationSettings) -> Unit
+    initialConfigId: Long,
+    onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val repository = AiAssistantApp.instance.repository
     val context = androidx.compose.ui.platform.LocalContext.current
     val gson = remember { Gson() }
+    var isSaving by remember { mutableStateOf(false) }
+    var persistedConfigId by remember { mutableLongStateOf(initialConfigId) }
     var configTab by rememberSaveable(config?.id) { mutableIntStateOf(0) }
     val connectionListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val keysListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -377,13 +375,128 @@ fun ApiConfigDialog(
         }
     }
 
-    EchoGlassDialog(
-        hazeState = hazeState,
-        onDismissRequest = { if (!isSaving) onDismiss() },
-        title = { Text(if (config == null) "添加API配置" else "编辑API配置") },
-        text = {
-            val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val canSave = rotationAddress.isSuccess && loadedRotationSettings.isSuccess &&
+        apiKey.isNotBlank() && cleanModelName(modelName) != null &&
+        rotationDraft.validationMessage == null && !isSaving && !resettingKeyHealth
+
+    // 页面自己完成落库：先保证配置本体保存，再同步模型清单、头像与轮询设置。
+    val performSave: () -> Unit = {
+        val rotationSettings = rotationDraft.toSettingsOrNull()
+        if (rotationSettings != null && canSave) {
+            isSaving = true
+            scope.launch {
+                try {
+                    val cleanedCurrentModel = cleanModelName(modelName).orEmpty()
+                    val modelNames = cleanModelNames(availableModels + cleanedCurrentModel)
+                    val enabledModels = (enabledModelNames + modelName)
+                        .mapNotNull { cleanModelName(it) }
+                        .toSet()
+                    val proposed = ApiConfig(
+                        id = config?.id ?: 0,
+                        name = name.ifBlank { provider },
+                        provider = provider,
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                        apiType = apiType,
+                        modelName = cleanedCurrentModel,
+                        availableModels = modelNames.takeIf { it.isNotEmpty() }?.let { gson.toJson(it) },
+                        temperature = 0.95f,
+                        maxTokens = config?.maxTokens ?: 8192,
+                        topP = 1.0f,
+                        enableThinking = true,
+                        thinkingEffort = "medium",
+                        enableWebSearch = false,
+                        isEnabled = isConfigEnabled,
+                        isDefault = config?.isDefault ?: false,
+                        createdAt = config?.createdAt ?: System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    // 重试保存时沿用已落库 ID，避免重复新增配置。
+                    val persisted = if (persistedConfigId > 0L) repository.getApiConfigById(persistedConfigId) else null
+                    val configToSave = proposed.copy(
+                        id = persistedConfigId,
+                        isDefault = persisted?.isDefault ?: proposed.isDefault,
+                        createdAt = persisted?.createdAt ?: proposed.createdAt
+                    )
+                    val savedId = repository.saveApiConfig(configToSave)
+                    persistedConfigId = savedId
+                    if (modelNames.isNotEmpty()) {
+                        repository.replaceSelectedModels(
+                            apiConfigId = savedId,
+                            modelNames = modelNames,
+                            enabledModelNames = enabledModels,
+                            modelCapabilities = modelCapabilities,
+                            modelSettings = modelCustomSettings
+                        )
+                    }
+                    if (clearApiAvatar) {
+                        AvatarManager.deleteApiModelAvatar(context, savedId)
+                    }
+                    selectedApiAvatarUri?.let { uri ->
+                        AvatarManager.saveApiModelAvatarFromUri(context, savedId, uri)
+                    }
+                    val rotationSaved = withContext(Dispatchers.IO) {
+                        runCatching {
+                            AiAssistantApp.instance.personalizationManager.apiKeyRotationManager.saveSettings(
+                                baseUrl, apiType, rotationSettings
+                            )
+                        }.getOrDefault(false)
+                    }
+                    if (rotationSaved) {
+                        onBack()
+                    } else {
+                        android.widget.Toast.makeText(
+                            context,
+                            "API 配置已保存，但轮询设置保存失败。请点击“保存”重试。",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "保存失败: ${e.message ?: "未知异常"}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } finally {
+                    isSaving = false
+                }
+            }
+        }
+    }
+
+    // 保存中禁止返回，避免落库与页面销毁竞争。
+    BackHandler(enabled = !isSaving) { onBack() }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(if (config == null) "添加API配置" else "编辑API配置") },
+                navigationIcon = {
+                    IconButton(onClick = { if (!isSaving) onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        TextButton(onClick = performSave, enabled = canSave) {
+                            Text("保存")
+                        }
+                    }
+                }
+            )
+        }
+    ) { pagePadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(pagePadding)
+                .padding(echoContentInset(base = 16.dp))
+                .imePadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
                 ScrollableTabRow(
                     selectedTabIndex = configTab,
                     edgePadding = 0.dp,
@@ -404,7 +517,7 @@ fun ApiConfigDialog(
                         else -> connectionListState
                     },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.heightIn(max = (screenHeight * 0.65f).dp),
+                    modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
                 if (configTab == 0) {
@@ -1354,54 +1467,7 @@ fun ApiConfigDialog(
                     )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val rotationSettings = rotationDraft.toSettingsOrNull() ?: return@TextButton
-                    val cleanedCurrentModel = cleanModelName(modelName).orEmpty()
-                    val modelNames = cleanModelNames(availableModels + cleanedCurrentModel)
-                    val enabledModels = (enabledModelNames + modelName)
-                        .mapNotNull { cleanModelName(it) }
-                        .toSet()
-                    val newConfig = ApiConfig(
-                        id = config?.id ?: 0,
-                        name = name.ifBlank { provider },
-                        provider = provider,
-                        baseUrl = baseUrl,
-                        apiKey = apiKey,
-                        apiType = apiType,
-                        modelName = cleanedCurrentModel,
-                        availableModels = modelNames.takeIf { it.isNotEmpty() }?.let { gson.toJson(it) },
-                        temperature = 0.95f,
-                        maxTokens = config?.maxTokens ?: 8192,
-                        topP = 1.0f,
-                        enableThinking = true,
-                        thinkingEffort = "medium",
-                        enableWebSearch = false,
-                        isEnabled = isConfigEnabled,
-                        isDefault = config?.isDefault ?: false,
-                        createdAt = config?.createdAt ?: System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    onSave(newConfig, modelNames, enabledModels, modelCapabilities, modelCustomSettings, selectedApiAvatarUri, clearApiAvatar, rotationSettings)
-                },
-                enabled = rotationAddress.isSuccess && loadedRotationSettings.isSuccess && apiKey.isNotBlank() && cleanModelName(modelName) != null &&
-                    rotationDraft.validationMessage == null && !isSaving && !resettingKeyHealth
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("保存")
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
-            }
         }
-    )
 
     pendingCropAvatarUri?.let { cropUri ->
         ImageCropEditDialog(

@@ -66,7 +66,7 @@ internal fun SmartAnalyzeStudioDialog(
     var progressStatus by remember { mutableStateOf("") }
     var analyzeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    val apiConfigs by repository.getAllApiConfigs().collectAsState(initial = emptyList())
+    val apiConfigs by repository.getEnabledApiConfigs().collectAsState(initial = emptyList())
     val visibleOptions = remember { mutableStateOf<List<com.aiassistant.domain.model.ChatModelOption>>(emptyList()) }
     LaunchedEffect(Unit) {
         visibleOptions.value = repository.getAllVisibleChatModelOptions()

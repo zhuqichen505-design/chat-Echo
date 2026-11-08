@@ -1,5 +1,69 @@
 # 维护记录
 
+## 2026-11-09 · 2.8.30 搜索对话重做、发送贴底、API 配置页面化与停用配置过滤（已发布）
+
+基线 `main/a01f0dc`（已发布 2.8.29/215）；版本递增为 2.8.30/216；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本版同时包含此前未发版的输入框点击闪烁修复（见下一条）。
+
+### 搜索对话
+
+问题不是单点缺陷，而是 7 项叠加：查询词未 `trim()`，输入法尾随空格直接 0 结果；标题与消息内容二选一，默认搜不到聊天内容、勾选后标题命中的对话又消失；多词不分词；预览用 `indexOf` 直接切片，未命中（-1）时从开头截取，展示与关键词无关的内容；无高亮且点击不定位，长对话里“搜到了也找不到”；防抖期立即清空结果并显示“未找到”，输入时反复闪烁空态；会话尚未加载完成就搜索，`mapNotNull` 丢弃全部命中，冷启动立即搜索必为空。
+
+方案：新增 `ui/search/ConversationSearch.kt`（查询词去空白、折叠空格、忽略大小写、最多 4 词 AND；标题按完全相等 > 前缀 > 全包含排序；片段围绕首个命中截取并给出高亮区间，未命中返回 `null` 而不是错位切片；不截断 emoji）与 `MessageSearchHitCard.kt`。`Daos.kt` 新增四词 AND 查询（空词跳过、继续排除 hidden/private、`LIMIT 201` 判断截断）。`HistoryScreen.kt` 改为“对话 + 消息内容”并集并分区展示，支持高亮、搜索进度、截断提示与从首页带入查询词。`MainActivity.kt` 新增 `chat/{id}?focus={messageId}` 路由参数；`ChatScreen.kt` 在加载完成后滚动到该条消息并提示“已定位到搜索命中的消息”，命中未选中的变体时先切换变体组，并先占住初始滚底标志，避免“先滚到底再跳回”的闪跳。首页标题无命中时回退检索消息内容（最多 20 条，可点击定位），并可带当前关键词跳转历史。
+
+### 发送后贴底
+
+原实现只依赖 `isGenerating` 首帧贴底，用户消息落库与等待气泡插入之间存在时间差，列表常停在旧位置；而 `isScrollInProgress` 无法区分用户拖动与程序滚动。现普通发送触发一次性 `sendScrollRequest`，在 0/90/180/270ms 四个时间点调用 `followMeasuredBottom()`，覆盖落库、气泡测量与键盘高度变化；用 `collectIsDraggedAsState()` 判断手指接管，用户拖动后立即停止后续贴底。编辑消息仍保留“定位到被编辑消息”，不强制拉到底。
+
+### API 配置页面化
+
+`ApiConfigDialog` 改为 `ApiConfigEditorScreen`，弹窗内容原样迁移为全屏页：顶部返回 / 标题 / 保存（保存中显示进度并禁用返回），三个页签占满高度，长模型列表不再受 65% 屏高限制；保存逻辑内聚到页面（配置本体 → 模型清单 → 头像 → 密钥轮询设置），失败重试沿用已落库 ID，避免重复新增。新增路由 `api_config?configId={id}`（0 为新增），`SettingsScreen.kt` 的 `ApiConfigTab` 删除弹窗状态与保存回调，只负责导航；配置页增加 `imePadding()` 与 `echoContentInset` 宽屏约束，清理 39 个未使用 import。
+
+### 停用配置与模型
+
+`SettingsModelFeaturesTab.kt`、角色 / 场景编辑、工作室导入改读 `getEnabledApiConfigs()`；`SettingsUniversalModelPicker.kt` 内部再做一次防御性过滤。新增 `helpers/AuxiliaryModelPolicy.kt`（`firstEnabledConfig` / `resolveAuxiliaryModel`），替换自动命名、自动命名测试、思考链翻译三处重复内联分支：跳过停用配置，指定模型已停用则回退配置默认或首个启用模型。删除 `ChatViewModel`、`HistoryScreen`、`AiRepository` 中 `getAllApiConfigs().first()` 的停用配置兜底；`HomeViewModel` 只暴露启用配置。UI 文案同步为“搜索对话与消息内容...”“搜索对话、消息内容或模型”。
+
+### 输入框与滚动代码审核
+
+只做有明确收益且可验证的清理：IME 可见性查询由 `EchoNativeTextField` 两处 + `ChatInputComponents` 一处合并为 `isImeVisibleNow(view, fallback)`；两个 `LaunchedEffect(isGenerating)` 合并为一个；`isInputExpanded` 与 `customInputHeightDp` 表达同一状态，改为派生值并删除 6 处同步赋值；删除仅测试引用、生产路径未使用的 `hasNewUserMessage` 及其测试。
+
+### 验证与发布
+
+新增 26 项测试：`ConversationSearchTest` 13 项（分词、AND、排序、片段、高亮、emoji 边界）、`MessageSearchDaoTest` 3 项（真实 SQLite：AND 语义、隐藏对话排除、大小写折叠与空词）、`HomeNavigationTest` 新增 1 项（配置页新建 / 编辑路由与参数解析）、`AuxiliaryModelPolicyTest` 7 项（停用配置跳过、停用模型回退、自由模型名保留）等。套件 88 → 92，总数 1,059 → 1,085。
+
+最终冻结验收 `20261109-022755-694`：脚本 / Gradle 退出 0，453.334 秒；92 套件 / 1,085 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，6 分 16 秒。
+
+`Echo-v2.8.30.apk` 25,489,173 字节，SHA256 `fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`；`com.aiassistant`、2.8.30/216、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+APK 审计：446 条目且条目名集合与 2.8.29 完全一致，CRC 全部通过；变化 7 项——清单、版本控制信息、两个 baseline profile、`classes.dex`，以及两条 R8 重命名的 `kotlinx.coroutines` 服务描述符（`r4.b/r4.a` → `s4.b/s4.a`）。DEX 31,614 条字符串（+1,620 / -1,573，差异来自 R8 重编号），新增可读中文 18 条均为本版搜索、定位与配置页提示；`resources.arsc` 与 2.8.29 逐字节一致，186 张图片无变化；隐私扫描新增命中 0（仅有框架常量 `android@android.com` 与路由字符串 `/home/HomeViewModel`、`/home/RecentHomeStory`）。发布目录由 225 文件（224 APK）排他复制为 226 文件（225 APK），历史包名称 / 大小 / SHA256 均保留。
+
+设备边界：无连接设备，未验证安装、启动与贴底、搜索定位、配置页、输入法行为，验收步骤见 `release-notes/latest.md`。
+
+## 2026-11-09 · 输入框点击时输入法闪烁修复（已随 2.8.30 发布）
+
+基线 `main/a01f0dc`（已发布 2.8.29/215）；该修复随后随 2.8.30 一并发布（本条目记录当时状态）。Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+问题：用户反馈“在输入框输入时点击输入框，输入法会闪烁”。
+
+根因（对照 Compose 1.6.8 源码逐条核对，非推测）：
+
+1. `EchoNativeTextField` 的点击观察者此前只采样“点击前是否聚焦”，输入法可见性是在手势**之后**才读取。`TextFieldDecoratorModifier` 的点击手势（`TextFieldSelectionState.detectTextFieldTapGestures`）在 onTap 里先 `requestFocus()` 再 `showKeyboard()`，因此手势后读到的可见性已被它改过，判定不可靠。
+2. 更关键的是 `reopenEditorKeyboard` 的旧判定：`restartFocus = 已聚焦 && !输入法可见`。输入法可见性来自窗口 Insets，在**显示 / 隐藏动画期间、悬浮输入法、以及 API < 30 的近似实现**（`WindowInsetsCompat.Impl20.getInsetsForType(Type.IME)` 用 `systemWindow.bottom > rootStable.bottom` 近似）都可能单帧读到“不可见”。一旦误判，就走 `clearFocus()` → `TextFieldDecoratorModifier.onFocusEvent` 的 `disposeInputSession()` → `TextInputServiceAndroid.stopInput()`（其状态机把 StopInput 同时置 `showKeyboard = false`，即**主动收起键盘**）→ 再 `requestFocus()` → `startInputSession()` 重新弹起。这就是“点一下输入框，输入法闪一下”。
+3. 第三条独立路径：Compose 自己的点击手势每次点击已聚焦输入框都会 `requireKeyboardController().show()`，与我们的焦点事务无关；部分输入法对重复 `show()` 会重建输入视图，同样表现为闪一下。
+
+临时修复方案：
+
+1. 新增 `EditorGestureStart(focused, imeVisible)`，在 `awaitFirstDown`（Initial pass，早于输入框自身手势）**同时**采样聚焦与输入法可见性；`rememberEditorKeyboardRequest` 的请求签名由 `(Boolean) -> Unit` 改为 `(EditorGestureStart) -> Unit`，聊天输入栏拖拽手柄改读实时窗口 Insets（`imeVisibleNow()`）后传入。
+2. 用 `EditorTapAction` 三态替换布尔 `restartFocus`：`AssistFocus`（手势前未聚焦，交给输入框自身手势建会话）、`RestartSession`（手势前已聚焦且输入法确实已收起，才清焦重建）、`Ignore`（手势前已聚焦且输入法仍在屏幕上，**完全不碰焦点、不 show()**）。`reopenEditorKeyboard` 对 `Ignore` 直接返回。
+3. 新增 `ImeAwareKeyboardController`，只在 `EchoNativeTextField` 内部通过 `CompositionLocalProvider(LocalSoftwareKeyboardController provides ...)` 替换控制器：输入法确实可见时拦掉重复 `show()`，已收起时照常放行，`hide()` 不受影响。其它组件与隐藏键盘路径不变。
+
+涉及文件：`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。测试由 1,057 增至 1,059：新增 `tappingFocusedEditorWithVisibleImeNeverTouchesFocusOrKeyboard`、`keyboardControllerSkipsShowWhileImeIsVisible`；`firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession` 改为覆盖三态判定；既有跨帧焦点、快捷重开、取消、失焦不弹键盘、已显示不重复重开等测试全部保留。
+
+最终冻结验收 `20261109-001445-130`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，424.386 秒；88 套件 / 1,059 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+验收过程记录：同一验收前两次运行（`20261109-000144-532`、`20261109-001037-318`）均在 `ChatRetryRepositoryTest.acceptingAutoCompressionPersistsTargetTierThenActuallyCallsSummaryModel` 超时失败（`withTimeout(5000)` 轮询 `pendingAutoTier`）。该用例为 Robolectric + 真实计时轮询的上下文压缩测试，不引用本次任何改动文件，单独运行该测试类通过，第三次全量运行通过；判定为既有计时敏感波动，未修改该测试、未放宽断言。
+
+设备边界：当前无连接设备，无法复现或确认闪烁是否消失。需人工复验：打字过程中点击输入框定位光标、连续快速点击输入框、点击右上拖拽手柄、按返回隐藏键盘后再点击、发送后立即点击、切换会话后返回、切换输入法 / 表情面板。
+
 ## 2026-11-08 · 2.8.29 输入框“能唤出输入法但无法输入文字”修复（已发布）
 
 基线 `main/81b23c1`；版本由 2.8.28/214 递增到 2.8.29/215；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。源码修复提交 `2852f2c`。

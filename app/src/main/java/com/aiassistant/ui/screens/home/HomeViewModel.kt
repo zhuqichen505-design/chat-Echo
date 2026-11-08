@@ -62,8 +62,8 @@ class HomeViewModel : ViewModel() {
 
         viewModelScope.launch {
             repository.getAllApiConfigs().collect { configs ->
-                _apiConfigs.value = configs
                 val enabledConfigs = configs.filter { it.isEnabled }
+                _apiConfigs.value = enabledConfigs
                 val defaultConfig = enabledConfigs.firstOrNull { it.isDefault } ?: enabledConfigs.firstOrNull()
                 val currentConfig = _selectedConfig.value
                 _selectedConfig.value = when {

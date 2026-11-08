@@ -185,7 +185,7 @@ class UiPolishRegressionTest {
             events.clear()
             transaction.launch(this) {
                 com.aiassistant.ui.components.reopenEditorKeyboard(
-                    restartFocus = true,
+                    action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
                     clearFocus = { focused = false; events += "clear" },
                     requestFocus = { focused = true; events += "focus" },
                     isFocused = { focused },
@@ -214,7 +214,7 @@ class UiPolishRegressionTest {
             var requests = 0
             transaction.launch(this) {
                 com.aiassistant.ui.components.reopenEditorKeyboard(
-                    restartFocus = true,
+                    action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
                     clearFocus = { focused = false },
                     requestFocus = { focused = true; requests++ },
                     isFocused = { focused },
@@ -243,7 +243,7 @@ class UiPolishRegressionTest {
         repeat(4) { tap ->
             transaction.launch(this) {
                 com.aiassistant.ui.components.reopenEditorKeyboard(
-                    restartFocus = false,
+                    action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
                     clearFocus = { error("普通聚焦不应重启焦点") },
                     requestFocus = {},
                     isFocused = { true },
@@ -267,7 +267,7 @@ class UiPolishRegressionTest {
             var requests = 0
             var shows = 0
             com.aiassistant.ui.components.reopenEditorKeyboard(
-                restartFocus = hideDuringRestart,
+                action = if (hideDuringRestart) com.aiassistant.ui.components.EditorTapAction.RestartSession else com.aiassistant.ui.components.EditorTapAction.AssistFocus,
                 clearFocus = { focused = false },
                 requestFocus = { focused = true; requests++ },
                 isFocused = { focused },
@@ -286,7 +286,7 @@ class UiPolishRegressionTest {
         var requests = 0
         var shows = 0
         com.aiassistant.ui.components.reopenEditorKeyboard(
-            restartFocus = false,
+            action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
             clearFocus = { error("已显示的输入法不应重启焦点") },
             requestFocus = { requests++ },
             isFocused = { true },
@@ -299,7 +299,7 @@ class UiPolishRegressionTest {
         assertEquals(0, shows)
 
         com.aiassistant.ui.components.reopenEditorKeyboard(
-            restartFocus = false,
+            action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
             clearFocus = { error("普通聚焦不应重启焦点") },
             requestFocus = {},
             isFocused = { true },
@@ -316,7 +316,7 @@ class UiPolishRegressionTest {
         var shows = 0
         var frames = 0
         com.aiassistant.ui.components.reopenEditorKeyboard(
-            restartFocus = false,
+            action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
             clearFocus = { error("未要求清除焦点") },
             requestFocus = {},
             isFocused = { focused },
@@ -334,24 +334,73 @@ class UiPolishRegressionTest {
 
     /** 首次点击不能清焦：字段在事件尾部已聚焦，清焦会拆掉刚建立的输入会话。 */
     @Test fun firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession() {
-        assertFalse(
-            com.aiassistant.ui.components.shouldRestartEditorFocus(
-                wasFocusedBeforeGesture = false,
-                imeVisible = false
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.AssistFocus,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(focused = false, imeVisible = false)
             )
         )
-        assertFalse(
-            com.aiassistant.ui.components.shouldRestartEditorFocus(
-                wasFocusedBeforeGesture = true,
-                imeVisible = true
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.AssistFocus,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(focused = false, imeVisible = true)
             )
         )
-        assertTrue(
-            com.aiassistant.ui.components.shouldRestartEditorFocus(
-                wasFocusedBeforeGesture = true,
-                imeVisible = false
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.RestartSession,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(focused = true, imeVisible = false)
             )
         )
+    }
+
+    /**
+     * 打字时点击已聚焦输入框、输入法仍在屏幕上：不得清焦重建，也不得重复 show()。
+     * 旧实现只看“输入法这一帧是否可见”，显示动画 / 悬浮输入法 / API<30 的近似值都会误判为已收起，
+     * 于是 clearFocus → stopInput 收起键盘、重新聚焦再弹起，表现为输入法闪烁。
+     */
+    @Test fun tappingFocusedEditorWithVisibleImeNeverTouchesFocusOrKeyboard() = runTest {
+        var requests = 0
+        var shows = 0
+        var clears = 0
+        val action = com.aiassistant.ui.components.editorTapAction(
+            com.aiassistant.ui.components.EditorGestureStart(focused = true, imeVisible = true)
+        )
+        assertEquals(com.aiassistant.ui.components.EditorTapAction.Ignore, action)
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = action,
+            clearFocus = { clears++ },
+            requestFocus = { requests++ },
+            isFocused = { true },
+            isActive = { true },
+            nextFrame = { error("输入法可见时不应等待重开帧") },
+            showKeyboard = { shows++ },
+            isImeVisible = { true }
+        )
+        assertEquals(0, clears)
+        assertEquals(0, requests)
+        assertEquals(0, shows)
+    }
+
+    /** 输入法已可见时，输入框内部的键盘控制器不得再次 show()（Compose 点击手势会重复调用）。 */
+    @Test fun keyboardControllerSkipsShowWhileImeIsVisible() {
+        var delegateShows = 0
+        var delegateHides = 0
+        var visible = true
+        val controller = com.aiassistant.ui.components.ImeAwareKeyboardController(
+            delegate = object : androidx.compose.ui.platform.SoftwareKeyboardController {
+                override fun show() { delegateShows++ }
+                override fun hide() { delegateHides++ }
+            },
+            isImeVisible = { visible }
+        )
+        controller.show()
+        assertEquals("输入法可见时不得重复 show", 0, delegateShows)
+        visible = false
+        controller.show()
+        assertEquals("输入法已收起时仍要能唤起键盘", 1, delegateShows)
+        controller.hide()
+        assertEquals("隐藏键盘不受保护影响", 1, delegateHides)
     }
 
     /** 清焦没有被观察到时不得重新聚焦并弹键盘，否则会出现“有键盘、无输入”。 */
@@ -361,7 +410,7 @@ class UiPolishRegressionTest {
         var shows = 0
         var frames = 0
         com.aiassistant.ui.components.reopenEditorKeyboard(
-            restartFocus = true,
+            action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
             clearFocus = { /* 焦点事务被吞掉：字段仍保持聚焦 */ },
             requestFocus = { requests++ },
             isFocused = { focused },

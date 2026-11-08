@@ -3,7 +3,6 @@ package com.aiassistant.ui.screens.chat
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.withFrameNanos
-import com.aiassistant.domain.model.Message
 import com.aiassistant.data.repository.ChatGenerationManager
 
 /** The application owns in-flight variants; screen recreation must recover their original host. */
@@ -50,10 +49,6 @@ internal fun chatReplyRowKeys(
     }
     return ChatReplyRowKeys(keys, streamingKey, streamingKey in keys)
 }
-
-/** Saved assistant replies are a rendering handoff, not a request to move the reader. */
-internal fun hasNewUserMessage(previousIds: Set<Long>, messages: List<Message>): Boolean =
-    messages.any { it.role == "user" && it.id !in previousIds }
 
 /** Only consume actual bottom overflow; never overshoot and rely on a later layout to undo it. */
 internal fun bottomFollowDistance(itemOffset: Int, itemSize: Int, viewportEnd: Int): Int =
