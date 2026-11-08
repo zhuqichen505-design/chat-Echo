@@ -1,5 +1,21 @@
 # 维护记录
 
+## 2026-11-08 · 输入框“能唤出输入法但无法输入文字”修复（未发版）
+
+基线 `main/81b23c1`；源码版本仍为 2.8.28/214，未构建 APK；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+问题：用户反馈点击输入框偶现可唤出输入法但无法输入文字，2.8.28 安装包仍存在。核对 Compose 1.6.8 `BasicTextField2` 源码（`TextFieldDecoratorModifier.onFocusEvent` → `startInputSession`）确认：输入会话只在焦点**重新获得**时建立；IME 关闭 InputConnection 后（返回键收起键盘等）字段仍保持聚焦，旧会话已经结束且不会被重建。此时 `SoftwareKeyboardController.show()` 只能唤起没有活动连接的键盘，表现为“键盘出现但打不出字”，再点输入框也因“已聚焦”不会重建会话。
+
+2.8.28 的“清焦后重建”方向正确，但触发条件取的是事件尾部状态：`EchoNativeTextField` 的点击观察者在 `PointerEventPass.Final` 才发起请求，此时输入框自身手势（Main pass）已请求焦点并启动会话，`isFocused()` 由 false 变 true，于是**首次点击**就走进 `clearFocus → requestFocus` 分支，把刚建立的会话拆掉并依赖跨帧重建；重建不成功即留下“有键盘、无输入”的死连接。另外清焦后只等一帧就重新聚焦，焦点事务一旦被合并就观察不到失焦，`startInputSession` 不会再次执行。
+
+临时修复方案：1）新增 `shouldRestartEditorFocus`，只有“手势开始前已聚焦、且输入法不可见”才重建会话；点击前未聚焦的首次点击由输入框自身 focus 请求建立会话，绝不再清焦。2）`EchoNativeTextField` 在 `awaitFirstDown`（Initial pass）读取点击前聚焦状态并传入键盘事务，`rememberEditorKeyboardRequest` 的请求改为 `(Boolean) -> Unit`，输入框右上拖拽手柄传实时 `inputFocused`。3）`reopenEditorKeyboard` 按焦点事务的实际结果推进：清焦后最多 3 帧确认 `isFocused()` 真的变 false（未观察到失焦即放弃，不重新聚焦、不弹键盘），重新聚焦后最多 3 帧确认聚焦，焦点确认后才在输入法仍不可见时补 `show()`。
+
+涉及文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。新增 2 项回归（首次点击不清焦、失焦未被观察时放弃），既有跨帧焦点、快捷重开、取消、失焦不弹键盘、已显示不重复重开等测试全部保留，测试总数 1,055 → 1,057。
+
+最终冻结验收 `20261108-201705-432`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，624.579 秒；88 套件 / 1,057 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：首次点击输入、按返回隐藏键盘后再点、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板，以及模型回复 / 系统提示词编辑器与首页搜索框。若仍出现，请记录输入法名称 / 版本与操作序列。
+
 ## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
 
 基线 `main/f79d291`；版本由 2.8.27/213 递增到 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。

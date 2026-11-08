@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import androidx.compose.ui.graphics.luminance
@@ -329,6 +330,50 @@ class UiPolishRegressionTest {
         )
         assertEquals(1, shows)
         assertEquals(2, frames)
+    }
+
+    /** 首次点击不能清焦：字段在事件尾部已聚焦，清焦会拆掉刚建立的输入会话。 */
+    @Test fun firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession() {
+        assertFalse(
+            com.aiassistant.ui.components.shouldRestartEditorFocus(
+                wasFocusedBeforeGesture = false,
+                imeVisible = false
+            )
+        )
+        assertFalse(
+            com.aiassistant.ui.components.shouldRestartEditorFocus(
+                wasFocusedBeforeGesture = true,
+                imeVisible = true
+            )
+        )
+        assertTrue(
+            com.aiassistant.ui.components.shouldRestartEditorFocus(
+                wasFocusedBeforeGesture = true,
+                imeVisible = false
+            )
+        )
+    }
+
+    /** 清焦没有被观察到时不得重新聚焦并弹键盘，否则会出现“有键盘、无输入”。 */
+    @Test fun restartAbortsWhenFocusLossIsNeverObserved() = runTest {
+        var focused = true
+        var requests = 0
+        var shows = 0
+        var frames = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            restartFocus = true,
+            clearFocus = { /* 焦点事务被吞掉：字段仍保持聚焦 */ },
+            requestFocus = { requests++ },
+            isFocused = { focused },
+            isActive = { true },
+            nextFrame = { frames++ },
+            showKeyboard = { shows++ },
+            isImeVisible = { false }
+        )
+        assertEquals(0, requests)
+        assertEquals(0, shows)
+        assertEquals(3, frames)
+        assertTrue(focused)
     }
 
     @Test fun paperParagraphsUseDifferentIndentAndKeepTextOutsideTheStyle() {

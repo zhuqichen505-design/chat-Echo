@@ -26,6 +26,15 @@
 
 ## 本次记录
 
+## 2026-11-08 · 输入框“能唤出输入法但无法输入文字”修复（未发版）
+
+- 基线 `main/81b23c1`；源码版本仍 2.8.28/214；Room v37 / 20 个实体不变。未构建 APK，2.8.28 安装包不含本修复。
+- 根因：Compose 1.6.8 `BasicTextField2` 只在焦点重新获得时 `startInputSession`；IME 关闭 InputConnection 后字段仍聚焦、会话已结束且不会重建，`show()` 得到的是没有活动连接的键盘。2.8.28 的清焦重建判断取事件尾部状态，点击观察者在 Final pass 请求时字段已被自身手势聚焦，首次点击即清焦拆掉新会话；清焦后只等一帧，失焦被合并时不会重建。
+- 临时方案：新增 `shouldRestartEditorFocus`，仅“手势前已聚焦且输入法不可见”才重建；点击前聚焦状态在 `awaitFirstDown`（Initial pass）读取并传入 `(Boolean) -> Unit` 请求；`reopenEditorKeyboard` 清焦后最多 3 帧确认失焦（未观察即放弃且不弹键盘），聚焦后最多 3 帧确认，再按需补 `show()`。
+- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`；新增 2 项回归，测试总数 1,057；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261108-201705-432` 退出 0，624.579 秒；88 套件 / 1,057 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning，输入哈希一致；`git diff --check` 退出 0。
+- 待办：无设备，输入法行为待人工复验（首次点击、返回隐藏后再点、发送后立即点击、快速连点、切换会话 / 输入法）；如需包含本修复的 APK，需用户明确要求构建并递增版本。
+
 ## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
 
 - 基线 `main/f79d291`；版本 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪内容保留排除，不读取归档。

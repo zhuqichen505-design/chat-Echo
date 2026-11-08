@@ -64,7 +64,21 @@ internal class EditorKeyboardRequest {
     }
 }
 
-/** A real frame between losing and regaining focus lets BasicTextField2 restart its input session. */
+/**
+ * 只有“手势开始前已聚焦、且输入法不可见”才需要重建输入会话。
+ *
+ * BasicTextField2 1.6.8 仅在焦点重新获得时调用 startInputSession；IME 关闭 InputConnection 后
+ * 字段仍保持聚焦，旧的输入会话已经结束，此时 show() 只能弹出没有连接、打不出字的键盘。
+ * 首次点击由输入框自身的 focus 请求建立会话，若此时再清焦，会把刚建立的会话拆掉并留下死连接。
+ */
+internal fun shouldRestartEditorFocus(wasFocusedBeforeGesture: Boolean, imeVisible: Boolean): Boolean =
+    wasFocusedBeforeGesture && !imeVisible
+
+/**
+ * A real frame between losing and regaining focus lets BasicTextField2 restart its input session.
+ * 清焦后必须确认字段真的失焦：焦点事务若被合并，跨帧 requestFocus 不会触发新的输入会话，
+ * 键盘虽被 show() 唤起却没有可用的 InputConnection，表现为“能弹出键盘但无法输入”。
+ */
 internal suspend fun reopenEditorKeyboard(
     restartFocus: Boolean,
     clearFocus: () -> Unit,
@@ -73,30 +87,37 @@ internal suspend fun reopenEditorKeyboard(
     isActive: () -> Boolean,
     nextFrame: suspend () -> Unit,
     showKeyboard: () -> Unit,
-    isImeVisible: () -> Boolean = { false }
+    isImeVisible: () -> Boolean = { false },
+    maxFocusFrames: Int = 3
 ) {
     if (!isActive()) return
     // Tapping an already active editor must not restart focus or re-show a visible IME.
     if (isFocused() && isImeVisible()) return
     if (restartFocus) {
         clearFocus()
-        nextFrame()
-        if (!isActive()) return
+        // 失焦没有被观察到时不要重新聚焦：会话不会重建，只会得到“有键盘、无输入”。
+        if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = false, maxFrames = maxFocusFrames)) return
     }
     requestFocus()
-    nextFrame()
-    if (isActive() && isFocused()) {
-        showKeyboard()
-        return
-    }
-    // Focus can settle one or two frames after a cross-frame request on slower devices.
-    repeat(2) {
+    if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = true, maxFrames = maxFocusFrames)) return
+    // 焦点获得本身就会 startInput 并请求显示键盘；只有它没有生效时才补一次 show()。
+    if (isActive() && !isImeVisible()) showKeyboard()
+}
+
+/** 最多等待 [maxFrames] 帧观察焦点是否落到 [expected]；返回 false 表示焦点事务没有生效。 */
+private suspend fun awaitEditorFocus(
+    isFocused: () -> Boolean,
+    isActive: () -> Boolean,
+    nextFrame: suspend () -> Unit,
+    expected: Boolean,
+    maxFrames: Int
+): Boolean {
+    repeat(maxFrames) {
         nextFrame()
-        if (isActive() && isFocused()) {
-            showKeyboard()
-            return
-        }
+        if (!isActive()) return false
+        if (isFocused() == expected) return true
     }
+    return false
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -105,7 +126,7 @@ internal fun rememberEditorKeyboardRequest(
     focusRequester: FocusRequester,
     isFocused: () -> Boolean,
     active: Boolean = true
-): Pair<EditorKeyboardRequest, () -> Unit> {
+): Pair<EditorKeyboardRequest, (Boolean) -> Unit> {
     val scope = rememberCoroutineScope()
     val transaction = remember { EditorKeyboardRequest() }
     val focusManager = LocalFocusManager.current
@@ -120,11 +141,12 @@ internal fun rememberEditorKeyboardRequest(
     fun imeVisibleNow(): Boolean = runCatching {
         ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime())
     }.getOrNull() ?: latestImeVisible
-    val request = {
-        val currentlyFocused = isFocused()
+    // 参数是手势开始前的聚焦状态（输入框在按下时读取），不能用事件尾部的状态判断：
+    // 首次点击时字段已被自身手势聚焦，误判会立刻清焦并拆掉刚建立的输入会话。
+    val request: (Boolean) -> Unit = { wasFocusedBeforeGesture ->
         transaction.launch(scope) {
             reopenEditorKeyboard(
-                restartFocus = currentlyFocused && !imeVisibleNow(),
+                restartFocus = shouldRestartEditorFocus(wasFocusedBeforeGesture, imeVisibleNow()),
                 clearFocus = { focusManager.clearFocus(force = true) },
                 requestFocus = { focusRequester.requestFocus() },
                 isFocused = isFocused,
@@ -207,7 +229,7 @@ internal fun EchoNativeTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     decorator: TextFieldDecorator? = null,
     focusRequester: FocusRequester = remember { FocusRequester() },
-    onRequestKeyboard: (() -> Unit)? = null
+    onRequestKeyboard: ((Boolean) -> Unit)? = null
 ) {
     val editor = remember { NativeEditorState(value) }
     val density = LocalDensity.current.density
@@ -257,6 +279,8 @@ internal fun EchoNativeTextField(
                 // area and reopens an IME hidden with Back while the field still has focus.
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    // 在输入框自身手势（Main pass）处理之前读取，得到的是“点击前”的聚焦状态。
+                    val wasFocused = focused
                     var tap = true
                     var pressed: Boolean
                     do {
@@ -269,7 +293,7 @@ internal fun EchoNativeTextField(
                     if (tap) {
                         // Run after the native tap handler, so its Up event cannot undo our clear.
                         awaitPointerEvent(PointerEventPass.Final)
-                        latestRequestKeyboard()
+                        latestRequestKeyboard(wasFocused)
                     }
                 }
             },

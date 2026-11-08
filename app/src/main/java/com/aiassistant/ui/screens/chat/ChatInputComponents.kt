@@ -787,7 +787,8 @@ fun ChatInputBar(
                         .size(handleBoxSize)
                         .pointerInput(Unit) {
                             detectTapGestures {
-                                latestRequestKeyboard()
+                                // 手柄不属于输入框手势链，这里的实时焦点就是点击前的状态。
+                                latestRequestKeyboard(inputFocused)
                             }
                         }
                         // v2.7.7 需求 1：移除手柄的点按展开/收起切换——点击输入框（含手柄热区）
