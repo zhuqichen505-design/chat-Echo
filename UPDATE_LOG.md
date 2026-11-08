@@ -1,8 +1,8 @@
 # 维护记录
 
-## 2026-11-08 · 输入框“能唤出输入法但无法输入文字”修复（未发版）
+## 2026-11-08 · 2.8.29 输入框“能唤出输入法但无法输入文字”修复（已发布）
 
-基线 `main/81b23c1`；源码版本仍为 2.8.28/214，未构建 APK；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+基线 `main/81b23c1`；版本由 2.8.28/214 递增到 2.8.29/215；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。源码修复提交 `2852f2c`。
 
 问题：用户反馈点击输入框偶现可唤出输入法但无法输入文字，2.8.28 安装包仍存在。核对 Compose 1.6.8 `BasicTextField2` 源码（`TextFieldDecoratorModifier.onFocusEvent` → `startInputSession`）确认：输入会话只在焦点**重新获得**时建立；IME 关闭 InputConnection 后（返回键收起键盘等）字段仍保持聚焦，旧会话已经结束且不会被重建。此时 `SoftwareKeyboardController.show()` 只能唤起没有活动连接的键盘，表现为“键盘出现但打不出字”，再点输入框也因“已聚焦”不会重建会话。
 
@@ -12,7 +12,11 @@
 
 涉及文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`UiPolishRegressionTest.kt`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。新增 2 项回归（首次点击不清焦、失焦未被观察时放弃），既有跨帧焦点、快捷重开、取消、失焦不弹键盘、已显示不重复重开等测试全部保留，测试总数 1,055 → 1,057。
 
-最终冻结验收 `20261108-201705-432`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，624.579 秒；88 套件 / 1,057 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+最终冻结验收 `20261108-213912-107`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，574.434 秒；88 套件 / 1,057 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入前后哈希一致；`git diff --check` 退出 0。
+
+Release `assembleRelease --no-daemon --build-cache` 退出 0，5 分 28 秒；`Echo-v2.8.29.apk` 25,489,177 字节，SHA256 `dd2c2bfbf06f4c93c938f798667262342d805306c24c1dc1651d7a2b814c6e9e`；`com.aiassistant`、2.8.29/215、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版连续，Android Debug **非正式生产签名**。
+
+APK 审计：446 个 ZIP 条目结构不变（无新增 / 移除），`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,109,760 字节，31,573 条 DEX 字符串（新增 11 / 移除 9，可读差异仅版本号 2.8.29 与 UA，另 9 条为 R8 重命名的类型描述符）；`resources.arsc` 逐字节不变，186 张图片集合与内容一致；对本机用户名、邮箱、私有 IP、手机号与仓库账号模式扫描新增命中 0（仅继承 2 条 `/home/...` 路由字符串与 1 条库内置占位邮箱 `android@android.com`，均非用户数据）。发布目录排他复制：原 224 文件（223 APK）名称 / 大小 / SHA256 全部保留，复制后 225 文件（224 APK），源包与副本 SHA256 一致。
 
 设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：首次点击输入、按返回隐藏键盘后再点、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板，以及模型回复 / 系统提示词编辑器与首页搜索框。若仍出现，请记录输入法名称 / 版本与操作序列。
 

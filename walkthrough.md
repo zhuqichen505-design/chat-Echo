@@ -1,5 +1,27 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-08 · 2.8.29 输入框“能唤出输入法但无法输入文字”修复（已发布）
+
+基线 `main/81b23c1`（源码修复提交 `2852f2c`）；版本 2.8.29/215；Room v37 / 20 个实体不变。
+
+问题：点击输入框偶现可唤出输入法但无法输入文字。Compose 1.6.8 `BasicTextField2` 只在焦点重新获得时调用 `startInputSession()`；IME 关闭 InputConnection 后字段仍保持聚焦，旧会话已结束且不会被重建，`show()` 只能唤起没有活动连接的键盘。2.8.28 的清焦重建判断取事件尾部状态：点击观察者在 Final pass 请求时字段已被自身手势聚焦，首次点击就清焦拆掉刚建立的会话；且清焦后只等一帧，焦点事务被合并时观察不到失焦，会话不会重建。
+
+临时实施方案：
+- 新增 `shouldRestartEditorFocus`：仅“手势开始前已聚焦、且输入法不可见”才重建会话；首次点击由输入框自身 focus 请求建立会话，不再清焦。
+- `EchoNativeTextField` 在 `awaitFirstDown`（Initial pass）读取点击前聚焦状态并传入事务；`rememberEditorKeyboardRequest` 请求签名改为 `(Boolean) -> Unit`，右上拖拽手柄传实时 `inputFocused`。
+- `reopenEditorKeyboard`：清焦后最多 3 帧确认 `isFocused()` 真的变 false（未观察即放弃，不重新聚焦、不弹键盘）；重新聚焦后最多 3 帧确认聚焦；确认后才在输入法仍不可见时补 `show()`。
+
+新增回归 2 项（`firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession`、`restartAbortsWhenFocusLossIsNeverObserved`），原有跨帧焦点、快捷重开、取消、失焦不弹键盘、已显示不重复重开等测试全部保留；总数 1,057。
+
+最终冻结验收 `20261108-213912-107`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，574.434 秒；88 套件 / 1,057 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release：`assembleRelease --no-daemon --build-cache` 退出 0，5 分 28 秒；`Echo-v2.8.29.apk` 25,489,177 字节，SHA256 `dd2c2bfbf06f4c93c938f798667262342d805306c24c1dc1651d7a2b814c6e9e`；`com.aiassistant`、2.8.29/215、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner 退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 审计：446 条目结构不变，清单 / 版本控制信息 / 两个 baseline profile / DEX 共 5 项 CRC 变化；DEX 31,573 条字符串（新增 11 / 移除 9），可读差异仅版本号与 UA；`resources.arsc` 逐字节不变、186 张图片一致；隐私模式扫描新增命中 0。发布目录 224 文件（223 APK）→ 225 文件（224 APK），历史包名称 / 大小 / SHA256 保留。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+- 首次点击输入框输入；按返回隐藏键盘后再次点击；发送后立即点击输入；快速连续点击输入区；切换会话后返回；切换输入法 / 表情面板。
+- 确认每次都能弹出键盘并立即接受输入，不出现“键盘可见但打不出字”或“有光标但无键盘”；若仍复现，记录输入法名称 / 版本、Android 版本和操作序列。
+- 复查 2.8.27 的形状：编辑模型回复 / 用户消息 / 系统提示词编辑器 14dp，首页搜索框 22dp，代码块 10dp，通用胶囊按钮不变。
+
 ## 2026-11-07 · 2.8.28 输入框偶发无法输入修复（已发布）
 
 基线 `main/f79d291`；版本 2.8.28/214；Room v37 / 20 个实体不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。
