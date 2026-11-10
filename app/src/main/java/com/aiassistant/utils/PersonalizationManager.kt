@@ -127,6 +127,7 @@ data class PersonalizationSettings(
     val auxiliaryMemoryPrompt: String = "",
     val autoTimelineEnabled: Boolean = true,
     val autoTimelineNoticeEnabled: Boolean = true,
+    val autoScrollToBottomOnSend: Boolean = true,
     val autoCompressionTierEnabled: Boolean = false,
     val autoCompressionThresholdL2: Float = 0.75f,
     val autoCompressionThresholdL3: Float = 0.85f,
@@ -230,6 +231,7 @@ class PersonalizationManager(private val context: Context) {
             auxiliaryMemoryPrompt = prefs.getString(KEY_AUXILIARY_MEMORY_PROMPT, DEFAULT_AUXILIARY_MEMORY_PROMPT).orEmpty().ifBlank { DEFAULT_AUXILIARY_MEMORY_PROMPT },
             autoTimelineEnabled = prefs.getBoolean(KEY_AUTO_TIMELINE_ENABLED, true),
             autoTimelineNoticeEnabled = prefs.getBoolean(KEY_AUTO_TIMELINE_NOTICE_ENABLED, true),
+            autoScrollToBottomOnSend = prefs.getBoolean(KEY_AUTO_SCROLL_TO_BOTTOM_ON_SEND, true),
             autoCompressionTierEnabled = prefs.getBoolean(KEY_AUTO_COMPRESSION_TIER_ENABLED, false),
             autoCompressionThresholdL2 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L2, 0.75f),
             autoCompressionThresholdL3 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L3, 0.85f),
@@ -279,6 +281,7 @@ class PersonalizationManager(private val context: Context) {
             .putString(KEY_AUXILIARY_MEMORY_PROMPT, settings.auxiliaryMemoryPrompt)
             .putBoolean(KEY_AUTO_TIMELINE_ENABLED, settings.autoTimelineEnabled)
             .putBoolean(KEY_AUTO_TIMELINE_NOTICE_ENABLED, settings.autoTimelineNoticeEnabled)
+            .putBoolean(KEY_AUTO_SCROLL_TO_BOTTOM_ON_SEND, settings.autoScrollToBottomOnSend)
             .putBoolean(KEY_AUTO_COMPRESSION_TIER_ENABLED, settings.autoCompressionTierEnabled)
             .putFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L2, settings.autoCompressionThresholdL2)
             .putFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L3, settings.autoCompressionThresholdL3)
@@ -373,6 +376,7 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_AUXILIARY_MEMORY_PROMPT = "auxiliary_memory_prompt"
         private const val KEY_AUTO_TIMELINE_ENABLED = "auto_timeline_enabled"
         private const val KEY_AUTO_TIMELINE_NOTICE_ENABLED = "auto_timeline_notice_enabled"
+        private const val KEY_AUTO_SCROLL_TO_BOTTOM_ON_SEND = "auto_scroll_to_bottom_on_send"
         private const val KEY_AUTO_COMPRESSION_TIER_ENABLED = "auto_compression_tier_enabled"
         private const val KEY_AUTO_COMPRESSION_THRESHOLD_L2 = "auto_compression_threshold_l2"
         private const val KEY_AUTO_COMPRESSION_THRESHOLD_L3 = "auto_compression_threshold_l3"

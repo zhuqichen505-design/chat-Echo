@@ -213,7 +213,10 @@ fun ChatInputBar(
     val inputKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     // v2.7.4 需求 2：TextFieldValue 承载选区/焦点/布局以支持自绘光标；对外仍保持 String API，
     // 声明在 AnimatedContent 之外，输入栏隐藏/恢复切换不丢内部状态
-    var inputFieldValue by remember { mutableStateOf(TextFieldValue(inputText)) }
+    // 草稿恢复时把光标放到末尾，避免输入从开头插入、看起来像“输入的文字没有显示”。
+    var inputFieldValue by remember {
+        mutableStateOf(TextFieldValue(inputText, selection = androidx.compose.ui.text.TextRange(inputText.length)))
+    }
     var inputFocused by remember { mutableStateOf(false) }
     val (keyboardRequest, requestKeyboard) = com.aiassistant.ui.components.rememberEditorKeyboardRequest(
         inputFocusRequester, isFocused = { inputFocused }, active = !isBarsHidden
@@ -221,6 +224,10 @@ fun ChatInputBar(
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
     // 手柄点击同样要取“点击前”的输入法可见性；组合快照会滞后，这里读实时窗口 Insets。
     val inputView = androidx.compose.ui.platform.LocalView.current
+    val inputContext = LocalContext.current
+    val imeHiddenAfterVisible =
+        com.aiassistant.ui.components.rememberImeHiddenAfterVisible(inputFocused)
+    val latestImeHiddenAfterVisible by rememberUpdatedState(imeHiddenAfterVisible)
     val latestImeVisible by rememberUpdatedState(WindowInsets.isImeVisible)
     fun imeVisibleNow(): Boolean =
         com.aiassistant.ui.components.isImeVisibleNow(inputView, latestImeVisible)
@@ -794,7 +801,10 @@ fun ChatInputBar(
                                 latestRequestKeyboard(
                                     com.aiassistant.ui.components.EditorGestureStart(
                                         focused = inputFocused,
-                                        imeVisible = imeVisibleNow()
+                                        imeVisible = imeVisibleNow(),
+                                        inputConnectionActive =
+                                            com.aiassistant.ui.components.isInputConnectionActiveNow(inputContext),
+                                        imeHiddenAfterVisible = latestImeHiddenAfterVisible
                                     )
                                 )
                             }

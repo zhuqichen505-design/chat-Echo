@@ -595,6 +595,22 @@ fun AppearanceTab(
 
         item {
             SettingsGlassCard(hazeState = hazeState) {
+                Text("对话滚动", style = MaterialTheme.typography.titleMedium)
+                HomeLayoutSwitch(
+                    title = "发送消息后自动滑到底部",
+                    description = "发送后把对话滚动到最新消息，并跟随本轮流式回复；关闭后保持当前阅读位置。",
+                    checked = settings.autoScrollToBottomOnSend,
+                    onCheckedChange = { enabled ->
+                        saveVisualPreference(if (enabled) "发送后将自动滑到底部" else "发送后保持当前阅读位置") {
+                            it.copy(autoScrollToBottomOnSend = enabled)
+                        }
+                    }
+                )
+            }
+        }
+
+        item {
+            SettingsGlassCard(hazeState = hazeState) {
                 Text("模型标识", style = MaterialTheme.typography.titleMedium)
                 HomeLayoutSwitch("显示模型头像", "用于普通对话与创作。关闭后可选极简 Bot、线条机器人或几何标识。", settings.showModelAvatar) { enabled ->
                     saveVisualPreference(if (enabled) "模型头像已显示" else "已切换为模型标识") { it.copy(showModelAvatar = enabled) }

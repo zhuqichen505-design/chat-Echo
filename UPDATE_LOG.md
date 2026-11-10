@@ -1,5 +1,93 @@
 # 维护记录
 
+## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
+
+基线 `main/c77b6f1`（已发布 2.8.30/216）；版本递增为 2.8.31/217；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本版包含三项：输入时偶现文字不显示与输入法闪烁修复、发送消息后自动贴底的设置项、API 配置全屏页排版统一。完整实现细节见下方两条 2026-11-10 记录。
+
+### 输入会话
+
+点击判定原只依赖窗口 IME Insets：悬浮输入法 Insets 恒为 0，会持续判为“不可见”，打字中每次点击输入框都 `clearFocus → requestFocus`，主动收起再弹起键盘（闪烁），重建期间正在合成的文字丢失（输入不显示）；键盘仍在屏幕上但输入连接失效时又直接 `Ignore`，无法恢复。现新增 `isInputConnectionActiveNow`（`InputMethodManager.isAcceptingText`），`EditorGestureStart` 增加 `inputConnectionActive` 与 `imeHiddenAfterVisible` 并在 Initial pass 采样；新增 `EditorTapAction.RevealKeyboard`：已聚焦、读不到输入法但连接仍可用时只 `requestFocus + show()`，绝不清焦；连接确实失效、或观察到“输入法显示后被收起（返回键）”时才清焦重建；草稿恢复时光标置于末尾。
+
+### 发送贴底设置
+
+新增偏好 `autoScrollToBottomOnSend`（默认开启，保持既有行为），入口“设置 → 界面与外观 → 对话滚动 → 发送消息后自动滑到底部”。开启时发送后按 0/90/180/270/450/630/810ms 采样贴底，覆盖消息落库、等待气泡测量与键盘收起动画，用户拖动即让出；关闭时发送不贴底并关闭本轮自动跟随，手动滚回底部后恢复跟随。编辑消息重发仍定位到被编辑消息。
+
+### API 配置页排版
+
+页面改用 `EchoScaffold` 的壁纸与悬浮玻璃顶栏，去掉 Tab 默认分隔线；三个页签按逻辑分组为 `SettingsGlassCard`，卡片标题统一 `titleMedium`；密钥卡片改为两行布局（首行拖拽 / 标签 / 备注 / 开关 / 竖排上下移 / 删除，次行全宽密钥输入框），保留上下移作为拖拽外的排序方式；Key 卡片、搜索框、密钥输入框与添加按钮圆角由 8/10dp 混用收敛为 `EchoTokens.Radius.md`（12dp）。
+
+### 验证与构建
+
+最终冻结验收 `20261110-121922-014`：脚本 / Gradle 退出 0，680.846 秒；92 套件 / 1,089 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，5 分 54 秒。
+
+`Echo-v2.8.31.apk` 25,505,561 字节，SHA256 `A0E0DB41B736699F8FA2F95BE185761D81DC3CF240097EA4FA0431B634DC82C9`；`com.aiassistant`、2.8.31/217、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+APK 审计：446 个 ZIP 条目（438 文件 + 8 目录），条目名集合与 2.8.30 完全一致；5 项变化为清单、`META-INF/version-control-info.textproto`、两个 baseline profile 与 `classes.dex`（7,128,708 → 7,139,400 字节）；DEX 31,645 条字符串（新增 57 / 移除 32），新增可读中文 12 条均为本版输入框、发送贴底设置与 API 配置页文案；`resources.arsc` 与 2.8.30 逐字节一致；按扩展名统计的 181 个 png/jpg/jpeg/webp 位图资源新增 / 变化 0。隐私扫描：变更源码与文档无本机用户名、用户目录、手机号、私有 IP、密钥命中（仅既有 `android@android.com` 框架调试证书常量）；APK DEX 同一组模式新增命中 0。发布目录由 226 文件（225 APK）新增为 227 文件（226 APK），历史包名称 / 大小 / SHA256 保留。
+
+### 发布
+
+待发布步骤完成后补充远端提交、标签、Release 附件与旧版清理结果。
+
+## 2026-11-10 · API 配置页排版统一为设置页视觉语言（未发版）
+
+基线 `main/c77b6f1` 之上；Room v37 / 20 个实体不变。未递增版本、未构建 APK。仅调整 `ApiConfigEditorScreen` 的页面结构与排版，不改保存、校验、模型读取、密钥轮询与头像逻辑。
+
+问题：该页由原 API 配置弹窗放大为全屏页，仍保留弹窗式结构——不透明 `Scaffold` 遮住主题纸纹与壁纸、默认色 `TopAppBar`、无分组的长表单、各区块仅靠 8dp 间距区分；密钥行把拖拽手柄、标签、备注、开关、上下移、删除全部塞在单行，窄屏下备注输入框被压到不可用。
+
+方案：
+
+1. 页面外壳改用 `EchoScaffold`：壁纸 + 纸纹 + 悬浮玻璃顶栏（标题「添加/编辑 API 配置」、副标题「连接、密钥与模型」），返回与保存动作保持原逻辑；内容仍按 720dp 居中并保留 `imePadding`。
+2. Tab 行去掉默认分隔线，页签与内容之间留统一间距；LazyColumn 间距统一为 `EchoTokens.Spacing.cardGap`（12dp），底部留 `sectionGap`。
+3. 三个页签按逻辑分组改用 `SettingsGlassCard` 玻璃卡片，卡片标题统一 `titleMedium`、子标题 `titleSmall`：
+   - 连接：启用开关；接口预设与协议；连接信息（名称 / 提供商 / Base URL + 分隔线 + 对话头像）。
+   - 密钥：密钥列表、说明、Key 卡片与添加按钮收进一张卡片；轮询设置保留其自带卡片。
+   - 模型：默认模型；从 Key 读取模型；已配置模型（含折叠、批量操作、手动添加、搜索与模型卡片）。
+4. 密钥卡片改为两行结构：首行拖拽手柄 / Key 标签 / 备注 / 启用开关 / 竖排上下移 / 删除，次行为全宽密钥输入框；上下移按钮保留（拖拽之外的可访问排序方式）。
+5. 统一内层圆角与间距：Key 卡片、搜索框、密钥输入框、添加按钮由 8/10dp 混用收敛为 `EchoTokens.Radius.md`（12dp）；卡片内边距与行距统一。
+
+涉及 `ui/screens/settings/SettingsApiConfigDialog.kt`；不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。
+
+验证：最终冻结验收 `20261110-010940-782` 脚本 / Gradle 退出 0，362.853 秒；92 套件 / 1,089 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+设备边界：无连接设备，未做视觉验收。需人工检查添加 / 编辑 API 配置三个页签在手机与宽屏下的顶栏、壁纸、卡片间距、Tab 指示、键盘弹出、密钥多行排序与模型卡片展开；深色主题与各外观预设下也需目视确认。
+
+## 2026-11-10 · 输入会话判定改为输入连接状态、发送贴底设置项（未发版）
+
+基线 `main/c77b6f1`（已发布 2.8.30/216）；Room v37 / 20 个实体不变，无迁移。未递增版本、未构建 APK。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。
+
+### 输入时偶现文字不显示与输入法闪烁
+
+复核 2.8.27–2.8.30 的修复链后确认残留缺陷：点击判定仍只依赖窗口 IME Insets 的可见性。悬浮输入法的 IME Insets 恒为 0，`isImeVisibleNow` 会持续读到“不可见”，于是打字中每次点击输入框都走 `clearFocus → requestFocus`：`clearFocus` 触发 Compose `stopInput()` 主动收起键盘（即使当时可用），再重新聚焦弹起，表现为输入法闪烁；重建事务期间正在合成的文字会丢失，表现为“输入的字没有出现在输入框”。此外键盘仍在屏幕上但输入连接已失效时，旧判定直接 `Ignore`，无法恢复。
+
+方案：
+
+1. 新增 `isInputConnectionActiveNow(context)`，用 `InputMethodManager.isAcceptingText` 判断输入连接是否仍可用。
+2. `EditorGestureStart` 增加 `inputConnectionActive` 与 `imeHiddenAfterVisible`，仍在 `awaitFirstDown`（Initial pass）与聚焦/可见性一起采样点击前状态。
+3. `EditorTapAction` 增加 `RevealKeyboard`：已聚焦、Insets 读不到输入法但连接仍可用时只 `requestFocus + show()`，**绝不清焦**；连接确实失效才 `RestartSession`。
+4. 新增 `rememberImeHiddenAfterVisible(focused)`：只记录“聚焦后输入法确实显示过、随后被系统收起”（返回键等）的转换；该转换仍沿用既有清焦重建，悬浮输入法不会命中，避免误清焦。
+5. 键盘可见但连接失效（键盘在却打不出字）时也重建会话。
+6. 聊天草稿恢复时 `TextFieldValue` 初始选区改为末尾，避免从开头插入造成“输入没有显示”的错觉。
+
+涉及 `ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`UiPolishRegressionTest.kt`。
+
+### 发送消息后自动滑到底部（设置项）
+
+原 2.8.30 的发送贴底为无条件行为，且只在 0/90/180/270ms 四次采样，覆盖不到键盘收起动画结束后的视口变化。现新增偏好 `autoScrollToBottomOnSend`（默认开启，保持既有行为），入口“设置 → 界面与外观 → 对话滚动 → 发送消息后自动滑到底部”。
+
+- 开启：普通发送照常触发贴底；采样延长为约 0–810ms（0/90/180/270/450/630/810ms），覆盖消息落库、等待气泡测量与 IME 收起动画；任一采样点已贴底时不产生位移。
+- 关闭：发送不触发贴底，并把本轮自动跟随关闭（`autoFollowOutput = false`），流式输出不会把视口抢回底部；用户手动滚回底部后恢复跟随。
+- 编辑消息重发仍保持“定位到被编辑消息”，不受该设置影响。
+
+涉及 `utils/PersonalizationManager.kt`、`ui/screens/settings/SettingsAppearanceTab.kt`、`ui/screens/chat/ChatScreen.kt`、`RetryPreferencesTest.kt`。不新增依赖，不改 Room schema、API 地址、请求协议、消息格式或备份格式。
+
+### 验证
+
+新增 4 项测试：`focusedEditorTapOnlyRevealsKeyboardWhileInputConnectionIsAlive`、`visibleImeWithInactiveConnectionIsRebuilt`、`imeHiddenAfterVisibleKeepsTheProvenRestartPath`、`autoScrollToBottomOnSendDefaultsToEnabledAndPersists`；`firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession` 扩充连接失效与悬浮输入法判定。套件 92 不变，总数 1,085 → 1,089。
+
+最终冻结验收 `20261110-003048-599`：脚本 / Gradle 退出 0，300.24 秒；92 套件 / 1,089 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 通过（`abortOnError`，退出 0）；输入哈希一致；`git diff --check` 退出 0。
+
+设备边界：无连接设备，未验证输入法闪烁、输入恢复、发送贴底与设置开关的实际表现。需人工复验：打字中连续点击输入框定位光标、悬浮输入法 / 切换输入法、返回键收起后再点、键盘在却打不出字时再点；设置开启与关闭后各发送一条消息，观察是否贴底与拖动让出。若仍有问题，请记录输入法名称 / 版本、是否悬浮模式与操作序列。
+
 ## 2026-11-09 · 2.8.30 搜索对话重做、发送贴底、API 配置页面化与停用配置过滤（已发布）
 
 基线 `main/a01f0dc`（已发布 2.8.29/215）；版本递增为 2.8.30/216；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本版同时包含此前未发版的输入框点击闪烁修复（见下一条）。

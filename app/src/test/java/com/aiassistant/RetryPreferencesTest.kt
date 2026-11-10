@@ -528,6 +528,17 @@ class RetryPreferencesTest {
         assertEquals(EchoModelMarkStyle.ORBIT, PersonalizationManager(context).getSettings().modelMarkStyle)
     }
 
+    @Test fun autoScrollToBottomOnSendDefaultsToEnabledAndPersists() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()
+        val manager = PersonalizationManager(context)
+        assertTrue("默认开启，保持发送后贴底行为", manager.getSettings().autoScrollToBottomOnSend)
+        assertTrue(manager.saveSettings(manager.getSettings().copy(autoScrollToBottomOnSend = false)))
+        assertFalse(PersonalizationManager(context).getSettings().autoScrollToBottomOnSend)
+        assertTrue(manager.saveSettings(manager.getSettings().copy(autoScrollToBottomOnSend = true)))
+        assertTrue(PersonalizationManager(context).getSettings().autoScrollToBottomOnSend)
+    }
+
     @Test fun thinkingBubbleVisibilityPersistsWithoutChangingThinkingOrReadingPreferences() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("personalization_settings", 0).edit().clear().commit()

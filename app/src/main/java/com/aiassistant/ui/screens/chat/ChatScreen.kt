@@ -524,14 +524,14 @@ fun ChatScreen(
         }
     }
 
-    // 发送后贴底：分几个时间点跟随，覆盖用户消息落库、等待气泡测量与键盘高度变化。
-    // 用户一旦开始手动滚动就立即让出控制，不在后台抢滚动位置。
+    // 发送后贴底：分几个时间点跟随，覆盖用户消息落库、等待气泡测量与键盘收起动画（约 300ms）。
+    // 任一采样点已贴底时不会产生位移；用户一旦开始手动滚动就立即让出控制，不在后台抢滚动位置。
     LaunchedEffect(sendScrollRequest) {
         if (sendScrollRequest <= 0) return@LaunchedEffect
         autoFollowOutput = true
-        repeat(4) { attempt ->
+        repeat(7) { attempt ->
             if (attempt > 0) {
-                kotlinx.coroutines.delay(90L)
+                kotlinx.coroutines.delay(if (attempt <= 3) 90L else 180L)
                 if (isListDragging) return@LaunchedEffect
             }
             androidx.compose.runtime.withFrameNanos { }
@@ -905,8 +905,13 @@ fun ChatScreen(
                             } else {
                                 preserveScrollForBranchGeneration = false
                                 streamingBranchGroupId = null
-                                autoFollowOutput = true
-                                sendScrollRequest++
+                                // 设置项关闭时保持当前阅读位置：不触发贴底，也不让本轮流式输出抢回视口。
+                                if (appearanceSettings.autoScrollToBottomOnSend) {
+                                    autoFollowOutput = true
+                                    sendScrollRequest++
+                                } else {
+                                    autoFollowOutput = false
+                                }
                                 viewModel.sendMessage(finalPrompt, selectedAttachments,
                                     displayMessages.lastOrNull { it.message.role == "assistant" && !it.message.isExcluded &&
                                         it.message.content.isNotBlank() && !AiRepository.isErrorPlaceholderMessage(it.message.content) }?.message?.id)

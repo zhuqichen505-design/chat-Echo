@@ -346,10 +346,77 @@ class UiPolishRegressionTest {
                 com.aiassistant.ui.components.EditorGestureStart(focused = false, imeVisible = true)
             )
         )
+        // 已聚焦、Insets 读不到输入法（悬浮输入法）但输入连接仍可用：只显示键盘，绝不清焦。
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.RevealKeyboard,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(focused = true, imeVisible = false)
+            )
+        )
+        // 输入连接已失效（旧会话结束）才允许清焦重建。
         assertEquals(
             com.aiassistant.ui.components.EditorTapAction.RestartSession,
             com.aiassistant.ui.components.editorTapAction(
-                com.aiassistant.ui.components.EditorGestureStart(focused = true, imeVisible = false)
+                com.aiassistant.ui.components.EditorGestureStart(
+                    focused = true, imeVisible = false, inputConnectionActive = false
+                )
+            )
+        )
+    }
+
+    /** 悬浮输入法 / 输入法已收起但连接仍在：不得清焦，否则每次点击都会收起再弹起键盘。 */
+    @Test fun focusedEditorTapOnlyRevealsKeyboardWhileInputConnectionIsAlive() = runTest {
+        val start = com.aiassistant.ui.components.EditorGestureStart(
+            focused = true, imeVisible = false, inputConnectionActive = true
+        )
+        assertEquals(com.aiassistant.ui.components.EditorTapAction.RevealKeyboard,
+            com.aiassistant.ui.components.editorTapAction(start))
+        var clears = 0
+        var requests = 0
+        var shows = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = com.aiassistant.ui.components.EditorTapAction.RevealKeyboard,
+            clearFocus = { clears++ },
+            requestFocus = { requests++ },
+            isFocused = { true },
+            isActive = { true },
+            nextFrame = {},
+            showKeyboard = { shows++ },
+            isImeVisible = { false }
+        )
+        assertEquals("只显示键盘时不得清焦", 0, clears)
+        assertEquals(1, requests)
+        assertEquals(1, shows)
+    }
+
+    /** 键盘仍在屏幕上但输入连接已失效（键盘出现却打不出字）时必须重建会话。 */
+    @Test fun visibleImeWithInactiveConnectionIsRebuilt() {
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.Ignore,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(
+                    focused = true, imeVisible = true, inputConnectionActive = true
+                )
+            )
+        )
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.RestartSession,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(
+                    focused = true, imeVisible = true, inputConnectionActive = false
+                )
+            )
+        )
+    }
+
+    /** 观察过“输入法显示后被收起”（返回键）：保留既有清焦重建，确保下一次输入会话可用。 */
+    @Test fun imeHiddenAfterVisibleKeepsTheProvenRestartPath() {
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.RestartSession,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(
+                    focused = true, imeVisible = false, inputConnectionActive = true, imeHiddenAfterVisible = true
+                )
             )
         )
     }

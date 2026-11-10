@@ -1,5 +1,32 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
+
+基线 `main/c77b6f1`（已发布 2.8.30/216）；版本 2.8.31/217；Room v37 / 20 个实体不变，无迁移。
+
+本轮范围与实现：
+
+- 输入会话：新增 `isInputConnectionActiveNow`（`InputMethodManager.isAcceptingText`）；`EditorGestureStart` 增加 `inputConnectionActive` 与 `imeHiddenAfterVisible`，在按下时（Initial pass）采样；新增 `EditorTapAction.RevealKeyboard`，已聚焦且输入连接可用时只 `requestFocus + show()`，绝不清焦；连接失效或观察到“输入法显示后被收起（返回键）”才清焦重建；草稿恢复光标置于末尾。
+- 发送贴底设置：新增偏好 `autoScrollToBottomOnSend`（默认开启），入口“设置 → 界面与外观 → 对话滚动”；开启时按 0/90/180/270/450/630/810ms 采样贴底并覆盖键盘收起动画，用户拖动即让出；关闭时发送保持当前阅读位置并关闭本轮自动跟随。
+- API 配置页：改用 `EchoScaffold` 壁纸与悬浮玻璃顶栏；去掉 Tab 默认分隔线；三页签分组为 `SettingsGlassCard`；密钥卡片改两行布局（首行拖拽 / 标签 / 备注 / 开关 / 竖排上下移 / 删除，次行全宽密钥输入框）；内层圆角统一 12dp。
+
+新增 4 项测试（输入连接存活、键盘可见但连接失效、返回键收起后的重建、贴底偏好默认值与持久化），`firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession` 扩充连接失效与悬浮输入法判定；套件 92 不变，总数 1,085 → 1,089。
+
+最终冻结验收 `20261110-121922-014`：脚本 / Gradle 退出 0，680.846 秒；92 套件 / 1,089 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 54 秒。
+
+`Echo-v2.8.31.apk` 25,505,561 字节，SHA256 `A0E0DB41B736699F8FA2F95BE185761D81DC3CF240097EA4FA0431B634DC82C9`；`com.aiassistant`、2.8.31/217、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+APK 审计：446 条目（438 文件 + 8 目录），条目名集合与 2.8.30 一致；5 项变化（清单、版本控制信息、两个 baseline profile、DEX）；DEX 31,645 条字符串（+57 / -32），新增可读中文 12 条均为本版提示；`resources.arsc` 逐字节不变；181 个 png/jpg/jpeg/webp 位图资源新增 / 变化 0；隐私扫描新增命中 0。发布目录 226 文件（225 APK）→ 227 文件（226 APK），历史包保留。
+
+发布：待发布步骤完成后补充。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+
+- 打字过程中点击输入框定位光标、连续快速点击、点击拖拽手柄、返回隐藏键盘后再点、键盘可见却打不出字时再点，确认无闪烁且文字不丢。
+- 分别使用普通输入法与悬浮输入法复验；若仍复现，记录输入法名称 / 版本、Android 版本与操作序列。
+- 设置 → 界面与外观 → 对话滚动：关闭后发送应保持阅读位置，开启后发送应滑到最新消息；拖动列表后本 rollout 不再抢视口。
+- API 配置页：手机与宽屏下顶栏、壁纸、卡片间距、Tab 指示、键盘避让、密钥多行排序、模型卡片展开与折叠；深色主题与各外观预设下目视确认。
+
 ## 2026-11-09 · 2.8.30 搜索对话、发送贴底、API 配置页面化与停用配置过滤（已发布）
 
 基线 `main/a01f0dc`（已发布 2.8.29/215）；版本 2.8.30/216；Room v37 / 20 个实体不变，无迁移。

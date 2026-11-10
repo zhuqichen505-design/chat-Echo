@@ -26,6 +26,35 @@
 
 ## 本次记录
 
+## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
+
+- 基线 `main/c77b6f1`（已发布 2.8.30/216）；版本递增为 2.8.31/217；Room v37 / 20 个实体不变。原未跟踪内容保留排除。
+- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`ChatScreen.kt`、`SettingsAppearanceTab.kt`、`PersonalizationManager.kt`、`SettingsApiConfigDialog.kt`、`UiPolishRegressionTest.kt`、`RetryPreferencesTest.kt`、版本配置与文档；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 方案要点：输入会话按 `InputMethodManager.isAcceptingText` 判断连接是否可用，新增 `RevealKeyboard`（绝不清焦）；发送贴底改为可开关偏好（默认开启），采样延长至约 810ms；API 配置页改用 `EchoScaffold` + `SettingsGlassCard`，密钥卡片两行布局，内层圆角统一 12dp。
+- 验证：最终 verify `20261110-121922-014` 退出 0，680.846 秒；92 套件 / 1,089 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 54 秒；`Echo-v2.8.31.apk` 25,505,561 字节，SHA256 `A0E0DB41B736699F8FA2F95BE185761D81DC3CF240097EA4FA0431B634DC82C9`；v2 签名连续，Android Debug **非正式生产签名**。
+- APK 审计：446 条目、条目名集合与 2.8.30 一致；5 项变化（清单、版本控制信息、两个 baseline profile、DEX）；DEX 31,645 条字符串（+57 / -32），新增可读中文 12 条均为本版提示；`resources.arsc` 逐字节不变，位图资源无变化；隐私扫描新增命中 0。发布目录 226 文件（225 APK）→ 227 文件（226 APK），历史包保留。
+- 发布：待发布步骤完成后补充。
+- 待办：无设备，输入法闪烁 / 输入恢复、发送贴底开关与 API 配置页视觉待人工验收。
+
+## 2026-11-10 · API 配置页排版统一（未发版）
+
+- 基线 `main/c77b6f1` 之上；Room v37 / 20 个实体不变。未递增版本、未构建 APK。
+- 问题：API 配置由弹窗放大为全屏页后仍保留弹窗式排版——不透明背景遮住主题壁纸/纸纹、默认色 TopAppBar、无卡片分组、密钥行控件全部挤在单行。
+- 临时方案：改用 `EchoScaffold`（壁纸 + 玻璃顶栏）与透明 Tab 行；三个页签按逻辑分组为 `SettingsGlassCard`，统一卡片标题层级与 12dp 卡片间距；密钥卡片改两行布局，上下移按钮竖排保留；内层圆角由 8/10dp 收敛为 12dp。
+- 文件：`ui/screens/settings/SettingsApiConfigDialog.kt`；不新增依赖，不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261110-010940-782` 退出 0，362.853 秒；92 套件 / 1,089 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 待办：无设备，顶栏 / 壁纸 / 卡片间距 / 密钥两行布局 / 宽屏与深色主题待人工目视验收。
+
+## 2026-11-10 · 输入会话判定与发送贴底设置项（未发版）
+
+- 基线 `main/c77b6f1`（已发布 2.8.30/216）；Room v37 / 20 个实体不变。未递增版本、未构建 APK；原未跟踪内容保留排除。
+- 根因（输入）：点击判定只依赖 IME Insets；悬浮输入法 Insets 恒为 0，会持续判定“不可见”，打字中每次点击都 `clearFocus → requestFocus`，主动收起再弹起键盘（闪烁），重建期间合成的文字丢失（输入不显示）；键盘可见但输入连接失效时又直接 `Ignore`，无法恢复。
+- 临时方案（输入）：`isInputConnectionActiveNow` 读取 `InputMethodManager.isAcceptingText`；`EditorGestureStart` 增加 `inputConnectionActive` / `imeHiddenAfterVisible` 并在 Initial pass 采样；新增 `EditorTapAction.RevealKeyboard`（连接可用时只显示键盘、绝不清焦），连接失效或“显示→被收起”转换才 `RestartSession`；草稿恢复光标置于末尾。
+- 临时方案（滚动）：新增偏好 `autoScrollToBottomOnSend`（默认开启）与设置入口“界面与外观 → 对话滚动”；开启时发送贴底采样延长至约 810ms 以覆盖 IME 收起动画，关闭时发送不贴底并关闭本轮自动跟随；用户拖动即让出。
+- 文件：`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`ChatScreen.kt`、`SettingsAppearanceTab.kt`、`PersonalizationManager.kt`、`UiPolishRegressionTest.kt`、`RetryPreferencesTest.kt`；新增 4 项测试，套件 92 不变，总数 1,085 → 1,089；不改 Room / API / 消息 / 备份格式。
+- 验证：最终 verify `20261110-003048-599` 退出 0，300.24 秒；92 套件 / 1,089 项测试，失败 / 错误 / 跳过 0；Lint 退出 0；输入哈希一致；`git diff --check` 退出 0。
+- 待办：无设备，输入法闪烁 / 输入恢复 / 发送贴底与开关行为待人工验收（记录输入法名称、是否悬浮模式与操作序列）。
+
 ## 2026-11-09 · 2.8.30 搜索对话、发送贴底、API 配置页面化与停用配置过滤（已发布）
 
 - 基线 `main/a01f0dc`（已发布 2.8.29/215）；版本由 2.8.29/215 递增到 2.8.30/216；Room v37 / 20 个实体不变，无迁移。原未跟踪内容保留排除。
