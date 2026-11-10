@@ -26,7 +26,9 @@ APK 审计：446 个 ZIP 条目（438 文件 + 8 目录），条目名集合与 
 
 ### 发布
 
-待发布步骤完成后补充远端提交、标签、Release 附件与旧版清理结果。
+版本提交 `4b187245be19d639b3dae67a772c680e7ce7e746` 与 annotated 标签 `v2.8.31`（`ee44e9aeb3334a9dd715844d3f6c229fd7ce8b87`，peeled 指向版本提交）已推送，push 均退出 0；`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。
+
+[Echo 2.8.31 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.31) 为 Latest，唯一附件 `Echo-v2.8.31.apk`；GitHub digest `sha256:a0e0db41b736699f8fa2f95be185761d81dc3cf240097ea4fa0431b634dc82c9` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核大小与 SHA256 与本机一致；Release 正文与已提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.30 Release / 标签，远端仅保留 v2.8.31；本机 `v2.8.30` 标签与全部历史 APK 保留，未删除。
 
 ## 2026-11-10 · API 配置页排版统一为设置页视觉语言（未发版）
 

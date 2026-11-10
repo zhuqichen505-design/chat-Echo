@@ -33,7 +33,7 @@
 - 方案要点：输入会话按 `InputMethodManager.isAcceptingText` 判断连接是否可用，新增 `RevealKeyboard`（绝不清焦）；发送贴底改为可开关偏好（默认开启），采样延长至约 810ms；API 配置页改用 `EchoScaffold` + `SettingsGlassCard`，密钥卡片两行布局，内层圆角统一 12dp。
 - 验证：最终 verify `20261110-121922-014` 退出 0，680.846 秒；92 套件 / 1,089 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 54 秒；`Echo-v2.8.31.apk` 25,505,561 字节，SHA256 `A0E0DB41B736699F8FA2F95BE185761D81DC3CF240097EA4FA0431B634DC82C9`；v2 签名连续，Android Debug **非正式生产签名**。
 - APK 审计：446 条目、条目名集合与 2.8.30 一致；5 项变化（清单、版本控制信息、两个 baseline profile、DEX）；DEX 31,645 条字符串（+57 / -32），新增可读中文 12 条均为本版提示；`resources.arsc` 逐字节不变，位图资源无变化；隐私扫描新增命中 0。发布目录 226 文件（225 APK）→ 227 文件（226 APK），历史包保留。
-- 发布：待发布步骤完成后补充。
+- 发布：版本提交 `4b187245be19d639b3dae67a772c680e7ce7e746` 与 annotated 标签 `v2.8.31` 已推送并核验远端 main / peeled 标签一致；Release 为 Latest，唯一附件 GitHub digest 与资产通道下载 SHA256 / 大小均与本机一致，正文与 `release-notes/latest.md` 逐字一致；按策略删除远端旧 v2.8.30 Release / 标签，远端仅保留 v2.8.31，本机历史标签与 APK 保留。
 - 待办：无设备，输入法闪烁 / 输入恢复、发送贴底开关与 API 配置页视觉待人工验收。
 
 ## 2026-11-10 · API 配置页排版统一（未发版）

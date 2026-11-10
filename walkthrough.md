@@ -18,7 +18,7 @@
 
 APK 审计：446 条目（438 文件 + 8 目录），条目名集合与 2.8.30 一致；5 项变化（清单、版本控制信息、两个 baseline profile、DEX）；DEX 31,645 条字符串（+57 / -32），新增可读中文 12 条均为本版提示；`resources.arsc` 逐字节不变；181 个 png/jpg/jpeg/webp 位图资源新增 / 变化 0；隐私扫描新增命中 0。发布目录 226 文件（225 APK）→ 227 文件（226 APK），历史包保留。
 
-发布：待发布步骤完成后补充。
+发布：版本提交 `4b187245be19d639b3dae67a772c680e7ce7e746` 与 annotated 标签 `v2.8.31` 已推送，`git ls-remote` 核验远端 main / peeled 标签一致。[Echo 2.8.31 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.31) 为 Latest，唯一附件 `Echo-v2.8.31.apk` 的 GitHub digest 与 `gh release download` 资产通道下载 SHA256 / 大小均与本机一致，正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.30 Release / 标签；本机标签与全部历史 APK 保留。
 
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 
