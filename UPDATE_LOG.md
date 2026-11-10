@@ -1,5 +1,39 @@
 # 维护记录
 
+## 2026-11-10 · 报错贴底、点击输入框不再收起键盘、API 配置页三段式（未发版）
+
+基线 `main/8d978a8`（已发布 2.8.31/217）；Room v37 / 20 个实体不变，无迁移。未递增版本、未构建 APK。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。三项需求：报错信息无法像流式输出一样推动页面下滑；点击输入框时输入法被收起；API 配置页改为连接 / 密钥 / 模型上下滑动的三段式，且新建配置的多 Key 轮询默认关闭。
+
+### 1. 报错信息不推动页面
+
+根因有两条独立路径：
+
+1. 流式跟随的 `snapshotFlow` 只采样 `currentResponse.length` 与 `currentThinking.length`。请求失败时正文常常一个字符都没有，气泡变高全部来自状态胶囊（“正在连接…”→ 具体报错）与逐条追加的实时 Key 明细，长度不变即不跟随。
+2. 失败落库走 `saveErrorReply` 后按 `loadConversation()` 插入一条新的 assistant 消息，而聊天页在此处刻意不因 `messages` 变化滚动（避免成功回复落库把阅读位置拉回），于是报错气泡直接出现在视口下方。
+
+方案：新增 `ChatFollowSignal`（正文长度 / 思考长度 / 状态文案 / Key 明细条数）替代裸长度采样，任何一项变化都按 70ms 节流贴底；`ChatViewModel` 新增 `errorScrollRequest` 计数，`saveErrorReply` 在非用户停止时递增，界面按发送贴底的同一机制（0/90/180/360/540/720ms 采样）跟随并在用户拖动时立即让出。用户主动停止不计入，避免停止后正文变短造成跳动。
+
+### 2. 点击输入框时输入法被收起
+
+2.8.30 / 2.8.31 两轮修的是“闪烁”和“键盘在却打不出字”，残留缺陷在判定信号本身：
+
+1. `rememberImeHiddenAfterVisible` 以组合期 `WindowInsets.isImeVisible` 记录“输入法显示过又被收起”，只要显示 / 隐藏动画中出现一帧 `false` 就永久置位；该信号一旦为真，点击已聚焦输入框必然走 `clearFocus → requestFocus`。`clearFocus` 触发 Compose `stopInput()` 主动收起键盘，重建期间正在合成的文字（拼音候选）被丢弃，表现为“点一下输入框，输入法被删掉了”。
+2. `reopenEditorKeyboard` 在 `RestartSession` 分支里，若三帧内没有观察到失焦就直接 `return`：键盘已被上一步收起，也没有再唤起，用户看到的是键盘消失且不再弹出。
+
+方案：判定改为以“输入连接是否可用”（`isAcceptingText`）为唯一重建依据，顺序为 未聚焦→`AssistFocus`、连接失效→`RestartSession`、输入法可见→`Ignore`、其余→`RevealKeyboard`；删除易误报的 `imeHiddenAfterVisible` 及其两处调用。`reopenEditorKeyboard` 的 `RestartSession` 分支不再提前返回，清焦后必定重新聚焦并补一次 `show()`；已聚焦字段完全不动焦点（原实现每次点击都重复 `requestFocus`）。
+
+### 3. API 配置页与轮询默认值
+
+页面原本用 `ScrollableTabRow` + 三个各自 `LazyListState` 的页签，同一张表单被切成三个互不可见的页面。现改为单条 `LazyColumn`：连接 / 密钥 / 模型按 1-2-3 顺序连续排布，新增 `ApiConfigSectionHeader`（序号徽标 + 标题 + 当前摘要，密钥段显示已录入数量与轮询开关状态，模型段显示已添加数量），删除页签与三个滚动状态；无效轮询数字的提示文案由“密钥页”改为“密钥分区”。
+
+多 Key 轮询默认值：新增 `ApiKeyRotationManager.hasSettings`（按策略前缀任意键判断是否保存过，兼容早期没有开关键的策略）与 `initialRotationSettings(loaded, isNewConfig)`——只有“新建配置 + 该地址与协议从未保存过策略”才默认 `enabled = false`；已保存策略按地址共享，必须原样载入，避免改一个配置把同地址其它配置的轮询关掉。
+
+涉及 `ui/screens/chat/ChatScrollPolicy.kt`、`ChatScreen.kt`、`ChatViewModel.kt`、`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`ui/screens/settings/SettingsApiConfigDialog.kt`、`SettingsApiKeyRotation.kt`、`utils/ApiKeyRotationManager.kt` 与两个测试文件；不新增依赖，不改 API / 消息 / 备份 / Room。
+
+验证：最终冻结验收 `20261110-185957-808` 脚本 / Gradle 退出 0，467.968 秒；92 套件 / 1,092 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。新增 3 项回归：跟随信号覆盖无正文的报错、失败贴底让位于拖动、策略存在性与新配置默认关闭（含无开关键的早期策略）；改写 5 项输入框判定测试以锁定“已聚焦不清焦 / 清焦后必须补回键盘”。
+
+设备边界：无连接设备，未做视觉与输入法验收。需人工确认：请求失败后页面是否推到报错气泡底部、拖动阅读位置时是否不被抢回；打字中连续点击输入框（含拼音候选状态）、悬浮输入法、返回键收起后再点、键盘在却打不出字时再点；API 配置页三段连续滚动、键盘弹出、深色与宽屏下分区标题；新建配置打开时“启用多 Key 轮询”默认关闭、同地址已有配置仍读到原策略。
+
 ## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
 
 基线 `main/c77b6f1`（已发布 2.8.30/216）；版本递增为 2.8.31/217；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。本版包含三项：输入时偶现文字不显示与输入法闪烁修复、发送消息后自动贴底的设置项、API 配置全屏页排版统一。完整实现细节见下方两条 2026-11-10 记录。

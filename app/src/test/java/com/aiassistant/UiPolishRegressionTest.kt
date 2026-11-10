@@ -240,13 +240,14 @@ class UiPolishRegressionTest {
     @Test fun rapidEditorAndHandleTapsKeepOnlyTheLatestKeyboardRequest() = runTest {
         val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
         val shown = mutableListOf<Int>()
+        var focused = false
         repeat(4) { tap ->
             transaction.launch(this) {
                 com.aiassistant.ui.components.reopenEditorKeyboard(
                     action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
                     clearFocus = { error("普通聚焦不应重启焦点") },
                     requestFocus = {},
-                    isFocused = { true },
+                    isFocused = { focused },
                     isActive = { true },
                     nextFrame = { delay(16) },
                     showKeyboard = { shown += tap }
@@ -255,31 +256,39 @@ class UiPolishRegressionTest {
             runCurrent()
             advanceTimeBy(4)
         }
-        advanceTimeBy(32)
+        focused = true
+        advanceTimeBy(64)
         runCurrent()
         assertEquals(listOf(3), shown)
     }
 
-    @Test fun keyboardRequestCannotShowAfterFocusLossOrHideDuringRestart() = runTest {
-        for (hideDuringRestart in listOf(false, true)) {
-            var active = true
-            var focused = true
-            var requests = 0
-            var shows = 0
-            com.aiassistant.ui.components.reopenEditorKeyboard(
-                action = if (hideDuringRestart) com.aiassistant.ui.components.EditorTapAction.RestartSession else com.aiassistant.ui.components.EditorTapAction.AssistFocus,
-                clearFocus = { focused = false },
-                requestFocus = { focused = true; requests++ },
-                isFocused = { focused },
-                isActive = { active },
-                nextFrame = {
-                    if (hideDuringRestart) active = false else focused = false
-                },
-                showKeyboard = { shows++ }
-            )
-            assertEquals(if (hideDuringRestart) 0 else 1, requests)
-            assertEquals(0, shows)
-        }
+    @Test fun keyboardRequestCannotShowAfterFocusLoss() = runTest {
+        // 未聚焦时请求焦点，但等待期间焦点始终没有落地：不得弹一把没有连接的键盘。
+        var shows = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = com.aiassistant.ui.components.EditorTapAction.AssistFocus,
+            clearFocus = { error("普通聚焦不应重启焦点") },
+            requestFocus = {},
+            isFocused = { false },
+            isActive = { true },
+            nextFrame = { },
+            showKeyboard = { shows++ }
+        )
+        assertEquals(0, shows)
+
+        // 重建会话期间窗口失活：不得再调用 show()。
+        var active = true
+        var showsAfterInactive = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
+            clearFocus = { },
+            requestFocus = { },
+            isFocused = { true },
+            isActive = { active },
+            nextFrame = { active = false },
+            showKeyboard = { showsAfterInactive++ }
+        )
+        assertEquals(0, showsAfterInactive)
     }
 
     @Test fun focusedEditorWithVisibleImeSkipsRedundantReopen() = runTest {
@@ -332,6 +341,34 @@ class UiPolishRegressionTest {
         assertEquals(2, frames)
     }
 
+    /**
+     * 请求失败时正文可能一个字符都没有，气泡高度全部来自状态胶囊与实时 Key 明细：
+     * 跟随信号必须覆盖这两项，否则报错信息不会像流式输出那样推动页面上滑。
+     */
+    @Test fun followSignalCoversStatusAndKeyErrorsWithoutBodyText() {
+        val idle = com.aiassistant.ui.screens.chat.chatFollowSignal("", "", null, emptyList())
+        val reconnecting = com.aiassistant.ui.screens.chat.chatFollowSignal(
+            "", "", "正在尝试重新连接（1/3）…", emptyList()
+        )
+        val keyError = com.aiassistant.ui.screens.chat.chatFollowSignal(
+            "", "", null, listOf("Key #1 (sk-***)：第 1 次请求失败：连接超时")
+        )
+        assertTrue("状态胶囊文案变化必须形成新的跟随信号", idle != reconnecting)
+        assertTrue("实时 Key 报错明细增加必须形成新的跟随信号", idle != keyError)
+        assertEquals(
+            "状态与正文都不变时不得重复触发滚动",
+            reconnecting,
+            com.aiassistant.ui.screens.chat.chatFollowSignal("", "", "正在尝试重新连接（1/3）…", emptyList())
+        )
+    }
+
+    /** 失败收尾贴底与流式跟随同一规则：用户拖动阅读位置后立即让出。 */
+    @Test fun failedReplyFollowYieldsToUserDrag() {
+        assertTrue(com.aiassistant.ui.screens.chat.shouldFollowFailedReply(autoFollowOutput = true, isDragging = false))
+        assertFalse(com.aiassistant.ui.screens.chat.shouldFollowFailedReply(autoFollowOutput = false, isDragging = false))
+        assertFalse(com.aiassistant.ui.screens.chat.shouldFollowFailedReply(autoFollowOutput = true, isDragging = true))
+    }
+
     /** 首次点击不能清焦：字段在事件尾部已聚焦，清焦会拆掉刚建立的输入会话。 */
     @Test fun firstTapOnUnfocusedEditorNeverRestartsTheFreshInputSession() {
         assertEquals(
@@ -380,12 +417,12 @@ class UiPolishRegressionTest {
             requestFocus = { requests++ },
             isFocused = { true },
             isActive = { true },
-            nextFrame = {},
+            nextFrame = { error("已聚焦的字段不应等待焦点事务") },
             showKeyboard = { shows++ },
             isImeVisible = { false }
         )
         assertEquals("只显示键盘时不得清焦", 0, clears)
-        assertEquals(1, requests)
+        assertEquals("已聚焦的字段不得重复请求焦点", 0, requests)
         assertEquals(1, shows)
     }
 
@@ -409,16 +446,32 @@ class UiPolishRegressionTest {
         )
     }
 
-    /** 观察过“输入法显示后被收起”（返回键）：保留既有清焦重建，确保下一次输入会话可用。 */
-    @Test fun imeHiddenAfterVisibleKeepsTheProvenRestartPath() {
-        assertEquals(
-            com.aiassistant.ui.components.EditorTapAction.RestartSession,
-            com.aiassistant.ui.components.editorTapAction(
-                com.aiassistant.ui.components.EditorGestureStart(
-                    focused = true, imeVisible = false, inputConnectionActive = true, imeHiddenAfterVisible = true
-                )
-            )
+    /**
+     * 输入法显示过又被系统收起（返回键、显示动画中的单帧误报）但输入连接仍可用：
+     * 只能重新显示键盘，绝不清焦。旧实现在这里清焦重建，等于点一下输入框就把键盘和正在合成的文字删掉。
+     */
+    @Test fun imeHiddenAfterVisibleWithLiveConnectionOnlyRevealsKeyboard() = runTest {
+        val start = com.aiassistant.ui.components.EditorGestureStart(
+            focused = true, imeVisible = false, inputConnectionActive = true
         )
+        assertEquals(
+            com.aiassistant.ui.components.EditorTapAction.RevealKeyboard,
+            com.aiassistant.ui.components.editorTapAction(start)
+        )
+        var clears = 0
+        var shows = 0
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = com.aiassistant.ui.components.editorTapAction(start),
+            clearFocus = { clears++ },
+            requestFocus = { },
+            isFocused = { true },
+            isActive = { true },
+            nextFrame = { },
+            showKeyboard = { shows++ },
+            isImeVisible = { false }
+        )
+        assertEquals("连接仍在时不得清焦", 0, clears)
+        assertEquals(1, shows)
     }
 
     /**
@@ -470,8 +523,11 @@ class UiPolishRegressionTest {
         assertEquals("隐藏键盘不受保护影响", 1, delegateHides)
     }
 
-    /** 清焦没有被观察到时不得重新聚焦并弹键盘，否则会出现“有键盘、无输入”。 */
-    @Test fun restartAbortsWhenFocusLossIsNeverObserved() = runTest {
+    /**
+     * 清焦没有被观察到时也必须继续重新聚焦并补一次 show()。
+     * 旧实现此时直接 return：键盘已被 clearFocus 收起、也没有再唤起，用户看到的就是“输入法被删掉了”。
+     */
+    @Test fun restartNeverAbandonsTheKeyboardAfterClearFocus() = runTest {
         var focused = true
         var requests = 0
         var shows = 0
@@ -486,9 +542,9 @@ class UiPolishRegressionTest {
             showKeyboard = { shows++ },
             isImeVisible = { false }
         )
-        assertEquals(0, requests)
-        assertEquals(0, shows)
-        assertEquals(3, frames)
+        assertEquals(1, requests)
+        assertEquals("清焦后必须补回键盘", 1, shows)
+        assertEquals(4, frames)
         assertTrue(focused)
     }
 

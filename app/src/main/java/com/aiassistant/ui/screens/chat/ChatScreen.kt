@@ -242,6 +242,8 @@ fun ChatScreen(
         }
     }
     val error by viewModel.error.collectAsState()
+    // 失败落库计数：报错气泡落库后按发送贴底同一机制跟随，见下方 errorScrollRequest effect。
+    val errorScrollRequest by viewModel.errorScrollRequest.collectAsState()
     val availableModelOptions by viewModel.availableModelOptions.collectAsState()
     val currentModel by viewModel.currentModel.collectAsState()
     val currentModelOption by viewModel.currentModelOption.collectAsState()
@@ -539,8 +541,21 @@ fun ChatScreen(
         }
     }
 
-    // Room 写入 assistant 回复时不要再根据 messages 变化移动页面。
-    // 流式输出期间的跟随由下方 isGenerating effect 控制；回复落库只更新当前视口，
+    // 失败收尾贴底（v2.8.32）：失败 / 中断的报错气泡通常比流式气泡高得多，
+    // 落库替换流式气泡后同样需要把页面推到最新内容，否则用户只能看到报错的上半截。
+    // 与发送贴底同一机制：多点采样覆盖落库、测量与键盘动画，用户一旦拖动立即让出。
+    LaunchedEffect(errorScrollRequest) {
+        if (errorScrollRequest <= 0) return@LaunchedEffect
+        repeat(6) { attempt ->
+            if (!shouldFollowFailedReply(autoFollowOutput, isListDragging)) return@LaunchedEffect
+            if (attempt > 0) kotlinx.coroutines.delay(if (attempt <= 2) 90L else 180L)
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { listState.followMeasuredBottom() }
+        }
+    }
+
+    // Room 写入 assistant 回复时不要再根据 messages 变化移动页面：只有上面这条
+    // “本轮以失败收尾”的显式信号才跟随，成功回复落库只更新当前视口，
     // 因而不会在生成结束时把阅读位置拉回新回复的开头。
 
     var lastStreamScrollTime by remember { mutableLongStateOf(0L) }
@@ -548,28 +563,27 @@ fun ChatScreen(
     // LaunchedEffect 在 ChatScreen 顶层组合作用域读取每 token 变化的流式 state，导致整个聊天页
     // 组合体（含 Scaffold、全部对话框分支与 remember）以每 token 一帧的频率全量重组。
     // 改为 LaunchedEffect(isGenerating) + snapshotFlow 在协程内读取长度：组合期零读取，
-    // 70ms 节流与钉底条件保持原样，滚动跟随行为不变
+    // 70ms 节流与钉底条件保持原样，滚动跟随行为不变。
+    // v2.8.32：采样信号补上状态胶囊文案与实时 Key 报错明细——请求失败时正文可能为空，
+    // 气泡仍会因报错文案长高，旧实现只比较正文长度，这类报错完全不会跟随页面。
     LaunchedEffect(isGenerating) {
         if (!isGenerating) return@LaunchedEffect
-        snapshotFlow { currentResponse.length to currentThinking.length }.collect {
+        snapshotFlow {
+            chatFollowSignal(currentResponse, currentThinking, reconnectStatus, liveKeyErrors)
+        }.collect {
             if (preserveScrollForBranchGeneration || !autoFollowOutput || listState.isScrollInProgress) {
                 return@collect
             }
-            val isStreaming = isGenerating && (currentResponse.isNotEmpty() || currentThinking.isNotEmpty())
-            if (isStreaming) {
-                val now = System.currentTimeMillis()
-                if (now - lastStreamScrollTime < 70L) {
-                    return@collect
-                }
-                lastStreamScrollTime = now
-                val totalCount = listState.layoutInfo.totalItemsCount
-                if (totalCount > 0) {
-                    androidx.compose.runtime.withFrameNanos { }
-                    try {
-                        listState.followMeasuredBottom()
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                }
+            val now = System.currentTimeMillis()
+            if (now - lastStreamScrollTime < 70L) {
+                return@collect
             }
+            lastStreamScrollTime = now
+            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
+            androidx.compose.runtime.withFrameNanos { }
+            try {
+                listState.followMeasuredBottom()
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         }
     }
 

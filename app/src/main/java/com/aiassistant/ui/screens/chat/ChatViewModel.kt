@@ -363,6 +363,10 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val _reconnectStatus = MutableStateFlow<String?>(null)
     val reconnectStatus: StateFlow<String?> = _reconnectStatus.asStateFlow()
 
+    // 失败收尾贴底计数：每写入一条报错 / 中断回复递增一次，界面据此把页面推到最新内容。
+    private val _errorScrollRequest = MutableStateFlow(0)
+    val errorScrollRequest: StateFlow<Int> = _errorScrollRequest.asStateFlow()
+
     private fun loadConversation() {
         viewModelScope.launch {
             conversation = repository.getConversationById(conversationId)
@@ -1726,6 +1730,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             ?: conversation?.modelName
         activeAssistantVariantGroupId = null
         activeAssistantVariantIndex = 1
+        // 报错 / 中断气泡往往比流式气泡高得多：落库后让界面按发送贴底的同一机制跟随到底部。
+        // 用户主动停止不抢滚动位置（停止时正文通常变短，跟随会造成跳动）。
+        if (!isUserStopping) _errorScrollRequest.value += 1
         val expectedMutationEpoch = ChatGenerationManager.mutationEpoch(conversationId)
         AiAssistantApp.instance.applicationScope.launch {
             val content = when {

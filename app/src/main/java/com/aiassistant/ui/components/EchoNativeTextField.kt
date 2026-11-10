@@ -90,32 +90,6 @@ internal fun isInputConnectionActiveNow(context: android.content.Context): Boole
 }.getOrNull() ?: false
 
 /**
- * 记录聚焦后是否出现过“输入法已显示 → 被系统收起”（例如返回键）。
- *
- * 常规输入法收起后字段仍保持焦点，旧输入会话可能已经结束，需要清焦重建；
- * 悬浮输入法不会出现这次可见性变化，不能据此清焦。
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun rememberImeHiddenAfterVisible(focused: Boolean): Boolean {
-    val imeVisible = WindowInsets.isImeVisible
-    var seenVisible by remember { mutableStateOf(false) }
-    var hiddenAfterVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(focused, imeVisible) {
-        if (!focused) {
-            seenVisible = false
-            hiddenAfterVisible = false
-        } else if (imeVisible) {
-            seenVisible = true
-            hiddenAfterVisible = false
-        } else if (seenVisible) {
-            hiddenAfterVisible = true
-        }
-    }
-    return hiddenAfterVisible
-}
-
-/**
  * 输入法已经在屏幕上时再次 show() 会让部分输入法重建输入视图，表现为键盘闪一下。
  *
  * BasicTextField2 1.6.8 的点击手势（`TextFieldSelectionState.detectTextFieldTapGestures`）在
@@ -147,9 +121,7 @@ internal data class EditorGestureStart(
     val focused: Boolean,
     val imeVisible: Boolean,
     /** 点击前输入连接是否仍可用；false 表示旧会话已结束，必须重建。 */
-    val inputConnectionActive: Boolean = true,
-    /** 聚焦后是否观察过“输入法已显示 → 被收起”；悬浮输入法不会出现该变化。 */
-    val imeHiddenAfterVisible: Boolean = false
+    val inputConnectionActive: Boolean = true
 )
 
 /** 点击输入框时该做什么。 */
@@ -157,10 +129,10 @@ internal enum class EditorTapAction {
     /** 手势前未聚焦：输入框自身的手势会请求焦点并建立输入会话，这里只补一次保险。 */
     AssistFocus,
 
-    /** 手势前已聚焦、旧输入会话确实已结束：必须清焦重建。 */
+    /** 输入连接确实失效（键盘在屏幕上也打不出字 / 旧会话已结束）：必须清焦重建。 */
     RestartSession,
 
-    /** 已聚焦、输入法被收起但输入连接仍可用：只重新显示键盘，绝不清焦（清焦会收起再弹起，表现为闪烁）。 */
+    /** 已聚焦、读不到输入法但连接仍可用：只重新显示键盘，绝不清焦（清焦会收起再弹起，表现为闪烁）。 */
     RevealKeyboard,
 
     /** 手势前已聚焦、输入法仍在屏幕上且连接可用：不要碰焦点，也不要重复 show()，否则键盘会闪一下。 */
@@ -172,26 +144,33 @@ internal enum class EditorTapAction {
  * 字段仍保持聚焦，旧的输入会话已经结束，此时 show() 只能弹出没有连接、打不出字的键盘。
  * 首次点击由输入框自身的 focus 请求建立会话，若此时再清焦，会把刚建立的会话拆掉并留下死连接。
  *
- * 判定顺序：
- * 1. 输入法仍在屏幕上且连接可用 → [EditorTapAction.Ignore]，打字时点击定位光标不产生任何焦点/键盘事务。
- * 2. 输入法可见但连接已失效（键盘仍在却打不出字）→ [EditorTapAction.RestartSession]。
- * 3. 观察过输入法显示后被收起（返回键等）→ 沿用 [EditorTapAction.RestartSession]，旧会话可能已结束。
- * 4. 从未观察到输入法（悬浮输入法 Insets 恒为 0）但连接仍在 → [EditorTapAction.RevealKeyboard]，
- *    只显示键盘，不清焦，避免每次点击都收起再弹起。
+ * 判定顺序（v2.8.32 起以“输入连接是否可用”为唯一重建依据）：
+ * 1. 点击前未聚焦 → [EditorTapAction.AssistFocus]，交给输入框自身手势建会话，绝不清焦。
+ * 2. 输入连接已失效 → [EditorTapAction.RestartSession]，这是唯一需要清焦重建的情形。
+ * 3. 输入法仍在屏幕上且连接可用 → [EditorTapAction.Ignore]，打字时点击定位光标不产生任何焦点/键盘事务。
+ * 4. 读不到输入法（悬浮输入法 Insets 恒为 0，或输入法刚被收起）但连接仍可用 →
+ *    [EditorTapAction.RevealKeyboard]，只显示键盘，不清焦。
+ *
+ * 旧实现用“输入法显示过后又被收起”作为额外重建条件：该信号来自组合期 IME Insets，
+ * 在显示 / 隐藏动画、悬浮输入法与 API<30 的近似实现下都会误报，一次误报就会在点击时
+ * clearFocus → stopInput 收起键盘并丢弃正在合成的文字，表现为“点一下输入框，输入法被删掉了”。
+ * 连接状态才是会话是否已结束的直接证据，因此不再保留该信号。
  */
 internal fun editorTapAction(start: EditorGestureStart): EditorTapAction =
     when {
         !start.focused -> EditorTapAction.AssistFocus
-        start.imeVisible -> if (start.inputConnectionActive) EditorTapAction.Ignore else EditorTapAction.RestartSession
-        start.imeHiddenAfterVisible -> EditorTapAction.RestartSession
-        start.inputConnectionActive -> EditorTapAction.RevealKeyboard
-        else -> EditorTapAction.RestartSession
+        !start.inputConnectionActive -> EditorTapAction.RestartSession
+        start.imeVisible -> EditorTapAction.Ignore
+        else -> EditorTapAction.RevealKeyboard
     }
 
 /**
  * A real frame between losing and regaining focus lets BasicTextField2 restart its input session.
  * 清焦后必须确认字段真的失焦：焦点事务若被合并，跨帧 requestFocus 不会触发新的输入会话，
  * 键盘虽被 show() 唤起却没有可用的 InputConnection，表现为“能弹出键盘但无法输入”。
+ *
+ * 反过来，清焦之后无论焦点事务是否被观察到，都必须继续 requestFocus 并补一次 show()：
+ * 提前 return 会留下“键盘已被收起、也没有再唤起”的状态，用户看到的就是输入法被删掉。
  */
 internal suspend fun reopenEditorKeyboard(
     action: EditorTapAction,
@@ -207,14 +186,23 @@ internal suspend fun reopenEditorKeyboard(
     if (action == EditorTapAction.Ignore) return
     if (!isActive()) return
     // Tapping an already active editor must not restart focus or re-show a visible IME.
-    if (isFocused() && isImeVisible()) return
+    if (action != EditorTapAction.RestartSession && isFocused() && isImeVisible()) return
     if (action == EditorTapAction.RestartSession) {
         clearFocus()
-        // 失焦没有被观察到时不要重新聚焦：会话不会重建，只会得到“有键盘、无输入”。
-        if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = false, maxFrames = maxFocusFrames)) return
+        awaitEditorFocus(isFocused, isActive, nextFrame, expected = false, maxFrames = maxFocusFrames)
+        if (!isActive()) return
+        requestFocus()
+        awaitEditorFocus(isFocused, isActive, nextFrame, expected = true, maxFrames = maxFocusFrames)
+        // 会话重建是修复动作：键盘可能已被清焦收起，即使焦点确认失败也要补一次 show()。
+        if (isActive() && !isImeVisible()) showKeyboard()
+        return
     }
-    requestFocus()
-    if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = true, maxFrames = maxFocusFrames)) return
+    // 已聚焦的字段完全不动焦点：重复 requestFocus 只会在部分输入法上重建输入视图。
+    if (!isFocused()) {
+        requestFocus()
+        // 焦点没有落地就不要弹键盘：那只会得到一把没有连接的键盘。
+        if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = true, maxFrames = maxFocusFrames)) return
+    }
     // 焦点获得本身就会 startInput 并请求显示键盘；只有它没有生效时才补一次 show()。
     if (isActive() && !isImeVisible()) showKeyboard()
 }
@@ -348,8 +336,6 @@ internal fun EchoNativeTextField(
     val density = LocalDensity.current.density
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
-    val imeHiddenAfterVisible = rememberImeHiddenAfterVisible(focused)
-    val latestImeHiddenAfterVisible by rememberUpdatedState(imeHiddenAfterVisible)
     val requestKeyboard = onRequestKeyboard ?: rememberEditorKeyboardRequest(focusRequester, isFocused = { focused }).second
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
     // Compose 自身的点击手势每次都会 show()；输入法已可见时重复 show() 会让它闪一下。
@@ -413,8 +399,7 @@ internal fun EchoNativeTextField(
                         val start = EditorGestureStart(
                             focused = focused,
                             imeVisible = isImeVisibleNow(view, fallback = false),
-                            inputConnectionActive = isInputConnectionActiveNow(context),
-                            imeHiddenAfterVisible = latestImeHiddenAfterVisible
+                            inputConnectionActive = isInputConnectionActiveNow(context)
                         )
                         var tap = true
                         var pressed: Boolean

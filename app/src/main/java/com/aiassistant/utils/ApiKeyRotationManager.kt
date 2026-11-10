@@ -29,6 +29,17 @@ class ApiKeyRotationManager(context: Context, private val nowMillis: () -> Long 
         readSettings(scope(baseUrl, apiType), prefs.all)
     }
 
+    /**
+     * 该地址与协议是否已经保存过轮询策略；未保存过时由调用方决定新配置的默认开关。
+     *
+     * 判据是策略前缀下的任意键，而不是单独的 `enabled`：早期版本保存策略时没有这个开关键，
+     * 只认 `enabled` 会把这类历史策略误判成“从未保存”，进而在保存时把轮询改写成关闭。
+     */
+    fun hasSettings(baseUrl: String, apiType: String): Boolean = synchronized(lock) {
+        val prefix = settingsPrefix(scope(baseUrl, apiType))
+        prefs.all.keys.any { it.startsWith(prefix) }
+    }
+
     fun saveSettings(baseUrl: String, apiType: String, settings: ApiKeyRotationSettings): Boolean = synchronized(lock) {
         val prefix = settingsPrefix(scope(baseUrl, apiType))
         val safe = settings.normalized()

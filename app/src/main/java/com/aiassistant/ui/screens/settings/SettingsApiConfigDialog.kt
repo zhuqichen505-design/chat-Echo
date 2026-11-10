@@ -52,7 +52,6 @@ import com.aiassistant.R
 import com.aiassistant.data.repository.AiRepository
 import com.aiassistant.data.repository.helpers.ApiEndpointHelper
 import com.aiassistant.domain.model.ApiConfig
-import com.aiassistant.domain.model.ApiKeyRotationSettings
 import com.aiassistant.domain.model.NamedApiKey
 import com.aiassistant.domain.model.ModelCapabilityEngine
 import com.aiassistant.domain.model.ModelCustomSettings
@@ -122,6 +121,55 @@ internal fun apiModelDiscoveryEntries(
     val missing = configured.filter { it !in fetchedSet }
     return (missing + fetched).filter { it.contains(query.trim(), ignoreCase = true) }
         .map { ApiModelDiscoveryEntry(it, it in configured, it !in fetchedSet) }
+}
+
+/**
+ * 单页三段式的分区标题（连接 / 密钥 / 模型）。
+ *
+ * 三段在同一 LazyColumn 里按顺序连续排布，标题只做层级标识与当前摘要，
+ * 不再用 Tab 把同一张表单切成三个互不可见的页面。
+ */
+@Composable
+private fun ApiConfigSectionHeader(
+    index: Int,
+    title: String,
+    summary: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = EchoTokens.Spacing.md)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.inlineGap)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.42f))
+            ) {
+                Text(
+                    text = index.toString(),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp)
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp, start = 2.dp)
+        )
+    }
 }
 
 @Composable
@@ -235,10 +283,8 @@ private fun ApiConfigEditorContent(
     val gson = remember { Gson() }
     var isSaving by remember { mutableStateOf(false) }
     var persistedConfigId by remember { mutableLongStateOf(initialConfigId) }
-    var configTab by rememberSaveable(config?.id) { mutableIntStateOf(0) }
-    val connectionListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val keysListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val modelsListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // 连接 / 密钥 / 模型三段在同一条纵向滚动里占据连续的层级，共用同一个滚动位置。
+    val pageListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     var isConfigEnabled by remember { mutableStateOf(config?.isEnabled ?: true) }
     var name by remember { mutableStateOf(config?.name ?: "") }
@@ -270,8 +316,19 @@ private fun ApiConfigEditorContent(
     val loadedRotationSettings = remember(config?.id, rotationScopeKey) {
         runCatching { rotationManager.getSettings(baseUrl, apiType) }
     }
+    // 该地址与协议是否已有用户保存过的策略：策略按地址共享，已有策略必须原样载入。
+    val hasStoredRotationSettings = remember(config?.id, rotationScopeKey) {
+        runCatching { rotationManager.hasSettings(baseUrl, apiType) }.getOrDefault(false)
+    }
     var rotationDraft by remember(config?.id, rotationScopeKey) {
-        mutableStateOf(ApiKeyRotationDraft(loadedRotationSettings.getOrDefault(ApiKeyRotationSettings())))
+        mutableStateOf(
+            ApiKeyRotationDraft(
+                initialRotationSettings(
+                    loaded = if (hasStoredRotationSettings) loadedRotationSettings.getOrNull() else null,
+                    isNewConfig = initialConfigId <= 0L
+                )
+            )
+        )
     }
     var resettingKeyHealth by remember(rotationScopeKey) { mutableStateOf(false) }
     var keyHealthResetFeedback by remember(rotationScopeKey) { mutableStateOf<Pair<Boolean, String>?>(null) }
@@ -499,31 +556,22 @@ private fun ApiConfigEditorContent(
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.sm)
         ) {
-                ScrollableTabRow(
-                    selectedTabIndex = configTab,
-                    edgePadding = 0.dp,
-                    containerColor = Color.Transparent,
-                    divider = {}
-                ) {
-                    listOf("连接", "密钥 · ${namedKeyList.count { it.key.isNotBlank() }}", "模型 · ${availableModels.size}").forEachIndexed { index, label ->
-                        Tab(
-                            selected = configTab == index,
-                            onClick = { configTab = index },
-                            text = { Text(label, style = MaterialTheme.typography.labelLarge) }
-                        )
-                    }
-                }
                 LazyColumn(
-                    state = when (configTab) {
-                        1 -> keysListState
-                        2 -> modelsListState
-                        else -> connectionListState
-                    },
+                    state = pageListState,
                     verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.cardGap),
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(top = EchoTokens.Spacing.xs, bottom = EchoTokens.Spacing.sectionGap)
+                    contentPadding = PaddingValues(
+                        top = EchoTokens.Spacing.xs,
+                        bottom = EchoTokens.Spacing.sectionGap
+                    )
                 ) {
-                if (configTab == 0) {
+                    item(key = "api_section_connection") {
+                        ApiConfigSectionHeader(
+                            index = 1,
+                            title = "连接",
+                            summary = "接口地址、协议与外观"
+                        )
+                    }
                     item {
                         SettingsGlassCard {
                             Row(
@@ -652,9 +700,17 @@ private fun ApiConfigEditorContent(
                             )
                         }
                     }
-                }
 
-                if (configTab == 1) {
+                    item(key = "api_section_keys") {
+                        ApiConfigSectionHeader(
+                            index = 2,
+                            title = "密钥",
+                            summary = buildString {
+                                append("已录入 ${namedKeyList.count { it.key.isNotBlank() }} 个密钥")
+                                append(if (rotationDraft.settings.enabled) " · 多 Key 轮询已开启" else " · 多 Key 轮询已关闭")
+                            }
+                        )
+                    }
                     item {
                         val validKeysCount = namedKeyList.count { it.key.isNotBlank() }
                         SettingsGlassCard {
@@ -1055,9 +1111,14 @@ private fun ApiConfigEditorContent(
                             }
                         )
                     }
-                }
 
-                if (configTab == 2) {
+                    item(key = "api_section_models") {
+                        ApiConfigSectionHeader(
+                            index = 3,
+                            title = "模型",
+                            summary = "默认模型、模型清单与能力设置（已添加 ${availableModels.size} 个）"
+                        )
+                    }
                     item {
                         SettingsGlassCard {
                             Text("默认模型", style = MaterialTheme.typography.titleMedium)
@@ -1460,10 +1521,9 @@ private fun ApiConfigEditorContent(
                         }
                     }
                 }
-                }
                 if (rotationDraft.validationMessage != null) {
                     Text(
-                        text = "轮询设置有无效数字，请到“密钥”页修正后保存：${rotationDraft.validationMessage}",
+                        text = "轮询设置有无效数字，请到“密钥”分区修正后保存：${rotationDraft.validationMessage}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )

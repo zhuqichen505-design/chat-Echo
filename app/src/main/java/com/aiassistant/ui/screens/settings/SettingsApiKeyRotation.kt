@@ -92,6 +92,22 @@ internal data class ApiKeyRotationDraft(
     }
 }
 
+/**
+ * API 配置页打开时的轮询草稿默认值（v2.8.32 需求）。
+ *
+ * [loaded] 为该地址与协议已保存的策略；策略按“API 地址 + 协议”共享，已有策略必须原样载入，
+ * 否则在这里改动会覆盖同一地址其它配置的选择。只有“新建配置 + 该地址从未保存过策略”
+ * 才套用“多 Key 轮询默认关闭”；编辑既有配置保持历史行为不变。
+ */
+internal fun initialRotationSettings(
+    loaded: ApiKeyRotationSettings?,
+    isNewConfig: Boolean
+): ApiKeyRotationSettings = when {
+    loaded != null -> loaded
+    isNewConfig -> ApiKeyRotationSettings(enabled = false)
+    else -> ApiKeyRotationSettings()
+}
+
 @Composable
 internal fun ApiKeyRotationSettingsSection(
     scopeKey: String,

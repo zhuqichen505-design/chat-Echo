@@ -142,6 +142,40 @@ class NetworkAndKeyStabilityTest {
         })
     }
 
+    /**
+     * 新建 API 配置的多 Key 轮询默认关闭，但“已保存过策略”的地址必须原样载入：
+     * 策略按地址 + 协议共享，已有策略既包括写了开关键的新版本，也包括只有策略值的早期版本。
+     */
+    @Test fun storedRotationPolicyPresenceDrivesNewConfigDefault() {
+        val fixture = RotationFixture()
+        val manager = fixture.manager()
+        assertFalse(manager.hasSettings(ROTATION_URL, "openai"))
+        // 未保存过策略 + 新建配置 → 默认关闭；编辑既有配置保持历史默认。
+        assertFalse(com.aiassistant.ui.screens.settings.initialRotationSettings(
+            loaded = null, isNewConfig = true
+        ).enabled)
+        assertTrue(com.aiassistant.ui.screens.settings.initialRotationSettings(
+            loaded = null, isNewConfig = false
+        ).enabled)
+
+        assertTrue(manager.saveSettings(ROTATION_URL, "openai", ApiKeyRotationSettings(enabled = false)))
+        assertTrue(manager.hasSettings(ROTATION_URL, "openai"))
+        assertFalse("已保存的策略必须原样载入", com.aiassistant.ui.screens.settings.initialRotationSettings(
+            loaded = manager.getSettings(ROTATION_URL, "openai"), isNewConfig = true
+        ).enabled)
+        assertFalse(manager.hasSettings(ROTATION_URL, "anthropic"))
+
+        // 早期版本只写策略值、没有开关键：同样视为已保存，不能被新默认值改写成关闭。
+        val legacy = RotationFixture()
+        legacy.manager().saveSettings(ROTATION_URL, "openai", ApiKeyRotationSettings())
+        val legacyEnabledKey = legacy.preferences.all.keys.single { it.endsWith(".enabled") }
+        assertTrue(legacy.preferences.edit().remove(legacyEnabledKey).commit())
+        assertTrue(legacy.manager().hasSettings(ROTATION_URL, "openai"))
+        assertTrue(com.aiassistant.ui.screens.settings.initialRotationSettings(
+            loaded = legacy.manager().getSettings(ROTATION_URL, "openai"), isNewConfig = true
+        ).enabled)
+    }
+
     @Test fun bearerAliasesAreDeduplicatedWhileOriginalSendingStringsAndCaseRemainUnchanged() {
         val fixture = RotationFixture()
         val manager = fixture.manager()

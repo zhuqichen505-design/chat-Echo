@@ -26,6 +26,14 @@
 
 ## 本次记录
 
+## 2026-11-10 · 报错贴底、输入框点击与 API 配置页三段式（未发版）
+
+- 基线 `main/8d978a8`（已发布 2.8.31/217）；Room v37 / 20 个实体不变。未递增版本、未构建 APK；原未跟踪内容保留排除。
+- 文件：`ChatScrollPolicy.kt`、`ChatScreen.kt`、`ChatViewModel.kt`、`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`SettingsApiConfigDialog.kt`、`SettingsApiKeyRotation.kt`、`ApiKeyRotationManager.kt`、`UiPolishRegressionTest.kt`、`NetworkAndKeyStabilityTest.kt` 与文档；不新增依赖，不改 API / 消息 / 备份 / Room。
+- 方案要点：流式跟随信号改为 `ChatFollowSignal`（正文 / 思考长度 + 状态文案 + Key 明细条数），失败落库后按 `errorScrollRequest` 计数以发送贴底同一机制跟随；输入框判定改以 `isAcceptingText` 为唯一重建依据，删除 `imeHiddenAfterVisible`，`RestartSession` 清焦后必定重新聚焦并补 `show()`；API 配置页去掉页签，改为连接 / 密钥 / 模型三段连续纵向滚动，新建配置多 Key 轮询默认关闭（已保存策略原样载入）。
+- 验证：最终 verify `20261110-185957-808` 退出 0，467.968 秒；92 套件 / 1,092 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 待办：无设备，报错贴底、输入法点击行为与 API 配置页视觉待人工验收。
+
 ## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
 
 - 基线 `main/c77b6f1`（已发布 2.8.30/216）；版本递增为 2.8.31/217；Room v37 / 20 个实体不变。原未跟踪内容保留排除。

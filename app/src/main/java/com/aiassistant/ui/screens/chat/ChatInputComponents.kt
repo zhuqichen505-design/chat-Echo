@@ -225,9 +225,6 @@ fun ChatInputBar(
     // 手柄点击同样要取“点击前”的输入法可见性；组合快照会滞后，这里读实时窗口 Insets。
     val inputView = androidx.compose.ui.platform.LocalView.current
     val inputContext = LocalContext.current
-    val imeHiddenAfterVisible =
-        com.aiassistant.ui.components.rememberImeHiddenAfterVisible(inputFocused)
-    val latestImeHiddenAfterVisible by rememberUpdatedState(imeHiddenAfterVisible)
     val latestImeVisible by rememberUpdatedState(WindowInsets.isImeVisible)
     fun imeVisibleNow(): Boolean =
         com.aiassistant.ui.components.isImeVisibleNow(inputView, latestImeVisible)
@@ -803,8 +800,7 @@ fun ChatInputBar(
                                         focused = inputFocused,
                                         imeVisible = imeVisibleNow(),
                                         inputConnectionActive =
-                                            com.aiassistant.ui.components.isInputConnectionActiveNow(inputContext),
-                                        imeHiddenAfterVisible = latestImeHiddenAfterVisible
+                                            com.aiassistant.ui.components.isInputConnectionActiveNow(inputContext)
                                     )
                                 )
                             }
