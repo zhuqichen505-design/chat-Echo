@@ -26,12 +26,13 @@
 
 ## 本次记录
 
-## 2026-11-10 · 报错贴底、输入框点击与 API 配置页三段式（未发版）
+## 2026-11-10 · 2.8.32 报错贴底、输入框点击与 API 配置页三段式（已发布）
 
-- 基线 `main/8d978a8`（已发布 2.8.31/217）；Room v37 / 20 个实体不变。未递增版本、未构建 APK；原未跟踪内容保留排除。
+- 基线 `main/8d978a8`（已发布 2.8.31/217）；版本递增为 2.8.32/218；Room v37 / 20 个实体不变；原未跟踪内容保留排除。
 - 文件：`ChatScrollPolicy.kt`、`ChatScreen.kt`、`ChatViewModel.kt`、`EchoNativeTextField.kt`、`ChatInputComponents.kt`、`SettingsApiConfigDialog.kt`、`SettingsApiKeyRotation.kt`、`ApiKeyRotationManager.kt`、`UiPolishRegressionTest.kt`、`NetworkAndKeyStabilityTest.kt` 与文档；不新增依赖，不改 API / 消息 / 备份 / Room。
 - 方案要点：流式跟随信号改为 `ChatFollowSignal`（正文 / 思考长度 + 状态文案 + Key 明细条数），失败落库后按 `errorScrollRequest` 计数以发送贴底同一机制跟随；输入框判定改以 `isAcceptingText` 为唯一重建依据，删除 `imeHiddenAfterVisible`，`RestartSession` 清焦后必定重新聚焦并补 `show()`；API 配置页去掉页签，改为连接 / 密钥 / 模型三段连续纵向滚动，新建配置多 Key 轮询默认关闭（已保存策略原样载入）。
-- 验证：最终 verify `20261110-185957-808` 退出 0，467.968 秒；92 套件 / 1,092 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 验证：最终 verify `20261110-214606-202` 退出 0，197.803 秒；92 套件 / 1,092 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，421.3 秒；`Echo-v2.8.32.apk` 25,505,561 字节，SHA256 `1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40`；v2 签名与上版一致，Android Debug **非正式生产签名**。APK 446 条目与 2.8.31 条目名集合一致，5 项变化；DEX 唯一 +33 / -21，新增可读中文 7 条均为本版提示；`resources.arsc` 与 186 张位图不变；隐私新增命中 0。发布目录 227 文件（226 APK）→ 228 文件（227 APK），历史包保留。
+- 发布：版本提交与 annotated 标签 `v2.8.32` 已推送并核验；Release 为 Latest、唯一附件，正文与 `release-notes/latest.md` 一致；远端仅保留 v2.8.32，本机历史标签与 APK 保留。
 - 待办：无设备，报错贴底、输入法点击行为与 API 配置页视觉待人工验收。
 
 ## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）

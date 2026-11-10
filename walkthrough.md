@@ -1,5 +1,30 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-10 · 2.8.32 报错贴底、输入框点击稳定性与 API 配置页三段式（已发布）
+
+基线 `main/3692eca`（已发布 2.8.31/217）；版本 2.8.32/218；Room v37 / 20 个实体不变，无迁移。
+
+本轮范围与实现：
+
+- 报错贴底：新增 `ChatFollowSignal`（正文 / 思考长度 + 状态胶囊文案 + 实时 Key 明细条数），流式跟随不再只比较正文长度；`ChatViewModel` 新增 `errorScrollRequest`，`saveErrorReply` 在非用户停止时递增，界面按发送贴底的 0/90/180/360/540/720ms 采样跟随，`isListDragging` 时立即让出。
+- 输入框点击：删除 `rememberImeHiddenAfterVisible` 及两处调用（组合期 Insets 单帧误报会让每次点击都清焦重建）；`editorTapAction` 改以 `inputConnectionActive`（`isAcceptingText`）为唯一重建依据，顺序为未聚焦→`AssistFocus`、连接失效→`RestartSession`、输入法可见→`Ignore`、其余→`RevealKeyboard`；`reopenEditorKeyboard` 的清焦分支不再提前返回，必定重新聚焦并补 `show()`；已聚焦字段不重复 `requestFocus`。
+- API 配置页：去掉 `ScrollableTabRow` 与三个独立 `LazyListState`，改为单 `LazyColumn` 的连接 → 密钥 → 模型三段；新增 `ApiConfigSectionHeader`（序号徽标 + 标题 + 摘要）；无效轮询提示改指“密钥分区”。
+- 轮询默认值：新增 `ApiKeyRotationManager.hasSettings`（按策略前缀任意键判断，兼容无开关键的旧策略）与 `initialRotationSettings(loaded, isNewConfig)`；新建配置且地址未保存过策略时默认关闭，已保存策略原样载入。
+
+新增 3 项测试（跟随信号覆盖无正文的报错、失败贴底让位于拖动、策略存在性与新配置默认关闭），改写 5 项输入框判定测试（已聚焦不清焦、清焦后必须补回键盘、IME 收起但连接可用只补键盘）；套件 92 不变，总数 1,089 → 1,092。
+
+最终冻结验收 `20261110-214606-202`：脚本 / Gradle 退出 0，197.803 秒；92 套件 / 1,092 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，421.3 秒。
+
+`Echo-v2.8.32.apk` 25,505,561 字节，SHA256 `1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40`；`com.aiassistant`、2.8.32/218、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过（v1 无、v3/v3.1/v4 无），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
+
+APK 审计：446 个 ZIP 条目，条目名集合与 2.8.31 完全一致；5 项变化为清单、版本控制信息、两个 baseline profile 与 `classes.dex`（+2,252 字节）；DEX 31,657 条字符串（唯一 +33 / -21），新增可读中文 7 条均为本版分区标题、轮询文案与版本号；`resources.arsc` 逐字节不变；186 张位图资源新增 / 变化 0；隐私扫描（本机路径、邮箱、手机号、IPv4、`sk-` 密钥、Bearer）新增命中 0，仅保留既有 `android@android.com` 调试证书常量与 RFC 5737 文档地址。发布目录 227 文件（226 APK）→ 228 文件（227 APK），历史包名称 / 大小 / SHA256 保留（v2.8.31 `a0e0db41…`、v2.8.30 `fa12df35…` 复核一致）。
+
+设备与人工走查（尚未执行；`adb devices` 无连接设备）：
+
+- 制造一次请求失败（错误地址或无效 Key），确认报错气泡出现后页面推到其底部；报错前手动上滑阅读旧消息时不被抢回。
+- 打字中点击输入框定位光标（含拼音候选未上屏）、连续快速点击、返回隐藏键盘后再点、键盘可见却打不出字时再点；普通与悬浮输入法分别复验。
+- 新建 API 配置确认“启用多 Key 轮询”默认关闭；编辑同一地址的既有配置确认读到原策略；三段连续滚动、分区标题与摘要在手机 / 宽屏 / 深色主题下目视确认。
+
 ## 2026-11-10 · 2.8.31 输入会话稳定性、发送贴底设置与 API 配置页排版（已发布）
 
 基线 `main/c77b6f1`（已发布 2.8.30/216）；版本 2.8.31/217；Room v37 / 20 个实体不变，无迁移。

@@ -1,8 +1,8 @@
 # 维护记录
 
-## 2026-11-10 · 报错贴底、点击输入框不再收起键盘、API 配置页三段式（未发版）
+## 2026-11-10 · 2.8.32 报错贴底、点击输入框不再收起键盘、API 配置页三段式（已发布）
 
-基线 `main/8d978a8`（已发布 2.8.31/217）；Room v37 / 20 个实体不变，无迁移。未递增版本、未构建 APK。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。三项需求：报错信息无法像流式输出一样推动页面下滑；点击输入框时输入法被收起；API 配置页改为连接 / 密钥 / 模型上下滑动的三段式，且新建配置的多 Key 轮询默认关闭。
+基线 `main/8d978a8`（已发布 2.8.31/217）；版本递增为 2.8.32/218；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。三项需求：报错信息无法像流式输出一样推动页面下滑；点击输入框时输入法被收起；API 配置页改为连接 / 密钥 / 模型上下滑动的三段式，且新建配置的多 Key 轮询默认关闭。
 
 ### 1. 报错信息不推动页面
 
@@ -30,7 +30,19 @@
 
 涉及 `ui/screens/chat/ChatScrollPolicy.kt`、`ChatScreen.kt`、`ChatViewModel.kt`、`ui/components/EchoNativeTextField.kt`、`ui/screens/chat/ChatInputComponents.kt`、`ui/screens/settings/SettingsApiConfigDialog.kt`、`SettingsApiKeyRotation.kt`、`utils/ApiKeyRotationManager.kt` 与两个测试文件；不新增依赖，不改 API / 消息 / 备份 / Room。
 
-验证：最终冻结验收 `20261110-185957-808` 脚本 / Gradle 退出 0，467.968 秒；92 套件 / 1,092 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。新增 3 项回归：跟随信号覆盖无正文的报错、失败贴底让位于拖动、策略存在性与新配置默认关闭（含无开关键的早期策略）；改写 5 项输入框判定测试以锁定“已聚焦不清焦 / 清焦后必须补回键盘”。
+验证：最终冻结验收 `20261110-214606-202` 脚本 / Gradle 退出 0，197.803 秒；92 套件 / 1,092 项测试实际执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。版本递增后的编译产物由同输入的上一轮完成，本轮复用编译缓存，测试与 Lint 实际执行。新增 3 项回归：跟随信号覆盖无正文的报错、失败贴底让位于拖动、策略存在性与新配置默认关闭（含无开关键的早期策略）；改写 5 项输入框判定测试以锁定“已聚焦不清焦 / 清焦后必须补回键盘”。
+
+### 构建与安装包
+
+Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，421.3 秒。`Echo-v2.8.32.apk` 25,505,561 字节，SHA256 `1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40`；`com.aiassistant`、2.8.32/218、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过（v1、v3、v3.1、v4 均无），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致，Android Debug **非正式生产签名**。
+
+APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.31 完全一致；5 项变化为清单、`META-INF/version-control-info.textproto`、两个 baseline profile 与 `classes.dex`（7,139,400 → 7,141,652 字节）。DEX 31,657 条字符串（唯一 +33 / -21），新增可读中文 7 条均为本版分区标题（“接口地址、协议与外观”“默认模型、模型清单与能力设置（已添加 ”）、轮询文案（“· 多 Key 轮询已开启 / 已关闭”“轮询设置有无效数字，请到“密钥”分区修正后保存：”）与“版本 2.8.32”；新增非中文字符串为 `ChatFollowSignal` 字段、三个分区 item key、UA 版本串与 R8 重命名产物。`resources.arsc` 逐字节不变；186 张 png/jpg/jpeg/webp 位图新增 / 变化 0。隐私扫描（本机路径、邮箱、手机号、IPv4、`sk-` 密钥、Bearer）新增命中 0，仅保留既有 `android@android.com` 调试证书常量与 RFC 5737 文档地址 `192.0.2.1`。
+
+排他复制退出 0：指定发布目录由 227 文件（226 APK）增为 228 文件（227 APK），`Echo-v2.8.32.apk` 未覆盖任何历史包；抽检 v2.8.31（`a0e0db41…`）与 v2.8.30（`fa12df35…`）SHA256 与既有记录一致。
+
+### 发布
+
+版本提交与 annotated 标签 `v2.8.32` 已推送，`git ls-remote` 核验远端 main / peeled 标签一致；[Echo 2.8.32 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.32) 为 Latest，唯一附件 `Echo-v2.8.32.apk`，Release 正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已撤下远端旧 v2.8.31 Release / 标签；本机历史标签与全部历史 APK 保留。
 
 设备边界：无连接设备，未做视觉与输入法验收。需人工确认：请求失败后页面是否推到报错气泡底部、拖动阅读位置时是否不被抢回；打字中连续点击输入框（含拼音候选状态）、悬浮输入法、返回键收起后再点、键盘在却打不出字时再点；API 配置页三段连续滚动、键盘弹出、深色与宽屏下分区标题；新建配置打开时“启用多 Key 轮询”默认关闭、同地址已有配置仍读到原策略。
 
