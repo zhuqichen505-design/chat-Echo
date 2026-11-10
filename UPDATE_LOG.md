@@ -42,7 +42,9 @@ APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.31 完�
 
 ### 发布
 
-版本提交与 annotated 标签 `v2.8.32` 已推送，`git ls-remote` 核验远端 main / peeled 标签一致；[Echo 2.8.32 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.32) 为 Latest，唯一附件 `Echo-v2.8.32.apk`，Release 正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已撤下远端旧 v2.8.31 Release / 标签；本机历史标签与全部历史 APK 保留。
+版本提交 `99a36f997f8772a8a8d41998f12d9051c1bcd4c8` 与 annotated 标签 `v2.8.32`（对象 `2b1908cb839d8c632f17f95148fa7ee8d9abd48b`，peeled 指向版本提交）已推送；首次推送 main 遇到 schannel SSL/TLS 握手失败、标签推送成功，重试 main 后 `git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。
+
+[Echo 2.8.32 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.32) 为 Latest，唯一附件 `Echo-v2.8.32.apk`；GitHub digest `sha256:1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核 SHA256 / 大小与本机一致；Release 正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.31 Release 与远端标签，远端仅保留 v2.8.32；本机 `v2.8.31` 标签与全部历史 APK 保留。
 
 设备边界：无连接设备，未做视觉与输入法验收。需人工确认：请求失败后页面是否推到报错气泡底部、拖动阅读位置时是否不被抢回；打字中连续点击输入框（含拼音候选状态）、悬浮输入法、返回键收起后再点、键盘在却打不出字时再点；API 配置页三段连续滚动、键盘弹出、深色与宽屏下分区标题；新建配置打开时“启用多 Key 轮询”默认关闭、同地址已有配置仍读到原策略。
 

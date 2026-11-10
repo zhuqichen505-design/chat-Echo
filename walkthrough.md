@@ -19,6 +19,8 @@
 
 APK 审计：446 个 ZIP 条目，条目名集合与 2.8.31 完全一致；5 项变化为清单、版本控制信息、两个 baseline profile 与 `classes.dex`（+2,252 字节）；DEX 31,657 条字符串（唯一 +33 / -21），新增可读中文 7 条均为本版分区标题、轮询文案与版本号；`resources.arsc` 逐字节不变；186 张位图资源新增 / 变化 0；隐私扫描（本机路径、邮箱、手机号、IPv4、`sk-` 密钥、Bearer）新增命中 0，仅保留既有 `android@android.com` 调试证书常量与 RFC 5737 文档地址。发布目录 227 文件（226 APK）→ 228 文件（227 APK），历史包名称 / 大小 / SHA256 保留（v2.8.31 `a0e0db41…`、v2.8.30 `fa12df35…` 复核一致）。
 
+发布：版本提交 `99a36f997f8772a8a8d41998f12d9051c1bcd4c8` 与 annotated 标签 `v2.8.32`（对象 `2b1908cb…`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致。[Echo 2.8.32 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.32) 为 Latest，唯一附件 `Echo-v2.8.32.apk` 的 GitHub digest 与 `gh release download` 资产通道下载 SHA256 / 大小均与本机一致，正文与 `release-notes/latest.md` 一致。按仅保留最新版策略已删除远端旧 v2.8.31 Release / 标签；本机标签与全部历史 APK 保留。
+
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 
 - 制造一次请求失败（错误地址或无效 Key），确认报错气泡出现后页面推到其底部；报错前手动上滑阅读旧消息时不被抢回。
