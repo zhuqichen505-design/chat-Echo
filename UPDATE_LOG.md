@@ -1,5 +1,29 @@
 # 维护记录
 
+## 2026-11-11 · 2.8.33 输入框点击不再重复显示或同帧清焦（待发布）
+
+基线 `main/906357a`（已发布 2.8.32/218）；版本递增为 2.8.33/219；Room v37 / 20 个实体、API / 消息 / 备份格式均不变。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留排除，不读取 `APP改进\`。用户复验仍报告“点击输入框有时不弹输入法”和“输入文字时点击输入框闪烁”，本轮针对残留竞态继续修复。
+
+根因有三条，均位于输入框共享组件：
+
+1. 正常点击被应用层重复执行。`BasicTextField2 1.6.8` 的原生点击手势已经 `requestFocus()` 并在已聚焦时 `showKeyboard()`；`EchoNativeTextField` 的观察器又按 `AssistFocus` / `RevealKeyboard` 执行一次聚焦或 `show()`。悬浮输入法 Insets 恒为 0 时，一次点击会触发两次显示请求，表现为闪烁。
+2. 连接判定在同一帧内破坏原生事务。按下时 `isAcceptingText` 的一次瞬时 `false` 被立即当成会话失效，`clearFocus()` 触发 Compose `stopInput()`；而原生 `startInput/show` 排到下一帧执行，随后与停止事务合并，键盘可能不弹或被收起。
+3. 输入框内部替换了 `LocalSoftwareKeyboardController`，可见时直接吞掉原生 `show()`。键盘收起动画期间 Insets 仍可能报告“可见”，此时唯一的显示请求会被丢弃；控制器还随每个 Insets 帧更换身份，造成不必要的重组。
+
+修复：`EditorGestureStart` 增加 `nativeTapHandlesFocusAndKeyboard`，输入框自身点击在“未聚焦或连接可用”时一律 `Ignore`，正常路径只保留原生的一次聚焦 / 显示；仅“已聚焦且连接失效”进入 `RestartSession`。`reopenEditorKeyboard` 新增实时连接复核，先给原生跨帧事务最多 8 帧恢复窗口，任一样本恢复即取消重建，连续确认仍失效后才清焦；等待期间失焦立即让出，不抢回焦点。连接查询异常按“未知”处理为非破坏路径，不再等价于失效。删除 `ImeAwareKeyboardController` 与 `CompositionLocalProvider` 替换，恢复原生唯一显示通道。手柄等非原生点击仍沿用原有聚焦 / 显示逻辑。
+
+涉及 `ui/components/EchoNativeTextField.kt` 与 `UiPolishRegressionTest.kt`；新增 2 项回归（原生点击不重复 focus/show、瞬时失效先恢复不清焦），删除 1 项已不再适用的控制器测试，并改写 4 项跨帧测试以锁定“先复核、后重建”和取消语义。不新增依赖。
+
+验证：冻结验收 `20261111-225850-101` 脚本 / Gradle 退出 0，845.979 秒；92 套件 / 1,093 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+### 构建与本地安装包
+
+Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，638 秒；`Echo-v2.8.33.apk` 25,505,561 字节，SHA256 `9fdbf3cf8543af793b271d9e9db2f49d784f81fb769decbc1d3e98961bb513a5`；`com.aiassistant`、2.8.33/219、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.32 完全一致；5 项变化为清单、`META-INF/version-control-info.textproto`、两个 baseline profile 与 `classes.dex`（7,141,652 → 7,142,048 字节）。DEX 31,650 条字符串（唯一 +13 / -14），新增可读中文仅“版本 2.8.33”；`resources.arsc` 逐字节一致，186 张位图资源无变化；隐私新增命中 0，两个邮箱正则命中经核查为 DEX 混淆串伪阳性。排他复制后发布目录 228 文件（227 APK）→ 229 文件（228 APK），`Echo-v2.8.32.apk` 大小与 SHA256 保留。
+
+设备边界：无连接设备。仍需真机确认首次点击、打字中连续点击 / 拼音候选、悬浮输入法、返回键收起后再点、键盘可见但连接失效、发送后立即点击、切换会话与输入法。
+
 ## 2026-11-10 · 2.8.32 报错贴底、点击输入框不再收起键盘、API 配置页三段式（已发布）
 
 基线 `main/8d978a8`（已发布 2.8.31/217）；版本递增为 2.8.32/218；Room v37 / 20 个实体不变，无迁移。原未跟踪 `.playwright-cli/`、`Plan/`、`deepseek.png` 保留并排除，不读取 `APP改进\`。三项需求：报错信息无法像流式输出一样推动页面下滑；点击输入框时输入法被收起；API 配置页改为连接 / 密钥 / 模型上下滑动的三段式，且新建配置的多 Key 轮询默认关闭。

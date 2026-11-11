@@ -17,7 +17,6 @@ import androidx.compose.foundation.text2.input.TextFieldCharSequence
 import androidx.compose.foundation.text2.input.TextFieldLineLimits
 import androidx.compose.foundation.text2.input.TextFieldState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -40,7 +39,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -87,29 +85,8 @@ internal fun isImeVisibleNow(view: android.view.View, fallback: Boolean): Boolea
 internal fun isInputConnectionActiveNow(context: android.content.Context): Boolean = runCatching {
     (context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
         ?.isAcceptingText == true
-}.getOrNull() ?: false
-
-/**
- * 输入法已经在屏幕上时再次 show() 会让部分输入法重建输入视图，表现为键盘闪一下。
- *
- * BasicTextField2 1.6.8 的点击手势（`TextFieldSelectionState.detectTextFieldTapGestures`）在
- * 每次点击已聚焦输入框时都会调用 `showKeyboard()`，这是应用侧无法通过自己的焦点事务规避的
- * 重复显示。这里只拦掉“输入法确实已可见”时的重复 show()；输入法已收起时照常放行，
- * 隐藏键盘与真正需要重新唤起键盘的路径不受影响。
- */
-internal class ImeAwareKeyboardController(
-    private val delegate: SoftwareKeyboardController?,
-    private val isImeVisible: () -> Boolean
-) : SoftwareKeyboardController {
-    override fun show() {
-        if (isImeVisible()) return
-        delegate?.show()
-    }
-
-    override fun hide() {
-        delegate?.hide()
-    }
-}
+    // 查询失败不能等价于连接失效：未知状态一律走非破坏性路径，绝不能据此清焦。
+}.getOrNull() ?: true
 
 /**
  * 一次点击开始时的输入状态，在按下（Initial pass）时读取，早于输入框自身的点击手势。
@@ -120,8 +97,10 @@ internal class ImeAwareKeyboardController(
 internal data class EditorGestureStart(
     val focused: Boolean,
     val imeVisible: Boolean,
-    /** 点击前输入连接是否仍可用；false 表示旧会话已结束，必须重建。 */
-    val inputConnectionActive: Boolean = true
+    /** 点击前输入连接是否仍可用；false 只触发延迟复核，不再直接清焦。 */
+    val inputConnectionActive: Boolean = true,
+    /** BasicTextField2 原生点击已负责 requestFocus + show，应用层不得再重复执行。 */
+    val nativeTapHandlesFocusAndKeyboard: Boolean = false
 )
 
 /** 点击输入框时该做什么。 */
@@ -144,20 +123,21 @@ internal enum class EditorTapAction {
  * 字段仍保持聚焦，旧的输入会话已经结束，此时 show() 只能弹出没有连接、打不出字的键盘。
  * 首次点击由输入框自身的 focus 请求建立会话，若此时再清焦，会把刚建立的会话拆掉并留下死连接。
  *
- * 判定顺序（v2.8.32 起以“输入连接是否可用”为唯一重建依据）：
- * 1. 点击前未聚焦 → [EditorTapAction.AssistFocus]，交给输入框自身手势建会话，绝不清焦。
- * 2. 输入连接已失效 → [EditorTapAction.RestartSession]，这是唯一需要清焦重建的情形。
- * 3. 输入法仍在屏幕上且连接可用 → [EditorTapAction.Ignore]，打字时点击定位光标不产生任何焦点/键盘事务。
- * 4. 读不到输入法（悬浮输入法 Insets 恒为 0，或输入法刚被收起）但连接仍可用 →
- *    [EditorTapAction.RevealKeyboard]，只显示键盘，不清焦。
+ * 判定顺序：
+ * 1. 输入框原生点击已负责聚焦与显示键盘；只要它不是“已聚焦但连接失效”，应用层均不重复操作。
+ *    这也覆盖悬浮输入法：其 Insets 可能恒为 0，不能再据此额外 show 一次。
+ * 2. 手柄等原生链路之外的点击：未聚焦则 [EditorTapAction.AssistFocus]，已隐藏键盘但连接可用则
+ *    [EditorTapAction.RevealKeyboard]，可见且连接可用则 [EditorTapAction.Ignore]。
+ * 3. 已聚焦且点击前连接失效 → [EditorTapAction.RestartSession]。此处只表示“需要复核”，
+ *    必须先给原生 startInput/show 的跨帧队列一个恢复机会，连续确认仍失效后才能清焦。
  *
- * 旧实现用“输入法显示过后又被收起”作为额外重建条件：该信号来自组合期 IME Insets，
- * 在显示 / 隐藏动画、悬浮输入法与 API<30 的近似实现下都会误报，一次误报就会在点击时
- * clearFocus → stopInput 收起键盘并丢弃正在合成的文字，表现为“点一下输入框，输入法被删掉了”。
- * 连接状态才是会话是否已结束的直接证据，因此不再保留该信号。
+ * 旧实现按按下时的单次 isAcceptingText=false 立即 clearFocus。原生点击的 startInput/show
+ * 要到下一帧才执行，因此一次瞬时 false 会把正常显示事务覆盖成 stopInput/hide，造成不弹出或闪烁。
  */
 internal fun editorTapAction(start: EditorGestureStart): EditorTapAction =
     when {
+        start.nativeTapHandlesFocusAndKeyboard &&
+            (!start.focused || start.inputConnectionActive) -> EditorTapAction.Ignore
         !start.focused -> EditorTapAction.AssistFocus
         !start.inputConnectionActive -> EditorTapAction.RestartSession
         start.imeVisible -> EditorTapAction.Ignore
@@ -181,13 +161,32 @@ internal suspend fun reopenEditorKeyboard(
     nextFrame: suspend () -> Unit,
     showKeyboard: () -> Unit,
     isImeVisible: () -> Boolean = { false },
-    maxFocusFrames: Int = 3
+    isInputConnectionActive: () -> Boolean = { true },
+    nativeTapHandlesFocusAndKeyboard: Boolean = false,
+    maxFocusFrames: Int = 3,
+    /** 连接恢复复核窗口：远长于一次焦点事务，避免把输入法绑定中的瞬时 false 误判为失效。 */
+    maxConnectionFrames: Int = 8
 ) {
     if (action == EditorTapAction.Ignore) return
     if (!isActive()) return
     // Tapping an already active editor must not restart focus or re-show a visible IME.
     if (action != EditorTapAction.RestartSession && isFocused() && isImeVisible()) return
     if (action == EditorTapAction.RestartSession) {
+        // BasicTextField2 的 startInput/show 在下一帧才执行。先让原生点击完成恢复；
+        // 只有连续数帧都没有活动连接，才允许执行会隐藏键盘的 clearFocus。
+        val connectionRecovered = awaitEditorInputConnection(
+            isInputConnectionActive = isInputConnectionActive,
+            isActive = isActive,
+            nextFrame = nextFrame,
+            maxFrames = maxConnectionFrames
+        )
+        // 此分支来自“点击前已聚焦”；等待期间失焦说明用户已离开，不能再抢回焦点。
+        if (!isActive() || !isFocused()) return
+        if (connectionRecovered) {
+            // 原生输入框点击已经请求过 show；悬浮键盘 Insets 为 0 时也不能再补一次。
+            if (!nativeTapHandlesFocusAndKeyboard && !isImeVisible()) showKeyboard()
+            return
+        }
         clearFocus()
         awaitEditorFocus(isFocused, isActive, nextFrame, expected = false, maxFrames = maxFocusFrames)
         if (!isActive()) return
@@ -205,6 +204,22 @@ internal suspend fun reopenEditorKeyboard(
     }
     // 焦点获得本身就会 startInput 并请求显示键盘；只有它没有生效时才补一次 show()。
     if (isActive() && !isImeVisible()) showKeyboard()
+}
+
+/** 给原生跨帧 startInput/show 最多 [maxFrames] 帧恢复机会，任一样本恢复即取消重建。 */
+private suspend fun awaitEditorInputConnection(
+    isInputConnectionActive: () -> Boolean,
+    isActive: () -> Boolean,
+    nextFrame: suspend () -> Unit,
+    maxFrames: Int
+): Boolean {
+    if (isInputConnectionActive()) return true
+    repeat(maxFrames) {
+        nextFrame()
+        if (!isActive()) return false
+        if (isInputConnectionActive()) return true
+    }
+    return false
 }
 
 /** 最多等待 [maxFrames] 帧观察焦点是否落到 [expected]；返回 false 表示焦点事务没有生效。 */
@@ -235,6 +250,7 @@ internal fun rememberEditorKeyboardRequest(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val windowInfo = LocalWindowInfo.current
+    val context = LocalContext.current
     val view = LocalView.current
     // Visibility also covers floating IMEs, whose bottom inset can legitimately be zero.
     val imeVisible = WindowInsets.isImeVisible
@@ -254,7 +270,9 @@ internal fun rememberEditorKeyboardRequest(
                 isActive = { latestActive && windowInfo.isWindowFocused },
                 nextFrame = { withFrameNanos { }; kotlinx.coroutines.yield() },
                 showKeyboard = { keyboard?.show() },
-                isImeVisible = { imeVisibleNow() }
+                isImeVisible = { imeVisibleNow() },
+                isInputConnectionActive = { isInputConnectionActiveNow(context) },
+                nativeTapHandlesFocusAndKeyboard = start.nativeTapHandlesFocusAndKeyboard
             )
         }
     }
@@ -338,16 +356,7 @@ internal fun EchoNativeTextField(
     var focused by remember { mutableStateOf(false) }
     val requestKeyboard = onRequestKeyboard ?: rememberEditorKeyboardRequest(focusRequester, isFocused = { focused }).second
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
-    // Compose 自身的点击手势每次都会 show()；输入法已可见时重复 show() 会让它闪一下。
-    // 只拦这一条路径：本组件自己的焦点事务仍用原始控制器（它已先判断可见性）。
-    val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
-    val imeFallback = WindowInsets.isImeVisible
-    val guardedKeyboard = remember(keyboard, view, imeFallback) {
-        keyboard?.let { delegate ->
-            ImeAwareKeyboardController(delegate) { isImeVisibleNow(view, imeFallback) }
-        }
-    }
     var getTextLayout by remember { mutableStateOf<(() -> TextLayoutResult?)?>(null) }
     SideEffect { editor.reconcileExternal(value) }
     val onCurrentValueChange by rememberUpdatedState(onValueChange)
@@ -381,51 +390,51 @@ internal fun EchoNativeTextField(
             frameNanos = { withFrameNanos { it } }
         )
     }
-    // 输入法已可见时，BasicTextField2 的点击手势仍会调用 show()，部分输入法因此重建输入视图闪一下。
-    // 只在输入框内部替换键盘控制器：其它组件与隐藏键盘路径不受影响。
-    CompositionLocalProvider(LocalSoftwareKeyboardController provides guardedKeyboard) {
-        BasicTextField2(
-            state = editor.field,
-            modifier = modifier
-                .focusRequester(focusRequester)
-                .onFocusChanged { focused = it.isFocused }
-                .pointerInput(Unit) {
-                    // Observe taps without consuming them. This also covers the decorator's empty
-                    // area and reopens an IME hidden with Back while the field still has focus.
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        // 在输入框自身手势（Main pass）处理之前采样：聚焦、输入法可见性与连接状态
-                        // 都必须取“点击前”的值，否则会把输入框刚建立的会话误判成需要重建。
-                        val start = EditorGestureStart(
-                            focused = focused,
-                            imeVisible = isImeVisibleNow(view, fallback = false),
-                            inputConnectionActive = isInputConnectionActiveNow(context)
-                        )
-                        var tap = true
-                        var pressed: Boolean
-                        do {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change == null || (change.position - down.position).getDistance() > viewConfiguration.touchSlop ||
-                                event.changes.size > 1 || change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) tap = false
-                            pressed = change?.pressed == true
-                        } while (pressed)
-                        if (tap) {
-                            // Run after the native tap handler, so its Up event cannot undo our clear.
-                            awaitPointerEvent(PointerEventPass.Final)
-                            latestRequestKeyboard(start)
-                        }
+    // 正常点击只保留 BasicTextField2 自身的一次 requestFocus/show；下面的观察器不消费事件，
+    // 仅在“已聚焦且连接失效”时安排延迟复核。不要替换 LocalSoftwareKeyboardController，
+    // 否则键盘收起动画期间残留的“可见”状态会把原生唯一的 show() 丢掉。
+    BasicTextField2(
+        state = editor.field,
+        modifier = modifier
+            .focusRequester(focusRequester)
+            .onFocusChanged { focused = it.isFocused }
+            .pointerInput(Unit) {
+                // Observe taps without consuming them. This also covers the decorator's empty
+                // area and reopens an IME hidden with Back while the field still has focus.
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    // 在输入框自身手势（Main pass）处理之前采样：聚焦、输入法可见性与连接状态
+                    // 都必须取“点击前”的值，否则会把输入框刚建立的会话误判成需要重建。
+                    val start = EditorGestureStart(
+                        focused = focused,
+                        imeVisible = isImeVisibleNow(view, fallback = false),
+                        inputConnectionActive = isInputConnectionActiveNow(context),
+                        nativeTapHandlesFocusAndKeyboard = true
+                    )
+                    var tap = true
+                    var pressed: Boolean
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null || (change.position - down.position).getDistance() > viewConfiguration.touchSlop ||
+                            event.changes.size > 1 || change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) tap = false
+                        pressed = change?.pressed == true
+                    } while (pressed)
+                    if (tap) {
+                        // Run after the native tap handler, so its Up event cannot undo our clear.
+                        awaitPointerEvent(PointerEventPass.Final)
+                        latestRequestKeyboard(start)
                     }
-                },
-            textStyle = textStyle,
-            interactionSource = interactionSource,
-            cursorBrush = cursorBrush,
-            lineLimits = lineLimits,
-            scrollState = scrollState,
-            keyboardOptions = keyboardOptions,
-            keyboardActions = keyboardActions,
-            onTextLayout = { getTextLayout = it },
-            decorator = decorator
-        )
-    }
+                }
+            },
+        textStyle = textStyle,
+        interactionSource = interactionSource,
+        cursorBrush = cursorBrush,
+        lineLimits = lineLimits,
+        scrollState = scrollState,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        onTextLayout = { getTextLayout = it },
+        decorator = decorator
+    )
 }

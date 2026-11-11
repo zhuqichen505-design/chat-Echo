@@ -183,6 +183,7 @@ class UiPolishRegressionTest {
         var focused = true
         repeat(3) {
             events.clear()
+            focused = true
             transaction.launch(this) {
                 com.aiassistant.ui.components.reopenEditorKeyboard(
                     action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
@@ -191,9 +192,19 @@ class UiPolishRegressionTest {
                     isFocused = { focused },
                     isActive = { true },
                     nextFrame = { delay(16) },
-                    showKeyboard = { events += "show" }
+                    showKeyboard = { events += "show" },
+                    isInputConnectionActive = { false },
+                    maxConnectionFrames = 3
                 )
             }
+            runCurrent()
+            assertEquals("先给原生显示事务恢复机会，不能同帧清焦", emptyList<String>(), events)
+            repeat(2) {
+                advanceTimeBy(16)
+                runCurrent()
+                assertEquals("连续复核期间仍不得清焦", emptyList<String>(), events)
+            }
+            advanceTimeBy(16)
             runCurrent()
             assertEquals(listOf("clear"), events)
             advanceTimeBy(16)
@@ -207,7 +218,8 @@ class UiPolishRegressionTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun sendOrHideCancelsKeyboardRequestInEitherFrameGap() = runTest {
-        for (cancelAfterMs in listOf(1L, 17L)) {
+        // 分别覆盖：复核连接前、已经清焦、已经重新聚焦之后。
+        for (cancelAfterMs in listOf(1L, 49L, 65L)) {
             val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
             var focused = true
             var shows = 0
@@ -220,7 +232,9 @@ class UiPolishRegressionTest {
                     isFocused = { focused },
                     isActive = { true },
                     nextFrame = { delay(16) },
-                    showKeyboard = { shows++ }
+                    showKeyboard = { shows++ },
+                    isInputConnectionActive = { false },
+                    maxConnectionFrames = 3
                 )
             }
             runCurrent()
@@ -230,7 +244,7 @@ class UiPolishRegressionTest {
             focused = false
             advanceTimeBy(100)
             runCurrent()
-            assertEquals("发送或隐藏后不应被延迟请求重新聚焦", if (cancelAfterMs < 16) 0 else 1, requests)
+            assertEquals("发送或隐藏后不应被延迟请求重新聚焦", if (cancelAfterMs < 64) 0 else 1, requests)
             assertEquals(0, shows)
             assertTrue(!focused)
         }
@@ -286,7 +300,8 @@ class UiPolishRegressionTest {
             isFocused = { true },
             isActive = { active },
             nextFrame = { active = false },
-            showKeyboard = { showsAfterInactive++ }
+            showKeyboard = { showsAfterInactive++ },
+            isInputConnectionActive = { false }
         )
         assertEquals(0, showsAfterInactive)
     }
@@ -401,6 +416,79 @@ class UiPolishRegressionTest {
         )
     }
 
+    /**
+     * 输入框原生点击已负责焦点与键盘：首次点击、悬浮输入法（Insets 读不到）都不得再补一次
+     * focus/show。只有“已聚焦且连接失效”才需要进入延迟复核。
+     */
+    @Test fun nativeEditorTapReliesOnComposeAndOnlyDefersDeadSessions() {
+        fun start(focused: Boolean, imeVisible: Boolean, active: Boolean) =
+            com.aiassistant.ui.components.EditorGestureStart(
+                focused = focused,
+                imeVisible = imeVisible,
+                inputConnectionActive = active,
+                nativeTapHandlesFocusAndKeyboard = true
+            )
+
+        assertEquals(
+            "首次点击不得与原生 focus/show 竞争",
+            com.aiassistant.ui.components.EditorTapAction.Ignore,
+            com.aiassistant.ui.components.editorTapAction(start(focused = false, imeVisible = false, active = false))
+        )
+        assertEquals(
+            "悬浮输入法 Insets=0 时不得重复 show",
+            com.aiassistant.ui.components.EditorTapAction.Ignore,
+            com.aiassistant.ui.components.editorTapAction(start(focused = true, imeVisible = false, active = true))
+        )
+        assertEquals(
+            "已聚焦但连接失效只能进入延迟复核",
+            com.aiassistant.ui.components.EditorTapAction.RestartSession,
+            com.aiassistant.ui.components.editorTapAction(start(focused = true, imeVisible = true, active = false))
+        )
+    }
+
+    /** 点击前的瞬时 false 不能直接清焦：先让原生跨帧 startInput/show 恢复，再决定是否重建。 */
+    @Test fun transientInactiveConnectionRecoversBeforeAnyDestructiveRestart() = runTest {
+        var focused = true
+        var connectionActive = false
+        var imeVisible = false
+        var frames = 0
+        var clears = 0
+        var requests = 0
+        var shows = 0
+        val action = com.aiassistant.ui.components.editorTapAction(
+            com.aiassistant.ui.components.EditorGestureStart(
+                focused = true,
+                imeVisible = false,
+                inputConnectionActive = false,
+                nativeTapHandlesFocusAndKeyboard = true
+            )
+        )
+        assertEquals(com.aiassistant.ui.components.EditorTapAction.RestartSession, action)
+
+        com.aiassistant.ui.components.reopenEditorKeyboard(
+            action = action,
+            clearFocus = { clears++ },
+            requestFocus = { requests++ },
+            isFocused = { focused },
+            isActive = { true },
+            nextFrame = {
+                frames++
+                connectionActive = true
+                imeVisible = true
+            },
+            showKeyboard = { shows++ },
+            isImeVisible = { imeVisible },
+            isInputConnectionActive = { connectionActive },
+            nativeTapHandlesFocusAndKeyboard = true
+        )
+
+        assertEquals("原生事务只需一帧即可恢复连接", 1, frames)
+        assertEquals("恢复后不得清焦", 0, clears)
+        assertEquals("恢复后不得重复聚焦", 0, requests)
+        assertEquals("原生点击已经 show，恢复后不得重复 show", 0, shows)
+        assertTrue(focused)
+    }
+
     /** 悬浮输入法 / 输入法已收起但连接仍在：不得清焦，否则每次点击都会收起再弹起键盘。 */
     @Test fun focusedEditorTapOnlyRevealsKeyboardWhileInputConnectionIsAlive() = runTest {
         val start = com.aiassistant.ui.components.EditorGestureStart(
@@ -502,49 +590,33 @@ class UiPolishRegressionTest {
         assertEquals(0, shows)
     }
 
-    /** 输入法已可见时，输入框内部的键盘控制器不得再次 show()（Compose 点击手势会重复调用）。 */
-    @Test fun keyboardControllerSkipsShowWhileImeIsVisible() {
-        var delegateShows = 0
-        var delegateHides = 0
-        var visible = true
-        val controller = com.aiassistant.ui.components.ImeAwareKeyboardController(
-            delegate = object : androidx.compose.ui.platform.SoftwareKeyboardController {
-                override fun show() { delegateShows++ }
-                override fun hide() { delegateHides++ }
-            },
-            isImeVisible = { visible }
-        )
-        controller.show()
-        assertEquals("输入法可见时不得重复 show", 0, delegateShows)
-        visible = false
-        controller.show()
-        assertEquals("输入法已收起时仍要能唤起键盘", 1, delegateShows)
-        controller.hide()
-        assertEquals("隐藏键盘不受保护影响", 1, delegateHides)
-    }
-
     /**
-     * 清焦没有被观察到时也必须继续重新聚焦并补一次 show()。
+     * 连接经连续复核仍失效时才清焦；清焦没有被观察到时也必须继续重新聚焦并补一次 show()。
      * 旧实现此时直接 return：键盘已被 clearFocus 收起、也没有再唤起，用户看到的就是“输入法被删掉了”。
      */
     @Test fun restartNeverAbandonsTheKeyboardAfterClearFocus() = runTest {
         var focused = true
+        var clears = 0
         var requests = 0
         var shows = 0
         var frames = 0
         com.aiassistant.ui.components.reopenEditorKeyboard(
             action = com.aiassistant.ui.components.EditorTapAction.RestartSession,
-            clearFocus = { /* 焦点事务被吞掉：字段仍保持聚焦 */ },
+            clearFocus = { clears++; /* 焦点事务被吞掉：字段仍保持聚焦 */ },
             requestFocus = { requests++ },
             isFocused = { focused },
             isActive = { true },
             nextFrame = { frames++ },
             showKeyboard = { shows++ },
-            isImeVisible = { false }
+            isImeVisible = { false },
+            isInputConnectionActive = { false },
+            maxConnectionFrames = 3
         )
+        assertEquals("只有确认失效后才清焦一次", 1, clears)
         assertEquals(1, requests)
         assertEquals("清焦后必须补回键盘", 1, shows)
-        assertEquals(4, frames)
+        // 3 帧确认连接失效 + 3 帧等待失焦 + 1 帧确认重新聚焦。
+        assertEquals(7, frames)
         assertTrue(focused)
     }
 
