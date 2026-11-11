@@ -1,6 +1,6 @@
 # Echo 当前源码与已发布版本验收走查
 
-## 2026-11-11 · 2.8.33 输入框点击重复显示与同帧清焦修复（待发布）
+## 2026-11-11 · 2.8.33 输入框点击重复显示与同帧清焦修复（已发布）
 
 基线 `main/906357a`（已发布 2.8.32/218）；版本 2.8.33/219；Room v37 / 20 个实体不变，无迁移。
 
@@ -17,6 +17,8 @@
 `Echo-v2.8.33.apk` 25,505,561 字节，SHA256 `9fdbf3cf8543af793b271d9e9db2f49d784f81fb769decbc1d3e98961bb513a5`；`com.aiassistant`、2.8.33/219、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过（v1、v3、v3.1、v4 无），证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
 
 APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.32 完全一致；5 项变化为清单、版本控制信息、两个 baseline profile 与 `classes.dex`（7,141,652 → 7,142,048 字节）。DEX 31,650 条字符串（唯一 +13 / -14），新增可读中文仅“版本 2.8.33”；`resources.arsc` 逐字节不变；186 张位图资源新增 / 变化 0；隐私新增命中 0，两个邮箱正则命中经核查为 DEX 混淆串伪阳性。发布目录 228 文件（227 APK）→ 229 文件（228 APK），历史包名称 / 大小 / SHA256 保留（v2.8.32 `1497f7c9…` 复核一致）。
+
+发布：版本提交 `4ea5a42702ffd6acde4ba112a4394a3f4a6d49da` 与 annotated 标签 `v2.8.33`（对象 `078534c6…`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致。[Echo 2.8.33 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.33) 为 Latest，唯一附件 `Echo-v2.8.33.apk` 的 GitHub digest 与独立下载 SHA256 / 大小均与本机一致，正文与 `release-notes/latest.md` 一致；首次资产通道下载在约 19 MB 处被代理中断，重试完整下载通过。按仅保留最新版策略已删除远端旧 v2.8.32 Release / 标签；本机标签与全部历史 APK 保留。
 
 设备与人工走查（尚未执行；`adb devices` 无连接设备）：
 
