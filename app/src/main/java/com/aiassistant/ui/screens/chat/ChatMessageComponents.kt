@@ -1337,42 +1337,48 @@ internal fun MessageBubble(
                 // 实时连接异常明细：每个 Key 尝试失败即刻展示（v2.7.0 需求 3，无需手动暂停）
                 if (liveKeyErrors.isNotEmpty()) {
                     var isLiveErrorsExpanded by remember(message.id) { mutableStateOf(true) }
+                    // v2.8.34：折叠外观与上方思考/状态胶囊统一——16dp 圆角、errorContainer 底、
+                    // 1dp 描边、12/7 内边距、16dp 图标与同一字体；宽度也随内容收缩，展开时才占满可用宽度。
+                    val liveErrorsShape = RoundedCornerShape(16.dp)
                     Surface(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .padding(top = 4.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .echoShapeClick(RoundedCornerShape(12.dp)) {
+                            .defaultMinSize(minHeight = 34.dp)
+                            .animateContentSize(com.aiassistant.ui.theme.EchoMotion.Spring.gentle())
+                            .clip(liveErrorsShape)
+                            .echoShapeClick(liveErrorsShape) {
                                 isLiveErrorsExpanded = !isLiveErrorsExpanded
                             },
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f),
                         contentColor = MaterialTheme.colorScheme.error,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                        shape = liveErrorsShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                     ) {
-                        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ErrorOutline,
+                                    imageVector = Icons.Default.WarningAmber,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 Text(
                                     text = "连接异常 · 实时明细（${liveKeyErrors.size} 次尝试失败）",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
                                     color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Icon(
                                     imageVector = if (isLiveErrorsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                     contentDescription = if (isLiveErrorsExpanded) "收起实时报错明细" else "展开实时报错明细",
                                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                             androidx.compose.animation.AnimatedVisibility(visible = isLiveErrorsExpanded) {

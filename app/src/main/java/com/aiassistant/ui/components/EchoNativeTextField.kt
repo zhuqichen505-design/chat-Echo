@@ -59,7 +59,13 @@ internal class EditorKeyboardRequest {
         request = null
     }
 
-    fun launch(scope: kotlinx.coroutines.CoroutineScope, block: suspend () -> Unit) {
+    fun launch(
+        scope: kotlinx.coroutines.CoroutineScope,
+        action: EditorTapAction? = null,
+        block: suspend () -> Unit
+    ) {
+        // A native no-op tap must not cancel an earlier recovery that is still crossing frames.
+        if (action == EditorTapAction.Ignore) return
         cancel()
         request = scope.launch { block() }
     }
@@ -99,7 +105,7 @@ internal data class EditorGestureStart(
     val imeVisible: Boolean,
     /** 点击前输入连接是否仍可用；false 只触发延迟复核，不再直接清焦。 */
     val inputConnectionActive: Boolean = true,
-    /** BasicTextField2 原生点击已负责 requestFocus + show，应用层不得再重复执行。 */
+    /** BasicTextField2 原生点击负责 requestFocus；show 只在输入法已显示时才由它自己完成。 */
     val nativeTapHandlesFocusAndKeyboard: Boolean = false
 )
 
@@ -124,20 +130,22 @@ internal enum class EditorTapAction {
  * 首次点击由输入框自身的 focus 请求建立会话，若此时再清焦，会把刚建立的会话拆掉并留下死连接。
  *
  * 判定顺序：
- * 1. 输入框原生点击已负责聚焦与显示键盘；只要它不是“已聚焦但连接失效”，应用层均不重复操作。
- *    这也覆盖悬浮输入法：其 Insets 可能恒为 0，不能再据此额外 show 一次。
- * 2. 手柄等原生链路之外的点击：未聚焦则 [EditorTapAction.AssistFocus]，已隐藏键盘但连接可用则
- *    [EditorTapAction.RevealKeyboard]，可见且连接可用则 [EditorTapAction.Ignore]。
- * 3. 已聚焦且点击前连接失效 → [EditorTapAction.RestartSession]。此处只表示“需要复核”，
+ * 1. 点击前未聚焦 → [EditorTapAction.AssistFocus]。原生点击也会请求焦点，但装饰器空白区域
+ *    与窗口/布局切换期间的原生事务可能没有落地，因此这里需要跨帧确认，未聚焦才补一次。
+ * 2. 已聚焦且点击前连接失效 → [EditorTapAction.RestartSession]。此处只表示“需要复核”，
  *    必须先给原生 startInput/show 的跨帧队列一个恢复机会，连续确认仍失效后才能清焦。
+ * 3. 已聚焦、连接可用且输入法仍在屏幕上 → [EditorTapAction.Ignore]：不改焦点、不重复 show()，
+ *    避免打字过程中键盘闪一下。
+ * 4. 已聚焦、连接可用但输入法不可见（返回键收起 / 关闭弹窗 / 悬浮窗放大后）→
+ *    [EditorTapAction.RevealKeyboard]。原生点击对已聚焦字段不会再 show()，应用层必须补一次：
+ *    v2.8.33 把这一情形也让行给原生，造成“点输入框永远唤不出键盘”的死锁。
+ *    悬浮输入法的 Insets 可能恒为 0：连接仍可用，因此只补显示、绝不清焦，不会收起再弹起。
  *
  * 旧实现按按下时的单次 isAcceptingText=false 立即 clearFocus。原生点击的 startInput/show
  * 要到下一帧才执行，因此一次瞬时 false 会把正常显示事务覆盖成 stopInput/hide，造成不弹出或闪烁。
  */
 internal fun editorTapAction(start: EditorGestureStart): EditorTapAction =
     when {
-        start.nativeTapHandlesFocusAndKeyboard &&
-            (!start.focused || start.inputConnectionActive) -> EditorTapAction.Ignore
         !start.focused -> EditorTapAction.AssistFocus
         !start.inputConnectionActive -> EditorTapAction.RestartSession
         start.imeVisible -> EditorTapAction.Ignore
@@ -169,9 +177,28 @@ internal suspend fun reopenEditorKeyboard(
 ) {
     if (action == EditorTapAction.Ignore) return
     if (!isActive()) return
+    val nativeFirstFocus = nativeTapHandlesFocusAndKeyboard && action == EditorTapAction.AssistFocus
     // Tapping an already active editor must not restart focus or re-show a visible IME.
-    if (action != EditorTapAction.RestartSession && isFocused() && isImeVisible()) return
-    if (action == EditorTapAction.RestartSession) {
+    // A native first-focus tap still needs to verify that its input connection survived.
+    if (action != EditorTapAction.RestartSession && !nativeFirstFocus &&
+        isFocused() && isImeVisible()) return
+    if (action == EditorTapAction.RestartSession || nativeFirstFocus) {
+        if (nativeFirstFocus) {
+            // 原生 onTap 的 requestFocus 可能被装饰器空白区、窗口切换或同一帧布局吞掉。
+            // 先等它落地；确实没有聚焦时才补请求，不先清焦，避免拆掉已经建立的会话。
+            val focusArrived = awaitEditorFocus(
+                isFocused = isFocused,
+                isActive = isActive,
+                nextFrame = nextFrame,
+                expected = true,
+                maxFrames = maxFocusFrames
+            )
+            if (!isActive()) return
+            if (!focusArrived) {
+                requestFocus()
+                if (!awaitEditorFocus(isFocused, isActive, nextFrame, expected = true, maxFrames = maxFocusFrames)) return
+            }
+        }
         // BasicTextField2 的 startInput/show 在下一帧才执行。先让原生点击完成恢复；
         // 只有连续数帧都没有活动连接，才允许执行会隐藏键盘的 clearFocus。
         val connectionRecovered = awaitEditorInputConnection(
@@ -180,11 +207,12 @@ internal suspend fun reopenEditorKeyboard(
             nextFrame = nextFrame,
             maxFrames = maxConnectionFrames
         )
-        // 此分支来自“点击前已聚焦”；等待期间失焦说明用户已离开，不能再抢回焦点。
+        // RestartSession 来自“点击前已聚焦”；等待期间失焦说明用户已离开，不能再抢回焦点。
         if (!isActive() || !isFocused()) return
         if (connectionRecovered) {
-            // 原生输入框点击已经请求过 show；悬浮键盘 Insets 为 0 时也不能再补一次。
-            if (!nativeTapHandlesFocusAndKeyboard && !isImeVisible()) showKeyboard()
+            // 原生已聚焦且连接可用时，它的 show 是唯一显示请求。首次聚焦则需要确认键盘真的出现：
+            // 系统显示请求是 best-effort，焦点切换时可能被窗口状态静默丢弃。
+            if ((!nativeTapHandlesFocusAndKeyboard || nativeFirstFocus) && !isImeVisible()) showKeyboard()
             return
         }
         clearFocus()
@@ -261,9 +289,10 @@ internal fun rememberEditorKeyboardRequest(
     // 参数是手势开始前（按下时）的聚焦与输入法状态，不能用事件尾部的状态判断：
     // 首次点击时字段已被自身手势聚焦，误判会立刻清焦并拆掉刚建立的输入会话。
     val request: (EditorGestureStart) -> Unit = { start ->
-        transaction.launch(scope) {
+        val action = editorTapAction(start)
+        transaction.launch(scope, action) {
             reopenEditorKeyboard(
-                action = editorTapAction(start),
+                action = action,
                 clearFocus = { focusManager.clearFocus(force = true) },
                 requestFocus = { focusRequester.requestFocus() },
                 isFocused = isFocused,
@@ -390,9 +419,9 @@ internal fun EchoNativeTextField(
             frameNanos = { withFrameNanos { it } }
         )
     }
-    // 正常点击只保留 BasicTextField2 自身的一次 requestFocus/show；下面的观察器不消费事件，
-    // 仅在“已聚焦且连接失效”时安排延迟复核。不要替换 LocalSoftwareKeyboardController，
-    // 否则键盘收起动画期间残留的“可见”状态会把原生唯一的 show() 丢掉。
+    // 下面的观察器不消费事件：已聚焦且键盘仍在屏幕上时完全让行；键盘被收起（返回键 / 关闭弹窗 /
+    // 悬浮窗放大）时应用层补一次 show；首次聚焦验证原生焦点 / 输入会话是否落地，失效会话再延迟复核。
+    // 不要替换 LocalSoftwareKeyboardController，否则键盘收起动画期间残留的“可见”状态会把 show() 丢掉。
     BasicTextField2(
         state = editor.field,
         modifier = modifier
