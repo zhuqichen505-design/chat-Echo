@@ -52,6 +52,77 @@ import org.robolectric.Robolectric
 class UiPolishRegressionTest {
 
     @Test
+    fun leavingWindowCancelsPendingEditorRecoveryAndEndsFocusedSession() = runTest {
+        val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+        var focused = true
+        var delayedShow = false
+        var clearCount = 0
+        transaction.launch(this) {
+            delay(100)
+            delayedShow = true
+        }
+        runCurrent()
+
+        com.aiassistant.ui.components.endEditorKeyboardSession(transaction, { focused }) {
+            clearCount++
+            focused = false
+        }
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertEquals(1, clearCount)
+        assertFalse("窗口离开后不能执行旧的键盘显示请求", delayedShow)
+        assertEquals(
+            "恢复后由下一次点击建立新的输入会话",
+            com.aiassistant.ui.components.EditorTapAction.AssistFocus,
+            com.aiassistant.ui.components.editorTapAction(
+                com.aiassistant.ui.components.EditorGestureStart(focused = focused, imeVisible = false)
+            )
+        )
+    }
+
+    @Test
+    fun rapidWindowFocusLossAndReturnEndsSessionWithoutShowingKeyboard() = runTest {
+        val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+        var focused = true
+        var cleared = 0
+        var shown = false
+        transaction.launch(this) { delay(100); shown = true }
+        runCurrent()
+        val listener = com.aiassistant.ui.components.editorWindowFocusListener(transaction, { focused }) {
+            cleared++
+            focused = false
+        }
+        listener.onWindowFocusChanged(false)
+        listener.onWindowFocusChanged(true)
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals(1, cleared)
+        assertFalse(shown)
+    }
+
+    @Test
+    fun leavingWindowDoesNotClearFocusHeldByAnotherEditor() = runTest {
+        val transaction = com.aiassistant.ui.components.EditorKeyboardRequest()
+        var otherEditorCleared = false
+        var delayedShow = false
+        transaction.launch(this) {
+            delay(100)
+            delayedShow = true
+        }
+        runCurrent()
+
+        com.aiassistant.ui.components.endEditorKeyboardSession(transaction, { false }) {
+            otherEditorCleared = true
+        }
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertFalse("没有持焦的编辑器不能清除其他控件的焦点", otherEditorCleared)
+        assertFalse("没有持焦时也要取消过期请求", delayedShow)
+    }
+
+    @Test
     fun adaptiveContentInsetKeepsPhoneGutterAndCentresWideContent() {
         assertEquals("手机宽度保持基础留白", 12f, echoContentInsetFor(411.dp, 12.dp, 720.dp).value, 0.01f)
         assertEquals("平板宽度按 720dp 内容列居中", 292f, echoContentInsetFor(1280.dp, 12.dp, 720.dp).value, 0.01f)
@@ -274,6 +345,41 @@ class UiPolishRegressionTest {
         advanceTimeBy(64)
         runCurrent()
         assertEquals(listOf(3), shown)
+    }
+
+    @Test fun inputConnectionChecksHostViewAndTreatsUnknownAsNonDestructive() {
+        assertFalse(com.aiassistant.ui.components.inputConnectionMayBeActive(false, true))
+        assertFalse(com.aiassistant.ui.components.inputConnectionMayBeActive(true, false))
+        assertTrue(com.aiassistant.ui.components.inputConnectionMayBeActive(null, null))
+        assertTrue(com.aiassistant.ui.components.inputConnectionMayBeActive(true, true))
+    }
+
+    @Test fun tapWaitsOnlyBrieflyForWindowFocusAndStopsWhenInactive() = runTest {
+        var focused = false
+        var active = true
+        var frames = 0
+        val regained = com.aiassistant.ui.components.awaitEditorWindowFocus(
+            isActive = { active }, isWindowFocused = { focused }, nextFrame = {
+                delay(16)
+                if (++frames == 2) focused = true
+            }
+        )
+        assertTrue(regained)
+        assertEquals(2, frames)
+        focused = false
+        val cancelled = com.aiassistant.ui.components.awaitEditorWindowFocus(
+            isActive = { active }, isWindowFocused = { focused }, nextFrame = {
+                delay(16)
+                active = false
+            }
+        )
+        assertFalse(cancelled)
+        active = true
+        val timedOut = com.aiassistant.ui.components.awaitEditorWindowFocus(
+            isActive = { active }, isWindowFocused = { false },
+            nextFrame = { delay(16) }, timeoutMillis = 50
+        )
+        assertFalse(timedOut)
     }
 
     @Test fun keyboardRequestCannotShowAfterFocusLoss() = runTest {

@@ -17,6 +17,7 @@ import androidx.compose.foundation.text2.input.TextFieldCharSequence
 import androidx.compose.foundation.text2.input.TextFieldLineLimits
 import androidx.compose.foundation.text2.input.TextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -33,9 +34,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -88,11 +91,15 @@ internal fun isImeVisibleNow(view: android.view.View, fallback: Boolean): Boolea
  * 此时若按可见性清焦重建，每次点击都会收起再弹起键盘（闪烁），正在合成的文字也会中断。
  * 连接仍在时只重新显示键盘，只有连接确实失效才走清焦重建。
  */
-internal fun isInputConnectionActiveNow(context: android.content.Context): Boolean = runCatching {
-    (context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
-        ?.isAcceptingText == true
-    // 查询失败不能等价于连接失效：未知状态一律走非破坏性路径，绝不能据此清焦。
-}.getOrNull() ?: true
+internal fun inputConnectionMayBeActive(viewActive: Boolean?, acceptingText: Boolean?): Boolean =
+    viewActive != false && acceptingText != false
+
+internal fun isInputConnectionActiveNow(view: android.view.View): Boolean = runCatching {
+    val manager = view.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+        as? android.view.inputmethod.InputMethodManager
+    inputConnectionMayBeActive(manager?.isActive(view), manager?.isAcceptingText)
+    // 未知状态不能判作连接失效；即使两项为 true，也不能证明 Compose 内某个字段的连接健康。
+}.getOrDefault(true)
 
 /**
  * 一次点击开始时的输入状态，在按下（Initial pass）时读取，早于输入框自身的点击手势。
@@ -266,6 +273,35 @@ private suspend fun awaitEditorFocus(
     return false
 }
 
+/** 窗口离开前结束旧输入会话；只清除本编辑器持有的焦点。 */
+internal fun endEditorKeyboardSession(
+    transaction: EditorKeyboardRequest,
+    isFocused: () -> Boolean,
+    clearFocus: () -> Unit
+) {
+    transaction.cancel()
+    if (isFocused()) clearFocus()
+}
+
+internal fun editorWindowFocusListener(
+    transaction: EditorKeyboardRequest,
+    isFocused: () -> Boolean,
+    clearFocus: () -> Unit
+) = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+    if (!hasFocus) endEditorKeyboardSession(transaction, isFocused, clearFocus)
+}
+
+/** Wait briefly for a user-tapped window to regain focus; never queue an indefinite show. */
+internal suspend fun awaitEditorWindowFocus(
+    isActive: () -> Boolean,
+    isWindowFocused: () -> Boolean,
+    nextFrame: suspend () -> Unit,
+    timeoutMillis: Long = 500
+): Boolean = kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) {
+    while (isActive() && !isWindowFocused()) nextFrame()
+    isActive() && isWindowFocused()
+} == true
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun rememberEditorKeyboardRequest(
@@ -278,21 +314,66 @@ internal fun rememberEditorKeyboardRequest(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val windowInfo = LocalWindowInfo.current
-    val context = LocalContext.current
     val view = LocalView.current
     // Visibility also covers floating IMEs, whose bottom inset can legitimately be zero.
     val imeVisible = WindowInsets.isImeVisible
     val latestActive by rememberUpdatedState(active)
+    val latestFocused by rememberUpdatedState(isFocused)
     val latestImeVisible by rememberUpdatedState(imeVisible)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // 窗口失焦或应用进入后台后，旧输入连接可能已被系统关闭，而 Compose 焦点仍然保留。
+    // 清理旧会话而不在恢复时主动 show：下一次用户点击由原生字段建立新的输入会话。
+    DisposableEffect(lifecycle, transaction, focusManager, view) {
+        // Observe every transition directly: a false→true change can be coalesced before
+        // recomposition and would otherwise leave the stale session focused.
+        val windowFocusListener = editorWindowFocusListener(transaction, { latestFocused() }) {
+            focusManager.clearFocus(force = true)
+        }
+        val viewTreeObserver = view.viewTreeObserver
+        viewTreeObserver.addOnWindowFocusChangeListener(windowFocusListener)
+        if (!view.hasWindowFocus()) {
+            endEditorKeyboardSession(transaction, latestFocused) { focusManager.clearFocus(force = true) }
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                endEditorKeyboardSession(transaction, latestFocused) { focusManager.clearFocus(force = true) }
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            if (viewTreeObserver.isAlive) viewTreeObserver.removeOnWindowFocusChangeListener(windowFocusListener)
+            else view.viewTreeObserver.removeOnWindowFocusChangeListener(windowFocusListener)
+            transaction.cancel()
+        }
+    }
     // Query the live window insets: composition snapshots can lag behind a hide/show transaction.
     fun imeVisibleNow(): Boolean = isImeVisibleNow(view, latestImeVisible)
     // 参数是手势开始前（按下时）的聚焦与输入法状态，不能用事件尾部的状态判断：
     // 首次点击时字段已被自身手势聚焦，误判会立刻清焦并拆掉刚建立的输入会话。
     val request: (EditorGestureStart) -> Unit = { start ->
+        // A tap can arrive just before the window regains focus. Keep only that explicit tap
+        // for a short time; lifecycle loss or a newer request cancels it.
         val action = editorTapAction(start)
-        transaction.launch(scope, action) {
+        val hadWindowFocus = windowInfo.isWindowFocused
+        transaction.launch(scope, if (hadWindowFocus) action else null) {
+            if (!hadWindowFocus) {
+                val gained = awaitEditorWindowFocus(
+                    isActive = { latestActive },
+                    isWindowFocused = { windowInfo.isWindowFocused },
+                    nextFrame = { withFrameNanos { } }
+                )
+                if (!gained) return@launch
+            }
+            val currentAction = if (hadWindowFocus) action else editorTapAction(
+                start.copy(
+                    focused = isFocused(),
+                    imeVisible = imeVisibleNow(),
+                    inputConnectionActive = isInputConnectionActiveNow(view)
+                )
+            )
             reopenEditorKeyboard(
-                action = action,
+                action = currentAction,
                 clearFocus = { focusManager.clearFocus(force = true) },
                 requestFocus = { focusRequester.requestFocus() },
                 isFocused = isFocused,
@@ -300,7 +381,7 @@ internal fun rememberEditorKeyboardRequest(
                 nextFrame = { withFrameNanos { }; kotlinx.coroutines.yield() },
                 showKeyboard = { keyboard?.show() },
                 isImeVisible = { imeVisibleNow() },
-                isInputConnectionActive = { isInputConnectionActiveNow(context) },
+                isInputConnectionActive = { isInputConnectionActiveNow(view) },
                 nativeTapHandlesFocusAndKeyboard = start.nativeTapHandlesFocusAndKeyboard
             )
         }
@@ -381,7 +462,6 @@ internal fun EchoNativeTextField(
 ) {
     val editor = remember { NativeEditorState(value) }
     val density = LocalDensity.current.density
-    val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
     val requestKeyboard = onRequestKeyboard ?: rememberEditorKeyboardRequest(focusRequester, isFocused = { focused }).second
     val latestRequestKeyboard by rememberUpdatedState(requestKeyboard)
@@ -437,7 +517,7 @@ internal fun EchoNativeTextField(
                     val start = EditorGestureStart(
                         focused = focused,
                         imeVisible = isImeVisibleNow(view, fallback = false),
-                        inputConnectionActive = isInputConnectionActiveNow(context),
+                        inputConnectionActive = isInputConnectionActiveNow(view),
                         nativeTapHandlesFocusAndKeyboard = true
                     )
                     var tap = true
