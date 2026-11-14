@@ -35,6 +35,7 @@
 - 验证：冻结验收 `20261115-001254-007` 脚本 / Gradle 退出 0，559.608 秒；92 套件 / 1,090 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
 - 构建：Release `assembleRelease --no-daemon --build-cache` 退出 0，6 分 4 秒；`Echo-v2.8.37.apk` 25,505,561 字节，SHA256 `b6e153873bcf18a90e59ab4b1c91ec85ad1799fcadd713d5127199030e5df514`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；446 条目 CRC 通过，`resources.arsc` 与 186 张位图不变，隐私新增命中 0；历史包保留。
 - 待办：无连接设备，未做真机安装与输入法验收；首次点击、拼音输入中点击、返回键收起后点击、弹窗 / 悬浮窗恢复、连续点击与切换输入法需人工复验。
+- 发布：提交 `f37e2c5` 与 annotated 标签 `v2.8.37` 已推送核验；Release 为 Latest、唯一附件，平台 digest 与独立下载 SHA256 / 大小一致，正文与 `release-notes/latest.md` 语义一致（平台换行规范化）；远端仅保留 v2.8.37，本机历史标签 / APK 保留；无标签的本地 2.8.36 包未发布。
 
 ## 2026-11-13 · 2.8.35 输入法窗口与后台恢复（已发布）
 
