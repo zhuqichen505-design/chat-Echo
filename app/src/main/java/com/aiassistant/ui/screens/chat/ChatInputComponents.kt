@@ -401,7 +401,6 @@ fun ChatInputBar(
 
                     EchoNativeTextField(
                         focusRequester = inputFocusRequester,
-                        onRequestKeyboard = requestKeyboard,
                         value = inputFieldValue,
                         onValueChange = {
                             inputFieldValue = it
@@ -797,9 +796,7 @@ fun ChatInputBar(
                                 latestRequestKeyboard(
                                     com.aiassistant.ui.components.EditorGestureStart(
                                         focused = inputFocused,
-                                        imeVisible = imeVisibleNow(),
-                                        inputConnectionActive =
-                                            com.aiassistant.ui.components.isInputConnectionActiveNow(inputView)
+                                        imeVisible = imeVisibleNow()
                                     )
                                 )
                             }
