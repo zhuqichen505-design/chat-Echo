@@ -24,6 +24,8 @@ APK 审计：438 条目，与 2.8.38 条目名集合一致；4 项变化为清�
 - 复验首页标题 + 内容搜索、右侧输入列表搜索 / 编号 / 滑块、阅读位置恢复、收藏与两处收藏页跳转。
 - 复验分页删除的窗口稳定性、整条输入 / 回复原位显示，以及流式期间删除旧分页。
 
+发布与隐私核查：提交 `38adf10a991a82d8914f04af81a2f7f54c135005` 与 annotated 标签 `v2.8.39`（对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致。[Echo 2.8.39 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.39) 为 Latest，唯一附件 `Echo-v2.8.39.apk` 的平台 digest、独立下载 SHA256 与大小一致，正文与 `release-notes/latest.md` 一致。已删除远端旧 v2.8.38 Release 与标签，本机历史标签与全部历史 APK 保留。暂存内容与公开说明隐私扫描命中 0。
+
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
 基线 `origin/main/bc3745c`（已发布 2.8.37/223）；版本 2.8.38/224；Room v37 / 20 个实体不变，无迁移。开发与发布在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支完成，本地 `app/chat-Echo` 主工作树的领先提交与旧版文档草稿未混入。

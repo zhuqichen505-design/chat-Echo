@@ -8,6 +8,8 @@
 
 冻结验收 `20261115-185226-617`：脚本 / Gradle 退出 0，304.46 秒；94 套件 / 1,101 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，4 分 11 秒；`Echo-v2.8.39.apk` 25,521,945 字节，SHA256 `4c800ce33162cb1bca4c224a9ff08eaedd86ebc2801a37baa1aa6c823dd36e1e`；v2 签名与上版证书一致，Android Debug **非正式生产签名**。APK 438 条目，条目名集合与 2.8.38 一致，4 项内容变化，`resources.arsc` 与 186 张位图不变，隐私新增命中 0。未进行设备安装验证。
 
+版本提交 `38adf10` 与标注标签 `v2.8.39` 已推送；[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.39) 为 Latest，唯一附件摘要与独立下载一致。
+
 ## Echo 2.8.38（已发布）
 
 - 首页对话搜索同时检索标题与消息内容：只要命中聊过的内容就会单独列出（含高亮片段与条数），点击可直接定位到该条消息。

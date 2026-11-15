@@ -35,6 +35,7 @@
 - 验证：冻结验收 `20261115-185226-617` 脚本 / Gradle 退出 0，304.46 秒；94 套件 / 1,101 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
 - 构建：Release `assembleRelease --no-daemon --build-cache` 退出 0，4 分 11 秒；`Echo-v2.8.39.apk` 25,521,945 字节，SHA256 `4c800ce33162cb1bca4c224a9ff08eaedd86ebc2801a37baa1aa6c823dd36e1e`；v2 签名与上版证书一致，Android Debug **非正式生产签名**；438 条目且条目名集合与 2.8.38 一致，4 项变化，`resources.arsc` 与 186 张位图不变，隐私新增命中 0。
 - 待办：无连接设备；需人工安装 2.8.39 release 包确认进入对话不再闪退，并复验 2.8.38 新功能。
+- 发布：提交 `38adf10` 与 annotated 标签 `v2.8.39` 已推送核验（远端 main / peeled 标签一致）；Release 为 Latest、唯一附件，平台 digest 与独立下载 SHA256 / 大小一致；已删除远端旧 v2.8.38 Release 与标签，本机历史标签 / APK 保留。
 
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 

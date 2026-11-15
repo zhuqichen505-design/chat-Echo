@@ -16,6 +16,8 @@
 
 设备边界：仍无连接设备。本次修复针对 release / R8 路径，调试构建无法复现；需人工安装 2.8.39 release 包后验证进入任意对话不再闪退，并复验首页搜索、输入列表、阅读位置恢复、收藏与分页删除。
 
+发布与隐私核查：版本提交 `38adf10a991a82d8914f04af81a2f7f54c135005` 与 annotated 标签 `v2.8.39`（对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。[Echo 2.8.39 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.39) 为 Latest，唯一附件 `Echo-v2.8.39.apk`，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.38 Release 与标签；本机 v2.8.38 标签和全部历史 APK 保留。暂存 11 个文件隐私扫描命中 0（本机路径 / 用户名 / 手机号 / 密钥）；命中的 `Bearer` 字样为既有文档说明，邮箱字样为历史 Android Debug 证书 DN。APK 内 `sk-` 命中为界面占位文案、ML Kit 语言代码与字体字节序列。
+
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
 版本 2.8.38/224；Room v37 / 20 个实体不变，无迁移。基线 `origin/main/bc3745c`（已发布 2.8.37/223），在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支开发；本地 `app/chat-Echo` 主工作树保留其领先提交与旧版文档草稿，未混入本版。
