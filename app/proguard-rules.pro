@@ -23,6 +23,11 @@
 -keepclassmembers class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
+# Gson 的匿名 TypeToken 子类依赖 getGenericSuperclass() 读取泛型签名。
+# Gson 自带规则允许 shrinking，R8 会把匿名子类并入 TypeToken，运行时抛
+# "Missing type parameter"（v2.8.38 release 点击进对话闪退根因）。
+-keep class * extends com.google.gson.reflect.TypeToken { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
 -keep @androidx.annotation.Keep class * { *; }
 -keepclassmembers class * {
     @androidx.annotation.Keep *;

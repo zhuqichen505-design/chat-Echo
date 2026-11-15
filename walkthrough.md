@@ -1,5 +1,29 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
+
+版本 2.8.39/225；Room v37 / 20 个实体不变。用户反馈 2.8.38 安装包点击进入对话即闪退。
+
+根因与证据：
+
+- `FavoriteStore` 曾用匿名 `object : TypeToken<List<FavoriteMessage>>() {}.type` 反序列化；Gson consumer 规则 `-keep,allowobfuscation,allowshrinking class * extends TypeToken` 允许 R8 收缩匿名子类。
+- 2.8.38 release 的 mapping / DEX 中只剩 `AiRepository$parseSavedModelNames$type$1` 一个 TypeToken 子类；`FavoriteStore` 无 `typeToken` 成员，`FavoriteStore$typeToken$1.<init>` 被内联到 `<clinit>`。运行时 `TypeToken` 无参构造读不到泛型，抛 `Missing type parameter`，`FavoriteStore` 类初始化失败；`ChatScreen` 组合期读取 `FavoriteStore.favorites`，故进入任意对话必崩。
+- debug 构建不经 R8，单测与调试包无法复现，属 release 专属路径。
+
+修复：`FavoriteStore` 改用 `gson.toJson(list)` 与 `Array<FavoriteMessage?>::class.java`，不依赖反射泛型；`proguard-rules.pro` 增加 TypeToken 子类与 TypeToken 的 keep 规则，保护已有 `AiRepository` 匿名 TypeToken。新增 Robolectric `FavoriteStorePersistenceTest`（JSON 字段完整、再次点击取消收藏），套件 93 → 94、总数 1,100 → 1,101。
+
+冻结验收 `20261115-185226-617`：脚本 / Gradle 退出 0，304.46 秒；94 套件 / 1,101 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，4 分 11 秒。`Echo-v2.8.39.apk` 25,521,945 字节，SHA256 `4c800ce33162cb1bca4c224a9ff08eaedd86ebc2801a37baa1aa6c823dd36e1e`；`com.aiassistant`、2.8.39/225、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：438 条目，与 2.8.38 条目名集合一致；4 项变化为清单、两个 baseline profile、`classes.dex`；`resources.arsc` 逐字节一致，186 张位图按内容一致；隐私扫描 0 命中本机路径 / 手机号 / 真实密钥（`sk-` 命中为占位文案、ML Kit 语言代码与字体字节）。发布目录新增 `Echo-v2.8.39.apk`，历史包保留。
+
+设备与人工走查（尚未执行；无连接设备）：
+
+- 安装 2.8.39 release 包，确认点击任意对话不再闪退。
+- 复验首页标题 + 内容搜索、右侧输入列表搜索 / 编号 / 滑块、阅读位置恢复、收藏与两处收藏页跳转。
+- 复验分页删除的窗口稳定性、整条输入 / 回复原位显示，以及流式期间删除旧分页。
+
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
 基线 `origin/main/bc3745c`（已发布 2.8.37/223）；版本 2.8.38/224；Room v37 / 20 个实体不变，无迁移。开发与发布在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支完成，本地 `app/chat-Echo` 主工作树的领先提交与旧版文档草稿未混入。

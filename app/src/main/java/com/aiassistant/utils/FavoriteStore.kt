@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.core.content.edit
 import com.aiassistant.domain.model.Message
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +38,6 @@ object FavoriteStore {
     private const val MAX_SNAPSHOT_CHARS = 2000
 
     private val gson = Gson()
-    private val typeToken = object : TypeToken<List<FavoriteMessage>>() {}.type
 
     private val _favorites = MutableStateFlow<List<FavoriteMessage>>(emptyList())
     val favorites: StateFlow<List<FavoriteMessage>> = _favorites.asStateFlow()
@@ -93,7 +91,8 @@ object FavoriteStore {
         _favorites.value = next
         runCatching {
             context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit { putString(KEY_ITEMS, gson.toJson(next, typeToken)) }
+                // List 序列化按运行时元素类型反射，不依赖 TypeToken。
+                .edit { putString(KEY_ITEMS, gson.toJson(next)) }
         }
     }
 
@@ -102,7 +101,10 @@ object FavoriteStore {
             context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_ITEMS, null)
         }.getOrNull() ?: return emptyList()
-        return runCatching { gson.fromJson<List<FavoriteMessage>>(raw, typeToken) }
+        // 用数组类反序列化：匿名 TypeToken 子类会被 R8 类合并移除（release 下 Missing type parameter）。
+        return runCatching {
+            gson.fromJson(raw, Array<FavoriteMessage?>::class.java)?.filterNotNull().orEmpty()
+        }
             .getOrNull()
             .orEmpty()
             .filter { it.conversationId > 0L && it.messageId > 0L }

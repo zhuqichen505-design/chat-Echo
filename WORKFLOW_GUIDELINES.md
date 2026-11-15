@@ -26,6 +26,16 @@
 
 ## 本次记录
 
+## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（已发布）
+
+- 现象：2.8.38 安装包点击进入对话即闪退，debug 构建无法复现。
+- 根因：`FavoriteStore` 的匿名 `TypeToken<List<FavoriteMessage>>` 被 R8 类合并移除，运行时 `TypeToken` 无参构造读不到泛型，抛 `Missing type parameter`，`FavoriteStore` 类初始化失败；聊天页组合期读取收藏流即崩溃。依据：2.8.38 release mapping / DEX 仅剩 `AiRepository` 一个 TypeToken 子类，`FavoriteStore` 无 `typeToken` 成员且匿名构造被内联进 `<clinit>`。
+- 修复：收藏序列化改用 `gson.toJson(list)`，反序列化改用 `Array<FavoriteMessage?>::class.java`；`proguard-rules.pro` 增加 TypeToken 子类 / TypeToken 的 keep 规则。
+- 文件：`utils/FavoriteStore.kt`、`proguard-rules.pro`、新增 `FavoriteStorePersistenceTest.kt`、版本配置与发布文档；不改 Room v37 / 20 个实体、请求协议、消息或备份格式。
+- 验证：冻结验收 `20261115-185226-617` 脚本 / Gradle 退出 0，304.46 秒；94 套件 / 1,101 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 构建：Release `assembleRelease --no-daemon --build-cache` 退出 0，4 分 11 秒；`Echo-v2.8.39.apk` 25,521,945 字节，SHA256 `4c800ce33162cb1bca4c224a9ff08eaedd86ebc2801a37baa1aa6c823dd36e1e`；v2 签名与上版证书一致，Android Debug **非正式生产签名**；438 条目且条目名集合与 2.8.38 一致，4 项变化，`resources.arsc` 与 186 张位图不变，隐私新增命中 0。
+- 待办：无连接设备；需人工安装 2.8.39 release 包确认进入对话不再闪退，并复验 2.8.38 新功能。
+
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
 - 基线 `origin/main/bc3745c`（已发布 2.8.37/223）；版本顺延为 2.8.38/224。在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支开发；本地 `app/chat-Echo` 主工作树未提交的 2.8.35 文档草稿与领先提交未混入本版，也未改动。

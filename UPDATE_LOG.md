@@ -1,5 +1,21 @@
 # 维护记录
 
+## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
+
+版本 2.8.39/225；Room v37 / 20 个实体不变。用户反馈 2.8.38 安装包点击进入对话即闪退。
+
+根因：`FavoriteStore` 使用匿名 `object : TypeToken<List<FavoriteMessage>>() {}.type` 反序列化收藏。Gson 自带的 consumer ProGuard 规则是 `-keep,allowobfuscation,allowshrinking class * extends TypeToken`，允许 R8 收缩匿名子类；R8 把 `FavoriteStore$typeToken$1` 合并进 `TypeToken`，仅在 `<clinit>` 内联构造代码。运行时 `TypeToken` 无参构造通过 `getGenericSuperclass()` 读取泛型，子类已不存在，抛 `RuntimeException("Missing type parameter")`；`FavoriteStore` 类初始化失败，而 `ChatScreen` 组合期访问 `FavoriteStore.favorites`，因此**每次进入任意对话**都会闪退。证据：2.8.38 release 的 mapping / DEX 中只剩 `AiRepository$parseSavedModelNames$type$1` 一个 TypeToken 子类，`FavoriteStore` 已无 `typeToken` 成员，匿名类构造被内联到 `<clinit>`。debug 构建不经 R8，因此单元测试与调试包均无法复现，这是该缺陷漏过的原因。
+
+修复：`FavoriteStore` 不再使用 TypeToken——序列化直接用 `gson.toJson(list)`，反序列化改用 `Array<FavoriteMessage?>::class.java`；`proguard-rules.pro` 追加 `-keep class * extends com.google.gson.reflect.TypeToken { *; }` 与 `-keep class com.google.gson.reflect.TypeToken { *; }`，保护已有的 `AiRepository` 匿名 TypeToken 与后续同类用法。新增 Robolectric 回归 `FavoriteStorePersistenceTest`（收藏写入 JSON 字段完整、再次点击取消收藏），套件 93 → 94、总数 1,100 → 1,101。
+
+涉及文件：`utils/FavoriteStore.kt`、`proguard-rules.pro`、新增 `FavoriteStorePersistenceTest.kt`、版本配置与发布文档；不改请求协议、消息格式、备份格式与数据库结构。
+
+验证：冻结验收 `20261115-185226-617` 脚本 / Gradle 退出 0，304.46 秒；94 套件 / 1,101 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+安装包：Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，4 分 11 秒；`Echo-v2.8.39.apk` 25,521,945 字节，SHA256 `4c800ce33162cb1bca4c224a9ff08eaedd86ebc2801a37baa1aa6c823dd36e1e`；2.8.39/225、com.aiassistant、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；438 条目，与 2.8.38 条目名集合一致，4 项变化（清单、两个 baseline profile、DEX），`resources.arsc` 逐字节不变，186 张位图一致。隐私扫描：本机路径 / 用户名 / 手机号 / 真实密钥命中 0；`sk-` 字样命中为界面占位文案、ML Kit 语言代码与字体字节序列。
+
+设备边界：仍无连接设备。本次修复针对 release / R8 路径，调试构建无法复现；需人工安装 2.8.39 release 包后验证进入任意对话不再闪退，并复验首页搜索、输入列表、阅读位置恢复、收藏与分页删除。
+
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
 版本 2.8.38/224；Room v37 / 20 个实体不变，无迁移。基线 `origin/main/bc3745c`（已发布 2.8.37/223），在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支开发；本地 `app/chat-Echo` 主工作树保留其领先提交与旧版文档草稿，未混入本版。
