@@ -26,6 +26,8 @@ APK 审计（ZIP 条目法）：438 条目，与 2.8.37 条目名集合完全一
 - 收藏输入与回复，在设置“收藏”与对话设置“收藏”页签中查看并跳转。
 - 对存在多个分页的输入 / 回复：删除旧分页观察窗口是否稳定、整条内容是否留在原位；在流式生成期间查看旧分页并删除，确认回复不消失。
 
+发布与隐私核查：提交 `2646ceabf1eb8b9ddfe3c96ec7e9fb8c7c2456c1` 与 annotated 标签 `v2.8.38`（对象 `5856baa80c81f9e3d365108c38c4ba951bfd3cc3`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致。[Echo 2.8.38 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.38) 为 Latest，唯一附件 `Echo-v2.8.38.apk` 的平台 digest、独立下载 SHA256（首轮 HTTP/2 流错误后重试成功）与大小一致，正文与 `release-notes/latest.md` 一致。已删除远端旧 v2.8.37 Release 与标签，本机历史标签与全部历史 APK 保留。暂存内容与公开说明隐私扫描命中 0；APK 内 2 处邮箱字样为 Google ML Kit 原生库构建机器人地址与 DEX 混淆字符串。
+
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 
 基线 `origin/main/8ccfe08`（已发布 2.8.35/221）；版本 2.8.37/223；Room v37 / 20 个实体不变，无迁移。本机已存在无标签、无 Release 的 2.8.36/222 历史包，本次按唯一命名规则顺延，未覆盖该文件。

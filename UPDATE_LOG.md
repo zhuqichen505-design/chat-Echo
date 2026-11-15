@@ -23,6 +23,8 @@
 
 设备边界：当前无连接设备，未做安装、启动或交互验收。需人工复验首页搜索（标题与内容同时命中）、输入列表搜索 / 编号 / 滑块、退出重进对话恢复位置、收藏与两处收藏页跳转，以及删除分页时的窗口稳定性、变体切换与流式期间删除旧分页。
 
+发布与隐私核查：版本提交 `2646ceabf1eb8b9ddfe3c96ec7e9fb8c7c2456c1` 与 annotated 标签 `v2.8.38`（对象 `5856baa80c81f9e3d365108c38c4ba951bfd3cc3`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。[Echo 2.8.38 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.38) 为 Latest，唯一附件 `Echo-v2.8.38.apk`，平台 digest、`gh release download` 独立下载 SHA256（首轮 HTTP/2 流错误后重试成功）与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.37 Release 与标签；本机 v2.8.37 标签和全部历史 APK 保留。暂存 22 个文件隐私扫描：本机路径 / 用户名 / 私网地址 / 密钥 / 手机号命中 0；命中的邮箱字样为历史文档中的 Android Debug 证书 DN（`android@android.com`），电话样式命中均为历史提交哈希子串。APK 内 2 处邮箱字样分别为 Google ML Kit 原生库构建机器人地址与 DEX 混淆字符串。
+
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 
 版本 2.8.37/223；Room v37 / 20 个实体不变。用户反馈输入框偶发无法输入、输入法收起后无论怎样点击都不能再次唤出、输入内容后点击输入框时输入法闪烁。三条路径都指向共享编辑器里应用层与 Compose 原生输入会话的双重所有权。

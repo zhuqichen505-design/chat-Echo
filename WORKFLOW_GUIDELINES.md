@@ -35,7 +35,7 @@
 - 验证：冻结验收 `20261115-173917-227` 脚本 / Gradle 退出 0，343.87 秒；93 套件 / 1,100 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。首次验收因 Compose Lint 内嵌 kotlinx-metadata 不支持 Kotlin 2.2 元数据、在 `ChatScreen.kt` 分析时崩溃，按既有工具链缺陷仅追加 `FrequentlyChangedStateReadInComposition` 隔离后复验通过。
 - 构建：Release `assembleRelease --no-daemon --build-cache` 退出 0，4 分 10 秒；`Echo-v2.8.38.apk` 25,521,941 字节，SHA256 `9499e7912ff58cdc77a174b91e002b687668fb171a106eb97dec01b98c50da76`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；438 条目且条目名集合与 2.8.37 一致，4 项变化（清单、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，隐私新增命中 0。
 - 待办：无连接设备，未做真机安装；首页搜索、输入列表搜索 / 编号 / 滑块、位置恢复、收藏跳转与分页删除需人工复验。
-- 发布：详细提交 / 标签 / Release 核验结果见本版发布记录与 `release-notes/latest.md`。
+- 发布：提交 `2646cea` 与 annotated 标签 `v2.8.38` 已推送核验（远端 main / peeled 标签一致）；Release 为 Latest、唯一附件，平台 digest 与独立下载 SHA256 / 大小一致，正文与 `release-notes/latest.md` 一致；已删除远端旧 v2.8.37 Release 与标签，本机历史标签 / APK 保留。
 
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 

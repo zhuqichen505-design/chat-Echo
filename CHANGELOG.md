@@ -11,6 +11,8 @@
 
 冻结验收 `20261115-173917-227`：脚本 / Gradle 退出 0，343.87 秒；93 套件 / 1,100 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 105 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，4 分 10 秒；`Echo-v2.8.38.apk` 25,521,941 字节，SHA256 `9499e7912ff58cdc77a174b91e002b687668fb171a106eb97dec01b98c50da76`；v2 签名与上版证书一致，Android Debug **非正式生产签名**。APK 438 条目，条目名集合与 2.8.37 一致，4 项内容变化，`resources.arsc` 逐字节不变，186 张位图不变，隐私新增命中 0。未进行设备安装验证。
 
+版本提交 `2646cea` 与标注标签 `v2.8.38` 已推送；[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.38) 为 Latest，唯一附件摘要与独立下载一致。
+
 ## Echo 2.8.37（已发布）
 
 - 修复输入框偶发无法输入、输入法收起后无法再次唤出，以及输入内容后点击输入框时输入法闪烁。
