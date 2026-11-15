@@ -419,6 +419,11 @@ fun AiAssistantNavigation(
                             launchSingleTop = true
                         }
                     },
+                    onNavigateToMessage = { conversationId, messageId ->
+                        navController.navigate("chat/$conversationId?focus=$messageId") {
+                            launchSingleTop = true
+                        }
+                    },
                     themeMode = themeMode,
                     onThemeModeChange = onThemeModeChange
                 )

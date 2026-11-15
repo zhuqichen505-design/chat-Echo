@@ -132,6 +132,9 @@ import com.aiassistant.ui.components.rememberEchoHazeState
 import com.aiassistant.ui.components.rememberLazyListControlsVisible
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
+import com.aiassistant.utils.ChatPositionStore
+import com.aiassistant.utils.ChatScrollAnchor
+import com.aiassistant.utils.FavoriteStore
 import com.aiassistant.utils.FileUtils
 import com.aiassistant.utils.RoleplaySmartAnalyzer
 import com.aiassistant.utils.RoleplaySmartParser
@@ -323,6 +326,17 @@ fun ChatScreen(
     val displayMessages = remember(messages, variantSelectionSnapshot) {
         buildDisplayMessages(messages, variantSelectionSnapshot)
     }
+    // 收藏：气泡星标、对话设置收藏页签与设置页共用同一份本地记录
+    val favoriteMessages by FavoriteStore.favorites.collectAsState()
+    LaunchedEffect(Unit) { FavoriteStore.ensureLoaded(context) }
+    val favoriteIdsInConversation = remember(favoriteMessages, conversationId) {
+        favoriteMessages.asSequence()
+            .filter { it.conversationId == conversationId }
+            .map { it.messageId }
+            .toSet()
+    }
+    // 删除消息后的列表锚点：按 key 精确恢复可见行，替代按索引 -1 的粗略补偿
+    var pendingDeleteAnchor by remember(conversationId) { mutableStateOf<ChatListAnchor?>(null) }
     // 搜索命中定位：pending 在完成滚动后清空，避免后续消息更新再次触发滚动。
     var pendingFocusMessageId by remember(conversationId, focusMessageId) {
         mutableStateOf(focusMessageId)
@@ -484,8 +498,9 @@ fun ChatScreen(
         if (messages.isEmpty()) return@LaunchedEffect
         val target = messages.firstOrNull { it.id == targetId }
         if (target == null) {
-            // 消息可能在搜索后被删除；放弃定位并回到正常的初始滚底。
+            // 消息可能在搜索/收藏后被删除；放弃定位并回到正常的初始滚底。
             pendingFocusMessageId = null
+            Toast.makeText(context, "该消息已不存在", Toast.LENGTH_SHORT).show()
             return@LaunchedEffect
         }
         // 命中消息可能属于未选中的变体：先切换变体，displayMessages 重建后本 effect 会再次进入。
@@ -520,9 +535,73 @@ fun ChatScreen(
         if (!hasInitialScrolledToBottom && displayMessages.isNotEmpty()) {
             hasInitialScrolledToBottom = true
             androidx.compose.runtime.withFrameNanos { }
+            // 上一次阅读位置：搜索命中/收藏跳转优先，其次恢复上次停下的位置，最后才贴底。
+            val saved = if (pendingFocusMessageId == null) {
+                ChatPositionStore.load(context, conversationId)
+            } else null
+            val savedIndex = saved?.let { anchor ->
+                displayMessages.indexOfFirst { item ->
+                    (anchor.groupId != null && item.groupId == anchor.groupId) ||
+                        item.message.id == anchor.messageId
+                }
+            } ?: -1
             try {
-                listState.followMeasuredBottom()
+                if (savedIndex >= 0) {
+                    listState.scrollToItem(savedIndex, saved?.offset ?: 0)
+                } else {
+                    listState.followMeasuredBottom()
+                }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        }
+    }
+
+    // 阅读位置：用户停止滚动时保存；页面销毁时再兜底保存一次。
+    // 停在底部时清除记录，下一次打开仍从最新消息开始。
+    // 协程与 onDispose 捕获的是启动时的列表快照，必须经 rememberUpdatedState 读取最新值。
+    val latestDisplayMessagesForPosition by rememberUpdatedState(displayMessages)
+    fun saveReadingPosition() {
+        val items = latestDisplayMessagesForPosition
+        if (items.isEmpty() || listState.layoutInfo.visibleItemsInfo.isEmpty()) return
+        if (!listState.canScrollForward) {
+            ChatPositionStore.clear(context, conversationId)
+            return
+        }
+        val index = listState.firstVisibleItemIndex
+        val item = items.getOrNull(index) ?: return
+        ChatPositionStore.save(
+            context,
+            conversationId,
+            ChatScrollAnchor(
+                groupId = item.groupId,
+                messageId = item.message.id,
+                offset = listState.firstVisibleItemScrollOffset
+            )
+        )
+    }
+    LaunchedEffect(conversationId) {
+        // 跳过订阅起始帧的“未滚动”状态，只有真正滚动停止后才记录阅读位置，
+        // 避免初始组合时把恢复前的 0 位置写回存储。
+        var firstEmission = true
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (firstEmission) {
+                firstEmission = false
+                return@collect
+            }
+            if (!scrolling) saveReadingPosition()
+        }
+    }
+    DisposableEffect(conversationId) {
+        onDispose { saveReadingPosition() }
+    }
+
+    // 删除消息后的视口恢复：等新列表完成一次组合，再按删除前捕获的行 key 找回位置。
+    LaunchedEffect(displayMessages) {
+        val anchor = pendingDeleteAnchor ?: return@LaunchedEffect
+        pendingDeleteAnchor = null
+        val targetIndex = resolveChatListAnchor(replyRowKeys.messageKeys, anchor.key)
+        if (targetIndex >= 0) {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { listState.scrollToItem(targetIndex, anchor.offset) }
         }
     }
 
@@ -1051,8 +1130,18 @@ fun ChatScreen(
                         } else {
                             displayItem.variantInfo?.total ?: 1
                         }
+                        // 流式期间可用页码：已落库分页 + 正在生成的新分页。
+                        // 选择索引必须落在其中，否则删除旧分页后会残留指向已删除分页的索引，
+                        // 既显示错页码，也会让整条回复在流式结束前无法正常渲染。
+                        val streamingAvailableIndices = if (isBranchStreamingHere) {
+                            (displayItem.variantInfo?.availableIndices ?: listOf(1)) + totalVariantsWithStreaming
+                        } else {
+                            displayItem.variantInfo?.availableIndices ?: listOf(1)
+                        }
                         val selectedVariantIndex = if (isBranchStreamingHere) {
-                            variantSelections[streamingBranchGroupId!!] ?: totalVariantsWithStreaming
+                            variantSelections[streamingBranchGroupId!!]
+                                ?.takeIf { it in streamingAvailableIndices }
+                                ?: totalVariantsWithStreaming
                         } else {
                             displayItem.variantInfo?.currentIndex ?: 1
                         }
@@ -1089,7 +1178,7 @@ fun ChatScreen(
                                         groupId = streamingBranchGroupId!!,
                                         currentIndex = totalVariantsWithStreaming,
                                         total = totalVariantsWithStreaming,
-                                        availableIndices = (displayItem.variantInfo?.availableIndices ?: listOf(1)) + totalVariantsWithStreaming
+                                        availableIndices = streamingAvailableIndices
                                     ),
                                     onVariantSelected = { groupId, index ->
                                         preserveScrollForBranchGeneration = true
@@ -1121,7 +1210,7 @@ fun ChatScreen(
                                         groupId = streamingBranchGroupId!!,
                                         currentIndex = selectedVariantIndex,
                                         total = totalVariantsWithStreaming,
-                                        availableIndices = (displayItem.variantInfo?.availableIndices ?: listOf(1)) + totalVariantsWithStreaming
+                                        availableIndices = streamingAvailableIndices
                                     )
                                 } else {
                                     displayItem.variantInfo
@@ -1139,6 +1228,17 @@ fun ChatScreen(
                                     assistantApiConfigId = currentModelOption?.apiConfigId,
                                     assistantModelName = resolvedAssistantModelName,
                                     variantInfo = dynamicVariantInfo,
+                                    isFavorite = favoriteIdsInConversation.contains(message.id),
+                                    onToggleFavorite = if (message.id > 0L) {
+                                        {
+                                            val nowFavorite = FavoriteStore.toggle(context, message)
+                                            Toast.makeText(
+                                                context,
+                                                if (nowFavorite) "已收藏，可在设置 · 收藏中查看" else "已取消收藏",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    } else null,
                                     onVariantSelected = { groupId, index ->
                                         preserveScrollForBranchGeneration = true
                                         autoFollowOutput = false
@@ -1767,27 +1867,30 @@ fun ChatScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // 若被删除的消息与正在进行的流式分支关联，解绑分支并恢复常规底部生成展示
-                        val isAssociatedWithStreaming = isGenerating && streamingBranchGroupId != null && (
-                            targetMsg.variantGroupId == streamingBranchGroupId ||
-                            targetMsg.variantGroupId?.let { pairedVariantGroupId(it) } == streamingBranchGroupId ||
-                            streamingBranchGroupId!!.startsWith("turn_${targetMsg.id}_") ||
-                            streamingBranchGroupId == "reply_${targetMsg.id}"
-                        )
-                        if (isAssociatedWithStreaming) {
+                        // 只有“生成锚点用户消息”被删除、且该分组随之消失时才解绑流式分支。
+                        // 删除同一变体组里的旧分页不会移除流式挂载点：旧实现一律解绑，
+                        // 会让旧分页与流式回复一起暂时消失，直到本轮生成结束才重新出现。
+                        val groupDisappears = targetMsg.variantGroupId?.let { group ->
+                            messages.count { it.variantGroupId == group } <= 1
+                        } ?: (messages.none { it.id == targetMsg.id })
+                        val isAnchorHostDeleted = isGenerating && targetMsg.role == "user" &&
+                            groupDisappears && (
+                            targetMsg.id == generatingAnchor?.userMessageId ||
+                                (generatingAnchor?.userGroupId != null &&
+                                    targetMsg.variantGroupId == generatingAnchor?.userGroupId)
+                            )
+                        if (isAnchorHostDeleted) {
                             streamingBranchGroupId = null
                             preserveScrollForBranchGeneration = false
                         }
 
-                        // 锁定当前可见视口锚点：若被删除的消息在视口上方，在删除后平移 1 个索引避免视觉跳跃
-                        val targetIdx = displayMessages.indexOfFirst { it.message.id == targetMsg.id }
-                        val firstVisible = listState.firstVisibleItemIndex
-                        val currentOffset = listState.firstVisibleItemScrollOffset
-                        if (targetIdx >= 0 && firstVisible > targetIdx) {
-                            scope.launch {
-                                try {
-                                    listState.scrollToItem((firstVisible - 1).coerceAtLeast(0), scrollOffset = currentOffset)
-                                } catch (_: Exception) {}
+                        // 捕获删除前首个可见行的 key 与偏移，列表更新后按 key 精确恢复。
+                        // 不再用 firstVisible - 1 的索引补偿：删除变体分页时行数不变，
+                        // 旧实现反而会把窗口向上推一行，表现为删除时错误上下滑动。
+                        val visibleInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+                        pendingDeleteAnchor = visibleInfo?.let { info ->
+                            replyRowKeys.messageKeys.getOrNull(info.index)?.let { key ->
+                                ChatListAnchor(key, listState.firstVisibleItemScrollOffset)
                             }
                         }
                         viewModel.deleteMessage(targetMsg)
@@ -1868,6 +1971,13 @@ fun ChatScreen(
             onUpdateConversationModelAvatar = { uri ->
                 viewModel.updateConversationModelAvatar(uri)
                 modelAvatarRevision++
+            },
+            favorites = remember(favoriteMessages, conversationId) {
+                favoriteMessages.filter { it.conversationId == conversationId }
+            },
+            onJumpToFavorite = { messageId ->
+                showSettingsDialog = false
+                pendingFocusMessageId = messageId
             }
         )
     }

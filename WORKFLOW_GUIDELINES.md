@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
+
+- 基线 `origin/main/bc3745c`（已发布 2.8.37/223）；版本顺延为 2.8.38/224。在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支开发；本地 `app/chat-Echo` 主工作树未提交的 2.8.35 文档草稿与领先提交未混入本版，也未改动。
+- 需求：首页搜索含消息内容、右侧输入列表搜索 / 编号 / 滑块、阅读位置记忆、收藏（设置与对话设置两处入口）、分页删除四类缺陷修复。
+- 方案：首页标题 + 内容并集分区；`SideAnchorNavigator` 搜索框、编号徽标与独立拖动滑块；`ChatPositionStore` 持久化首个可见行 key / 偏移并在重进时恢复；`FavoriteStore` + 星标按钮 + 两个收藏页；删除前捕获可见行 key 精确恢复、成对变体组共享最早锚点、流式期间仅在删除生成锚点且分组消失时解绑并校验流式页码。
+- 文件：`HomeScreen.kt`、`SideAnchorNavigator.kt`、`ChatContextComponents.kt`、`ChatScreen.kt`、`ChatMessageComponents.kt`、`ChatScrollPolicy.kt`、`ChatSettingsDialogs.kt`、`SettingsScreen.kt`、新增 `SettingsFavoritesTab.kt`、`MainActivity.kt`、新增 `utils/FavoriteStore.kt`、`utils/ChatPositionStore.kt`、`lint.xml`、版本配置与发布文档；新增 `ChatNavigationAndFavoritesTest.kt` 10 项测试，套件 92 → 93、总数 1,090 → 1,100；不改 Room v37 / 20 个实体、请求协议、消息或备份格式。
+- 验证：冻结验收 `20261115-173917-227` 脚本 / Gradle 退出 0，343.87 秒；93 套件 / 1,100 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。首次验收因 Compose Lint 内嵌 kotlinx-metadata 不支持 Kotlin 2.2 元数据、在 `ChatScreen.kt` 分析时崩溃，按既有工具链缺陷仅追加 `FrequentlyChangedStateReadInComposition` 隔离后复验通过。
+- 构建：Release `assembleRelease --no-daemon --build-cache` 退出 0，4 分 10 秒；`Echo-v2.8.38.apk` 25,521,941 字节，SHA256 `9499e7912ff58cdc77a174b91e002b687668fb171a106eb97dec01b98c50da76`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；438 条目且条目名集合与 2.8.37 一致，4 项变化（清单、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，隐私新增命中 0。
+- 待办：无连接设备，未做真机安装；首页搜索、输入列表搜索 / 编号 / 滑块、位置恢复、收藏跳转与分页删除需人工复验。
+- 发布：详细提交 / 标签 / Release 核验结果见本版发布记录与 `release-notes/latest.md`。
+
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 
 - 基线 `origin/main/8ccfe08`（已发布 2.8.35/221）；版本顺延为 2.8.37/223。本机发布目录已有 2.8.36/222 包，但既无标签也无远端 Release，为遵守唯一命名与不覆盖历史包规则，本次跳过 2.8.36。

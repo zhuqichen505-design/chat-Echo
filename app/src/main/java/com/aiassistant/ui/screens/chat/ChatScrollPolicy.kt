@@ -55,6 +55,23 @@ internal fun bottomFollowDistance(itemOffset: Int, itemSize: Int, viewportEnd: I
     (itemOffset + itemSize - viewportEnd).coerceAtLeast(0)
 
 /**
+ * 删除消息前的可见行锚点：删除后按 key 找回同一条消息并恢复像素偏移。
+ *
+ * 旧实现用 firstVisibleItemIndex - 1 手动补偿，只有“删除行恰好在视口上方且行数减一”才成立；
+ * 删除变体分页时行数不变，反而会把整个窗口向上推一行。
+ */
+internal data class ChatListAnchor(
+    val key: String,
+    val offset: Int
+)
+
+/** 删除后解析锚点：目标 key 仍存在时返回其新索引，否则返回 -1 交给列表默认锚定。 */
+internal fun resolveChatListAnchor(keys: List<String>, anchorKey: String?): Int {
+    if (anchorKey == null) return -1
+    return keys.indexOf(anchorKey)
+}
+
+/**
  * 流式跟随信号：正文与思考长度不足以覆盖“气泡长高但正文没变”的情形。
  *
  * 请求失败时正文可能一个字符都没有，气泡变高全部来自状态胶囊（“正在连接…”→ 具体报错文案）

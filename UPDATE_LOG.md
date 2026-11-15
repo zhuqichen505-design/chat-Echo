@@ -1,5 +1,28 @@
 # 维护记录
 
+## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
+
+版本 2.8.38/224；Room v37 / 20 个实体不变，无迁移。基线 `origin/main/bc3745c`（已发布 2.8.37/223），在独立工作树 `app/chat-Echo-2.8.36` 的 `release/2.8.38` 分支开发；本地 `app/chat-Echo` 主工作树保留其领先提交与旧版文档草稿，未混入本版。
+
+需求与实现：
+
+1. 对话搜索只出标题：首页旧实现在“标题有命中”时不再检索消息内容。现改为标题命中与消息内容命中共存，内容命中单独分区（含条数、高亮片段、截断提示），点击经 `chat/{id}?focus=` 定位；历史页原有并集不变。
+2. 右侧输入列表：`SideAnchorNavigator` 增加提问搜索框（按输入全文过滤、显示“找到 N 条匹配”、无匹配提示、清除按钮）、每项从 1 开始的编号徽标、面板内独立可拖动滚动滑块；`buildChatAnchorItems` 输出编号与完整搜索文本。
+3. 阅读位置：新增 `ChatPositionStore`（按会话 id 保存首个可见行的分组 id / 消息 id 与像素偏移）；滚动停止与页面销毁时保存，停在底部时清除；重新进入对话时优先恢复上次位置，搜索命中与收藏跳转优先，未读过则保持贴底。
+4. 收藏：新增 `FavoriteStore`（SharedPreferences 持久化 + StateFlow，保存消息 id、角色、内容快照与时间）；输入与回复操作栏新增星标；设置新增“收藏”页汇总全部收藏，对话设置新增“收藏”页签汇总本对话收藏，均可点击跳回消息并自动切换对应变体。
+5. 分页删除缺陷：
+   - 窗口错误滑动：删除确认中的 `firstVisibleItemIndex - 1` 索引补偿在删除变体分页（行数不变）时反而把窗口上推一行。现改为删除前捕获首个可见行的 key 与偏移，列表更新后按 key 精确恢复。
+   - 整条输入/回复消失或错位：变体组按“组内剩余最早消息的 createdAt”定位，编辑重发产生的新分页时间更晚，删除原始分页会把整组搬到会话末尾。现 `buildDisplayMessages` 为成对 `turn_X_user` / `turn_X_assistant` 组共享最早锚点，同锚点时输入排在回复前，删除任一分页均留在原位。
+   - 删除旧分页后回复暂时消失：删除确认把“与流式分组同组”的旧分页也当作流式宿主而解绑，流式气泡退回底部兜底又因已存在落库回复而不渲染。现仅当删除生成锚点用户消息且该分组随之消失时才解绑；流式页码选择索引按“已落库页码 + 生成中页码”校验，删除旧分页后自动回落生成中分页并继续显示。
+
+涉及文件：`HomeScreen.kt`、`SideAnchorNavigator.kt`、`ChatContextComponents.kt`、`ChatScreen.kt`、`ChatMessageComponents.kt`、`ChatScrollPolicy.kt`、`ChatSettingsDialogs.kt`、`SettingsScreen.kt`、新增 `SettingsFavoritesTab.kt`、`MainActivity.kt`、新增 `utils/FavoriteStore.kt`、`utils/ChatPositionStore.kt`、`lint.xml`（追加隔离同一 metadata 版本缺陷的 `FrequentlyChangedStateReadInComposition` 探测器）、版本配置；新增 `ChatNavigationAndFavoritesTest.kt` 10 项测试，套件 92 → 93、总数 1,090 → 1,100。不改请求协议、消息格式与备份格式；收藏与阅读位置为本地偏好数据，不进入备份快照。
+
+验证：冻结验收 `20261115-173917-227` 脚本 / Gradle 退出 0，343.87 秒；93 套件 / 1,100 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 105 Warning；输入哈希一致；`git diff --check` 退出 0。首次验收曾因 Compose Lint 内嵌 kotlinx-metadata 不支持 Kotlin 2.2 元数据、在分析 `ChatScreen.kt` 时崩溃（`LazyLayoutStateReadInCompositionDetector`），按既有工具链缺陷处理方式仅追加该探测器隔离并复验通过。
+
+安装包：Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，4 分 10 秒；`Echo-v2.8.38.apk` 25,521,941 字节，SHA256 `9499e7912ff58cdc77a174b91e002b687668fb171a106eb97dec01b98c50da76`；`com.aiassistant`、2.8.38/224、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。APK 438 条目（与 2.8.37 的 438 条一致），条目名集合完全一致，4 项变化为清单、两个 baseline profile 与 `classes.dex`；`resources.arsc` 逐字节不变，186 张位图按内容一致；隐私扫描 0 命中本机路径 / 手机号 / `sk-` 密钥，仅 2 处邮箱字样为 Google ML Kit 原生库内的构建机器人地址与 DEX 混淆字符串。发布目录新增 `Echo-v2.8.38.apk`，既有 2.8.37 等历史包保持原样。
+
+设备边界：当前无连接设备，未做安装、启动或交互验收。需人工复验首页搜索（标题与内容同时命中）、输入列表搜索 / 编号 / 滑块、退出重进对话恢复位置、收藏与两处收藏页跳转，以及删除分页时的窗口稳定性、变体切换与流式期间删除旧分页。
+
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 
 版本 2.8.37/223；Room v37 / 20 个实体不变。用户反馈输入框偶发无法输入、输入法收起后无论怎样点击都不能再次唤出、输入内容后点击输入框时输入法闪烁。三条路径都指向共享编辑器里应用层与 Compose 原生输入会话的双重所有权。

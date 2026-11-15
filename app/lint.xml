@@ -5,8 +5,12 @@
         根因：项目 Kotlin 2.2.21 产出 Metadata 2.2.0，而当前 AGP/Compose Lint 内嵌的
         kotlinx-metadata-jvm 最高只支持 2.0.0，探测器在 isComposable() 解析时直接抛异常
         （工具链缺陷，与业务代码无关；旧代码同样会触发）。
+        2026-11-15：`FrequentlyChangedStateReadInComposition`（LazyLayoutStateReadInCompositionDetector）
+        在分析 ChatScreen.kt 时因同一 metadata 版本不兼容崩溃（isComposable → throwIfNotCompatible），
+        属同一根因，仅追加隔离该探测器。
         其余全部 Lint 规则保持启用，未关闭 lint 整体检查。
     -->
+    <issue id="FrequentlyChangedStateReadInComposition" severity="ignore" />
     <issue id="UnrememberedAnimatable" severity="ignore" />
     <issue id="StateFlowValueCalledInComposition" severity="ignore" />
     <issue id="CoroutineCreationDuringComposition" severity="ignore" />

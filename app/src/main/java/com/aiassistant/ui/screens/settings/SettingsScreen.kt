@@ -609,6 +609,7 @@ fun SettingsScreen(
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
     onAppearancePresetChange: (String) -> Unit = {},
+    onNavigateToMessage: (conversationId: Long, messageId: Long) -> Unit = { _, _ -> },
     showBackButton: Boolean = true
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -732,6 +733,12 @@ fun SettingsScreen(
                         onNavigateToChat = onNavigateToChat,
                         contentPadding = tabContentPadding
                     )
+                    "favorites" -> FavoritesTab(
+                        hazeState = hazeState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = tabContentPadding,
+                        onNavigateToMessage = onNavigateToMessage
+                    )
                     "backup" -> BackupTab(
                         hazeState = hazeState,
                         modifier = Modifier.fillMaxSize(),
@@ -790,6 +797,7 @@ fun SettingsScreen(
                                 "prompts_memory" -> "提示词与记忆"
                                 "web_search" -> "搜索与工具"
                                 "hidden_conversations" -> "其他对话"
+                                "favorites" -> "收藏"
                                 "backup" -> "数据备份"
                                 "about" -> "关于"
                                 else -> "设置"
@@ -836,6 +844,7 @@ fun SettingsMenu(
             SettingsMenuEntry("web_search", "搜索与工具", "搜索引擎、天气与设备能力", Icons.Default.Search)
         ),
         "数据与应用" to listOf(
+            SettingsMenuEntry("favorites", "收藏", "查看所有收藏的输入与回复", Icons.Default.Star),
             SettingsMenuEntry("hidden_conversations", "其他对话", "通过密码查看隐藏会话", Icons.Default.VisibilityOff),
             SettingsMenuEntry("backup", "数据备份", "导出与恢复对话、角色和配置", Icons.Default.Backup),
             SettingsMenuEntry("about", "关于", "版本信息与功能说明", Icons.Default.Info)

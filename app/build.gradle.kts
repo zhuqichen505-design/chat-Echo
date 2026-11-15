@@ -13,8 +13,8 @@ android {
         applicationId = "com.aiassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 223
-        versionName = "2.8.37"
+        versionCode = 224
+        versionName = "2.8.38"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

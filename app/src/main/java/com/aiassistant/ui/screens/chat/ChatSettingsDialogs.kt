@@ -191,7 +191,10 @@ fun ChatSettingsDialog(
     onConvertToRoleplay: () -> Unit = {},
     conversationId: Long = 0L,
     currentConversationModelAvatarUri: String? = null,
-    onUpdateConversationModelAvatar: ((String?) -> Unit)? = null
+    onUpdateConversationModelAvatar: ((String?) -> Unit)? = null,
+    /** 本对话已收藏的消息（输入与回复），点击可直接跳转回原位置 */
+    favorites: List<com.aiassistant.utils.FavoriteMessage> = emptyList(),
+    onJumpToFavorite: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
     val dialogContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
@@ -234,9 +237,11 @@ fun ChatSettingsDialog(
     val generationListState = rememberLazyListState()
     val memoryListState = rememberLazyListState()
     val appearanceListState = rememberLazyListState()
+    val favoritesListState = rememberLazyListState()
     val dialogListState = when (settingsTab) {
         1 -> memoryListState
         2 -> appearanceListState
+        3 -> favoritesListState
         else -> generationListState
     }
     val modelOptions = remember(currentOption, fallbackModel, availableOptions) {
@@ -406,7 +411,7 @@ fun ChatSettingsDialog(
                     edgePadding = 0.dp,
                     containerColor = Color.Transparent
                 ) {
-                    listOf("模型与生成", "提示与记忆", "外观与模式").forEachIndexed { index, label ->
+                    listOf("模型与生成", "提示与记忆", "外观与模式", "收藏").forEachIndexed { index, label ->
                         Tab(
                             selected = settingsTab == index,
                             onClick = { settingsTab = index },
@@ -1009,6 +1014,81 @@ fun ChatSettingsDialog(
                                     Text("平滑升级为故事会话，解锁角色卡、世界观与剧情推进指令", style = MaterialTheme.typography.bodySmall, color = dialogSecondaryColor)
                                 }
                                 Icon(Icons.Default.ChevronRight, contentDescription = null, tint = dialogSecondaryColor)
+                            }
+                        }
+                    }
+                }
+                if (settingsTab == 3) {
+                    if (favorites.isEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("本对话还没有收藏", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                                Text(
+                                    "在任意输入或回复下方的星标按钮即可收藏；收藏后可在这里点击直接跳回原位置。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = dialogSecondaryColor
+                                )
+                            }
+                        }
+                    } else {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("本对话收藏 · ${favorites.size}", style = MaterialTheme.typography.titleSmall, color = dialogContentColor)
+                                Text(
+                                    "点击任一收藏可关闭设置并定位到该条消息",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = dialogSecondaryColor
+                                )
+                            }
+                        }
+                        items(items = favorites, key = { "chat_favorite_${it.messageId}" }) { favorite ->
+                            val isUserFavorite = favorite.role == "user"
+                            EchoGlassCard(
+                                onClick = {
+                                    onDismiss()
+                                    onJumpToFavorite(favorite.messageId)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = EchoTokens.Radius.shapeMd,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (isUserFavorite) "我的输入" else "模型回复",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                                .format(Date(favorite.messageCreatedAt)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = dialogSecondaryColor
+                                        )
+                                    }
+                                    Text(
+                                        text = favorite.content.replace('\n', ' ').trim(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = dialogContentColor,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "点击跳转到该消息",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                                    )
+                                }
                             }
                         }
                     }

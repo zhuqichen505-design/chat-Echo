@@ -148,12 +148,16 @@ import androidx.compose.animation.scaleOut
 
 
 internal fun buildChatAnchorItems(displayMessages: List<DisplayMessageItem>): List<SideAnchorItem> {
+    var inputNumber = 0
     return displayMessages.mapIndexedNotNull { index, item ->
         val message = item.message
         if (message.role != "user") return@mapIndexedNotNull null
+        inputNumber += 1
         SideAnchorItem(
             title = anchorTitle(message.content),
-            itemIndex = index
+            itemIndex = index,
+            number = inputNumber,
+            searchText = message.content
         )
     }
 }

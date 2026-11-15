@@ -164,7 +164,8 @@ fun HomeScreen(
     var selectedConversationIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
-    // 标题没有命中时才回退搜索消息内容：既避免每次输入都全表扫描，也保证“搜聊过的内容”能出结果。
+    // 标题与消息内容同时检索：旧实现仅在标题零命中时才回退搜索消息内容，
+    // 只要命中一个标题就永远看不到聊过的内容，用户会认为“搜索只认标题”。
     var homeMessageHits by remember { mutableStateOf<List<MessageSearchHit>>(emptyList()) }
     var isSearchingHomeMessages by remember { mutableStateOf(false) }
     val homeTerms = remember(searchQuery) { searchTerms(searchQuery) }
@@ -185,13 +186,14 @@ fun HomeScreen(
                 )
         }
     }
-    LaunchedEffect(homeTerms, filteredConversations.isEmpty(), conversations) {
-        if (homeTerms.isEmpty() || filteredConversations.isNotEmpty() || conversations.isEmpty()) {
+    LaunchedEffect(homeTerms, conversations) {
+        if (homeTerms.isEmpty() || conversations.isEmpty()) {
             homeMessageHits = emptyList()
             isSearchingHomeMessages = false
             return@LaunchedEffect
         }
         isSearchingHomeMessages = true
+        homeMessageHits = emptyList()
         delay(220)
         val byId = conversations.associateBy { it.id }
         homeMessageHits = repository.searchMessagesForTerms(homeTerms)
@@ -380,44 +382,6 @@ fun HomeScreen(
                         }
                         if (filteredConversations.isEmpty()) {
                             when {
-                                // 标题没有命中时回退到消息内容：旧实现只搜标题，聊过的内容永远搜不到。
-                                homeMessageHits.isNotEmpty() -> {
-                                    item(key = "home_message_header") {
-                                        Column(
-                                            Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                "对话标题没有匹配",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = backdropTextColor
-                                            )
-                                            Text(
-                                                "以下结果来自消息内容，点击可直接定位到该条消息",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = backdropTextColor.copy(alpha = 0.84f)
-                                            )
-                                        }
-                                    }
-                                    items(
-                                        items = homeMessageHits,
-                                        key = { "home_message_${it.message.id}" }
-                                    ) { hit ->
-                                        MessageSearchHitCard(
-                                            hazeState = hazeState,
-                                            hit = hit,
-                                            readableBackdrop = readableBackdrop,
-                                            onClick = {
-                                                onNavigateToMessage(hit.conversation.id, hit.message.id)
-                                            }
-                                        )
-                                    }
-                                    item(key = "home_message_more") {
-                                        TextButton(onClick = { onNavigateToHistory(searchQuery.trim()) }) {
-                                            Text("在历史记录中查看全部消息搜索")
-                                        }
-                                    }
-                                }
                                 isSearchingHomeMessages -> {
                                     item(key = "home_searching") {
                                         Row(
@@ -431,7 +395,7 @@ fun HomeScreen(
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
-                                                "正在搜索消息内容…",
+                                                "正在搜索标题与消息内容…",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = backdropTextColor
                                             )
@@ -599,6 +563,45 @@ fun HomeScreen(
                                 },
                                 folders = folders
                             )
+                        }
+
+                        // 消息内容命中：与标题命中并集展示，不再只在“标题零命中”时出现
+                        if (homeTerms.isNotEmpty() && homeMessageHits.isNotEmpty()) {
+                            item(key = "home_message_header") {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        "消息内容命中 · ${homeMessageHits.size}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = backdropTextColor
+                                    )
+                                    Text(
+                                        "点击可直接定位到该条消息；标题命中的会话在上方",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = backdropTextColor.copy(alpha = 0.84f)
+                                    )
+                                }
+                            }
+                            items(
+                                items = homeMessageHits,
+                                key = { "home_message_${it.message.id}" }
+                            ) { hit ->
+                                MessageSearchHitCard(
+                                    hazeState = hazeState,
+                                    hit = hit,
+                                    readableBackdrop = readableBackdrop,
+                                    onClick = {
+                                        onNavigateToMessage(hit.conversation.id, hit.message.id)
+                                    }
+                                )
+                            }
+                            item(key = "home_message_more") {
+                                TextButton(onClick = { onNavigateToHistory(searchQuery.trim()) }) {
+                                    Text("在历史记录中查看全部消息搜索")
+                                }
+                            }
                         }
 
                         // 底部间距

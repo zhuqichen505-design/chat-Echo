@@ -294,20 +294,9 @@ internal fun buildDisplayMessages(
     val groups = validMessages
         .filter { !it.variantGroupId.isNullOrBlank() }
         .groupBy { it.variantGroupId!! }
-    val consumedGroups = mutableSetOf<String>()
-    val result = mutableListOf<DisplayMessageItem>()
-
-    validMessages.forEach { message ->
-        val groupId = message.variantGroupId
-        if (groupId.isNullOrBlank()) {
-            result += DisplayMessageItem(message = message, groupId = null)
-            return@forEach
-        }
-        if (!consumedGroups.add(groupId)) return@forEach
-
-        val rawVariants = groups[groupId].orEmpty()
+    val normalizedVariants = groups.mapValues { (_, rawVariants) ->
         val distinctIndices = rawVariants.map { it.variantIndex }.distinct()
-        val variants = if (rawVariants.size > 1 && distinctIndices.size < rawVariants.size) {
+        if (rawVariants.size > 1 && distinctIndices.size < rawVariants.size) {
             rawVariants.sortedWith(compareBy<Message> { it.variantIndex }.thenBy { it.createdAt }.thenBy { it.id })
                 .mapIndexed { idx, msg ->
                     if (msg.variantIndex != idx + 1) msg.copy(variantIndex = idx + 1) else msg
@@ -315,6 +304,37 @@ internal fun buildDisplayMessages(
         } else {
             rawVariants.sortedBy { it.variantIndex }
         }
+    }
+    // 每个变体组的定位时间 = 组内最早消息时间；成对的 user/assistant 组共享同一时间，
+    // 删除组内最早的那一页时整轮不会跳到会话末尾（旧实现按“组内剩余最早消息”定位，
+    // 编辑重发产生的后建变体会把整轮搬到列表尾部，表现为输入/回复消失或错位）。
+    val groupCreatedAt = normalizedVariants.mapValues { (_, variants) ->
+        variants.minOf { it.createdAt }
+    }
+    data class DisplayRow(
+        val anchor: Long,
+        val roleRank: Int,
+        val originalOrder: Int,
+        val item: DisplayMessageItem
+    )
+
+    val consumedGroups = mutableSetOf<String>()
+    val rows = mutableListOf<DisplayRow>()
+
+    validMessages.forEachIndexed { order, message ->
+        val groupId = message.variantGroupId
+        if (groupId.isNullOrBlank()) {
+            rows += DisplayRow(
+                anchor = message.createdAt,
+                roleRank = if (message.role == "user") 0 else 1,
+                originalOrder = order,
+                item = DisplayMessageItem(message = message, groupId = null)
+            )
+            return@forEachIndexed
+        }
+        if (!consumedGroups.add(groupId)) return@forEachIndexed
+
+        val variants = normalizedVariants[groupId].orEmpty()
         val indices = variants.map { it.variantIndex }.distinct().sorted()
         val selectedIndex = selections[groupId]
             ?.takeIf { it in indices }
@@ -322,21 +342,42 @@ internal fun buildDisplayMessages(
             ?: 1
         val selectedMessage = variants.lastOrNull { it.variantIndex == selectedIndex }
             ?: variants.last()
-        result += DisplayMessageItem(
-            message = selectedMessage,
-            groupId = groupId,
-            variantInfo = if (indices.size > 1) {
-                VariantInfo(
-                    groupId = groupId,
-                    currentIndex = selectedIndex,
-                    total = indices.size,
-                    availableIndices = indices
-                )
-            } else null
+        rows += DisplayRow(
+            anchor = groupDisplayAnchor(groupId, groupCreatedAt),
+            roleRank = if (groupId.endsWith("_user")) 0 else 1,
+            originalOrder = order,
+            item = DisplayMessageItem(
+                message = selectedMessage,
+                groupId = groupId,
+                variantInfo = if (indices.size > 1) {
+                    VariantInfo(
+                        groupId = groupId,
+                        currentIndex = selectedIndex,
+                        total = indices.size,
+                        availableIndices = indices
+                    )
+                } else null
+            )
         )
     }
 
-    return result
+    return rows
+        .sortedWith(compareBy({ it.anchor }, { it.roleRank }, { it.originalOrder }))
+        .map { it.item }
+}
+
+/**
+ * 变体组的展示定位时间。
+ * 成对分组（turn_X_user / turn_X_assistant）取两组最早消息的较小值：
+ * 只要其中一组还保留着最早的原始分页，整轮仍停留在原位置。
+ */
+internal fun groupDisplayAnchor(
+    groupId: String,
+    groupCreatedAt: Map<String, Long>
+): Long {
+    val own = groupCreatedAt[groupId] ?: Long.MAX_VALUE
+    val paired = pairedVariantGroupId(groupId)?.let { groupCreatedAt[it] } ?: return own
+    return minOf(own, paired)
 }
 
 internal fun pairedVariantGroupId(groupId: String): String? {
@@ -448,7 +489,10 @@ internal fun MessageBubble(
     /** P0-3 落定信号：生成结束落库后的持久化气泡置 true，首次组合播放一次光标淡出+落定脉冲 */
     settleSignal: Boolean = false,
     latestAssistantIdentity: Boolean = false,
-    modelMarkColorOwner: ModelMarkColorMotion? = null
+    modelMarkColorOwner: ModelMarkColorMotion? = null,
+    /** 收藏状态与切换入口：为空表示该气泡不提供收藏按钮 */
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null
 ) {
     val isUser = message.role == "user"
     val personalizationSettings = rememberChatPersonalizationSettings()
@@ -867,6 +911,8 @@ internal fun MessageBubble(
                         onDelete = onDelete,
                         onTogglePin = onTogglePin?.let { cb -> { cb(message) } },
                         onToggleExclude = onToggleExclude?.let { cb -> { cb(message) } },
+                        isFavorite = isFavorite,
+                        onToggleFavorite = onToggleFavorite,
                         endAlignMetadata = !immersiveUserMessage,
                         modifier = Modifier
                             .widthIn(max = bubbleMaxWidth)
@@ -1664,6 +1710,8 @@ internal fun MessageBubble(
                         onDelete = onDelete,
                         onTogglePin = onTogglePin?.let { cb -> { cb(message) } },
                         onToggleExclude = onToggleExclude?.let { cb -> { cb(message) } },
+                        isFavorite = isFavorite,
+                        onToggleFavorite = onToggleFavorite,
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -1709,7 +1757,9 @@ internal fun MessageFooter(
     onToggleExclude: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     endAlignMetadata: Boolean = isUser,
-    thinkingBubbleVisible: Boolean = true
+    thinkingBubbleVisible: Boolean = true,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null
 ) {
     val thinkingTokensInThinkingBubble = thinkingBubbleVisible && message.role == "assistant" &&
         (!message.thinkingContent.isNullOrBlank() || message.thinkingTokens > 0)
@@ -1804,6 +1854,16 @@ internal fun MessageFooter(
                 tint = backdropContentColor,
                 onClick = onCopy
             )
+
+            // 收藏：输入与回复都可收藏，设置页与对话设置页可统一查看并跳回位置
+            if (onToggleFavorite != null) {
+                FooterIconButton(
+                    icon = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else backdropContentColor,
+                    onClick = onToggleFavorite
+                )
+            }
 
             if (!isUser && onBranch != null) {
                 IconButton(onClick = onBranch, enabled = branchEnabled && !isCreatingBranch,
