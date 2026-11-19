@@ -12,6 +12,8 @@
 
 验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.42/228）：全屏键盘已弹出时连续点击，`mInputShown` 全程 true；返回键收起后点击立即恢复。悬浮窗 + 悬浮键盘下点击前后输入框区域与整窗像素哈希一致（无焦点丢失、无光标消失、无布局跳动），返回键收起后点击恢复且继续输入正常；长按选词仍为系统手柄。冻结验收 `20261119-111042-293`：脚本 / Gradle 退出 0，669.37 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 12 秒；`Echo-v2.8.42.apk` 25,521,941 字节，SHA-256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；446 条目且条目名集合与 2.8.41 一致，5 项变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，DEX 隐私扫描 0 命中。
 
+发布与隐私核查：版本提交 `012d8aceb4bfe359e22d71c0525672ccd047eb07` 与 annotated 标签 `v2.8.42`（对象 `28ae09d2d2ad98a5528b1337be270d884966a097`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签一致；[Echo 2.8.42 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.42) 为 Latest，唯一附件 `Echo-v2.8.42.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.41 Release 与标签；删除后本机 v2.8.41 标签同样消失，已用原标签对象 `55d06a6` 恢复本机 ref（未推送），历史 APK 与其余标签保留。隐私核查：暂存文档 / 源码扫描本机路径、用户名、手机号、密钥命中 0；APK DEX 扫描 0 命中；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
+
 ## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复（真机验证）
 
 版本 2.8.41/227；Room v37 / 20 个实体不变。用户反馈：键盘收起后（返回键或点空白），再点输入框无法重新弹出输入法；同时指出上一版“全屏下光标不可见”（该现象本轮真机未复现，用户已确认现在不再出现）。

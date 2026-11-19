@@ -10,6 +10,8 @@
 
 冻结验收 `20261119-111042-293`：脚本 / Gradle 退出 0，669.37 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 112 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 12 秒；`Echo-v2.8.42.apk` 25,521,941 字节，SHA256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`；v2 签名与上版证书一致，Android Debug **非正式生产签名**。APK 446 条目且条目名集合与 2.8.41 一致，5 项内容变化，`resources.arsc` 逐字节不变、186 张位图不变，隐私新增命中 0。真机 HONOR ROL-W10 安装 release 包：全屏键盘已弹出时连续点击不收起、页面不跳动，返回键收起后点击立即恢复；悬浮窗 + 悬浮键盘下点击前后像素一致，收起后点击恢复且继续输入正常。
 
+版本提交 `012d8ac` 与标注标签 `v2.8.42` 已推送；[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.42) 为 Latest，唯一附件摘要与独立下载一致。
+
 ## Echo 2.8.41（已发布）
 
 - 修复输入法收起后，再点输入框无法重新弹出键盘（全屏与悬浮窗均可复现）。

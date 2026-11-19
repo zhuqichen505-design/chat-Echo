@@ -37,7 +37,7 @@
 - 构建：Release `assembleRelease` 退出 0，5 分 12 秒；`Echo-v2.8.42.apk` 25,521,941 字节，SHA256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；446 条目且条目名集合与 2.8.41 一致，5 项内容变化，`resources.arsc` 与 186 张位图不变，DEX 隐私扫描 0 命中；发布目录新增 `Echo-v2.8.42.apk`，历史包保留。
 - 设备验收：HONOR ROL-W10 安装 release 包。全屏键盘已弹出时连续点击，`mInputShown` 全程 true、页面不跳动；返回键收起后点击立即恢复。悬浮窗 + 悬浮键盘下点击前后输入框区域与整窗像素哈希一致（无焦点丢失、无光标消失、无布局跳动），收起后点击恢复并继续输入正常；长按选词仍为系统手柄。
 - 待办：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手；未逐一枚举第三方输入法（讯飞）下的表现。
-- 发布：提交与 annotated 标签 `v2.8.42` 已推送核验；Release 为 Latest、唯一附件，平台 digest 与独立下载 SHA256 / 大小一致；已删除远端旧 v2.8.41 Release 与标签，本机历史标签 / APK 保留。
+- 发布：提交 `012d8aceb4bfe359e22d71c0525672ccd047eb07` 与 annotated 标签 `v2.8.42`（对象 `28ae09d2d2ad98a5528b1337be270d884966a097`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致；[Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.42) 为 Latest、唯一附件，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致；已删除远端旧 v2.8.41 Release 与标签，删除后本机 v2.8.41 标签同步消失、已用原标签对象 `55d06a6` 恢复本机 ref（未推送），历史 APK 与其余标签保留。隐私核查：暂存文档 / 源码与 APK DEX 扫描命中 0。
 
 ## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复（已发布）
 
