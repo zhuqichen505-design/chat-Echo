@@ -1,5 +1,31 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-19 · 2.8.42 修复键盘已弹出时点击输入框导致闪烁
+
+版本 2.8.42/228；Room v37 / 20 个实体不变。用户反馈 2.8.41 之后，键盘已弹出时点击输入框会让输入法收起再弹、页面闪烁，同时要求保留“收起后点击可重新弹出”。
+
+根因与证据：
+
+- 2.8.41 的恢复路径是 `shouldRevealImeOnTap(focused, isImeVisibleNow(...))` → `clearFocus(force = true)` → 下一帧 `requestFocus()`。
+- `isImeVisibleNow` 读窗口 Insets 的 `isVisible(Type.ime())`。真机确认：悬浮键盘（分离键盘）弹出时，悬浮窗与输入框位置完全不变（窗口收不到 IME Insets），该判断恒为 false。
+- 因此每次点击都命中“已聚焦 + 不可见”，清焦点后键盘收起、下一帧重建又弹回，页面随之跳动。
+
+修复：恢复键盘改为幂等动作——`view.requestFocus()`（已是焦点时为无操作）后调用 `InputMethodManager.showSoftInput(view, 0)`，绝不清除焦点；下一帧若仍判定不可见再补一次。键盘已弹出时该调用无副作用。真机确认返回键收起后 `showSoftInput` 可恢复（`mInputShown` false → true），不再需要清焦重建。
+
+冻结验收 `20261119-111042-293`：脚本 / Gradle 退出 0，669.37 秒；94 套件 / 1,102 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease` 退出 0，5 分 12 秒。`Echo-v2.8.42.apk` 25,521,941 字节，SHA256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`；`com.aiassistant`、2.8.42/228、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：446 条目，条目名集合与 2.8.41 完全一致；5 项内容变化为清单、版本控制信息、两个 baseline profile、`classes.dex`；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 隐私扫描（本机路径 / 手机号 / `sk-` 密钥）0 命中。发布目录新增 `Echo-v2.8.42.apk`，历史包保留。
+
+设备走查（HONOR ROL-W10，USB 调试，release 包）：
+
+- 全屏（横屏）：键盘已弹出时连续点击输入框，`mInputShown` 全程 true，键盘不收起、页面不跳动；返回键收起后点击立即恢复。
+- 悬浮窗 + 悬浮键盘（窗口收不到 IME Insets 的场景）：键盘已弹出时点击，输入框区域与整窗像素哈希在点击前后完全一致（无焦点丢失、无光标消失）；返回键收起后点击恢复，随后继续输入正常。
+- 长按选词仍为系统手柄，键盘不会被误弹。
+
+剩余风险：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手；未逐一枚举第三方输入法（讯飞）下的表现。
+
 ## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复
 
 版本 2.8.41/227；Room v37 / 20 个实体不变。用户反馈键盘收起后点击输入框无法重新弹出，并提到“全屏下光标不可见”（后者真机未复现，用户确认已不再出现）。

@@ -159,7 +159,7 @@ internal suspend fun awaitEditorWindowFocus(
 /**
  * 原生点击仍负责定位光标与焦点，但 Compose 1.6.8 的点击只在未聚焦时请求焦点：
  * 输入框已聚焦、用户又用返回键收起键盘后，再点输入框不会重新唤起输入法。
- * 因此“已聚焦 + 输入法不可见”必须由调用方补一次会话重建；键盘已弹出或尚未聚焦时都不介入。
+ * 因此“已聚焦 + 输入法不可见”时由调用方补一次显示请求；键盘已弹出或尚未聚焦时都不介入。
  */
 internal fun shouldRevealImeOnTap(focused: Boolean, imeVisible: Boolean): Boolean =
     focused && !imeVisible
@@ -390,17 +390,24 @@ internal fun EchoNativeTextField(
     // session after a window focus change. Window transitions must never clear focus or intercept
     // its keyboard controller; the only exception is a tap that has to revive a hidden IME.
     val view = LocalView.current
-    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val imeVisibleSnapshot = WindowInsets.isImeVisible
     val scope = rememberCoroutineScope()
-    // 已聚焦时原生点击只定位光标，不会再唤起输入法；系统结束输入会话后 show() 也无效，
-    // 只能结束并重建焦点，让输入框重新建立输入会话（键盘随之弹出）。
+    val inputMethodManager = remember(view) {
+        view.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+    }
+    // 已聚焦时原生点击只定位光标，不会再唤起输入法。恢复必须是无害的幂等动作：
+    // 悬浮键盘 / 悬浮窗下窗口收不到输入法 Insets，“是否可见”判断会误报，清焦点重建
+    // 会让已经弹出的键盘收起再弹（页面闪烁）。这里只请求系统显示键盘，绝不动焦点。
     fun revealImeAfterTap() {
         if (!shouldRevealImeOnTap(focused, isImeVisibleNow(view, imeVisibleSnapshot))) return
-        focusManager.clearFocus(force = true)
+        view.requestFocus()
+        inputMethodManager?.showSoftInput(view, 0)
         scope.launch {
             withFrameNanos { }
-            runCatching { focusRequester.requestFocus() }
+            if (!isImeVisibleNow(view, imeVisibleSnapshot)) {
+                // 首次请求在窗口刚拿回焦点时可能被忽略，补一次；键盘已弹出时该调用无副作用。
+                inputMethodManager?.showSoftInput(view, 0)
+            }
         }
     }
     CompositionLocalProvider(
