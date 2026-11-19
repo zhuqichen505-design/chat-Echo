@@ -37,7 +37,7 @@
 - 构建：Release `assembleRelease` 退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；446 条目且条目名集合与 2.8.39 一致，5 项内容变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，隐私新增命中 0；发布目录新增 `Echo-v2.8.41.apk`，历史包保留。
 - 设备验收：HONOR ROL-W10 安装 release 包；全屏与悬浮窗“点击弹出 → 返回键收起 → 再点击恢复”稳定；收起后点击文字中部再输入得到 `ZhMelloXY`（插入位置与点击一致，重建焦点不丢选区）；长按选词仍为系统手柄且不误弹键盘；输入框无调试文字残留。
 - 待办：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手。
-- 发布：提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致；[Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest、唯一附件，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建；已删除远端旧 v2.8.39 Release 与标签，本机历史标签 / APK 保留。隐私核查：暂存文档 / 源码与 APK DEX 扫描本机路径、用户名、手机号、`sk-` 密钥命中 0。
+- 发布：提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，`git ls-remote` 核验远端 main / peeled 标签一致；[Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest、唯一附件，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建；已删除远端旧 v2.8.39 Release 与标签；删除后本机 v2.8.39 标签亦消失，已用原标签对象 `1eb03c6` 恢复本机 ref（未推送），历史 APK 与其余标签保留。隐私核查：暂存文档 / 源码与 APK DEX 扫描本机路径、用户名、手机号、`sk-` 密钥命中 0。
 
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（已发布）
 
