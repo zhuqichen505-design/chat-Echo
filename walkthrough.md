@@ -1,5 +1,33 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复
+
+版本 2.8.41/227；Room v37 / 20 个实体不变。用户反馈键盘收起后点击输入框无法重新弹出，并提到“全屏下光标不可见”（后者真机未复现，用户确认已不再出现）。
+
+根因与证据：
+
+- `BasicTextField2`（Compose 1.6.8）的点击手势只在未聚焦时 `requestFocus()`；已聚焦时点击仅定位光标。
+- 返回键收起键盘后系统已 `finishInput`，输入会话结束；`SoftwareKeyboardController.show()` 无会话可用。先按“补一次 show()”实现，真机复测 `mInputShown=false` 仍不弹，确认该路径无效后改为重建焦点。
+- v2.8.37 将点击、焦点与输入会话交还原生输入框，此后没有“已聚焦 + 键盘收起”的兜底路径。
+
+修复：`EchoNativeTextField` 新增 `Modifier.editorTapToRevealIme`，在 `PointerEventPass.Initial` 旁路观察手势且不消费事件；只有抬手、位移未超 `touchSlop`、时长未超长按阈值才判定为点击。命中纯函数 `shouldRevealImeOnTap(focused, imeVisible)` 后 `clearFocus(force = true)`，下一帧 `requestFocus()` 重建输入会话，键盘随之弹出。长按选词、拖动选区与滚动不受影响。另删除 2.8.40 调试期遗留的红色调试文字（构建后加入，未进入已安装包）。
+
+冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease` 退出 0，5 分 45 秒。`Echo-v2.8.41.apk` 25,521,941 字节，SHA256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`；`com.aiassistant`、2.8.41/227、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：446 条目，条目名集合与 2.8.39 完全一致；5 项内容变化为清单、版本控制信息、两个 baseline profile、`classes.dex`；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 隐私扫描（本机路径 / 手机号 / `sk-` 密钥）0 命中。发布目录新增 `Echo-v2.8.41.apk`，历史包保留。
+
+设备走查（HONOR ROL-W10，USB 调试，release 包）：
+
+- 全屏：点击输入框弹出键盘 → 返回键收起 → 再点击立即恢复，连续多次稳定。
+- 光标：收起后点击文字中部再输入，得到 `ZhMelloXY`，插入位置与点击一致（重建焦点不丢选区）。
+- 悬浮窗：同样路径键盘正常恢复，输入框内光标可见、无游离手柄。
+- 长按选词：仍为系统手柄，选区正常，键盘不会被误弹。
+- 输入框无调试文字残留，空输入占位与光标显示正常。
+
+剩余风险：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手；不同输入法（讯飞 / 系统）下的补弹时序未逐一枚举。
+
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
 
 版本 2.8.39/225；Room v37 / 20 个实体不变。用户反馈 2.8.38 安装包点击进入对话即闪退。

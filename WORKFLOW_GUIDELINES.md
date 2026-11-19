@@ -26,6 +26,19 @@
 
 ## 本次记录
 
+## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复（已发布）
+
+- 基线 `origin/main/6b1eb45`（已发布 2.8.39/225）；版本顺延为 2.8.41/227。本机存在 2.8.40/226 未发布构建（悬浮窗选择手柄修复），为不覆盖已安装包并保持版本单调，本次直接使用 2.8.41。
+- 现象：键盘收起后（返回键或点空白），再点输入框无法重新弹出输入法；全屏与悬浮窗均可复现。用户同时反馈的“全屏下光标不可见”本轮真机未复现（横竖屏、空/有文字、键盘开/关均正常），用户确认现在不再出现。
+- 根因：`BasicTextField2`（Compose 1.6.8）的点击手势只在“未聚焦”时 `requestFocus()`；已聚焦时点击仅定位光标。返回键收起键盘后系统已结束输入会话，`SoftwareKeyboardController.show()` 无可用会话，实测无效（先按“补一次 show()”实现并真机复测，`mInputShown` 仍为 false，随后改为重建焦点）。v2.8.37 把点击交还原生输入框后该路径即无兜底。
+- 方案：`EchoNativeTextField` 增加 `Modifier.editorTapToRevealIme`，在 `PointerEventPass.Initial` 旁路观察手势、不消费事件；仅“抬手 + 未超 touchSlop + 未超长按阈值”判定为点击，经纯函数 `shouldRevealImeOnTap(focused, imeVisible)` 命中“已聚焦 + 输入法不可见”后 `clearFocus` 并在下一帧 `requestFocus()`，重建输入会话。同时删除 2.8.40 调试期遗留的 `drawWithContent` 红色调试文字（构建后加入，未进入任何已安装包）。
+- 文件：`ui/components/EchoNativeTextField.kt`、`UiPolishRegressionTest.kt`、新增 `ui/components/EchoEditorSelectionHandles.kt`（随 2.8.40 修复一并发布）、版本配置与发布文档；不改 Room v37 / 20 个实体、请求协议、消息或备份格式。
+- 验证：冻结验收 `20261119-101447-584` 脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试，失败 / 错误 / 跳过 0；Lint 0 Error / 112 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 构建：Release `assembleRelease` 退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`；apksigner v2 通过，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**；446 条目且条目名集合与 2.8.39 一致，5 项内容变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，隐私新增命中 0；发布目录新增 `Echo-v2.8.41.apk`，历史包保留。
+- 设备验收：HONOR ROL-W10 安装 release 包；全屏与悬浮窗“点击弹出 → 返回键收起 → 再点击恢复”稳定；收起后点击文字中部再输入得到 `ZhMelloXY`（插入位置与点击一致，重建焦点不丢选区）；长按选词仍为系统手柄且不误弹键盘；输入框无调试文字残留。
+- 待办：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手。
+- 发布：提交与 annotated 标签 `v2.8.41` 已推送核验；Release 为 Latest、唯一附件，平台 digest 与独立下载 SHA256 / 大小一致；已删除远端旧 v2.8.39 Release 与标签，本机历史标签 / APK 保留。
+
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（已发布）
 
 - 现象：2.8.38 安装包点击进入对话即闪退，debug 构建无法复现。
