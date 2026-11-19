@@ -228,13 +228,15 @@ class UiPolishRegressionTest {
     }
 
     @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-    @Test     fun nativeEditorTapsAreNotInterceptedOrDuplicated() {
+    @org.robolectric.annotation.Config(shadows = [CountingInputMethodManager::class, ImeInsetsViewRoot::class, PopupTitleResources::class])
+    @Test fun nativeEditorTapsAreNotInterceptedOrDuplicated() {
         fun resultFromTaps(
             wrapped: Boolean,
             preFocus: Boolean = true,
             hideAndRestoreBeforeTap: Boolean = false,
-            tapCount: Int = 1
-        ): Pair<Int, Boolean> {
+            tapCount: Int = 1,
+            imeVisibleBeforeTap: Boolean = true
+        ): Triple<Int, Int, Boolean> {
             val activityController = Robolectric.buildActivity(ComponentActivity::class.java).setup()
             val activity = activityController.get()
             val composeView = ComposeView(activity)
@@ -260,9 +262,9 @@ class UiPolishRegressionTest {
                             )
                         } else {
                             val state = androidx.compose.runtime.remember {
-                                androidx.compose.foundation.text2.input.TextFieldState("已有输入内容")
+                                androidx.compose.foundation.text.input.TextFieldState("已有输入内容")
                             }
-                            androidx.compose.foundation.text2.BasicTextField2(
+                            androidx.compose.foundation.text.BasicTextField(
                                 state = state,
                                 modifier = modifier.then(Modifier.focusRequester(focusRequester))
                             )
@@ -286,7 +288,23 @@ class UiPolishRegressionTest {
                     composeView.dispatchWindowFocusChanged(true)
                     looper.idleFor(java.time.Duration.ofMillis(32))
                 }
+                // Set the same observable root signal that the wrapper reads; do not infer
+                // actual floating-keyboard visibility from a missing inset.
+                ImeInsetsViewRoot.visible = imeVisibleBeforeTap
+                composeView.dispatchApplyWindowInsets(
+                    android.view.WindowInsets.Builder()
+                        .setInsets(android.view.WindowInsets.Type.ime(),
+                            if (imeVisibleBeforeTap) android.graphics.Insets.of(0, 0, 0, 120)
+                            else android.graphics.Insets.NONE)
+                        .setVisible(android.view.WindowInsets.Type.ime(), imeVisibleBeforeTap)
+                        .build()
+                )
+                looper.idleFor(java.time.Duration.ofMillis(32))
+                assertTrue("测试必须取得真实根窗口 Insets", androidx.core.view.ViewCompat.getRootWindowInsets(composeView) != null)
+                assertEquals("测试必须模拟指定的实时 IME 可见性", imeVisibleBeforeTap,
+                    com.aiassistant.ui.components.isImeVisibleNow(composeView, !imeVisibleBeforeTap))
                 shows = 0
+                CountingInputMethodManager.showRequests = 0
                 repeat(tapCount) { index ->
                     // 独立单击必须超过系统双击窗口，否则 Compose 会把后一次识别为双击。
                     val now = android.os.SystemClock.uptimeMillis() + index * 400L
@@ -305,33 +323,108 @@ class UiPolishRegressionTest {
                         up.recycle()
                     }
                 }
-                return shows to focused
+                return Triple(shows, CountingInputMethodManager.showRequests, focused)
             } finally {
+                ImeInsetsViewRoot.visible = false
                 composeView.disposeComposition()
                 activityController.pause().stop().destroy()
             }
         }
 
-        assertEquals(1 to true, resultFromTaps(wrapped = false))
-        assertEquals("包装后必须保留且仅保留原生的一次 show", 1 to true, resultFromTaps(wrapped = true))
+        val nativeOnce = resultFromTaps(wrapped = false)
+        assertEquals("原生字段的点击必须实际调用键盘控制器", 1, nativeOnce.first)
+        assertEquals("原生字段点击后应保持焦点", true, nativeOnce.third)
+        val wrappedOnce = resultFromTaps(wrapped = true)
+        assertEquals("点击后焦点必须保持", true, wrappedOnce.third)
+        assertEquals("Insets 显示键盘可见时不得透传 Compose show", 0, wrappedOnce.first)
+        assertEquals("Insets 显示键盘可见时不得另向 IMM 请求 show", 0, wrappedOnce.second)
+        val wrappedHidden = resultFromTaps(wrapped = true, imeVisibleBeforeTap = false)
+        assertEquals("Insets 显示键盘收起时点击后焦点必须保持", true, wrappedHidden.third)
+        assertEquals("恢复键盘时不得另外透传 Compose show", 0, wrappedHidden.first)
+        assertEquals("Insets 显示键盘收起时必须恰好向 IMM 请求一次 show", 1, wrappedHidden.second)
         assertEquals(
-            "首次聚焦由原生字段完成",
-            resultFromTaps(wrapped = false, preFocus = false),
-            resultFromTaps(wrapped = true, preFocus = false)
+            "首次聚焦仍由原生字段完成",
+            true,
+            resultFromTaps(wrapped = true, preFocus = false, imeVisibleBeforeTap = false).third
         )
         assertEquals(
-            "收起键盘及窗口恢复后，下一次点击仍由原生字段唤出",
-            1 to true,
-            resultFromTaps(wrapped = true, hideAndRestoreBeforeTap = true)
+            "收起键盘及窗口恢复后点击仍需保持焦点",
+            true,
+            resultFromTaps(wrapped = true, hideAndRestoreBeforeTap = true,
+                imeVisibleBeforeTap = false).third
         )
         val nativeRepeated = resultFromTaps(wrapped = false, tapCount = 3)
         val wrappedRepeated = resultFromTaps(wrapped = true, tapCount = 3)
-        assertEquals(
-            "已有内容时包装层不得改变原生字段的连续点击手势与显示次数",
-            nativeRepeated,
-            wrappedRepeated
+        assertTrue("原生连续点击对照必须实际请求键盘", nativeRepeated.first >= 1)
+        assertEquals("Insets 显示键盘可见时连续点击不得透传 Compose show", 0, wrappedRepeated.first)
+        assertEquals("Insets 显示键盘可见时连续点击不得向 IMM 请求 show", 0, wrappedRepeated.second)
+        assertEquals("连续点击后焦点必须保持", true, wrappedRepeated.third)
+    }
+
+    @Test fun keyboardControllerSwallowsShowWhileImeIsVisible() {
+        var forwarded = 0
+        var hidden = 0
+        val delegate = object : androidx.compose.ui.platform.SoftwareKeyboardController {
+            override fun show() { forwarded++ }
+            override fun hide() { hidden++ }
+        }
+        var imeVisible = true
+        var recovered = 0
+        val controller = com.aiassistant.ui.components.ImeAwareKeyboardController(
+            delegate = delegate,
+            isImeVisible = { imeVisible },
+            recoverHiddenIme = { recovered++ }
         )
-        assertTrue("已有内容时至少要完成一次原生显示", wrappedRepeated.first >= 1)
+        var tap = controller.beginTap(focused = true)
+        controller.finishGesture(tap, isTap = true)
+        controller.show()
+        assertEquals("键盘已显示时不得再请求 show", 0, forwarded)
+        assertEquals(0, recovered)
+        controller.endTap(tap)
+        imeVisible = false
+        tap = controller.beginTap(focused = true)
+        controller.finishGesture(tap, isTap = true)
+        controller.show()
+        controller.show()
+        assertEquals("键盘已收起时必须走一次恢复路径", 1, recovered)
+        assertEquals("恢复时不能同时透传 Compose show", 0, forwarded)
+        controller.endTap(tap)
+        tap = controller.beginTap(focused = false)
+        controller.finishGesture(tap, isTap = true)
+        controller.show()
+        assertEquals("首次聚焦应交给 Compose 的输入会话", 1, forwarded)
+        controller.endTap(tap)
+        controller.hide()
+        assertEquals("hide 必须始终透传", 1, hidden)
+    }
+
+    @Test fun keyboardTapGateDoesNotLetOldCleanupClearANewerGesture() {
+        var forwarded = 0
+        var recovered = 0
+        val controller = com.aiassistant.ui.components.ImeAwareKeyboardController(
+            delegate = object : androidx.compose.ui.platform.SoftwareKeyboardController {
+                override fun show() { forwarded++ }
+                override fun hide() = Unit
+            },
+            isImeVisible = { false },
+            recoverHiddenIme = { recovered++ }
+        )
+        val oldTap = controller.beginTap(focused = true)
+        controller.finishGesture(oldTap, isTap = true)
+        val newTap = controller.beginTap(focused = true)
+        controller.finishGesture(newTap, isTap = true)
+        controller.endTap(oldTap)
+        controller.show()
+        assertEquals(1, recovered)
+        assertEquals(0, forwarded)
+        controller.endTap(newTap)
+
+        val drag = controller.beginTap(focused = true)
+        controller.finishGesture(drag, isTap = false)
+        controller.show()
+        assertEquals("拖动或取消不应走点击专用恢复", 1, recovered)
+        assertEquals(1, forwarded)
+        controller.endTap(drag)
     }
 
     @Test fun tapWaitsOnlyBrieflyForWindowFocusAndStopsWhenInactive() = runTest {
@@ -700,14 +793,14 @@ class UiPolishRegressionTest {
     @Test fun delayedEditorAcknowledgementsCannotRewindAnImeEditOrHandleDrag() {
         val initial = androidx.compose.ui.text.input.TextFieldValue("合成编辑内容", androidx.compose.ui.text.TextRange(2))
         val editor = com.aiassistant.ui.components.NativeEditorState(initial)
-        editor.field.edit { replace(2, 2, "新增"); selectCharsIn(androidx.compose.ui.text.TextRange(3)) }
+        editor.field.edit { replace(2, 2, "新增"); selection = androidx.compose.ui.text.TextRange(3) }
         val published = requireNotNull(editor.valueToPublish())
-        editor.field.edit { replace(3, 3, "后续"); selectCharsIn(androidx.compose.ui.text.TextRange(2, 6)) }
+        editor.field.edit { replace(3, 3, "后续"); selection = androidx.compose.ui.text.TextRange(2, 6) }
         val latest = editor.currentValue()
         editor.reconcileExternal(published)
         assertEquals("延迟的文本/选区回声不能覆盖新编辑", latest, editor.currentValue())
         assertEquals("未发布的新编辑不能被确认旧值时吞掉", latest, editor.valueToPublish())
-        editor.field.edit { selectCharsIn(androidx.compose.ui.text.TextRange(1, 7)) }
+        editor.field.edit { selection = androidx.compose.ui.text.TextRange(1, 7) }
         val dragged = editor.currentValue()
         editor.reconcileExternal(latest)
         assertEquals(dragged, editor.currentValue())

@@ -13,8 +13,8 @@ android {
         applicationId = "com.aiassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 228
-        versionName = "2.8.42"
+        versionCode = 233
+        versionName = "2.8.47"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -134,7 +134,8 @@ dependencies {
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
+    // Compose UI 1.7.8 avoids redundant Popup property updates when properties are unchanged.
+    implementation("androidx.compose.ui:ui:1.7.8")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")

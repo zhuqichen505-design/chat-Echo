@@ -39,8 +39,8 @@ import com.aiassistant.domain.model.ToolCallRecord
 import com.aiassistant.domain.model.QueuedMessage
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text2.TextFieldDecorator
-import androidx.compose.foundation.text2.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import com.aiassistant.ui.components.EchoNativeTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*

@@ -1,18 +1,39 @@
 # 维护记录
 
+## 2026-11-19 · 输入法与光标联合修复候选（2.8.47 候选，未发布）
+
+用户要求同时解决“输入法已显示时再次点击导致闪烁”和“全屏首次弹出输入法后光标消失”两个交替问题。已构建并安装 2.8.43/229 候选 APK；用户反馈普通和分离键盘布局下均仍有闪烁，候选未通过验收，未发布。
+
+候选改动位于 `ui/components/EchoNativeTextField.kt` 与输入法/光标回归测试：输入框装饰器保持稳定结构，以减少全屏与悬浮窗重组对 `BasicTextField2` 内部光标节点的影响；点击手势在 Initial 阶段只记录同一次手势，由 `ImeAwareKeyboardController` 根据实时窗口 Insets 决定显示路径。该方案尚未解决真机闪烁，仍需定位实际触发路径。
+
+新增 Robolectric 回归覆盖装饰器重组、全屏/悬浮窗模式切换、竖线光标、焦点与选区保持、实时 Insets 覆盖旧快照，以及“键盘显示时零重复请求、收起后一次恢复请求”。测试环境的 Compose 双击超时需要推进两段真实延迟，已在测试中明确处理，避免把模拟双击误判为生产问题。
+
+候选验证：`scripts/verify.ps1` 退出 0；95 套件 / 1106 项测试全部通过，失败、错误、跳过均为 0，Lint 0 Error；`git diff --check` 退出 0。Release 构建退出 0，候选 APK 已安装；全屏普通键盘布局的截图分别可见竖线光标和蓝色水滴手柄。自动诊断只记录到离散的输入法显示状态，不能证明点击过程中没有瞬时闪烁；用户的真机反馈表明闪烁仍存在。
+
+后续真机定位：录屏捕获到选中文字时键盘区域短暂空白后原位恢复；在本轮自动鼠标与触摸单击对照中未捕获到相同空白，自动长按选词则可复现。仅供定位的 2.8.44/230 诊断包临时关闭选词工具栏并保留原生手柄，安装后长按选词仍复现空白，因此不能将问题归因于工具栏，也尚不能断言手柄窗口是根因。该诊断包未发布；源码中的临时关闭逻辑已撤回。录屏和设备备份仅留本机。
+
+设备恢复：为替换临时关闭工具栏的诊断包，以已发布 2.8.42 的源码为基线，仅将版本提升至 2.8.45/231，保留选词工具栏；该包不含本轮候选修复。Release 构建退出 0，签名校验通过且证书与既有版本一致（Android Debug 非正式生产签名）。新备份完成并校验后，设备覆盖安装返回 Success，启动冒烟通过。此前反馈的键盘闪烁仍未解决；此恢复包未作为修复版本验收或发布。
+
+依赖对照：直接升级 Compose UI 至 1.7.8 会连带升级 foundation，旧输入框 API 无法编译；临时强制混合 UI 1.7.8 与旧 foundation 后，三项输入框定向测试均失败（Gradle 退出 1）。已撤销强制混用，并迁移到匹配的组件版本；不能沿用 2.8.43 的自动验收结论。
+
+2.8.46/232 Compose 1.7.8 对照包曾安装：新备份及校验、覆盖安装和启动冒烟均通过。冻结后的 `scripts/verify.ps1` 退出 0，耗时 570.946 秒，96 套件 / 1108 项测试，失败、错误、跳过均为 0。APK 为 25,623,695 字节，SHA-256 `10ec49ce8dbbab937a38d30773c22f00159d97df03c0d9cb44146a64c5282d20`。普通键盘布局下，自动首次弹出、收起后恢复通过；截图可见竖线、光标水滴与选词手柄，选词录屏未观察到基线中的大面积空白。用户随后确认普通和分离键盘布局下输入并点击文字未发现闪烁，竖线光标和蓝色水滴手柄均可见；应用悬浮窗模式也已检查且表现正常。悬浮键盘显示时窗口 Insets 可能为 false，当前逻辑仍可能再次请求 show，不能保证其他输入法表现。该对照包未作为完成修复的版本发布。
+
+
+2.8.47/233 为后续源码候选：本次候选处理输入法已弹出时点击输入框出现闪烁，以及全屏竖线光标和水滴手柄消失的问题。输入框保持稳定的装饰器结构，使用匹配的 Compose 1.7.8 文本输入组件，并协调点击期间的键盘显示请求；键盘报告不可见时保留恢复路径。录屏对照发现选词时键盘内容曾短暂空白，但尚不足以确定具体根因。 部分悬浮键盘场景下窗口报告的输入法可见性可能与实际不一致，因而当前逻辑仍可能再次请求显示；不能据此保证其他设备或输入法均无重复请求或闪烁。 上述用户反馈针对 2.8.46。2.8.47 正式冻结验收退出 0，耗时 473.563 秒；96 套件 / 1,108 项测试全部执行，失败 / 错误 / 跳过均为 0，Lint 0 Error / 114 Warning。Release 构建退出 0，耗时 4 分 58 秒；备份并校验后覆盖安装成功、启动通过，新对话自动首次弹出和收起后恢复通过；用户对 2.8.47 实际输入并多次点击后确认未发现闪烁，竖线光标和蓝色手柄均可见。 `Echo-v2.8.47.apk` 为 25,623,695 字节，SHA-256 `66fa9854ada33ea45de74d24b0830e0a2ef92c6456c63c9ca68877cebc48f907`；签名与上版一致，Android Debug 非正式生产签名。APK 450 条目 CRC 全部通过；与 2.8.46 相比仅清单、baseline profile 和 DEX 变化，资源表及 186 张图片一致。 当前未发布。
+
 ## 2026-11-19 · 2.8.42 修复“键盘已弹出时点击输入框导致闪烁”（真机验证）
 
 版本 2.8.42/228；Room v37 / 20 个实体不变。用户反馈：2.8.41 之后，键盘已经弹出时点击输入框会让输入法收起再弹、页面闪烁；同时要求保留“键盘收起后点击可重新弹出”。
 
-根因：2.8.41 用 `isImeVisibleNow`（窗口 Insets 的 `isVisible(Type.ime())`）判断键盘状态，命中“已聚焦 + 不可见”就 `clearFocus` 再 `requestFocus` 重建输入会话。但 Honor 的悬浮键盘（分离键盘）与悬浮窗下，应用窗口收不到输入法 Insets（真机确认：悬浮键盘弹出时窗口位置不变、输入框不上移），该判断恒为“键盘已收起”，于是每次点击都清一次焦点——已弹出的键盘被收起又弹回，输入框高度与页面随之跳动。
+根因：2.8.41 用 `isImeVisibleNow`（窗口 Insets 的 `isVisible(Type.ime())`）判断键盘状态，命中“已聚焦 + 不可见”就 `clearFocus` 再 `requestFocus` 重建输入会话。但 平板设备 的悬浮键盘（分离键盘）与悬浮窗下，应用窗口收不到输入法 Insets（真机确认：悬浮键盘弹出时窗口位置不变、输入框不上移），该判断恒为“键盘已收起”，于是每次点击都清一次焦点——已弹出的键盘被收起又弹回，输入框高度与页面随之跳动。
 
 修复：把“恢复键盘”改成无害的幂等动作，只调用 `InputMethodManager.showSoftInput(view, 0)` 请求显示，绝不清除焦点；下一帧若仍判定不可见再补一次（键盘已弹出时该调用无副作用）。`shouldRevealImeOnTap` 保留为“避免每次点击都打扰输入法”的前置判断。真机确认：返回键收起键盘后 `showSoftInput` 可正常恢复（`mInputShown` false → true），因此不再需要清焦重建。
 
 涉及文件：`ui/components/EchoNativeTextField.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
 
-验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.42/228）：全屏键盘已弹出时连续点击，`mInputShown` 全程 true；返回键收起后点击立即恢复。悬浮窗 + 悬浮键盘下点击前后输入框区域与整窗像素哈希一致（无焦点丢失、无光标消失、无布局跳动），返回键收起后点击恢复且继续输入正常；长按选词仍为系统手柄。冻结验收 `20261119-111042-293`：脚本 / Gradle 退出 0，669.37 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 12 秒；`Echo-v2.8.42.apk` 25,521,941 字节，SHA-256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；446 条目且条目名集合与 2.8.41 一致，5 项变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，DEX 隐私扫描 0 命中。
+验证（真机 平板设备，USB 调试，release 包 2.8.42/228）：全屏键盘已弹出时连续点击，`mInputShown` 全程 true；返回键收起后点击立即恢复。悬浮窗 + 悬浮键盘下点击前后输入框区域与整窗像素哈希一致（无焦点丢失、无光标消失、无布局跳动），返回键收起后点击恢复且继续输入正常；长按选词仍为系统手柄。冻结验收 `20261119-111042-293`：脚本 / Gradle 退出 0，669.37 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 12 秒；`Echo-v2.8.42.apk` 25,521,941 字节，SHA-256 `3aef7a714b123887796b787bf6b6608192ba157a5cf8dee20c9ad7ee8442eff9`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；446 条目且条目名集合与 2.8.41 一致，5 项变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 与 186 张位图不变，DEX 隐私扫描 0 命中。
 
-发布与隐私核查：版本提交 `012d8aceb4bfe359e22d71c0525672ccd047eb07` 与 annotated 标签 `v2.8.42`（对象 `28ae09d2d2ad98a5528b1337be270d884966a097`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签一致；[Echo 2.8.42 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.42) 为 Latest，唯一附件 `Echo-v2.8.42.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.41 Release 与标签；删除后本机 v2.8.41 标签同样消失，已用原标签对象 `55d06a6` 恢复本机 ref（未推送），历史 APK 与其余标签保留。隐私核查：暂存文档 / 源码扫描本机路径、用户名、手机号、密钥命中 0；APK DEX 扫描 0 命中；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
+发布与隐私核查：版本提交 `012d8aceb4bfe359e22d71c0525672ccd047eb07` 与 annotated 标签 `v2.8.42`（对象 `28ae09d2d2ad98a5528b1337be270d884966a097`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签一致；Echo 2.8.42 Release 为 Latest，唯一附件 `Echo-v2.8.42.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.41 Release 与标签；删除后本机 v2.8.41 标签同样消失，已用原标签对象 `55d06a6` 恢复本机 ref（未推送），历史 APK 与其余标签保留。隐私核查：暂存文档 / 源码扫描本机路径、用户名、手机号、密钥命中 0；APK DEX 扫描 0 命中；提交作者为 `维护身份（邮箱已脱敏）`。
 
 ## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复（真机验证）
 
@@ -24,21 +45,21 @@
 
 涉及文件：`ui/components/EchoNativeTextField.kt`、`app/src/test/java/com/aiassistant/UiPolishRegressionTest.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
 
-验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.41/227）：全屏“点击弹出 → 返回键收起 → 再点击恢复”稳定通过；收起后点击文字中部再输入得到 `ZhMelloXY`，插入位置与点击一致，说明重建焦点不丢选区；悬浮窗内同样路径键盘正常恢复，光标可见、无游离手柄；长按选词仍为系统手柄且不会误弹键盘；输入框无调试文字残留。冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA-256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）。
+验证（真机 平板设备，USB 调试，release 包 2.8.41/227）：全屏“点击弹出 → 返回键收起 → 再点击恢复”稳定通过；收起后点击文字中部再输入得到 `ZhMelloXY`，插入位置与点击一致，说明重建焦点不丢选区；悬浮窗内同样路径键盘正常恢复，光标可见、无游离手柄；长按选词仍为系统手柄且不会误弹键盘；输入框无调试文字残留。冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA-256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）。
 
-发布与隐私核查：版本提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；[Echo 2.8.41 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest，唯一附件 `Echo-v2.8.41.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.39 Release 与标签；删除后复核发现本机 v2.8.39 标签同时消失，已按原标签对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5` 恢复本机 ref（未推送远端），全部历史 APK 与其余历史标签保留。隐私核查：暂存文档与源码扫描本机路径 / 用户名 / 密钥 / 手机号命中 0（`TypeToken` 为关键词误命中）；APK DEX 扫描本机路径、手机号、`sk-` 密钥均 0 命中；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
+发布与隐私核查：版本提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.8.41 Release 为 Latest，唯一附件 `Echo-v2.8.41.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.39 Release 与标签；删除后复核发现本机 v2.8.39 标签同时消失，已按原标签对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5` 恢复本机 ref（未推送远端），全部历史 APK 与其余历史标签保留。隐私核查：暂存文档与源码扫描本机路径 / 用户名 / 密钥 / 手机号命中 0（`TypeToken` 为关键词误命中）；APK DEX 扫描本机路径、手机号、`sk-` 密钥均 0 命中；提交作者为 `维护身份（邮箱已脱敏）`。
 
 ## 2026-11-19 · 2.8.40 悬浮窗内文本选择手柄漂移修复（未发布，已并入 2.8.41）
 
 版本 2.8.40/226；Room v37 / 20 个实体不变。用户反馈：在输入框或内容编辑区长按选中文字后，代表选区两端的左右手柄位置漂移，与选中区域不符，悬浮窗模式下稳定复现，且常漂到应用之外。
 
-根因：`BasicTextField2`（Compose 1.6.8）的选择手柄是独立 `Popup` 子窗口，位置由 `HandlePositionProvider` 用 `positionInWindow()` 计算。该函数在悬浮窗（Honor 自由窗口带旋转 / 缩放变换）里返回屏幕坐标，而 `Popup` 的 `x/y` 由 WindowManager 相对父窗口解释，两者叠加等于多加了一次窗口原点。真机实测：窗口位于 (200,200) 时手柄恰好偏移 (+200,+200)，窗口位于 (1956,206) 时偏移 (+1956,+206)，窗口原点为 (0,0) 的全屏模式完全正常；同一窗口内应用自绘的浮动工具栏（根坐标 + `getLocationInWindow`）位置正确，可作对照。
+根因：`BasicTextField2`（Compose 1.6.8）的选择手柄是独立 `Popup` 子窗口，位置由 `HandlePositionProvider` 用 `positionInWindow()` 计算。该函数在悬浮窗（平板设备 自由窗口带旋转 / 缩放变换）里返回屏幕坐标，而 `Popup` 的 `x/y` 由 WindowManager 相对父窗口解释，两者叠加等于多加了一次窗口原点。真机实测：窗口位于 (200,200) 时手柄恰好偏移 (+200,+200)，窗口位于 (1956,206) 时偏移 (+1956,+206)，窗口原点为 (0,0) 的全屏模式完全正常；同一窗口内应用自绘的浮动工具栏（根坐标 + `getLocationInWindow`）位置正确，可作对照。
 
 修复：非全屏窗口下由应用自绘手柄。新增 `ui/components/EchoEditorSelectionHandles.kt`：`isFloatingWindowHost()` 用 `Activity.isInMultiWindowMode` 判定并随配置变化重算；手柄仍放在 `Popup` 中，但位置改为「文本布局在根坐标中的位置 + 光标锚点」，与工具栏同一套坐标算法，因此始终落在选区两端；拖拽按 Compose 的做法累计拖动距离映射回文本偏移并更新 `TextFieldState` 选区，且不允许拖到塌缩。`EchoNativeTextField` 在悬浮窗下用探针 `Box` 记录文本布局原点（含装饰器内边距与原生滚动），并把 `handleColor` 置为透明隐藏内置手柄；全屏仍使用原生手柄，行为不变。悬浮窗下光标小把手（caret handle）暂不提供，点击仍可定位光标。
 
 涉及文件：新增 `ui/components/EchoEditorSelectionHandles.kt`，修改 `ui/components/EchoNativeTextField.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
 
-验证（真机 HONOR ROL-W10，USB 调试）：全屏长按选中仍为原生手柄且位置正确（子窗口 63x63 px）；自由窗口（窗口原点非 0，系统旋转 + 缩放）下长按选中，自绘手柄（70x65 px 子窗口）精确落在选区两端，拖动末端手柄可把选区从 “bravo” 扩展为 “bravo charlie”，窗口外不再出现游离手柄；切换窗口模式后判定随配置重算。单元测试 94 套件 / 1,101 项全部通过，失败 / 错误 / 跳过 0。
+验证（真机 平板设备，USB 调试）：全屏长按选中仍为原生手柄且位置正确（子窗口 63x63 px）；自由窗口（窗口原点非 0，系统旋转 + 缩放）下长按选中，自绘手柄（70x65 px 子窗口）精确落在选区两端，拖动末端手柄可把选区从 “bravo” 扩展为 “bravo charlie”，窗口外不再出现游离手柄；切换窗口模式后判定随配置重算。单元测试 94 套件 / 1,101 项全部通过，失败 / 错误 / 跳过 0。
 
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
 
@@ -56,7 +77,7 @@
 
 设备边界：仍无连接设备。本次修复针对 release / R8 路径，调试构建无法复现；需人工安装 2.8.39 release 包后验证进入任意对话不再闪退，并复验首页搜索、输入列表、阅读位置恢复、收藏与分页删除。
 
-发布与隐私核查：版本提交 `38adf10a991a82d8914f04af81a2f7f54c135005` 与 annotated 标签 `v2.8.39`（对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。[Echo 2.8.39 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.39) 为 Latest，唯一附件 `Echo-v2.8.39.apk`，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.38 Release 与标签；本机 v2.8.38 标签和全部历史 APK 保留。暂存 11 个文件隐私扫描命中 0（本机路径 / 用户名 / 手机号 / 密钥）；命中的 `Bearer` 字样为既有文档说明，邮箱字样为历史 Android Debug 证书 DN。APK 内 `sk-` 命中为界面占位文案、ML Kit 语言代码与字体字节序列。
+发布与隐私核查：版本提交 `38adf10a991a82d8914f04af81a2f7f54c135005` 与 annotated 标签 `v2.8.39`（对象 `1eb03c634fe351787cac4f5f8af79e026aa43dd5`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。Echo 2.8.39 Release 为 Latest，唯一附件 `Echo-v2.8.39.apk`，平台 digest 与 `gh release download` 独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.38 Release 与标签；本机 v2.8.38 标签和全部历史 APK 保留。暂存 11 个文件隐私扫描命中 0（本机路径 / 用户名 / 手机号 / 密钥）；命中的 `Bearer` 字样为既有文档说明，邮箱字样为历史 Android Debug 证书 DN。APK 内 `sk-` 命中为界面占位文案、ML Kit 语言代码与字体字节序列。
 
 ## 2026-11-15 · 2.8.38 搜索并集、输入列表搜索滑块与编号、阅读位置、收藏与分页删除修复（已发布）
 
@@ -81,7 +102,7 @@
 
 设备边界：当前无连接设备，未做安装、启动或交互验收。需人工复验首页搜索（标题与内容同时命中）、输入列表搜索 / 编号 / 滑块、退出重进对话恢复位置、收藏与两处收藏页跳转，以及删除分页时的窗口稳定性、变体切换与流式期间删除旧分页。
 
-发布与隐私核查：版本提交 `2646ceabf1eb8b9ddfe3c96ec7e9fb8c7c2456c1` 与 annotated 标签 `v2.8.38`（对象 `5856baa80c81f9e3d365108c38c4ba951bfd3cc3`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。[Echo 2.8.38 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.38) 为 Latest，唯一附件 `Echo-v2.8.38.apk`，平台 digest、`gh release download` 独立下载 SHA256（首轮 HTTP/2 流错误后重试成功）与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.37 Release 与标签；本机 v2.8.37 标签和全部历史 APK 保留。暂存 22 个文件隐私扫描：本机路径 / 用户名 / 私网地址 / 密钥 / 手机号命中 0；命中的邮箱字样为历史文档中的 Android Debug 证书 DN（`android@android.com`），电话样式命中均为历史提交哈希子串。APK 内 2 处邮箱字样分别为 Google ML Kit 原生库构建机器人地址与 DEX 混淆字符串。
+发布与隐私核查：版本提交 `2646ceabf1eb8b9ddfe3c96ec7e9fb8c7c2456c1` 与 annotated 标签 `v2.8.38`（对象 `5856baa80c81f9e3d365108c38c4ba951bfd3cc3`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。Echo 2.8.38 Release 为 Latest，唯一附件 `Echo-v2.8.38.apk`，平台 digest、`gh release download` 独立下载 SHA256（首轮 HTTP/2 流错误后重试成功）与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.37 Release 与标签；本机 v2.8.37 标签和全部历史 APK 保留。暂存 22 个文件隐私扫描：本机路径 / 用户名 / 私网地址 / 密钥 / 手机号命中 0；命中的邮箱字样为历史文档中的 Android Debug 证书 DN（`android@android.com`），电话样式命中均为历史提交哈希子串。APK 内 2 处邮箱字样分别为 Google ML Kit 原生库构建机器人地址与 DEX 混淆字符串。
 
 ## 2026-11-14 · 2.8.37 输入框点击与输入会话收敛（已发布）
 
@@ -97,7 +118,7 @@
 
 设备边界：当前无连接设备，未做安装、启动或真实输入法验收。需人工复验首次点击、输入拼音时点击定位、按返回键收起再点、关闭弹窗 / 悬浮窗恢复后再点、连续点击与切换输入法。
 
-发布与隐私核查：提交 `f37e2c5f16370cd3edffc4855f61fcb2303be248` 与 annotated 标签 `v2.8.37`（对象 `21554c1e933c48143a7fe36c9eb073a59b6c45e2`）已推送，远端 main / peeled 标签均指向该提交。[Echo 2.8.37 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.37) 为 Latest，唯一附件 `Echo-v2.8.37.apk`，平台 digest 与独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.35 Release 与标签；本机 v2.8.35 标签和全部历史 APK 保留。暂存差异与公开说明隐私扫描命中 0，未包含本机用户路径、邮箱、手机号、密钥、Token、Bearer、私网地址或构建产物；APK 内 `sk-` 命中为界面占位文案 `填写密钥 (sk-...)`。
+发布与隐私核查：提交 `f37e2c5f16370cd3edffc4855f61fcb2303be248` 与 annotated 标签 `v2.8.37`（对象 `21554c1e933c48143a7fe36c9eb073a59b6c45e2`）已推送，远端 main / peeled 标签均指向该提交。Echo 2.8.37 Release 为 Latest，唯一附件 `Echo-v2.8.37.apk`，平台 digest 与独立下载 SHA256 / 大小一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.35 Release 与标签；本机 v2.8.35 标签和全部历史 APK 保留。暂存差异与公开说明隐私扫描命中 0，未包含本机用户路径、邮箱、手机号、密钥、Token、Bearer、私网地址或构建产物；APK 内 `sk-` 命中为界面占位文案 `填写密钥 (sk-...)`。
 
 ## 2026-11-13 · 2.8.35 输入法窗口与后台恢复（已发布）
 
@@ -184,7 +205,7 @@ APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.32 完�
 
 ### 发布
 
-版本提交 `4ea5a42702ffd6acde4ba112a4394a3f4a6d49da` 与 annotated 标签 `v2.8.33`（对象 `078534c6436b42c3f4341a7fcbf4b92658586483`，peeled 指向版本提交）已推送；`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。[Echo 2.8.33 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.33) 为 Latest，唯一附件 `Echo-v2.8.33.apk`；GitHub digest 与大小均与本机一致，正文与 `release-notes/latest.md` 一致；首次资产通道下载在约 19 MB 处被代理中断，重试独立目录下载后 25,505,561 字节与 SHA256 完整一致。按仅保留最新版策略已删除远端旧 v2.8.32 Release 与标签，远端仅保留 v2.8.33；本机旧标签与全部历史 APK 保留。
+版本提交 `4ea5a42702ffd6acde4ba112a4394a3f4a6d49da` 与 annotated 标签 `v2.8.33`（对象 `078534c6436b42c3f4341a7fcbf4b92658586483`，peeled 指向版本提交）已推送；`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。Echo 2.8.33 Release 为 Latest，唯一附件 `Echo-v2.8.33.apk`；GitHub digest 与大小均与本机一致，正文与 `release-notes/latest.md` 一致；首次资产通道下载在约 19 MB 处被代理中断，重试独立目录下载后 25,505,561 字节与 SHA256 完整一致。按仅保留最新版策略已删除远端旧 v2.8.32 Release 与标签，远端仅保留 v2.8.33；本机旧标签与全部历史 APK 保留。
 
 设备边界：无连接设备。仍需真机确认首次点击、打字中连续点击 / 拼音候选、悬浮输入法、返回键收起后再点、键盘可见但连接失效、发送后立即点击、切换会话与输入法。
 
@@ -232,7 +253,7 @@ APK 审计：446 个 ZIP 条目、CRC 全通过，条目名集合与 2.8.31 完�
 
 版本提交 `99a36f997f8772a8a8d41998f12d9051c1bcd4c8` 与 annotated 标签 `v2.8.32`（对象 `2b1908cb839d8c632f17f95148fa7ee8d9abd48b`，peeled 指向版本提交）已推送；首次推送 main 遇到 schannel SSL/TLS 握手失败、标签推送成功，重试 main 后 `git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。
 
-[Echo 2.8.32 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.32) 为 Latest，唯一附件 `Echo-v2.8.32.apk`；GitHub digest `sha256:1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核 SHA256 / 大小与本机一致；Release 正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.31 Release 与远端标签，远端仅保留 v2.8.32；本机 `v2.8.31` 标签与全部历史 APK 保留。
+Echo 2.8.32 Release 为 Latest，唯一附件 `Echo-v2.8.32.apk`；GitHub digest `sha256:1497f7c90770ecc7cbffd5510dae0c5b6c43425367aebc6a0f65b84361a82e40` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核 SHA256 / 大小与本机一致；Release 正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.31 Release 与远端标签，远端仅保留 v2.8.32；本机 `v2.8.31` 标签与全部历史 APK 保留。
 
 设备边界：无连接设备，未做视觉与输入法验收。需人工确认：请求失败后页面是否推到报错气泡底部、拖动阅读位置时是否不被抢回；打字中连续点击输入框（含拼音候选状态）、悬浮输入法、返回键收起后再点、键盘在却打不出字时再点；API 配置页三段连续滚动、键盘弹出、深色与宽屏下分区标题；新建配置打开时“启用多 Key 轮询”默认关闭、同地址已有配置仍读到原策略。
 
@@ -264,7 +285,7 @@ APK 审计：446 个 ZIP 条目（438 文件 + 8 目录），条目名集合与 
 
 版本提交 `4b187245be19d639b3dae67a772c680e7ce7e746` 与 annotated 标签 `v2.8.31`（`ee44e9aeb3334a9dd715844d3f6c229fd7ce8b87`，peeled 指向版本提交）已推送，push 均退出 0；`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交。
 
-[Echo 2.8.31 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.31) 为 Latest，唯一附件 `Echo-v2.8.31.apk`；GitHub digest `sha256:a0e0db41b736699f8fa2f95be185761d81dc3cf240097ea4fa0431b634dc82c9` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核大小与 SHA256 与本机一致；Release 正文与已提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.30 Release / 标签，远端仅保留 v2.8.31；本机 `v2.8.30` 标签与全部历史 APK 保留，未删除。
+Echo 2.8.31 Release 为 Latest，唯一附件 `Echo-v2.8.31.apk`；GitHub digest `sha256:a0e0db41b736699f8fa2f95be185761d81dc3cf240097ea4fa0431b634dc82c9` 与大小 25,505,561 字节均与本机一致；`gh release download` 资产通道复核大小与 SHA256 与本机一致；Release 正文与已提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.30 Release / 标签，远端仅保留 v2.8.31；本机 `v2.8.30` 标签与全部历史 APK 保留，未删除。
 
 ## 2026-11-10 · API 配置页排版统一为设置页视觉语言（未发版）
 
@@ -364,7 +385,7 @@ APK 审计：446 条目且条目名集合与 2.8.29 完全一致，CRC 全部通
 
 ### 发布
 
-版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；[Echo 2.8.30 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.30) 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签；本机全部历史 APK 保留，本次新建并保留 v2.8.30 标签。核对发现 v2.8.25、v2.8.26、v2.8.27、v2.8.29 标签此前仅推送远端、本地从未创建，本次未补造。
+版本提交 `526924dd5d6842601c4f714d4b976410bf72e765` 与 `v2.8.30` 已推送并核验远端 main / peeled 标签一致；Echo 2.8.30 Release 为 Latest，唯一 APK 附件的 GitHub digest（`sha256:fa12df35df51ce5612465ae23bd38bab09c27bda5e7bc1a0be8df16f13f5772b`）与大小 25,489,173 字节均与本机一致；直链与资产通道经本机代理下载返回 502 / Bad Gateway，未能完成独立下载复核（平台侧 digest 为服务端计算）。按仅保留最新版策略已删除远端旧 v2.8.29 Release / 标签；本机全部历史 APK 保留，本次新建并保留 v2.8.30 标签。核对发现 v2.8.25、v2.8.26、v2.8.27、v2.8.29 标签此前仅推送远端、本地从未创建，本次未补造。
 
 设备边界：无连接设备，未验证安装、启动与贴底、搜索定位、配置页、输入法行为，验收步骤见 `release-notes/latest.md`。
 
@@ -412,7 +433,7 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，5 分 28 秒；`E
 
 APK 审计：446 个 ZIP 条目结构不变（无新增 / 移除），`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,109,760 字节，31,573 条 DEX 字符串（新增 11 / 移除 9，可读差异仅版本号 2.8.29 与 UA，另 9 条为 R8 重命名的类型描述符）；`resources.arsc` 逐字节不变，186 张图片集合与内容一致；对本机用户名、邮箱、私有 IP、手机号与仓库账号模式扫描新增命中 0（仅继承 2 条 `/home/...` 路由字符串与 1 条库内置占位邮箱 `android@android.com`，均非用户数据）。发布目录排他复制：原 224 文件（223 APK）名称 / 大小 / SHA256 全部保留，复制后 225 文件（224 APK），源包与副本 SHA256 一致。
 
-发布结果：版本提交 `097775d73cd835bd687586ee21a3a263ad8cff9a`（含源码修复 `2852f2c`）与 annotated 标签 `v2.8.29` 已推送，push 均退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.29](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.29) 为 Latest，唯一附件 `Echo-v2.8.29.apk`，GitHub digest `sha256:dd2c2bfb…` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略删除远端旧 v2.8.28 Release 与远端标签，远端仅剩 v2.8.29；本机历史标签与全部历史 APK 保留。
+发布结果：版本提交 `097775d73cd835bd687586ee21a3a263ad8cff9a`（含源码修复 `2852f2c`）与 annotated 标签 `v2.8.29` 已推送，push 均退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release Echo 2.8.29 为 Latest，唯一附件 `Echo-v2.8.29.apk`，GitHub digest `sha256:dd2c2bfb…` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 逐字一致。按仅保留最新版策略删除远端旧 v2.8.28 Release 与远端标签，远端仅剩 v2.8.29；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：首次点击输入、按返回隐藏键盘后再点、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板，以及模型回复 / 系统提示词编辑器与首页搜索框。若仍出现，请记录输入法名称 / 版本与操作序列。
 
@@ -432,7 +453,7 @@ Release `assembleRelease --no-daemon` 退出 0，4 分 12 秒；`Echo-v2.8.28.ap
 
 APK 审计：446 个 ZIP 条目结构不变，`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex` 共 5 项 CRC 变化；`classes.dex` 7,108,980 字节（较上版 +708），可读差异仅版本号 2.8.28 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 223 文件（222 APK）保留，复制后 224 文件（223 APK）。
 
-发布结果：版本提交 `5c428fab21989c5377343542b8919d6e4cb7fb08` 与 annotated 标签 `v2.8.28` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.28](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.28) 为 Latest，唯一附件 `Echo-v2.8.28.apk`，GitHub digest `sha256:a56839e2…b5d8` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.27 Release 与远端标签，远端仅剩 v2.8.28；本机历史标签与全部历史 APK 保留。
+发布结果：版本提交 `5c428fab21989c5377343542b8919d6e4cb7fb08` 与 annotated 标签 `v2.8.28` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release Echo 2.8.28 为 Latest，唯一附件 `Echo-v2.8.28.apk`，GitHub digest `sha256:a56839e2…b5d8` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.27 Release 与远端标签，远端仅剩 v2.8.28；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，无法复现“偶现无法输入”或确认修复后的输入法行为。需人工复验：正常点击输入、按返回隐藏键盘后再次点击、发送后立即点击、快速连续点击输入区、切换会话后返回、切换输入法 / 表情面板；并确认 2.8.27 的编辑器 / 搜索框 / 代码块固定形状。若仍出现无法输入或闪烁，请记录输入法名称 / 版本与操作序列。
 
@@ -454,7 +475,7 @@ Release `assembleRelease --no-daemon` 退出 0，5 分 10 秒；`Echo-v2.8.27.ap
 
 APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,108,272 字节（较上版 +312），可读差异仅版本号 2.8.27 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 222 文件（221 APK）保留，复制后 223 文件（222 APK）。
 
-发布结果：版本提交 `cdeff252dc65161443cca3777c328e732d66aa53` 与 annotated 标签 `v2.8.27` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.27](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.27) 为 Latest，唯一附件 `Echo-v2.8.27.apk`，GitHub digest `sha256:9abdc71f…e950` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.26 Release 与远端标签，远端仅剩 v2.8.27；本机历史标签与全部历史 APK 保留。
+发布结果：版本提交 `cdeff252dc65161443cca3777c328e732d66aa53` 与 annotated 标签 `v2.8.27` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release Echo 2.8.27 为 Latest，唯一附件 `Echo-v2.8.27.apk`，GitHub digest `sha256:9abdc71f…e950` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.26 Release 与远端标签，远端仅剩 v2.8.27；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备。“编辑模型回复 / 用户消息 / 系统提示词”编辑器、首页搜索框与代码块形状无法实机目视；输入法闪烁无法复现。需人工确认上述窗口为 14dp / 22dp / 10dp 圆角矩形，通用胶囊按钮不变；若输入法闪烁仍出现，请记录发生场景（纯打字 / 点击定位光标 / 切换表情或候选栏）与输入法版本，以便进一步定位。
 
@@ -474,7 +495,7 @@ Release `assembleRelease --no-daemon` 首次 BUILD SUCCESSFUL（8 分 10 秒）�
 
 APK 审计：446 个 ZIP 条目结构不变，仅 `AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`classes.dex` 4 项 CRC 变化；`classes.dex` 7,107,960 字节（较上版 +204），可读差异仅版本号 2.8.26 与 UA，无新增可读文案；`resources.arsc` 与 186 张图片逐字节 / CRC 不变；对本机用户名路径、邮箱、私有 IP、手机号与仓库账号模式的 DEX 扫描命中 0。发布目录排他复制：原 221 文件（220 APK）名称 / 大小全部保留，复制后 222 文件（221 APK）。
 
-发布结果：版本提交 `1aa0dda682fd65fcb6cf8f931d23b2221adb3fc6` 与 annotated 标签 `v2.8.26` 已推送，push 退出 0；`git ls-remote origin main refs/tags/v2.8.26` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo 2.8.26](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.26) 为 Latest，唯一附件 `Echo-v2.8.26.apk`，GitHub digest `sha256:154aa64a…c9dc` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.25 Release 与远端标签，远端仅剩 v2.8.26；本机历史标签与全部历史 APK 保留。
+发布结果：版本提交 `1aa0dda682fd65fcb6cf8f931d23b2221adb3fc6` 与 annotated 标签 `v2.8.26` 已推送，push 退出 0；`git ls-remote origin main refs/tags/v2.8.26` 核验 main 与 peeled 标签均指向该提交。GitHub Release Echo 2.8.26 为 Latest，唯一附件 `Echo-v2.8.26.apk`，GitHub digest `sha256:154aa64a…c9dc` 与本机一致；`gh release download` 资产通道复核 25,489,177 字节、SHA256 一致，正文与提交的 `release-notes/latest.md` 一致（仅平台尾部换行）。按仅保留最新版策略删除远端旧 v2.8.25 Release 与远端标签，远端仅剩 v2.8.26；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，未验证安装启动与深色模式视觉。需人工在深色模式确认首页会话标题 / 说明、历史、文件夹、创作工作室、角色与场景编辑、记忆管理及故事工作台文字均为浅色且可读；确认对话输入框恢复 22dp 圆角矩形，发送、搜索、思考等胶囊按钮形状不变。
 
@@ -496,7 +517,7 @@ Release `assembleRelease --no-daemon` 退出 0，339 秒；`Echo-v2.8.25.apk` 25
 
 APK 审计：446 个 ZIP 条目 CRC 全通过；`classes.dex` 字符串池 31,571 条（较 2.8.24 新增 33 / 移除 16），新增 8 条可读中文均为导入容错提示与版本号，新增 25 条非中文为 R8 类型描述符、日志标签与构建元数据，未出现联系方式、私有地址、本机路径或凭据模式；`resources.arsc` 与上一版逐字节一致（新增资源字符串 0）；186 张图片名称与 CRC 全部一致。发布目录排他复制：复制前 220 文件（219 APK）名称 / 大小全部保留，复制后 221 文件（220 APK）。
 
-发布结果：待推送的三个提交（`9f615d0` 容错导入、`b83178b` 宽屏排版、`a8b83a3` 版本递增）与 annotated 标签 `v2.8.25` 已推送，push 退出 0；推送时 `git ls-remote` 核验 main 与 peeled 标签同指 `a8b83a3`，其后发布记录提交 `b8bdfbb` 已推送，远端 main 以最新发布记录提交为准（`git ls-remote origin main` 可复核），标签 `v2.8.25` 始终指向版本提交 `a8b83a3`。GitHub Release [Echo v2.8.25](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.25) 为 Latest，唯一附件 `Echo-v2.8.25.apk`，GitHub digest 为 `sha256:730079c6…26aad` 与本机一致，正文与 `release-notes/latest.md` 一致。匿名浏览器直链在本机经本地代理返回 502（代理侧问题，非 Release 故障），改用 GitHub API 资产通道 `gh release download` 核验：25,489,177 字节、SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.24 Release 与远端标签，远端仅剩 v2.8.25；本机历史标签与全部历史 APK 保留。
+发布结果：待推送的三个提交（`9f615d0` 容错导入、`b83178b` 宽屏排版、`a8b83a3` 版本递增）与 annotated 标签 `v2.8.25` 已推送，push 退出 0；推送时 `git ls-remote` 核验 main 与 peeled 标签同指 `a8b83a3`，其后发布记录提交 `b8bdfbb` 已推送，远端 main 以最新发布记录提交为准（`git ls-remote origin main` 可复核），标签 `v2.8.25` 始终指向版本提交 `a8b83a3`。GitHub Release Echo v2.8.25 为 Latest，唯一附件 `Echo-v2.8.25.apk`，GitHub digest 为 `sha256:730079c6…26aad` 与本机一致，正文与 `release-notes/latest.md` 一致。匿名浏览器直链在本机经本地代理返回 502（代理侧问题，非 Release 故障），改用 GitHub API 资产通道 `gh release download` 核验：25,489,177 字节、SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.24 Release 与远端标签，远端仅剩 v2.8.25；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，未验证安装启动、真实备份导入与平板视觉。需人工复验：此前报“备份关联缺失”的备份应导入成功并列出清理项；普通备份与单对话备份行为不变；在平板 / 模拟器检查设置、首页、历史、文件夹、聊天的内容列居中，手机布局与上一版一致。
 
@@ -522,7 +543,7 @@ Release `assembleRelease --no-daemon` 退出 0，386 秒；`Echo-v2.8.24.apk` 25
 
 APK 审计：446 个 ZIP 条目 CRC 全通过；`classes.dex` 字符串池 31,554 条，较 2.8.23 新增 60 / 移除 28；新增可读中文 16 条全部为本轮预检、失败原因与版本号文案，新增非中文 44 条为 R8 类型描述符、日志标签与构建元数据，未出现联系方式、私有地址、本机路径或凭据模式；`resources.arsc` 与上一版逐字节一致，新增资源字符串 0；186 张图片名称与 CRC 全部一致。发布目录排他复制：复制前 220 文件（219 APK）名称 / 大小全部保留，复制后 221 文件（220 APK），未覆盖或删除任何历史包。
 
-发布结果：版本提交 `fad54d49576d0900fa6bcfa455e52cc89937f6b4` 与 annotated 标签 `v2.8.24` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release [Echo v2.8.24](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.24) 为 Latest，唯一附件 `Echo-v2.8.24.apk`，GitHub digest 与本机 SHA256 一致；匿名直链下载退出 0，25,489,173 字节且 SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.23 Release 与远端标签，远端仅剩 v2.8.24；本机历史标签与全部历史 APK 保留。
+发布结果：版本提交 `fad54d49576d0900fa6bcfa455e52cc89937f6b4` 与 annotated 标签 `v2.8.24` 已推送，push 退出 0；`git ls-remote` 核验 main 与 peeled 标签均指向该提交。GitHub Release Echo v2.8.24 为 Latest，唯一附件 `Echo-v2.8.24.apk`，GitHub digest 与本机 SHA256 一致；匿名直链下载退出 0，25,489,173 字节且 SHA256 一致。按仅保留最新版策略删除远端旧 v2.8.23 Release 与远端标签，远端仅剩 v2.8.24；本机历史标签与全部历史 APK 保留。
 
 设备边界：当前无连接设备，未验证安装启动与真实导入。需人工用此前崩溃的大备份（约 60 MB 以上）复验导入完成、对话与附件完整、重启后设置加载，并回归单对话备份、旧版备份与普通小备份。
 
@@ -548,7 +569,7 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，454 秒；`Echo-v
 
 设备边界：`adb devices` 无连接设备，未验证安装启动、主题字体 / 动态材质、输入法触控或真实服务商。需人工在设置 → 外观检查三套主题与明暗切换、重启持久化、首页 / 对话 / 设置 / 历史 / 统计 / 文件夹 / 创作及弹窗菜单的对比与交互，并重点拖选长文本验证滚动速度、松手停止和手动滚动。
 
-发布结果：版本提交 `9febfaf3eef17059c9d3a745aa242b0fffa99985` 与 annotated 标签 `v2.8.23` 已推送；`git ls-remote` 核验 main 和 peeled 标签均指向该提交，push 退出 0。GitHub Release [Echo v2.8.23](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.23) 已创建为 Latest，唯一附件 `Echo-v2.8.23.apk`，GitHub digest 与本机 SHA256 一致。匿名资产接口下载退出 0，25,472,793 字节且 SHA256 `0c192a5543948a34a91390c1aa4bb037b7622d45f5cd6212b8daf5b6eefa257d` 与本机一致；浏览器直链首次出现临时 502，随后以匿名 API 资产通道完成同摘要核验。Release 正文与 `release-notes/latest.md` 内容一致（仅平台返回尾随换行）。按仅保留最新版策略删除远端旧 v2.8.22 Release 和远端标签，远端仅剩 v2.8.23；本机标签和全部历史 APK 保留。
+发布结果：版本提交 `9febfaf3eef17059c9d3a745aa242b0fffa99985` 与 annotated 标签 `v2.8.23` 已推送；`git ls-remote` 核验 main 和 peeled 标签均指向该提交，push 退出 0。GitHub Release Echo v2.8.23 已创建为 Latest，唯一附件 `Echo-v2.8.23.apk`，GitHub digest 与本机 SHA256 一致。匿名资产接口下载退出 0，25,472,793 字节且 SHA256 `0c192a5543948a34a91390c1aa4bb037b7622d45f5cd6212b8daf5b6eefa257d` 与本机一致；浏览器直链首次出现临时 502，随后以匿名 API 资产通道完成同摘要核验。Release 正文与 `release-notes/latest.md` 内容一致（仅平台返回尾随换行）。按仅保留最新版策略删除远端旧 v2.8.22 Release 和远端标签，远端仅剩 v2.8.23；本机标签和全部历史 APK 保留。
 
 ## 2026-10-28 · 2.8.22 流式输出开关与非流式兼容（已发布）
 
@@ -580,7 +601,7 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，454 秒；`Echo-v
 
 最终冻结验收 `20261027-150815-700`：`pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，415.541 秒；88 个套件 / 1,034 项测试实际执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，验收输入哈希一致；`git diff --check` 退出 0。Release `assembleRelease --no-daemon --build-cache` 使用 `<本机可写缓存>`，退出 0，约 381 秒。候选 APK 为 2.8.21/207、25,472,793 字节、SHA256 `4a726ef1ee506a5292d50f92b4b38eea07933b177d05f905565f47730c2616b0`，`com.aiassistant`、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34、不可 debug；aapt / apksigner v2 元数据校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。
 
-完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 全通过，31,480 条 DEX 实际字符串 / 10,624 条资源字符串；16 个唯一新增字符串（17 条记录）逐项关联源码、DEX 类型 / 原型和 R8 构建结构复核，未决 0；186 张图片与已审 2.8.20 基线内容及元数据一致。排他复制退出 0，指定本机发布目录原 217 文件（216 APK）的名称 / 大小 / SHA256 保留，无覆盖或删除。 Git 提交 `0b6eeb12e2172101492c1e24b742949e27cf3647` 与 `v2.8.21` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[Echo v2.8.21 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.21)。按仅保留最新版策略已撤下新仓库旧 v2.8.20 Release 与远端标签；本机标签和全部历史 APK 保留。未连接真机或模拟器；安装启动、输入法 / 触控、弹窗位置和动态视觉仍需人工验收。
+完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 全通过，31,480 条 DEX 实际字符串 / 10,624 条资源字符串；16 个唯一新增字符串（17 条记录）逐项关联源码、DEX 类型 / 原型和 R8 构建结构复核，未决 0；186 张图片与已审 2.8.20 基线内容及元数据一致。排他复制退出 0，指定本机发布目录原 217 文件（216 APK）的名称 / 大小 / SHA256 保留，无覆盖或删除。 Git 提交 `0b6eeb12e2172101492c1e24b742949e27cf3647` 与 `v2.8.21` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：Echo v2.8.21 Release。按仅保留最新版策略已撤下新仓库旧 v2.8.20 Release 与远端标签；本机标签和全部历史 APK 保留。未连接真机或模拟器；安装启动、输入法 / 触控、弹窗位置和动态视觉仍需人工验收。
 
 ## 2026-10-27 · 2.8.20 Bot 状态颜色渐变与误判修复（已发布）
 
@@ -590,7 +611,7 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，454 秒；`Echo-v
 
 涉及 `EchoModelMark.kt`、`ChatMessageComponents.kt`、`ChatScreen.kt`、`MotionRoundTests.kt`、`ChatEnhancementsTest.kt`；新增 6 项领域回归，覆盖颜色中间帧、转向、交接、减弱动态和误判；构建配置只递增版本。影响限于模型标识颜色和错误识别，不改数据库、请求协议或用户数据格式；保留暂停 / 错误符号与姿态。颜色帧只在绘制阶段读取，避免驱动流式正文逐帧重组。
 
-历史首次挂载直接显示终色；同轮布局切换或短暂离屏若尚未变完，则接续当前进度，不从头重播。前两轮验收分别因 Wrapper 默认缓存不可写、沙箱 Android 用户目录不可写而退出 1（0.341 秒 / 45.006 秒，均未执行测试）；本次进程设置 GRADLE_USER_HOME 并经审批使用实际本机环境后重新验收，未改源码。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致：[https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.20)。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。未连接真机或模拟器，安装启动、真实接口及动态视觉仍需人工验收。
+历史首次挂载直接显示终色；同轮布局切换或短暂离屏若尚未变完，则接续当前进度，不从头重播。前两轮验收分别因 Wrapper 默认缓存不可写、沙箱 Android 用户目录不可写而退出 1（0.341 秒 / 45.006 秒，均未执行测试）；本次进程设置 GRADLE_USER_HOME 并经审批使用实际本机环境后重新验收，未改源码。最终冻结验收 `20261027-132556-501`：标准 `pwsh -File scripts/verify.ps1 -GradleUserHome <本机可写缓存>` 脚本 / Gradle 退出 0，457.111 秒；88 套件 / 1,028 项完整单测 EXECUTED，失败 / 错误 / 跳过均 0，Lint 0 Error / 103 Warning，输入前后哈希一致，`git diff --check` 退出 0。 Release `assembleRelease --no-daemon --build-cache` 使用本机可写缓存，退出 0，262.502 秒。`Echo-v2.8.20.apk`：25,472,793 字节，SHA256 `4c4a0ed4346a4441de0ab8d2412d0ec441b973c5c1377cd6dcc675b12d2b1173`；com.aiassistant、2.8.20/206、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a、不可 debug。aapt / apksigner v2 校验退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上一版及项目 JKS 一致，Android Debug **非正式生产签名**。 完整 APK 隐私与完整性扫描退出 0：446 个 ZIP 条目 CRC 通过，31,550 条 DEX 实际字符串 / 10,624 条资源字符串、已知私人标记、签名块和图片元数据无未决项；45 个唯一新增字符串（46 条记录）逐条关联源码、DEX / R8 结构及公开构建元数据复核。186 张图片与已审 2.8.19 基线内容 / 元数据一致，changedImage 为 0。排他复制退出 0，指定本机发布目录原 216 个文件（215 APK）的名称 / 大小 / SHA256 均保留，无覆盖或删除。 Git 提交 `4062d2fd35b8a0dd18dc55c9f81db0f1b55ce319` 与 `v2.8.20` 已推送，远端 main / 标签指向一致；GitHub Release 已创建并发布唯一 APK，上传摘要与匿名下载 SHA256 均与本机一致（历史 Release）。按仅保留最新版策略已撤下新仓库旧 v2.8.19 Release 与远端标签；本机标签和全部历史 APK 保留。未连接真机或模拟器，安装启动、真实接口及动态视觉仍需人工验收。
 
 ## 2026-10-27 · 输入法重复唤起与输入框稳定性修复（未发版）
 
@@ -620,7 +641,7 @@ Release `assembleRelease --no-daemon --build-cache` 退出 0，454 秒；`Echo-v
 
 影响面：只改变主题展示、字体 / 排版和主题偏好持久化；不改变 Room schema、请求协议、消息内容、模型选择、输入交互、滚动或文本选择。纹理层使用固定种子和缓存，绘制在内容下方，避免新增点击拦截。
 
-验证完成：最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。 版本提交 `bbf04cde5d694ac97d22031b73543c6fdb45a225` 与 `v2.8.19` 已推送且远端一致，核验时无待推提交。[Echo v2.8.19 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.19) 创建并上传唯一手动 APK，GitHub 摘要与匿名下载 SHA256 一致，publish / cleanup 均退出 0；远端仅保留 v2.8.19，本机旧标签与 215 个历史文件（214 APK）保留。 未连接真机或模拟器。未连接真机或模拟器，不声称设备视觉、触控、键盘或真实接口已验证。
+验证完成：最终 verify `20261026-203246-800`：脚本/Gradle 退出 0，619.399 秒；88 套件 / 1,018 项测试 EXECUTED，失败/错误/跳过均 0，Lint 0 Error / 102 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon --build-cache` 退出 0，412 秒。 `Echo-v2.8.19.apk`：25,472,793 字节，SHA256 `2c7c49a120b438eaeaca89b89999c70f1aac9a11e5e58df97fa33936dc260cb1`；com.aiassistant、2.8.19/205、minSdk 26 / targetSdk 34 / compileSdk 34、arm64-v8a；aapt 与 apksigner v2 验证退出 0，证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。排他复制校验退出 0，原 215 个文件（214 个 APK）名称/大小/哈希保留。 APK 隐私扫描通过：446 个 ZIP 条目 CRC 全通过，31,534 条 DEX 实际字符串、10,624 条资源字符串、已知私人标记、签名块与图片元数据扫描未决 0；新增可读字符串已逐条关联主题/纹理/组件源码人工审阅，186 张图片与 2.8.18 基线内容和元数据一致。 版本提交 `bbf04cde5d694ac97d22031b73543c6fdb45a225` 与 `v2.8.19` 已推送且远端一致，核验时无待推提交。Echo v2.8.19 Release 创建并上传唯一手动 APK，GitHub 摘要与匿名下载 SHA256 一致，publish / cleanup 均退出 0；远端仅保留 v2.8.19，本机旧标签与 215 个历史文件（214 APK）保留。 未连接真机或模拟器。未连接真机或模拟器，不声称设备视觉、触控、键盘或真实接口已验证。
 
 ## 2026-10-26 · 书页纸张预览重做与 Bot 状态细修（未重新发版）
 
@@ -656,7 +677,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC 全通过，扫描 31,512 条实
 
 隐私与边界：用户提供的截图仅用于定位问题，未复制入仓库；预览与测试使用合成内容。源码、测试、文档、预览图片与元数据、暂存区、待推提交 / 标签及 APK 均须在上传前重新完成隐私核查。本机配置、签名、报告、缓存、产物和既有未跟踪内容排除。未连接真机或模拟器，自动测试与浏览器样稿不能代替设备输入法、拖柄、动态视觉、安装启动及真实接口验收，人工步骤见本轮 `walkthrough.md`。
 
-发布结果：版本提交 `1e16b10028c412bc01912c374b83034451f4b268` 和 `v2.8.18` 已推送，远端一致，核验时无待推提交。[Echo v2.8.18 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.18) 创建与唯一手动 APK 附件上传完成，发布退出 0；GitHub 摘要、匿名下载 SHA256 和本机 `1ace8d21fe20874f46e941d39a531e18838bbbe5bf3f67879b91beaed5d0e491` 一致。旧版处理退出 0，撤下新仓库旧 v2.8.16 Release，删除远端 v2.8.16 / v2.8.17 版本标签，远端仅 v2.8.18；本机旧标签及全部历史 APK 保留。后续仅六份维护文档作结果收尾、独立核查后提交，`release-notes/latest.md` 与已发布正文保持冻结；不新建 / 移动版本标签，不重复编译。
+发布结果：版本提交 `1e16b10028c412bc01912c374b83034451f4b268` 和 `v2.8.18` 已推送，远端一致，核验时无待推提交。Echo v2.8.18 Release 创建与唯一手动 APK 附件上传完成，发布退出 0；GitHub 摘要、匿名下载 SHA256 和本机 `1ace8d21fe20874f46e941d39a531e18838bbbe5bf3f67879b91beaed5d0e491` 一致。旧版处理退出 0，撤下新仓库旧 v2.8.16 Release，删除远端 v2.8.16 / v2.8.17 版本标签，远端仅 v2.8.18；本机旧标签及全部历史 APK 保留。后续仅六份维护文档作结果收尾、独立核查后提交，`release-notes/latest.md` 与已发布正文保持冻结；不新建 / 移动版本标签，不重复编译。
 
 ## 2026-10-26 · 2.8.17 发版：Bot 动画与纸本装帧预览重做
 
@@ -768,7 +789,7 @@ APK 内容隐私：自动扫描、完整人工差异与最终证据链审核均�
 
 Git 核验：完整候选、暂存与版本提交的 10 个文件隐私扫描均退出 0，89 个匹配精确继承已审证据，未决 0；完整 blob 与人工审核报告一致，公共提交与标签元数据已复核，差异检查退出 0。版本提交 `1ae2cd4e787114910eabbf63762910145d0debc5` 与 annotated `v2.8.15` 原子推送退出 0，标签对象 `2d81373810a2f40c7ceb3fc44a9762a92caf000f`，`git ls-remote` 核对 main、标签对象及解引用均一致。
 
-公开发布：[v2.8.15 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.15) 发布脚本退出 0，Release ID 417475783；唯一手动附件为 `Echo-v2.8.15.apk`（资产 656709642），25,406,965 字节，API digest 与匿名下载 SHA256 均为 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`，与本机一致。再次匿名核验新版成功后，仅撤下新仓库远端 v2.8.14 Release/版本标签，清理退出 0；清理后独立核验退出 0，远端 Release/版本标签仅余 v2.8.15，唯一附件与匿名下载哈希一致。全部本机历史 APK 和本机旧标签保留，未操作旧仓库。
+公开发布：v2.8.15 Release 发布脚本退出 0，Release ID 417475783；唯一手动附件为 `Echo-v2.8.15.apk`（资产 656709642），25,406,965 字节，API digest 与匿名下载 SHA256 均为 `7ded47f990e91a9824f60847ac60797c8e876585eda4b5b0fd36f046878825d4`，与本机一致。再次匿名核验新版成功后，仅撤下新仓库远端 v2.8.14 Release/版本标签，清理退出 0；清理后独立核验退出 0，远端 Release/版本标签仅余 v2.8.15，唯一附件与匿名下载哈希一致。全部本机历史 APK 和本机旧标签保留，未操作旧仓库。
 
 交付边界：本次 `Echo-v2.8.15.apk` 已完成本机包、同签名覆盖升级条件及公开下载核验；源码修复本身不会更新已安装应用，不能声称用户手机已恢复。没有设备安装、启动或触控验收，无需卸载或清除应用数据；保留全部本机历史安装包及既有未跟踪素材，不读取历史改进归档。公开说明保持版本提交与 Release 正文一致，发布后六份维护文档另行隐私审核和提交，不移动版本标签，不重复 Gradle。
 
@@ -788,7 +809,7 @@ APK 内容隐私：完整扫描及差异提取退出 0，31,183 个 DEX/10,617 �
 
 版本 Git 核查：完整 8 个候选、暂存与提交全文隐私扫描退出 0，24 个匹配均继承已审基线、未决 0；完整 blob 与审核候选一致，公共提交/标签元数据及独立人工复核通过。版本提交 `3d20b0376575649063f1a16d46f73497c3181367` 与 annotated `v2.8.14` 推送退出 0，标签对象 `68fcb34278a5383bd97564eb8b020bf009c25c07`，`git ls-remote` 核对 main、标签对象与解引用一致。私人配置/密钥、缓存、报告、APK 与既有未跟踪素材排除 Git。
 
-公开发布：[v2.8.14 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.14) 发布脚本退出 0，唯一手动附件为 `Echo-v2.8.14.apk`（25,406,961 字节），GitHub 摘要和匿名下载 SHA256 均为 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`，与本机一致。再次匿名校验当前版成功后，仅删除新仓库远端 v2.8.13 Release/版本标签，清理退出 0；清理后独立复核退出 0，剩余 Release/版本标签仅 v2.8.14，唯一附件与匿名下载哈希一致。本机全部历史 APK 和旧标签保留，未操作旧仓库。
+公开发布：v2.8.14 Release 发布脚本退出 0，唯一手动附件为 `Echo-v2.8.14.apk`（25,406,961 字节），GitHub 摘要和匿名下载 SHA256 均为 `1c43351c83ce1ec6eb956e60fc189cb317c01bc6f05c0a43b8c961d3f88c4780`，与本机一致。再次匿名校验当前版成功后，仅删除新仓库远端 v2.8.13 Release/版本标签，清理退出 0；清理后独立复核退出 0，剩余 Release/版本标签仅 v2.8.14，唯一附件与匿名下载哈希一致。本机全部历史 APK 和旧标签保留，未操作旧仓库。
 
 发布后仅收尾六份维护文档，候选及后续提交/元数据另行完整隐私核查后推送；最终 main 的文档提交与远端一致性在交付时单独报告。不修改冻结公开发布说明、不移动版本标签、不改写既有版本提交、不重复 Gradle。
 
@@ -837,7 +858,7 @@ APK 内容隐私：完整扫描及差异提取退出 0，31,183 个 DEX/10,617 �
 - 标准源码验收 `20261018-223236-977`：脚本/Gradle 退出 0，总 469.287 秒；88 套件/907 项测试实际执行，失败/错误/跳过 0；Lint 0 Error/95 Warning，输入哈希一致。
 - Release 构建 `assembleRelease --no-daemon --build-cache -g <本机可写缓存>` 退出 0，用时 458 秒。APK 版本 2.8.13/199、arm64-v8a、25,374,197 字节、446 个 ZIP 条目，CRC 全通过；SHA256 `24DC15ED08B5128DA37EAD56822544FC00B3F4EAB8208DA38547214566FA3405`。
 - 签名使用项目 `keystore/echo-release.jks`（`ECHO_RELEASE_KEYSTORE` 未设置），v2 校验通过；证书 SHA256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，Android Debug **非正式生产签名**。APK 内容已知模式扫描 156 个候选、全部继承上一版，新增 0；186 张图片与上一版逐字节一致。
-- 本机发布目录复制退出 0，源包与 `<本机发布目录>/Echo-v2.8.13.apk` SHA256 一致。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、`main` 与 annotated `v2.8.13` 标签推送退出 0，`git ls-remote` 核验一致；[v2.8.13 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.13) 创建退出 0，唯一附件和匿名下载 SHA256 均与本机一致；旧 v2.8.12 Release/标签已撤下，本机历史包和旧标签保留。设备安装、启动和真实接口仍需验收。
+- 本机发布目录复制退出 0，源包与 `<本机发布目录>/Echo-v2.8.13.apk` SHA256 一致。提交 `18bbc99c6c53cdec5d24a666af9657a0a95cf9b5`、`main` 与 annotated `v2.8.13` 标签推送退出 0，`git ls-remote` 核验一致；v2.8.13 Release 创建退出 0，唯一附件和匿名下载 SHA256 均与本机一致；旧 v2.8.12 Release/标签已撤下，本机历史包和旧标签保留。设备安装、启动和真实接口仍需验收。
 - 最终文档候选隐私核查：7 个完整暂存 blob、28 个已知模式候选，新增 6 个均为本次公开 GitHub Release 链接，人工复核为公共地址；未发现新增私钥、凭据、用户路径、手机号或个人邮箱。提交后继续核对完整 blob、公共维护者元数据和待推提交；`.playwright-cli/`、`deepseek.png`、APK、缓存、配置和报告均排除。
 
 ## 2026-10-18：摘要拒绝识别与按比例直接截断（源码更新，未构建 APK）
@@ -879,7 +900,7 @@ APK 隐私核验退出 0：检查 30,889 个 DEX 字符串、10,617 个资源字
 
 版本提交前，25 个完整暂存 blob（1,623,735 字节）自动扫描退出 0，18 个源码候选和 7 份文档人工复核通过；文档共 323,724 字节。提交扫描退出 0，25 个完整 blob 与审后暂存区哈希全部一致，作者、提交者与标签创建者均为已核验的公共维护者身份，元数据核验退出 0。
 
-发布核验：版本提交 `feee7ed59e173172e4db81540ee2042b455450c0` 与 annotated `v2.8.12` 推送退出 0，标签对象 `053d66562692d6bd14920cccd1ae67f237726a98`，`git ls-remote` 确认 main、标签对象及解引用一致。[v2.8.12 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.12) 发布退出 0，唯一附件为 `Echo-v2.8.12.apk`；GitHub 资产 SHA256 与匿名公开下载均为 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`，与本机一致。旧版处理退出 0，并在处理后再次匿名下载复验通过；仅撤下该新仓库远端 v2.8.11 Release/版本标签，远端仅保留 v2.8.12，本机旧标签和全部历史 APK 保留。
+发布核验：版本提交 `feee7ed59e173172e4db81540ee2042b455450c0` 与 annotated `v2.8.12` 推送退出 0，标签对象 `053d66562692d6bd14920cccd1ae67f237726a98`，`git ls-remote` 确认 main、标签对象及解引用一致。v2.8.12 Release 发布退出 0，唯一附件为 `Echo-v2.8.12.apk`；GitHub 资产 SHA256 与匿名公开下载均为 `d2d878ccc9d17f7cd92af7c9dca6c8fe1c7baf03deb58dec7854493a3a3ce0d7`，与本机一致。旧版处理退出 0，并在处理后再次匿名下载复验通过；仅撤下该新仓库远端 v2.8.11 Release/版本标签，远端仅保留 v2.8.12，本机旧标签和全部历史 APK 保留。
 
 发布后收尾：此后只收尾维护文档，文档候选与提交另行隐私核查后推送；不移动版本标签，最终 main 文档提交及远端一致性在交付时单独报告。设备安装、启动、触控与真实模型仍未验收，不宣称所有真实模型的 HTTP 500 已解决。
 
@@ -954,7 +975,7 @@ APK 内容核查退出 0：446 个 ZIP 条目全部通过 CRC，检查 30,797 �
 
 上传候选核查：19 个完整候选文件（8 个生产/构建、4 个测试、7 份文档）均进行全文隐私扫描并结合人工复核；公共维护者身份已核对，当前未解决项 0，自动扫描退出 0。测试使用合成数据、回环或保留地址，公开文档不含本机用户名路径。原未跟踪素材、本机配置/签名、缓存、APK 与私有审核材料排除；暂存、提交、标签及附件在上传前继续按完整内容与哈希核验。未知私人值、设备数据和平台缓存不作模式扫描保证。
 
-发布核验（2026-10-18）：完整工作区、暂存和提交三阶段隐私核查均退出 0；19 个暂存文件与提交的完整 blob 哈希一致，公共作者/提交者及标签元数据通过复核。版本提交 `79507ce2d9454ff4676bafa85f44e6eda61f9503` 与 annotated `v2.8.11` 已原子推送，退出 0；标签对象 `16aca374d3d6972e63973ccdb58d7a30f7dc8bc8`，`git ls-remote` 核对 main 与标签解引用均指向版本提交。[v2.8.11 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.11) 只包含 Echo-v2.8.11.apk（资产 651450122），上传 digest 与匿名公开下载 SHA256 均与本机一致，发布辅助程序退出 0。随后独立再次匿名下载核验成功，旧版处理退出 0，仅撤下新仓库 v2.8.10 Release/远端版本标签，当前仅保留 v2.8.11；本机全部历史 APK 和本机标签保留，不操作旧仓库。发布后维护记录另行审核提交，不改公开发布正文、不移动版本标签，不重复 Gradle。
+发布核验（2026-10-18）：完整工作区、暂存和提交三阶段隐私核查均退出 0；19 个暂存文件与提交的完整 blob 哈希一致，公共作者/提交者及标签元数据通过复核。版本提交 `79507ce2d9454ff4676bafa85f44e6eda61f9503` 与 annotated `v2.8.11` 已原子推送，退出 0；标签对象 `16aca374d3d6972e63973ccdb58d7a30f7dc8bc8`，`git ls-remote` 核对 main 与标签解引用均指向版本提交。v2.8.11 Release 只包含 Echo-v2.8.11.apk（资产 651450122），上传 digest 与匿名公开下载 SHA256 均与本机一致，发布辅助程序退出 0。随后独立再次匿名下载核验成功，旧版处理退出 0，仅撤下新仓库 v2.8.10 Release/远端版本标签，当前仅保留 v2.8.11；本机全部历史 APK 和本机标签保留，不操作旧仓库。发布后维护记录另行审核提交，不改公开发布正文、不移动版本标签，不重复 Gradle。
 
 ## 2026-10-18：Echo v2.8.10（196）发布完成（10 月 17 日构建验收）
 
@@ -971,7 +992,7 @@ APK 内容核查退出 0：446 个 ZIP 条目全部通过 CRC，检查 30,797 �
 
 安装包隐私核查：446 个 ZIP 条目全部通过 CRC，核查 30,733 个 DEX 字符串、10,617 个 AXML/ARSC 字符串、186 张图片的元数据、签名块与证书，并对已知私人值逐字节扫描。295 个新增唯一字符串逐项全文人工复核；3 个候选均精确核实为标准 Android 资源命名空间，按条目和字符串哈希限定，不作宽泛排除；186 张图片均与前版逐字节一致。未发现用户私人值，未解决项为 0，核查退出 0；未知私人值、设备数据和外部平台缓存不在模式扫描保证范围。
 
-发布核验（2026-10-18）：完整版本候选的工作区、暂存与提交三阶段审核均退出 0，暂存与提交的 8 个完整 blob 哈希一致，公共提交与标签元数据核验退出 0。版本提交 `5b344bf958159d28f0138ee9834fee39920d871e` 与 annotated `v2.8.10` 已原子推送，退出 0；标签对象 `bb835bc2788e41fc880d358b55ccfec16a8a2c82`，`git ls-remote` 确认 main 与标签解引用均指向该版本提交。[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.10) 唯一附件为 Echo-v2.8.10.apk（资产 650890205，25,341,425 字节），上传 digest 与匿名公开下载 SHA256 均与本机一致。
+发布核验（2026-10-18）：完整版本候选的工作区、暂存与提交三阶段审核均退出 0，暂存与提交的 8 个完整 blob 哈希一致，公共提交与标签元数据核验退出 0。版本提交 `5b344bf958159d28f0138ee9834fee39920d871e` 与 annotated `v2.8.10` 已原子推送，退出 0；标签对象 `bb835bc2788e41fc880d358b55ccfec16a8a2c82`，`git ls-remote` 确认 main 与标签解引用均指向该版本提交。GitHub Release 唯一附件为 Echo-v2.8.10.apk（资产 650890205，25,341,425 字节），上传 digest 与匿名公开下载 SHA256 均与本机一致。
 
 发布恢复与旧版处理：首次发布辅助程序退出 1，原因是本机程序用公开 URL 检查尚未发布草稿的临时地址，APK 当时已正确上传，旧版仍保留。仅修正本机忽略的辅助程序后，独立只读复核同一标签草稿、同一资产及发布说明，重试退出 0，无重复上传或覆盖；清理前再次独立匿名下载核验成功，清理退出 0，仅撤下新仓库旧 v2.8.9 Release/远端版本标签，当前仅保留 v2.8.10。未操作旧仓库，本机历史 APK 与本机标签保留。发布说明与版本标签、Release 正文保持一致，发布后文档另行提交并重新核查，不移动版本标签、不重复 Gradle。设备安装、启动、触控与真实模型接口效果尚未验收。
 
