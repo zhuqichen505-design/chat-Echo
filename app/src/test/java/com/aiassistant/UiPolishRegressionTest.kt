@@ -450,6 +450,16 @@ class UiPolishRegressionTest {
         )
     }
 
+    @Test fun nativeTapOnFocusedFieldRevealsHiddenKeyboardOnly() {
+        // 已聚焦 + 键盘已收起：必须补一次 show()，否则点击输入框再也唤不出输入法
+        assertTrue(com.aiassistant.ui.components.shouldRevealImeOnTap(focused = true, imeVisible = false))
+        // 键盘已弹出：不重复 show()
+        assertFalse(com.aiassistant.ui.components.shouldRevealImeOnTap(focused = true, imeVisible = true))
+        // 未聚焦：交给原生点击请求焦点并唤起输入法，避免双重触发
+        assertFalse(com.aiassistant.ui.components.shouldRevealImeOnTap(focused = false, imeVisible = false))
+        assertFalse(com.aiassistant.ui.components.shouldRevealImeOnTap(focused = false, imeVisible = true))
+    }
+
     @Test fun focusedHandleWithVisibleImeSkipsRedundantShow() = runTest {
         var requests = 0
         var shows = 0

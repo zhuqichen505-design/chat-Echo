@@ -1,5 +1,29 @@
 # 维护记录
 
+## 2026-11-19 · 2.8.41 输入法收起后点击输入框无法再弹出修复（真机验证）
+
+版本 2.8.41/227；Room v37 / 20 个实体不变。用户反馈：键盘收起后（返回键或点空白），再点输入框无法重新弹出输入法；同时指出上一版“全屏下光标不可见”（该现象本轮真机未复现，用户已确认现在不再出现）。
+
+根因：`BasicTextField2`（Compose 1.6.8）的点击手势只在“未聚焦”时 `requestFocus()`。输入框已聚焦时点击仅定位光标，没有任何补弹键盘的分支；而用户按返回键收起键盘后，系统已 `finishInput`，`SoftwareKeyboardController.show()` 没有可用输入会话，实测无效。v2.8.37 把点击完全交还原生输入框后，这条路径就没有兜底。
+
+修复：`EchoNativeTextField` 增加 `Modifier.editorTapToRevealIme`——在 `PointerEventPass.Initial` 旁路观察手势，不消费事件，原生点击 / 长按 / 拖动照常；仅当“抬手、未超过 touchSlop、未超过长按阈值”判定为点击时回调。回调经纯函数 `shouldRevealImeOnTap(focused, imeVisible)` 判定，命中“已聚焦 + 输入法不可见”才结束焦点并在下一帧重新 `requestFocus()`，让输入框重建输入会话、键盘随之弹出。同时删除 2.8.40 调试期遗留在 `EchoNativeTextField` 的 `drawWithContent` 红色调试文字（该改动在构建之后才加入，未进入任何已安装包）。
+
+涉及文件：`ui/components/EchoNativeTextField.kt`、`app/src/test/java/com/aiassistant/UiPolishRegressionTest.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
+
+验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.41/227）：全屏“点击弹出 → 返回键收起 → 再点击恢复”稳定通过；收起后点击文字中部再输入得到 `ZhMelloXY`，插入位置与点击一致，说明重建焦点不丢选区；悬浮窗内同样路径键盘正常恢复，光标可见、无游离手柄；长按选词仍为系统手柄且不会误弹键盘；输入框无调试文字残留。冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA-256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）。未提交、未推送、未发布。
+
+## 2026-11-19 · 2.8.40 悬浮窗内文本选择手柄漂移修复（未发布，已并入 2.8.41）
+
+版本 2.8.40/226；Room v37 / 20 个实体不变。用户反馈：在输入框或内容编辑区长按选中文字后，代表选区两端的左右手柄位置漂移，与选中区域不符，悬浮窗模式下稳定复现，且常漂到应用之外。
+
+根因：`BasicTextField2`（Compose 1.6.8）的选择手柄是独立 `Popup` 子窗口，位置由 `HandlePositionProvider` 用 `positionInWindow()` 计算。该函数在悬浮窗（Honor 自由窗口带旋转 / 缩放变换）里返回屏幕坐标，而 `Popup` 的 `x/y` 由 WindowManager 相对父窗口解释，两者叠加等于多加了一次窗口原点。真机实测：窗口位于 (200,200) 时手柄恰好偏移 (+200,+200)，窗口位于 (1956,206) 时偏移 (+1956,+206)，窗口原点为 (0,0) 的全屏模式完全正常；同一窗口内应用自绘的浮动工具栏（根坐标 + `getLocationInWindow`）位置正确，可作对照。
+
+修复：非全屏窗口下由应用自绘手柄。新增 `ui/components/EchoEditorSelectionHandles.kt`：`isFloatingWindowHost()` 用 `Activity.isInMultiWindowMode` 判定并随配置变化重算；手柄仍放在 `Popup` 中，但位置改为「文本布局在根坐标中的位置 + 光标锚点」，与工具栏同一套坐标算法，因此始终落在选区两端；拖拽按 Compose 的做法累计拖动距离映射回文本偏移并更新 `TextFieldState` 选区，且不允许拖到塌缩。`EchoNativeTextField` 在悬浮窗下用探针 `Box` 记录文本布局原点（含装饰器内边距与原生滚动），并把 `handleColor` 置为透明隐藏内置手柄；全屏仍使用原生手柄，行为不变。悬浮窗下光标小把手（caret handle）暂不提供，点击仍可定位光标。
+
+涉及文件：新增 `ui/components/EchoEditorSelectionHandles.kt`，修改 `ui/components/EchoNativeTextField.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
+
+验证（真机 HONOR ROL-W10，USB 调试）：全屏长按选中仍为原生手柄且位置正确（子窗口 63x63 px）；自由窗口（窗口原点非 0，系统旋转 + 缩放）下长按选中，自绘手柄（70x65 px 子窗口）精确落在选区两端，拖动末端手柄可把选区从 “bravo” 扩展为 “bravo charlie”，窗口外不再出现游离手柄；切换窗口模式后判定随配置重算。单元测试 94 套件 / 1,101 项全部通过，失败 / 错误 / 跳过 0。
+
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
 
 版本 2.8.39/225；Room v37 / 20 个实体不变。用户反馈 2.8.38 安装包点击进入对话即闪退。

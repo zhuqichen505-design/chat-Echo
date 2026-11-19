@@ -1,20 +1,26 @@
 package com.aiassistant.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.text2.BasicTextField2
 import androidx.compose.foundation.text2.TextFieldDecorator
 import androidx.compose.foundation.text2.input.TextFieldCharSequence
 import androidx.compose.foundation.text2.input.TextFieldLineLimits
 import androidx.compose.foundation.text2.input.TextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -26,9 +32,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -144,6 +155,46 @@ internal suspend fun awaitEditorWindowFocus(
     while (isActive() && !isWindowFocused()) nextFrame()
     isActive() && isWindowFocused()
 } == true
+
+/**
+ * 原生点击仍负责定位光标与焦点，但 Compose 1.6.8 的点击只在未聚焦时请求焦点：
+ * 输入框已聚焦、用户又用返回键收起键盘后，再点输入框不会重新唤起输入法。
+ * 因此“已聚焦 + 输入法不可见”必须由调用方补一次会话重建；键盘已弹出或尚未聚焦时都不介入。
+ */
+internal fun shouldRevealImeOnTap(focused: Boolean, imeVisible: Boolean): Boolean =
+    focused && !imeVisible
+
+/**
+ * 只观察、不消费：手势在 Initial 阶段读取，原生输入框的点击/长按/拖动全部照常处理。
+ * 长按（选词）与拖动（选区、滚动）不算点击，避免误弹键盘。
+ */
+@Composable
+private fun Modifier.editorTapToRevealIme(onTap: () -> Unit): Modifier {
+    val latestOnTap by rememberUpdatedState(onTap)
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var dragged = false
+            var released = false
+            var longPressed = false
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                    dragged = true
+                }
+                if (change.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) {
+                    longPressed = true
+                }
+                if (!change.pressed) {
+                    released = true
+                    break
+                }
+            }
+            if (released && !dragged && !longPressed) latestOnTap()
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -266,6 +317,43 @@ internal fun EchoNativeTextField(
     val density = LocalDensity.current.density
     var focused by remember { mutableStateOf(false) }
     var getTextLayout by remember { mutableStateOf<(() -> TextLayoutResult?)?>(null) }
+    // Floating windows lay popups out relative to the app window while Compose 1.6.8 anchors the
+    // built-in handles in screen coordinates. Draw our own handles there instead.
+    val floatingWindow = isFloatingWindowHost()
+    var textLayoutInRoot by remember { mutableStateOf(Offset.Zero) }
+    val textLayout = getTextLayout?.invoke()
+    val selectionColors = LocalTextSelectionColors.current
+    val handleColors = remember(selectionColors, floatingWindow) {
+        if (floatingWindow) {
+            TextSelectionColors(
+                handleColor = Color.Transparent,
+                backgroundColor = selectionColors.backgroundColor
+            )
+        } else {
+            selectionColors
+        }
+    }
+    val decoratedField = remember(decorator, floatingWindow) {
+        if (!floatingWindow) {
+            decorator
+        } else {
+            TextFieldDecorator { innerTextField ->
+                // Probing here (instead of on the field) keeps the text layout's own origin,
+                // including the decorator padding and the native scroll offset.
+                val probed: @Composable () -> Unit = {
+                    Box(
+                        modifier = Modifier.onGloballyPositioned {
+                            textLayoutInRoot = it.positionInRoot()
+                        },
+                        propagateMinConstraints = true
+                    ) {
+                        innerTextField()
+                    }
+                }
+                decorator?.Decoration(probed) ?: probed()
+            }
+        }
+    }
     SideEffect { editor.reconcileExternal(value) }
     val onCurrentValueChange by rememberUpdatedState(onValueChange)
     LaunchedEffect(editor) {
@@ -299,21 +387,50 @@ internal fun EchoNativeTextField(
         )
     }
     // Compose owns taps, focus and the window-scoped input session, including restarting that
-    // session after a window focus change. Do not intercept its keyboard controller, clear focus
-    // on window transitions, or infer connection health from InputMethodManager's process state.
-    BasicTextField2(
-        state = editor.field,
-        modifier = modifier
-            .focusRequester(focusRequester)
-            .onFocusChanged { focused = it.isFocused },
-        textStyle = textStyle,
-        interactionSource = interactionSource,
-        cursorBrush = cursorBrush,
-        lineLimits = lineLimits,
-        scrollState = scrollState,
-        keyboardOptions = keyboardOptions,
-        keyboardActions = keyboardActions,
-        onTextLayout = { getTextLayout = it },
-        decorator = decorator
-    )
+    // session after a window focus change. Window transitions must never clear focus or intercept
+    // its keyboard controller; the only exception is a tap that has to revive a hidden IME.
+    val view = LocalView.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val imeVisibleSnapshot = WindowInsets.isImeVisible
+    val scope = rememberCoroutineScope()
+    // 已聚焦时原生点击只定位光标，不会再唤起输入法；系统结束输入会话后 show() 也无效，
+    // 只能结束并重建焦点，让输入框重新建立输入会话（键盘随之弹出）。
+    fun revealImeAfterTap() {
+        if (!shouldRevealImeOnTap(focused, isImeVisibleNow(view, imeVisibleSnapshot))) return
+        focusManager.clearFocus(force = true)
+        scope.launch {
+            withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+    CompositionLocalProvider(
+        LocalTextSelectionColors provides handleColors
+    ) {
+        BasicTextField2(
+            state = editor.field,
+            modifier = modifier
+                .editorTapToRevealIme { revealImeAfterTap() }
+                .focusRequester(focusRequester)
+                .onFocusChanged { focused = it.isFocused },
+            textStyle = textStyle,
+            interactionSource = interactionSource,
+            cursorBrush = cursorBrush,
+            lineLimits = lineLimits,
+            scrollState = scrollState,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            onTextLayout = { result -> getTextLayout = result },
+            decorator = decoratedField
+        )
+    }
+    if (floatingWindow && focused) {
+        EditorSelectionHandleLayer(
+            layout = textLayout,
+            selection = editor.field.text.selectionInChars,
+            textLayoutInRoot = textLayoutInRoot,
+            onSelectionChange = { range ->
+                editor.field.edit { selectCharsIn(range) }
+            }
+        )
+    }
 }
