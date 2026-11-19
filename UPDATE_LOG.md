@@ -10,7 +10,9 @@
 
 涉及文件：`ui/components/EchoNativeTextField.kt`、`app/src/test/java/com/aiassistant/UiPolishRegressionTest.kt` 与版本配置；不改请求协议、消息格式、备份格式与数据库结构。
 
-验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.41/227）：全屏“点击弹出 → 返回键收起 → 再点击恢复”稳定通过；收起后点击文字中部再输入得到 `ZhMelloXY`，插入位置与点击一致，说明重建焦点不丢选区；悬浮窗内同样路径键盘正常恢复，光标可见、无游离手柄；长按选词仍为系统手柄且不会误弹键盘；输入框无调试文字残留。冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA-256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）。未提交、未推送、未发布。
+验证（真机 HONOR ROL-W10，USB 调试，release 包 2.8.41/227）：全屏“点击弹出 → 返回键收起 → 再点击恢复”稳定通过；收起后点击文字中部再输入得到 `ZhMelloXY`，插入位置与点击一致，说明重建焦点不丢选区；悬浮窗内同样路径键盘正常恢复，光标可见、无游离手柄；长按选词仍为系统手柄且不会误弹键盘；输入框无调试文字残留。冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 112 Warning；输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA-256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`，v2 签名证书 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）。
+
+发布与隐私核查：版本提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；[Echo 2.8.41 Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest，唯一附件 `Echo-v2.8.41.apk`，平台 digest、`gh release download` 独立下载 SHA256 与大小均与本机一致，正文由 `release-notes/latest.md` 创建。按仅保留最新版策略已删除远端旧 v2.8.39 Release 与标签；本机 v2.8.39 标签和全部历史 APK 保留。隐私核查：暂存文档与源码扫描本机路径 / 用户名 / 密钥 / 手机号命中 0（`TypeToken` 为关键词误命中）；APK DEX 扫描本机路径、手机号、`sk-` 密钥均 0 命中；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
 
 ## 2026-11-19 · 2.8.40 悬浮窗内文本选择手柄漂移修复（未发布，已并入 2.8.41）
 

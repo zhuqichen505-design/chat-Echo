@@ -10,7 +10,7 @@
 
 冻结验收 `20261119-101447-584`：脚本 / Gradle 退出 0，661.58 秒；94 套件 / 1,102 项测试全部执行，失败 / 错误 / 跳过均 0，Lint 0 Error / 112 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，5 分 45 秒；`Echo-v2.8.41.apk` 25,521,941 字节，SHA256 `33bb852dd19a2236237d1eb0a298bc61a6106260ef6f55c6e507f2caa217c63a`；v2 签名与上版证书一致，Android Debug **非正式生产签名**。APK 446 条目且条目名集合与 2.8.39 一致，5 项内容变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 逐字节不变、186 张位图不变，隐私新增命中 0。真机 HONOR ROL-W10 安装 release 包验证：全屏与悬浮窗均“点击弹出 → 返回键收起 → 再点击恢复”，收起后点击文字中部再输入位置正确，长按选词仍为系统手柄。
 
-版本提交与标注标签 `v2.8.41` 已推送；GitHub Release 为 Latest，唯一附件摘要与独立下载一致。
+版本提交 `a17d7b8` 与标注标签 `v2.8.41` 已推送；[GitHub Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest，唯一附件摘要与独立下载一致。
 
 ## Echo 2.8.39（已发布）
 

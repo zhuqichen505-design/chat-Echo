@@ -28,6 +28,8 @@ APK 审计：446 条目，条目名集合与 2.8.39 完全一致；5 项内容�
 
 剩余风险：设置页 / 首页搜索等单行输入框未接入补弹逻辑；悬浮窗下无光标小把手；不同输入法（讯飞 / 系统）下的补弹时序未逐一枚举。
 
+发布：版本提交 `a17d7b8a820484dda854b45b05c35882b6babb6c` 与 annotated 标签 `v2.8.41`（对象 `55d06a6ebaa5b5209a017f422283aa9bab25911f`）已推送，远端 main / peeled 标签核验一致；[Release](https://github.com/zhuqichen505-design/chat-Echo/releases/tag/v2.8.41) 为 Latest，唯一附件 `Echo-v2.8.41.apk` 的平台 digest 与独立下载 SHA256 / 大小均与本机一致；已按仅保留最新版策略撤下远端 v2.8.39 Release 与标签，本机历史标签与历史 APK 保留。
+
 ## 2026-11-15 · 2.8.39 修复 2.8.38 release 进入对话闪退（Gson TypeToken 被 R8 合并）
 
 版本 2.8.39/225；Room v37 / 20 个实体不变。用户反馈 2.8.38 安装包点击进入对话即闪退。
