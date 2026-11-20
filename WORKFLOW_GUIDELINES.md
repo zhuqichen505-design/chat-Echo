@@ -26,6 +26,15 @@
 
 ## 本次记录
 
+## 2026-11-21 · API 配置拖拽中选中项跳变修复（未发版）
+
+- 基线 `main/dc6e5d0`（已发布 2.8.48/234）；本轮未递增版本、未构建 APK。
+- 根因：2.8.48 仍在拖拽中实时交换列表，交换会改变条目布局槽位与手柄原点，局部坐标累计位移在重排后跳变；补偿漏算列表间距；拖拽状态仍以 index 为主。
+- 修复：拖拽期间仅视觉位移，松手才 move 一次；全程按稳定 key 识别；目标判定计入条目中心与列表间距；新增拖拽代次与 Job 清理；API 配置页拖拽期间忽略数据库回流。
+- 涉及 `SmoothReorderState.kt`、`SettingsScreen.kt`、`SettingsApiConfigDialog.kt`、`ChatMessageComponents.kt`、`SmoothReorderTest.kt`、`UiPolishRegressionTest.kt`。
+- 冻结验收 `20261121-053516-619`：脚本 / Gradle 退出 0，712.674 秒；96 套件 / 1,113 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 未连接真机，四处拖拽手柄待人工验收。
+
 ## 2026-11-20 · 拖拽排序错选与可自定义连接超时（2.8.48 已发布）
 
 - 基线 `main/261604b`（已发布 2.8.47/233）；版本顺延为 2.8.48/234；Room v37 / 20 个实体不变。

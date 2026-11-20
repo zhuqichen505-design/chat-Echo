@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -989,10 +990,12 @@ fun ApiConfigTab(
     val scope = rememberCoroutineScope()
     val configsFromDb by repository.getAllApiConfigs().collectAsState(initial = emptyList())
     var localConfigs by remember { mutableStateOf<List<ApiConfig>>(emptyList()) }
-    LaunchedEffect(configsFromDb) {
-        localConfigs = configsFromDb
-    }
     val providerReorderState = rememberSmoothReorderState()
+    val providerItemSpacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+    LaunchedEffect(configsFromDb, providerReorderState) {
+        // 拖拽期间不使用数据库回流结果覆盖本地顺序，避免列表在手势中重排。
+        if (!providerReorderState.isDragging || localConfigs.isEmpty()) localConfigs = configsFromDb
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -1079,16 +1082,16 @@ fun ApiConfigTab(
             }
         }
 
-        itemsIndexed(localConfigs, key = { _, cfg -> cfg.id }) { index, config ->
-            val isDragActive = providerReorderState.isItemActive(index)
+        itemsIndexed(localConfigs, key = { _, cfg -> cfg.id }) { _, config ->
+            val isDragActive = providerReorderState.isItemActive(config.id)
             ApiConfigCard(
                 hazeState = hazeState,
                 config = config,
                 modifier = Modifier.reorderItem(
                     state = providerReorderState,
-                    index = index,
                     key = config.id,
-                    shape = SettingsPanelShape
+                    shape = SettingsPanelShape,
+                    spacingPx = providerItemSpacingPx
                 ),
                 reorderHandle = if (localConfigs.size > 1) {
                     {
@@ -1102,16 +1105,13 @@ fun ApiConfigTab(
                                 )
                                 .reorderDragHandle(
                                     state = providerReorderState,
-                                    index = { index },
                                     key = { config.id },
                                     keys = { localConfigs.map { it.id } },
-                                    listSize = { localConfigs.size },
                                     onMove = { fromIdx, toIdx ->
                                         if (fromIdx in localConfigs.indices && toIdx in localConfigs.indices && fromIdx != toIdx) {
                                             val updated = localConfigs.toMutableList()
-                                            val temp = updated[fromIdx]
-                                            updated[fromIdx] = updated[toIdx]
-                                            updated[toIdx] = temp
+                                            val moved = updated.removeAt(fromIdx)
+                                            updated.add(toIdx, moved)
                                             localConfigs = updated
                                             repository.saveApiConfigOrder(updated.map { it.id })
                                         }

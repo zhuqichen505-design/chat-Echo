@@ -2890,8 +2890,8 @@ internal fun MessageQueueCard(
             val queueReorderState = rememberSmoothReorderState()
 
             // 队列列表项
-            queue.forEachIndexed { index, msg ->
-                val isActive = queueReorderState.isItemActive(index)
+            queue.forEach { msg ->
+                val isActive = queueReorderState.isItemActive(msg.id)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = if (isActive) MaterialTheme.colorScheme.surface.copy(alpha = 0.95f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
@@ -2901,7 +2901,12 @@ internal fun MessageQueueCard(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .reorderItem(queueReorderState, index, msg.id)
+                        .reorderItem(
+                            queueReorderState,
+                            msg.id,
+                            // 队列条目之间由 Column 提供 8dp 间距
+                            spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+                        )
                 ) {
                     Row(
                         modifier = Modifier
@@ -2918,10 +2923,8 @@ internal fun MessageQueueCard(
                                 .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
                                 .reorderDragHandle(
                                     state = queueReorderState,
-                                    index = { index },
                                     key = { msg.id },
                                     keys = { queue.map { it.id } },
-                                    listSize = { queue.size },
                                     onMove = onMove
                                 ),
                             contentAlignment = Alignment.Center

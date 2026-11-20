@@ -1,6 +1,9 @@
 package com.aiassistant
 
 import com.aiassistant.ui.components.SmoothReorderState
+import com.aiassistant.ui.components.computeReorderTargetIndex
+import com.aiassistant.ui.components.reorderSlotOffset
+import com.aiassistant.ui.components.slotTravelDistance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
@@ -18,100 +21,105 @@ class SmoothReorderTest {
     @Test
     fun testInitialState() {
         val state = SmoothReorderState(testScope)
-        assertNull(state.draggingIndex)
+        assertNull(state.draggingKey)
+        assertFalse(state.isDragging)
         assertEquals(0f, state.dragOffsetY, 0.001f)
         assertFalse(state.isReleasing)
-        assertFalse(state.isItemActive(0))
+        assertFalse(state.isItemActive("k0"))
+        assertEquals(-1, state.targetIndex)
     }
 
     @Test
-    fun testOnDragStart() {
+    fun testOnDragStartTracksStableKey() {
         val state = SmoothReorderState(testScope)
-        state.setItemHeight(1, 120f)
-        state.onDragStart(1)
+        state.setItemHeight("a", 90f)
+        state.setItemHeight("b", 120f)
+        state.onDragStart(listOf("a", "b", "c"), "b")
 
-        assertEquals(1, state.draggingIndex)
+        assertEquals("b", state.draggingKey)
+        assertEquals(1, state.draggingStartIndex)
+        assertEquals(1, state.targetIndex)
         assertEquals(0f, state.dragOffsetY, 0.001f)
-        assertTrue(state.isItemActive(1))
-        assertFalse(state.isItemActive(0))
-        assertEquals(120f, state.getItemHeight(1), 0.001f)
+        assertTrue(state.isItemActive("b"))
+        assertFalse(state.isItemActive("a"))
+        assertEquals(120f, state.getItemHeight("b"), 0.001f)
+        assertEquals(1f, state.getItemLift(), 0.001f)
     }
 
     @Test
-    fun testOnDragDelta_downwardSwap() {
+    fun testDragDownOnlyMovesOnRelease() {
         val state = SmoothReorderState(testScope)
-        val itemHeight = 100f
-        state.setItemHeight(0, itemHeight)
-        state.setItemHeight(1, itemHeight)
-        state.onDragStart(0)
+        val keys = listOf("k0", "k1", "k2")
+        keys.forEach { state.setItemHeight(it, 100f) }
+        state.onDragStart(keys, "k0")
 
-        val keys = mutableListOf("key0", "key1", "key2")
-        var movedFrom: Int? = null
-        var movedTo: Int? = null
+        // 越过邻居中心（(100+100)/2 = 100）才切换到下一槽位
+        state.onDragDelta(deltaY = 80f, keys = keys)
+        assertEquals(0, state.targetIndex)
+        assertEquals(80f, state.dragOffsetY, 0.001f)
 
-        // 拖动位移未达到阈值 (42f)
-        state.onDragDelta(
-            deltaY = 30f,
-            listSize = keys.size,
-            keys = keys,
-            haptic = null
-        ) { from, to ->
-            movedFrom = from
-            movedTo = to
-        }
-        assertEquals(0, state.draggingIndex)
-        assertEquals(30f, state.dragOffsetY, 0.001f)
-        assertNull(movedFrom)
+        state.onDragDelta(deltaY = 40f, keys = keys)
+        assertEquals(1, state.targetIndex)
+        assertEquals(120f, state.dragOffsetY, 0.001f)
+        // 列表数据在手势期间不变，让位只是视觉位移
+        assertEquals(-100f, state.getItemOffsetY("k1"), 0.001f)
+        assertEquals(0f, state.getItemOffsetY("k2"), 0.001f)
 
-        // 继续拖动超过阈值 (42f)
-        state.onDragDelta(
-            deltaY = 20f, // 累计 50f > 42f
-            listSize = keys.size,
-            keys = keys,
-            haptic = null
-        ) { from, to ->
-            movedFrom = from
-            movedTo = to
-            val temp = keys[from]
-            keys[from] = keys[to]
-            keys[to] = temp
-        }
-
-        assertEquals(0, movedFrom)
-        assertEquals(1, movedTo)
-        // 验证当前拖动项索引顺延至 1
-        assertEquals(1, state.draggingIndex)
-        // 验证位移补偿：50f - 100f = -50f，保证在屏幕上的绝对位置保持连续
-        assertEquals(-50f, state.dragOffsetY, 0.001f)
+        var moved: Pair<Int, Int>? = null
+        state.onDragFinish(keys) { from, to -> moved = from to to }
+        assertEquals(0 to 1, moved)
+        assertNull(state.draggingKey)
+        assertFalse(state.isDragging)
+        assertEquals(0f, state.dragOffsetY, 0.001f)
+        assertEquals(0f, state.getItemOffsetY("k1"), 0.001f)
+        assertEquals(0f, state.getItemLift(), 0.001f)
     }
 
     @Test
-    fun testOnDragDelta_upwardSwap() {
+    fun testDragUpMovesOneSlot() {
         val state = SmoothReorderState(testScope)
-        val itemHeight = 100f
-        state.setItemHeight(1, itemHeight)
-        state.setItemHeight(0, itemHeight)
-        state.onDragStart(1)
+        val keys = listOf("k0", "k1")
+        keys.forEach { state.setItemHeight(it, 100f) }
+        state.onDragStart(keys, "k1")
 
-        val keys = mutableListOf("key0", "key1")
-        var swapped = false
+        state.onDragDelta(deltaY = -120f, keys = keys)
+        assertEquals(0, state.targetIndex)
+        assertEquals(-120f, state.dragOffsetY, 0.001f)
+        assertEquals(100f, state.getItemOffsetY("k0"), 0.001f)
 
-        state.onDragDelta(
-            deltaY = -60f, // 向上拖动超过 42f 阈值
-            listSize = keys.size,
-            keys = keys,
-            haptic = null
-        ) { from, to ->
-            swapped = true
-            val temp = keys[from]
-            keys[from] = keys[to]
-            keys[to] = temp
-        }
+        var moved: Pair<Int, Int>? = null
+        state.onDragFinish(keys) { from, to -> moved = from to to }
+        assertEquals(1 to 0, moved)
+    }
 
-        assertTrue(swapped)
-        assertEquals(0, state.draggingIndex)
-        // 向上位移补偿：-60f + 100f = +40f
-        assertEquals(40f, state.dragOffsetY, 0.001f)
+    @Test
+    fun testDragStaysOnSameKeyWhenListIsReplaced() {
+        val state = SmoothReorderState(testScope)
+        val original = listOf("a", "b", "c")
+        original.forEach { state.setItemHeight(it, 100f) }
+        state.onDragStart(original, "b")
+
+        // 外部回流导致 b 的位置变化：拖拽仍必须绑定 b，不得换成别的条目
+        val refreshed = listOf("b", "c", "a")
+        state.onDragDelta(deltaY = 60f, keys = refreshed)
+
+        assertEquals("b", state.draggingKey)
+        assertTrue(state.isItemActive("b"))
+        assertEquals(0, state.draggingStartIndex)
+    }
+
+    @Test
+    fun testTapWithoutMovementDoesNotReorder() {
+        val state = SmoothReorderState(testScope)
+        val keys = listOf("k0", "k1")
+        keys.forEach { state.setItemHeight(it, 100f) }
+        state.onDragStart(keys, "k0")
+
+        var moved = false
+        state.onDragFinish(keys) { _, _ -> moved = true }
+        assertFalse(moved)
+        assertNull(state.draggingKey)
+        assertEquals(0f, state.getItemLift(), 0.001f)
     }
 
     @Test
@@ -119,41 +127,67 @@ class SmoothReorderTest {
         val state = SmoothReorderState(testScope)
         state.setItemHeight(0, 100f)
         state.setItemHeight(1, 100f)
+        state.setItemHeight(2, 100f)
+        val keys = listOf(0, 1, 2)
 
-        val keys = listOf("key0", "key1")
-        var swapped = false
+        // 顶部项继续向上拖动，目标保持 0
+        state.onDragStart(keys, 0)
+        state.onDragDelta(deltaY = -500f, keys = keys)
+        assertEquals(0, state.targetIndex)
+        var moved = false
+        state.onDragFinish(keys) { _, _ -> moved = true }
+        assertFalse(moved)
 
-        // 在顶部项向上拖动，不应发生交换越界
-        state.onDragStart(0)
-        state.onDragDelta(
-            deltaY = -200f,
-            listSize = keys.size,
-            keys = keys,
-            haptic = null
-        ) { _, _ -> swapped = true }
-        assertFalse(swapped)
-        assertEquals(0, state.draggingIndex)
+        // 末尾项继续向下拖动，目标保持末尾
+        state.onDragStart(keys, 2)
+        state.onDragDelta(deltaY = 500f, keys = keys)
+        assertEquals(2, state.targetIndex)
+        moved = false
+        state.onDragFinish(keys) { _, _ -> moved = true }
+        assertFalse(moved)
+    }
 
-        // 在末尾项向下拖动，不应发生交换越界
-        state.onDragStart(1)
-        state.onDragDelta(
-            deltaY = 200f,
-            listSize = keys.size,
-            keys = keys,
-            haptic = null
-        ) { _, _ -> swapped = true }
-        assertFalse(swapped)
-        assertEquals(1, state.draggingIndex)
+    @Test
+    fun testTargetIndexUsesVariableHeights() {
+        assertEquals(0, computeReorderTargetIndex(0, 99f, listOf(100f, 100f)))
+        assertEquals(1, computeReorderTargetIndex(0, 101f, listOf(100f, 100f)))
+        // 相邻条目更高时，需要更大的位移才跨过其中心
+        assertEquals(0, computeReorderTargetIndex(0, 150f, listOf(100f, 300f)))
+        assertEquals(1, computeReorderTargetIndex(0, 201f, listOf(100f, 300f)))
+        assertEquals(2, computeReorderTargetIndex(1, 201f, listOf(100f, 100f, 300f)))
+        assertEquals(0, computeReorderTargetIndex(1, -201f, listOf(300f, 100f)))
+        // 列表项间距也要计入跨槽阈值
+        assertEquals(0, computeReorderTargetIndex(0, 149f, listOf(100f, 100f), itemSpacing = 50f))
+        assertEquals(1, computeReorderTargetIndex(0, 151f, listOf(100f, 100f), itemSpacing = 50f))
+    }
+
+    @Test
+    fun testSlotOffsetsAndTravel() {
+        val heights = listOf(100f, 120f, 140f)
+        // 向下让位：k1 上移 k0 的高度，k2 上移 k1 的高度
+        assertEquals(-100f, reorderSlotOffset(1, 0, 2, heights), 0.001f)
+        assertEquals(-120f, reorderSlotOffset(2, 0, 2, heights), 0.001f)
+        // 向上让位：k1 下移 k2 的高度
+        assertEquals(140f, reorderSlotOffset(1, 2, 1, heights), 0.001f)
+        assertEquals(0f, reorderSlotOffset(0, 2, 1, heights), 0.001f)
+        // 跨槽位移 = 途经槽位高度之和
+        assertEquals(220f, slotTravelDistance(0, 2, heights), 0.001f)
+        assertEquals(-220f, slotTravelDistance(2, 0, heights), 0.001f)
+        assertEquals(0f, slotTravelDistance(1, 1, heights), 0.001f)
+        // 间距参与让位与跨槽补偿
+        assertEquals(-108f, reorderSlotOffset(1, 0, 1, listOf(100f, 100f), itemSpacing = 8f), 0.001f)
+        assertEquals(216f, slotTravelDistance(0, 2, listOf(100f, 100f, 100f), itemSpacing = 8f), 0.001f)
     }
 
     @Test
     fun testOnAnimateSwap_buttonTrigger() {
         val state = SmoothReorderState(testScope)
-        state.setItemHeight(0, 80f)
-        state.setItemHeight(1, 80f)
+        state.setItemHeight("k0", 80f)
+        state.setItemHeight("k1", 80f)
 
         state.onAnimateSwap(fromKey = "k0", toKey = "k1", fromIndex = 0, toIndex = 1)
-        // 验证执行无异常崩溃，并且动画已启动
-        assertNotNull(state)
+        // 箭头换位动画播放后回到最终位置
+        assertEquals(0f, state.getItemOffsetY("k0"), 0.001f)
+        assertEquals(0f, state.getItemOffsetY("k1"), 0.001f)
     }
 }

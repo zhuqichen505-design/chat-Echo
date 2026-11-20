@@ -755,7 +755,7 @@ private fun ApiConfigEditorContent(
                                 val isKeyEnabled = currentKey.isEnabled
                                 val keyLabel = if (isKeyEnabled) "Key ${index + 1}" else "Key ${index + 1} (停用)"
                                 val itemId = keyIds.getOrElse(index) { "key_$index" }
-                                val isActive = keyReorderState.isItemActive(index)
+                                val isActive = keyReorderState.isItemActive(itemId)
 
                                 Surface(
                                     shape = RoundedCornerShape(EchoTokens.Radius.md),
@@ -769,7 +769,13 @@ private fun ApiConfigEditorContent(
                                         .fillMaxWidth()
                                         .padding(vertical = 3.dp)
                                         .alpha(if (isKeyEnabled) 1f else 0.65f)
-                                        .reorderItem(keyReorderState, index, itemId, shape = RoundedCornerShape(EchoTokens.Radius.md))
+                                        .reorderItem(
+                                            keyReorderState,
+                                            itemId,
+                                            shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                            // 密钥卡片上下各 3dp 内边距，列表项间距为 6dp
+                                            spacingPx = with(LocalDensity.current) { 6.dp.toPx() }
+                                        )
                                 ) {
                                     Column(
                                         modifier = Modifier
@@ -790,30 +796,27 @@ private fun ApiConfigEditorContent(
                                                         .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
                                                         .reorderDragHandle(
                                                             state = keyReorderState,
-                                                            index = { index },
                                                             key = { itemId },
                                                             keys = { keyIds.toList() },
-                                                            listSize = { namedKeyList.size },
                                                             onMove = { fromIdx, toIdx ->
-                                                                val updated = namedKeyList.toMutableList()
-                                                                val temp = updated[fromIdx]
-                                                                updated[fromIdx] = updated[toIdx]
-                                                                updated[toIdx] = temp
-                                                                namedKeyList = updated
-                                                                apiKey = AiRepository.formatNamedApiKeys(updated)
+                                                                if (fromIdx in namedKeyList.indices && toIdx in namedKeyList.indices && fromIdx != toIdx) {
+                                                                    val updated = namedKeyList.toMutableList()
+                                                                    val movedKey = updated.removeAt(fromIdx)
+                                                                    updated.add(toIdx, movedKey)
+                                                                    namedKeyList = updated
+                                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
 
-                                                                if (fromIdx < keyIds.size && toIdx < keyIds.size) {
-                                                                    val tempId = keyIds[fromIdx]
-                                                                    keyIds[fromIdx] = keyIds[toIdx]
-                                                                    keyIds[toIdx] = tempId
-                                                                }
+                                                                    if (fromIdx < keyIds.size && toIdx < keyIds.size) {
+                                                                        val movedId = keyIds.removeAt(fromIdx)
+                                                                        keyIds.add(toIdx, movedId)
+                                                                    }
 
-                                                                val nextVis = keyVisibilityList.toMutableList()
-                                                                if (fromIdx < nextVis.size && toIdx < nextVis.size) {
-                                                                    val tempV = nextVis[fromIdx]
-                                                                    nextVis[fromIdx] = nextVis[toIdx]
-                                                                    nextVis[toIdx] = tempV
-                                                                    keyVisibilityList = nextVis
+                                                                    val nextVis = keyVisibilityList.toMutableList()
+                                                                    if (fromIdx < nextVis.size && toIdx < nextVis.size) {
+                                                                        val movedVisible = nextVis.removeAt(fromIdx)
+                                                                        nextVis.add(toIdx, movedVisible)
+                                                                        keyVisibilityList = nextVis
+                                                                    }
                                                                 }
                                                             }
                                                         ),
@@ -1444,9 +1447,9 @@ private fun ApiConfigEditorContent(
                                         }
 
                                         val modelsToShow = if (canReorderModels) availableModels else filteredModels
-                                        modelsToShow.forEachIndexed { index, model ->
+                                        modelsToShow.forEach { model ->
                                             val modelItemId = model
-                                            val isModelDragActive = canReorderModels && modelReorderState.isItemActive(index)
+                                            val isModelDragActive = canReorderModels && modelReorderState.isItemActive(modelItemId)
                                             ModelCustomSettingCard(
                                                 model = model,
                                                 checked = enabledModelNames.contains(model),
@@ -1454,16 +1457,13 @@ private fun ApiConfigEditorContent(
                                                 capability = modelCapabilities[model] ?: "auto",
                                                 customSettings = modelCustomSettings[model],
                                                 reorderState = if (canReorderModels) modelReorderState else null,
-                                                reorderIndex = index,
                                                 reorderKey = modelItemId,
                                                 reorderKeys = { availableModels.toList() },
-                                                reorderListSize = { availableModels.size },
                                                 onReorderMove = { fromIdx, toIdx ->
                                                     if (fromIdx in availableModels.indices && toIdx in availableModels.indices && fromIdx != toIdx) {
                                                         val updated = availableModels.toMutableList()
-                                                        val temp = updated[fromIdx]
-                                                        updated[fromIdx] = updated[toIdx]
-                                                        updated[toIdx] = temp
+                                                        val movedModel = updated.removeAt(fromIdx)
+                                                        updated.add(toIdx, movedModel)
                                                         availableModels = updated
                                                     }
                                                 },
@@ -1576,10 +1576,8 @@ private fun ModelCustomSettingCard(
     onResetCustomSettings: () -> Unit = {},
     onCustomSettingsChange: (ModelCustomSettings) -> Unit,
     reorderState: com.aiassistant.ui.components.SmoothReorderState? = null,
-    reorderIndex: Int = 0,
     reorderKey: Any = model,
     reorderKeys: () -> List<Any> = { listOf(model) },
-    reorderListSize: () -> Int = { 1 },
     onReorderMove: (Int, Int) -> Unit = { _, _ -> },
     isDragActive: Boolean = false
 ) {
@@ -1602,7 +1600,13 @@ private fun ModelCustomSettingCard(
         .fillMaxWidth()
         .padding(vertical = 3.dp)
     val dragModifier = if (reorderState != null) {
-        baseModifier.reorderItem(reorderState, reorderIndex, reorderKey, shape = cardShape)
+        baseModifier.reorderItem(
+            reorderState,
+            reorderKey,
+            shape = cardShape,
+            // 模型卡片上下各 3dp 内边距，列表项间距为 6dp
+            spacingPx = with(LocalDensity.current) { 6.dp.toPx() }
+        )
     } else {
         baseModifier
     }
@@ -1632,10 +1636,8 @@ private fun ModelCustomSettingCard(
                             )
                             .reorderDragHandle(
                                 state = reorderState,
-                                index = { reorderIndex },
                                 key = { reorderKey },
                                 keys = reorderKeys,
-                                listSize = reorderListSize,
                                 onMove = onReorderMove
                             ),
                         contentAlignment = Alignment.Center
