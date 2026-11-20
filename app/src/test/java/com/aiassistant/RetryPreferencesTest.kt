@@ -77,6 +77,27 @@ class RetryPreferencesTest {
         assertFalse(PersonalizationManager(context).getSettings().showModelAvatar)
     }
 
+    @Test fun connectionTimeoutDefaultsTo120SecondsAndPersistsClampedSelection() {
+        val context = RuntimeEnvironment.getApplication()
+        assertTrue(context.getSharedPreferences("personalization_settings", 0).edit().clear().commit())
+        val manager = PersonalizationManager(context)
+
+        assertEquals(120, manager.getConnectionTimeoutSeconds())
+        assertTrue(manager.setConnectionTimeoutSeconds(300))
+        assertEquals(300, PersonalizationManager(context).getConnectionTimeoutSeconds())
+
+        assertTrue(manager.setConnectionTimeoutSeconds(5))
+        assertEquals(
+            PersonalizationManager.MIN_CONNECTION_TIMEOUT_SECONDS,
+            PersonalizationManager(context).getConnectionTimeoutSeconds()
+        )
+        assertTrue(manager.setConnectionTimeoutSeconds(99_999))
+        assertEquals(
+            PersonalizationManager.MAX_CONNECTION_TIMEOUT_SECONDS,
+            PersonalizationManager(context).getConnectionTimeoutSeconds()
+        )
+    }
+
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun paperTexturesHaveDeterministicDistinctTranslucentFibres() {

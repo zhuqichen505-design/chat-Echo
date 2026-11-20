@@ -93,7 +93,8 @@ class AiRepository(
     private val echoToolHub: com.aiassistant.tools.EchoToolHub? = null,
     private val worldBookDao: WorldBookDao? = null,
     private val timelineNodeDao: TimelineNodeDao? = null,
-    private val firstTokenTimeoutMillis: Long = FirstTokenDeadline.DEFAULT_TIMEOUT_MILLIS
+    // 仅测试注入固定值；为空时每次请求读取用户自定义的连接超时。
+    private val firstTokenTimeoutMillis: Long? = null
 ) {
     private val gson = Gson()
     private val tag = "AiRepository"
@@ -1686,7 +1687,9 @@ class AiRepository(
             val keyMasked = maskApiKeyForDisplay(currentKey)
             var attempt = 0
             while (true) {
-                val deadline = FirstTokenDeadline(firstTokenTimeoutMillis)
+                val timeoutMillis = firstTokenTimeoutMillis
+                    ?: (personalizationManager.getConnectionTimeoutSeconds() * 1000L)
+                val deadline = FirstTokenDeadline(timeoutMillis)
                 try {
                     ensureContextSourcesCurrent(conversationId, historyMessages)
                     when (keyConfig.apiType) {
@@ -2055,7 +2058,10 @@ class AiRepository(
                     activeCall = call
                     activeStreamingCalls[conversationId] = call
                     firstTokenDeadline.start(call)
-                }
+                },
+                client = RetrofitClient.streamClientWithReadTimeout(
+                    personalizationManager.getConnectionTimeoutSeconds().toLong()
+                )
             )
 
             response.use { okResponse ->
@@ -2442,7 +2448,10 @@ class AiRepository(
                     activeCall = call
                     activeStreamingCalls[conversationId] = call
                     firstTokenDeadline.start(call)
-                }
+                },
+                client = RetrofitClient.streamClientWithReadTimeout(
+                    personalizationManager.getConnectionTimeoutSeconds().toLong()
+                )
             )
 
             response.use { okResponse ->

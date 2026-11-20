@@ -186,6 +186,16 @@ class PersonalizationManager(private val context: Context) {
         prefs.edit(commit = true) { putBoolean("retry_backup_key_enabled", enabled) }
     }
 
+    /** 等待模型返回首个正文/思考内容的最长时间；超出后按超时错误交给重试策略。 */
+    fun getConnectionTimeoutSeconds(): Int =
+        prefs.getInt(KEY_CONNECTION_TIMEOUT_SECONDS, DEFAULT_CONNECTION_TIMEOUT_SECONDS)
+            .coerceIn(MIN_CONNECTION_TIMEOUT_SECONDS, MAX_CONNECTION_TIMEOUT_SECONDS)
+
+    fun setConnectionTimeoutSeconds(seconds: Int): Boolean {
+        val sanitized = seconds.coerceIn(MIN_CONNECTION_TIMEOUT_SECONDS, MAX_CONNECTION_TIMEOUT_SECONDS)
+        return prefs.edit().putInt(KEY_CONNECTION_TIMEOUT_SECONDS, sanitized).commit()
+    }
+
     fun getSettings(): PersonalizationSettings {
         val legacyGlobalPrompt = legacyPrefs.getString("global_system_prompt", "").orEmpty()
         val globalPrompt = prefs.getString(KEY_GLOBAL_PROMPT, null) ?: legacyGlobalPrompt
@@ -382,7 +392,12 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_AUTO_COMPRESSION_THRESHOLD_L3 = "auto_compression_threshold_l3"
         private const val KEY_AUTO_COMPRESSION_THRESHOLD_L4 = "auto_compression_threshold_l4"
         private const val KEY_API_CONFIG_ORDER = "api_config_order"
+        private const val KEY_CONNECTION_TIMEOUT_SECONDS = "connection_timeout_seconds"
         private const val KEY_IGNORE_CONTEXT_FALLBACK_PREFIX = "ignore_context_fallback_conv_"
+
+        const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 120
+        const val MIN_CONNECTION_TIMEOUT_SECONDS = 30
+        const val MAX_CONNECTION_TIMEOUT_SECONDS = 600
 
         const val DEFAULT_AUXILIARY_MEMORY_PROMPT = "你是一个专业的记忆与设定提炼助手。请阅读以下对话内容，判断是否包含值得长期记住的人物画像、长期偏好、重要事实、剧情设定或行为约束（如称呼要求、绝对禁忌、输出规范等）。\n" +
             "【沉浸感最高准则（铁律）】：\n" +

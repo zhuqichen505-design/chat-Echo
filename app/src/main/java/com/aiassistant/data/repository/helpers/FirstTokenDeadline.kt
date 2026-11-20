@@ -46,7 +46,6 @@ internal class FirstTokenDeadline(private val timeoutMillis: Long) : AutoCloseab
     }
     @Synchronized override fun close() { finished = true; timer?.cancel(false) }
     companion object {
-        const val DEFAULT_TIMEOUT_MILLIS = 120_000L
         private val scheduler = Executors.newSingleThreadScheduledExecutor { task ->
             Thread(task, "echo-first-token-deadline").apply { isDaemon = true }
         }

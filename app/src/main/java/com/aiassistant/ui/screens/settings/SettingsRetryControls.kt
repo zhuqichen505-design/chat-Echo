@@ -39,6 +39,49 @@ internal fun SettingsRetryControls(manager: PersonalizationManager) {
         Text("流式输出设置保存失败，请重试。", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error)
     }
+    // 用户可自定义等待首个正文/思考内容的时间，替代固定的 120 秒。
+    var timeoutText by rememberSaveable { mutableStateOf(manager.getConnectionTimeoutSeconds().toString()) }
+    var timeoutSaveFailed by remember { mutableStateOf(false) }
+    val timeoutValue = timeoutText.toIntOrNull()
+    val timeoutValid = timeoutValue != null &&
+        timeoutValue in PersonalizationManager.MIN_CONNECTION_TIMEOUT_SECONDS..PersonalizationManager.MAX_CONNECTION_TIMEOUT_SECONDS
+    EchoSettingRow(
+        title = "模型连接超时",
+        subtitle = "等待首个正文或思考内容的最长时间：" +
+            "${PersonalizationManager.MIN_CONNECTION_TIMEOUT_SECONDS}–${PersonalizationManager.MAX_CONNECTION_TIMEOUT_SECONDS} 秒，" +
+            "默认 ${PersonalizationManager.DEFAULT_CONNECTION_TIMEOUT_SECONDS} 秒；超时后按下方重试设置处理，对新请求生效。",
+        contentPaddingHorizontal = 0.dp
+    ) {
+        val fontScale = LocalDensity.current.fontScale
+        OutlinedTextField(
+            value = timeoutText,
+            onValueChange = { value ->
+                timeoutText = value.filter(Char::isDigit).take(3)
+                timeoutText.toIntOrNull()?.takeIf {
+                    it in PersonalizationManager.MIN_CONNECTION_TIMEOUT_SECONDS..PersonalizationManager.MAX_CONNECTION_TIMEOUT_SECONDS
+                }?.let { seconds ->
+                    val saved = runCatching { manager.setConnectionTimeoutSeconds(seconds) }.getOrDefault(false)
+                    timeoutSaveFailed = !saved
+                }
+            },
+            label = { Text("秒", style = MaterialTheme.typography.labelSmall) },
+            isError = !timeoutValid,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width((88 * fontScale.coerceAtLeast(1f)).dp)
+        )
+    }
+    if (!timeoutValid) {
+        Text(
+            "请输入 ${PersonalizationManager.MIN_CONNECTION_TIMEOUT_SECONDS}–${PersonalizationManager.MAX_CONNECTION_TIMEOUT_SECONDS} 之间的秒数。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+    } else if (timeoutSaveFailed) {
+        Text("连接超时设置保存失败，请重试。", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+    }
     EchoSettingRow(title = "模型失败后自动重试", subtitle = "总开关：关闭后不自动重连、不自动切换备用 Key；首次失败立即显示原因", contentPaddingHorizontal = 0.dp) {
         EchoSwitch(checked = retryEnabled, onCheckedChange = {
             retryEnabled = it

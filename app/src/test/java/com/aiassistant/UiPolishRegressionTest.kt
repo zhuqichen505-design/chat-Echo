@@ -3,6 +3,7 @@ package com.aiassistant
 import com.aiassistant.ui.components.SmoothReorderState
 import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.echoContentInsetFor
+import com.aiassistant.ui.components.resolveReorderStartIndex
 import com.aiassistant.ui.screens.settings.cleanModelNames
 import com.aiassistant.ui.screens.settings.parseModelList
 import com.aiassistant.ui.screens.settings.apiModelDiscoveryEntries
@@ -83,6 +84,15 @@ class UiPolishRegressionTest {
         assertEquals("平板宽度按 720dp 内容列居中", 292f, echoContentInsetFor(1280.dp, 12.dp, 720.dp).value, 0.01f)
         assertEquals("临界宽度不产生额外留白", 12f, echoContentInsetFor(720.dp, 12.dp, 720.dp).value, 0.01f)
         assertEquals("超宽窗口仍按 720dp 居中", 652f, echoContentInsetFor(2000.dp, 12.dp, 720.dp).value, 0.01f)
+    }
+
+    @Test
+    fun reorderHandleResolvesLatestIndexByStableKeyAfterListReorder() {
+        val keys = listOf("api-c", "api-a", "api-b")
+        assertEquals("重排后必须按稳定 key 定位条目当前下标", 1, resolveReorderStartIndex(keys, "api-a", fallbackIndex = 0))
+        assertEquals("key 不存在时回退组合下标", 2, resolveReorderStartIndex(keys, "missing", fallbackIndex = 2))
+        assertEquals("回退下标越界时拒绝开始拖拽", -1, resolveReorderStartIndex(keys, "missing", fallbackIndex = 5))
+        assertEquals("空列表不得开始拖拽", -1, resolveReorderStartIndex(emptyList(), "api-a", fallbackIndex = 0))
     }
 
     @Test

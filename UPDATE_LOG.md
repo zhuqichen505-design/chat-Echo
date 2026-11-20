@@ -1,5 +1,17 @@
 # 维护记录
 
+## 2026-11-20 · API 配置拖拽排序错选与可自定义连接超时（2.8.48）
+
+用户提出两项要求：在 API 配置页按住左上角六个点移动配置位置时，偶尔实际被选中的条目与按住的不是同一个；模型连接超过 120 秒即判定超时，希望超时时间可自定义。
+
+排序错选的根因：`Modifier.reorderDragHandle` 的手势协程只以 `SmoothReorderState` 为键启动一次，列表重排或数据库回流后的重组不会重启它，按下时仍读取首次组合捕获的 `index`；重排后同一张卡片的组合下标已经变化，于是按住新位置的条目会命中旧下标，高亮与拖动落在别的配置上。修复：手柄通过 `rememberUpdatedState` 读取最新的下标、keys、列表长度与移动回调；按下时先用条目稳定 key（API 配置 id、Key 条目 id、模型名、排队消息 id）在最新 keys 中反查当前下标，找不到才回退组合下标，越界则忽略本次手势。新增纯函数 `resolveReorderStartIndex` 与回归测试，覆盖重排后定位、缺失 key 回退、越界与空列表；同一修复自动覆盖 API 配置、API Key、模型列表与排队消息四处拖拽手柄。
+
+连接超时自定义：`PersonalizationManager` 新增 `getConnectionTimeoutSeconds / setConnectionTimeoutSeconds`（SharedPreferences 持久化，默认 120 秒，合法范围 30–600 秒，读写均夹紧）；设置页“模型失败与重试”新增“模型连接超时”输入框，合法值即时保存，非法值显示范围提示。`AiRepository` 每次请求读取该配置创建 `FirstTokenDeadline`（等待首个正文或思考内容的上限，心跳与空增量不计为回复），并通过新增的 `RetrofitClient.streamClientWithReadTimeout` 让流式请求的响应头读取超时同步使用该秒数（派生客户端共享连接池、拦截器与心跳配置）；构造参数保留为测试注入固定值，为空时走用户配置。超时错误文案仍带实际秒数，后续分类与重试沿用既有策略。
+
+涉及文件：`ui/components/SmoothReorderState.kt`、`utils/PersonalizationManager.kt`、`data/remote/RetrofitClient.kt`、`data/repository/AiRepository.kt`、`data/repository/helpers/FirstTokenDeadline.kt`、`ui/screens/settings/SettingsRetryControls.kt`、`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt` 与版本配置；Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格式不变。
+
+验证：冻结验收 `20261120-181514-535` 脚本 / Gradle 退出 0，519.415 秒；96 套件 / 1,110 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建退出 0，5 分 15 秒；`Echo-v2.8.48.apk` 为 25,623,695 字节，SHA-256 `c232e1b456facc3878ce8b8925ed479acc50a48f75cecf415ce8aa8f254fbfc1`；v2 签名验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目 CRC 全部通过，条目名集合与 2.8.47 一致，5 项变化（清单、版本控制信息、两个 baseline profile、DEX），`resources.arsc` 逐字节不变、186 张位图不变，DEX 隐私扫描无本机路径 / 用户名 / 手机号 / 真实密钥命中（`sk-...` 为既有占位提示）。复制为本机发布目录的 `Echo-v2.8.48.apk`（复制非移动），历史包保留。未连接真机，四处拖拽手柄排序与 30–600 秒超时设置待人工验收。
+
 ## 2026-11-19 · 输入法与光标联合修复（2.8.47 已发布）
 
 用户要求同时解决“输入法已显示时再次点击导致闪烁”和“全屏首次弹出输入法后光标消失”两个交替问题。已构建并安装 2.8.43/229 候选 APK；用户反馈普通和分离键盘布局下均仍有闪烁，候选未通过验收，未发布。

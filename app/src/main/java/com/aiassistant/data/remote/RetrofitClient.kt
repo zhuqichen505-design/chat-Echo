@@ -76,6 +76,28 @@ object RetrofitClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // 用户自定义模型连接超时（等待响应头/首个内容）：派生一个仅调整读取超时的客户端，
+    // 共享同一连接池、拦截器与心跳配置，避免每次请求重新构建完整客户端。
+    @Volatile
+    private var readTimeoutClient: OkHttpClient = streamHttpClient
+
+    @Volatile
+    private var readTimeoutClientSeconds: Long = RESPONSE_HEADER_TIMEOUT_SECONDS
+
+    fun streamClientWithReadTimeout(seconds: Long): OkHttpClient {
+        val sanitized = seconds.coerceAtLeast(1L)
+        if (sanitized == readTimeoutClientSeconds) return readTimeoutClient
+        return synchronized(lock) {
+            if (sanitized != readTimeoutClientSeconds) {
+                readTimeoutClient = streamHttpClient.newBuilder()
+                    .readTimeout(sanitized, TimeUnit.SECONDS)
+                    .build()
+                readTimeoutClientSeconds = sanitized
+            }
+            readTimeoutClient
+        }
+    }
+
     // 专用于普通 REST 请求、模型拉取与摘要生成（设置明确超时与专用连接池，防止永久挂死）
     val restHttpClient = HttpAccessPolicy.guard(OkHttpClient.Builder())
         .addInterceptor(noPostReplayInterceptor)

@@ -303,6 +303,17 @@ fun Modifier.reorderItem(
     }
 
 /**
+ * 以稳定 key 反查条目当前下标；找不到时回退到组合下标，仍越界则返回 -1。
+ * 列表重排后组合下标会变化，而 pointerInput 手势协程不会因重组重启，
+ * 只能靠最新 keys 与条目自身 key 定位，避免拖动到别的条目。
+ */
+internal fun resolveReorderStartIndex(keys: List<Any>, key: Any, fallbackIndex: Int): Int {
+    val byKey = keys.indexOf(key)
+    val resolved = if (byKey >= 0) byKey else fallbackIndex
+    return if (resolved in keys.indices) resolved else -1
+}
+
+/**
  * 六点拖动手柄修饰符
  */
 fun Modifier.reorderDragHandle(
@@ -314,10 +325,18 @@ fun Modifier.reorderDragHandle(
     onMove: (fromIndex: Int, toIndex: Int) -> Unit
 ): Modifier = composed {
     val haptic = LocalHapticFeedback.current
+    // 手势协程只以 state 为键启动一次，后续重组不会重启它；
+    // 通过 rememberUpdatedState 读取最新回调，避免继续使用旧的组合下标。
+    val latestIndex by rememberUpdatedState(index)
+    val latestKey by rememberUpdatedState(key)
+    val latestKeys by rememberUpdatedState(keys)
+    val latestListSize by rememberUpdatedState(listSize)
+    val latestOnMove by rememberUpdatedState(onMove)
     this.pointerInput(state) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            val currentIndex = index()
+            val currentIndex = resolveReorderStartIndex(latestKeys(), latestKey(), latestIndex())
+            if (currentIndex < 0) return@awaitEachGesture
             state.onDragStart(currentIndex)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             var hasConsumedMove = false
@@ -333,10 +352,10 @@ fun Modifier.reorderDragHandle(
                     hasConsumedMove = true
                     state.onDragDelta(
                         deltaY = deltaY,
-                        listSize = listSize(),
-                        keys = keys(),
+                        listSize = latestListSize(),
+                        keys = latestKeys(),
                         haptic = haptic,
-                        onMove = onMove
+                        onMove = latestOnMove
                     )
                 }
             }

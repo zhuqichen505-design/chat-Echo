@@ -1,5 +1,21 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-20 · 2.8.48 拖拽排序错选与可自定义连接超时
+
+版本 2.8.48/234；Room v37 / 20 个实体不变。用户要求：API 配置页按住左上角六点手柄移动配置时，实际选中的条目必须与按住的一致；模型连接超时时间可自定义，不再固定 120 秒。
+
+排序错选根因：`Modifier.reorderDragHandle` 的手势协程只以 `SmoothReorderState` 为键启动一次，列表重排后的重组不会重启协程；按下时读取的仍是首次组合捕获的 `index`。重排使条目组合下标变化后，按住新位置的卡片会命中旧下标，高亮与拖动落到别的配置。修复：手柄改用 `rememberUpdatedState` 读取最新下标、keys、列表长度与移动回调；按下时先用条目稳定 key（配置 id、Key 条目 id、模型名、排队消息 id）在最新 keys 中反查当前下标，找不到才回退组合下标，越界不启动手势。新增 `resolveReorderStartIndex` 纯函数与回归，覆盖重排定位、缺失 key、越界与空列表。
+
+连接超时：`PersonalizationManager` 新增 `getConnectionTimeoutSeconds / setConnectionTimeoutSeconds`，默认 120 秒、范围 30–600 秒，读写均夹紧并持久化到 SharedPreferences。设置页“模型失败与重试”新增“模型连接超时”输入框，合法值即时保存。`AiRepository` 每次请求读取该值创建 `FirstTokenDeadline`（首个正文或思考内容等待上限）；新增 `RetrofitClient.streamClientWithReadTimeout`，以基础流式客户端派生仅调整读取超时的实例（共享连接池、拦截器与心跳），让等待响应头的时间与用户配置一致。构造参数 `firstTokenTimeoutMillis` 保留为测试注入，为空时走用户配置。
+
+冻结验收 `20261120-181514-535`：脚本 / Gradle 退出 0，519.415 秒；96 套件 / 1,110 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，5 分 15 秒。`Echo-v2.8.48.apk` 25,623,695 字节，SHA-256 `c232e1b456facc3878ce8b8925ed479acc50a48f75cecf415ce8aa8f254fbfc1`；`com.aiassistant`、2.8.48/234、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：450 条目，CRC 全部通过；条目名集合与 2.8.47 完全一致，5 项内容变化（清单、版本控制信息、两个 baseline profile、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 隐私扫描无本机路径、用户名、手机号或真实密钥命中（`sk-...` 为既有占位提示）。发布目录新增 `Echo-v2.8.48.apk`，历史包保留。
+
+设备边界：本轮未连接真机，拖拽排序与超时设置均未做实机验收；需人工复验 API 配置、API Key、模型列表与排队消息的拖动手柄在多次重排后仍作用于按住的条目，以及 30 / 120 / 600 秒超时下首个内容到达前后的表现。
+
 ## 2026-11-19 · 2.8.47 输入法与光标联合修复（已发布）
 
 本次修复处理输入法已弹出时点击输入框出现闪烁，以及全屏竖线光标和水滴手柄消失的问题。输入框保持稳定的装饰器结构，使用匹配的 Compose 1.7.8 文本输入组件，并协调点击期间的键盘显示请求；键盘报告不可见时保留恢复路径。录屏对照发现选词时键盘内容曾短暂空白，但尚不足以确定具体根因。
