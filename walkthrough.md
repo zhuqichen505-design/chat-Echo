@@ -12,6 +12,8 @@ Release 构建 `assembleRelease --no-daemon` 退出 0，5 分 24 秒（324.811 �
 
 APK 审计：450 条目，CRC 全部通过；条目名集合与 2.8.48 完全一致，5 项内容变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,451 条（较 2.8.48 新增 191 / 移除 71），新增可读中文均为本版重试纠错与重新提取提示，隐私扫描新增命中 0。排他复制到本机发布目录（244 → 245 文件，243 → 244 APK），全部历史包保留。
 
+发布核验：版本提交 `0541453` 与 annotated 标签 `v2.8.49`（对象 `4808685`）已推送，远端 main 与 peeled 标签一致；Release 为 Latest，唯一附件平台 digest、独立下载 SHA-256 与大小（25,640,079 字节）均与本机一致，正文与 `release-notes/latest.md` 一致；远端旧 v2.8.48 Release / 标签已撤，本机 `v2.8.48` 标签与全部历史 APK 保留。
+
 设备边界：本轮未连接真机，未验证安装、启动及界面交互；需人工实机复验：① 真实模型返回残缺/非 JSON 时时间线与故事设定自动重试并在成功或多次失败后均可点击刷新图标重读（含待确认卡片、全屏预览、时间轴工作台、故事设定弹窗）；② API 配置、API Key、模型列表与排队消息四处拖动手柄的连续拖动、跨项排序与松手归位。
 
 ## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）

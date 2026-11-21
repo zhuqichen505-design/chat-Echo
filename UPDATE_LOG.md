@@ -12,6 +12,8 @@ Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格�
 
 APK 元数据与审计：`Echo-v2.8.49.apk` 25,640,079 字节，SHA-256 `a4fac731f28ba50bdc859febe6f94aa2bb4f10d40931f642ca9621de501bbd53`；`com.aiassistant`、2.8.49/235、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目 CRC 全部通过，条目名集合与 2.8.48 一致，仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,451 条（+191 / -71），新增可读中文均为本版重试纠错与重新提取提示，隐私扫描新增命中 0。未连接真机，时间线/设定自动重试、三类弹窗重新提取交互及四处拖拽手柄手感待人工验收。
 
+发布核验：版本提交 `05414531898b5f97ec572a50f4368721307db998` 与 annotated 标签 `v2.8.49`（对象 `48086858f217404e64f5b29d152e41b7387a5dc8`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.8.49 Release 为 Latest，唯一附件 `Echo-v2.8.49.apk` 的平台 digest（`sha256:a4fac731f28ba50bdc859febe6f94aa2bb4f10d40931f642ca9621de501bbd53`）、独立下载 SHA-256 与大小（25,640,079 字节）均与本机一致，正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.48 Release 与远端标签；本机 `v2.8.48` 标签（`78d5c2c9e1a5966712832a1603c1e4d87a380cd9`）与全部历史 APK 保留未改。隐私核查：暂存区 8 个文件全量与新增行扫描本机路径、用户名、手机号、私网地址、设备标识与真实密钥命中 0（历史文档中仅含既有 `android@android.com` 调试证书常量说明）；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
+
 ## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
 
 用户提出两项需求：时间线和设定总结经常无法返回有效格式，希望在单纯提取失败或返回内容错误时自动重试（允许本轮对话确实没有新设定或时间线，不误重试）；当提取到设定和时间线、或者多次重试依然提取失败时，弹出的窗口需要提供重新提取图标按键，点击后重新读取。
