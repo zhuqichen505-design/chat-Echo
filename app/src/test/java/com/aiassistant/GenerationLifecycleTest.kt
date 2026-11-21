@@ -195,4 +195,25 @@ class GenerationLifecycleTest {
         assertFalse(ChatGenerationManager.tryMarkMessageSaved(id))
         ChatGenerationManager.removeSession(id, current)
     }
+
+    @Test fun consumeTimelineProposalIsAtomicAndPrioritizedReExtractionSurfacesFirst() {
+        val id = 908079L
+        val first = AutoTimelineUpdateResult("第1天", null, "第一轮", proposalId = "p1")
+        val second = AutoTimelineUpdateResult("第2天", null, "第二轮", proposalId = "p2")
+        val reExtracted = AutoTimelineUpdateResult("第1天·傍晚", null, "重新提取结果", proposalId = "p1-retry")
+        try {
+            ChatGenerationManager.offerTimelineProposal(id, first)
+            ChatGenerationManager.offerTimelineProposal(id, second)
+            assertTrue(ChatGenerationManager.consumeTimelineProposal(id, first))
+            assertFalse("重复点击重新提取不得再次消费同一提案", ChatGenerationManager.consumeTimelineProposal(id, first))
+            assertEquals(listOf(second), ChatGenerationManager.timelineProposals(id).value)
+
+            ChatGenerationManager.offerTimelineProposal(id, reExtracted, prioritize = true)
+            assertEquals(listOf(reExtracted, second), ChatGenerationManager.timelineProposals(id).value)
+        } finally {
+            ChatGenerationManager.dismissTimelineProposal(id, first)
+            ChatGenerationManager.dismissTimelineProposal(id, second)
+            ChatGenerationManager.dismissTimelineProposal(id, reExtracted)
+        }
+    }
 }

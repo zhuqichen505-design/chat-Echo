@@ -147,12 +147,37 @@ data class TimelineReconcileResult(
     var currentStoryTime: String = "",
     val events: MutableList<TimelineEventItem> = mutableListOf(),
     val atemporalSettings: MutableList<AtemporalSettingItem> = mutableListOf(),
-    var extractionSource: String = "AI_MODEL", // "AI_MODEL" 或 "LOCAL_FALLBACK"
+    var extractionSource: String = "AI_MODEL", // "AI_MODEL"、"EXTRACTION_FAILED" 或 "LOCAL_FALLBACK"
     var modelUsed: String = "",
     var extractionErrorMessage: String? = null,
     var lastProcessedMessageId: Long = 0L,
     var totalProcessedMessages: Int = 0
 )
+
+/**
+ * 单轮增量时间线与设定提取响应解析结果：
+ * 严格区分“明确无新内容”（允许静默结束、不重试）与“格式/结构无效”（触发自动重试）。
+ */
+sealed class IncrementalTimelineParseResult {
+    object NoChange : IncrementalTimelineParseResult()
+    data class Valid(
+        val newStoryTime: String?,
+        val action: String,
+        val targetNodeId: Long?,
+        val newEvent: TimelineEventItem?,
+        val newEventEvidence: String = "",
+        val atemporalSettings: List<AtemporalSettingItem> = emptyList()
+    ) : IncrementalTimelineParseResult()
+    data class Invalid(val reason: String) : IncrementalTimelineParseResult()
+}
+
+/**
+ * 分段/全量时间线严格校验解析结果（带具体失败原因，供重试纠错与错误提示使用）。
+ */
+sealed class VerifiedTimelineParseResult {
+    data class Valid(val result: TimelineReconcileResult) : VerifiedTimelineParseResult()
+    data class Invalid(val reason: String) : VerifiedTimelineParseResult()
+}
 
 /**
  * 时间线记忆辅助类
@@ -557,13 +582,19 @@ object TimelineMemoryHelper {
     }
 
     fun isNoChangeLikeResponse(text: String): Boolean {
-        if (text.contains("NO_UPDATE", ignoreCase = true)) return true
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return false
+        // 模型安全/策略拒绝不能误判为“本轮无变化”
+        if (com.aiassistant.data.repository.helpers.SummaryResponseValidator.refusalReason(trimmed) != null) return false
+        if (trimmed.contains("NO_UPDATE", ignoreCase = true)) return true
         val phrases = listOf(
-            "无变化", "无推进", "无新增", "无更新", "无需更新", "无需记录", "无需提取",
-            "不需要更新", "不需要记录", "没有变化", "没有推进", "没有新增", "没有更新",
+            "无变化", "无推进", "无新增", "无更新", "无需更新", "无需记录", "无需提取", "无需补充",
+            "不需要更新", "不需要记录", "没有变化", "没有推进", "没有新增", "没有更新", "没有需要记录",
+            "无新设定", "没有新设定", "没有新的设定", "无新事件", "没有新事件", "没有新的事件",
+            "无实质变化", "没有实质变化", "无实质性变化", "没有实质性变化",
             "保持原", "保持不变", "维持原", "维持不变", "不需更新", "不需记录", "不用更新"
         )
-        return phrases.any { text.contains(it) }
+        return phrases.any { trimmed.contains(it) }
     }
 
     /**
@@ -578,6 +609,10 @@ object TimelineMemoryHelper {
             return TimelineReconcileResult(currentStoryTime = safeTime, events = mutableListOf())
         }
 
+        fun JsonObject.safeText(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.let {
+            runCatching { it.asString.trim() }.getOrNull()
+        }
+
         // 1. 尝试提取 JSON 代码块或 JSON 字符串
         val jsonStr = extractJsonString(trimmed)
         if (jsonStr != null) {
@@ -585,28 +620,28 @@ object TimelineMemoryHelper {
                 val jsonElement = JsonParser.parseString(jsonStr)
                 if (jsonElement.isJsonObject) {
                     val obj = jsonElement.asJsonObject
-                    val currentTime = obj.get("currentStoryTime")?.asString?.trim().orEmpty()
+                    val currentTime = obj.safeText("currentStoryTime").orEmpty()
                     val eventsList = mutableListOf<TimelineEventItem>()
                     val atemporalList = mutableListOf<AtemporalSettingItem>()
 
                     // 解析时序事件
-                    val eventsArray = obj.getAsJsonArray("timelineEvents")
-                        ?: obj.getAsJsonArray("events")
+                    val eventsArray = obj.get("timelineEvents")?.takeIf { it.isJsonArray }?.asJsonArray
+                        ?: obj.get("events")?.takeIf { it.isJsonArray }?.asJsonArray
                     if (eventsArray != null) {
                         for (item in eventsArray) {
                             if (item.isJsonObject) {
                                 val itemObj = item.asJsonObject
-                                val tag = itemObj.get("timeTag")?.asString?.trim()
-                                    ?: itemObj.get("time")?.asString?.trim()
-                                    ?: itemObj.get("day")?.asString?.trim().orEmpty()
-                                val text = itemObj.get("content")?.asString?.trim()
-                                    ?: itemObj.get("event")?.asString?.trim().orEmpty()
-                                val catKey = itemObj.get("category")?.asString?.trim()
+                                val tag = itemObj.safeText("timeTag")
+                                    ?: itemObj.safeText("time")
+                                    ?: itemObj.safeText("day").orEmpty()
+                                val text = itemObj.safeText("content")
+                                    ?: itemObj.safeText("event").orEmpty()
+                                val catKey = itemObj.safeText("category")
                                 val cat = TimelineCategory.fromKey(catKey)
                                 if (text.isNotBlank()) {
                                     eventsList.add(TimelineEventItem(timeTag = tag, content = compactEventFact(text), category = cat))
                                 }
-                            } else if (item.isJsonPrimitive) {
+                            } else if (item.isJsonPrimitive && !item.isJsonNull) {
                                 val text = item.asString.trim()
                                 if (text.isNotBlank()) {
                                     eventsList.add(parseContentToEvent(text))
@@ -616,14 +651,14 @@ object TimelineMemoryHelper {
                     }
 
                     // 解析时间无关设定 (atemporalSettings)
-                    val atemporalArray = obj.getAsJsonArray("atemporalSettings")
-                        ?: obj.getAsJsonArray("settings")
-                        ?: obj.getAsJsonArray("globalSettings")
+                    val atemporalArray = obj.get("atemporalSettings")?.takeIf { it.isJsonArray }?.asJsonArray
+                        ?: obj.get("settings")?.takeIf { it.isJsonArray }?.asJsonArray
+                        ?: obj.get("globalSettings")?.takeIf { it.isJsonArray }?.asJsonArray
                     if (atemporalArray != null) {
                         for (item in atemporalArray) {
                             if (item.isJsonObject) {
                                 SessionSettingReconciler.parse(item.asJsonObject)?.let(atemporalList::add)
-                            } else if (item.isJsonPrimitive) {
+                            } else if (item.isJsonPrimitive && !item.isJsonNull) {
                                 val text = item.asString.trim()
                                 if (text.isNotBlank()) {
                                     atemporalList.add(
@@ -659,6 +694,174 @@ object TimelineMemoryHelper {
         return parseTextFallback(trimmed, fallbackCurrentTime)
     }
 
+    /**
+     * 严格解析单轮增量时间线与设定提取回复：
+     * - 允许明确“无新变化”（NO_UPDATE、无变化自然语言、或合法空 JSON）直接通过；
+     * - 拒绝空正文、非 JSON 杂文、截断/语法错误 JSON、缺少约定字段或字段类型错误的响应，触发自动重试。
+     */
+    fun parseIncrementalTimelineResponse(rawOutput: String): IncrementalTimelineParseResult {
+        val stripped = stripThinkingTags(rawOutput)
+        if (stripped.isBlank()) {
+            return IncrementalTimelineParseResult.Invalid("模型未返回有效提取正文")
+        }
+
+        val jsonCandidate = extractJsonObjectCandidate(stripped)
+        if (jsonCandidate == null) {
+            return if (isNoChangeLikeResponse(stripped)) {
+                IncrementalTimelineParseResult.NoChange
+            } else {
+                IncrementalTimelineParseResult.Invalid("未返回有效的提取 JSON")
+            }
+        }
+
+        val root = runCatching { JsonParser.parseString(jsonCandidate) }.getOrNull()
+            ?: return IncrementalTimelineParseResult.Invalid("JSON 语法无效或被截断")
+        if (!root.isJsonObject) {
+            return IncrementalTimelineParseResult.Invalid("根节点必须为 JSON 对象")
+        }
+        val obj = root.asJsonObject
+
+        val recognizedKeys = setOf(
+            "newStoryTime", "action", "targetNodeId", "newEvent",
+            "atemporalSettings", "settings", "globalSettings",
+            "noUpdate", "hasUpdate", "hasUpdates"
+        )
+        if (obj.keySet().none { it in recognizedKeys }) {
+            // 容忍显式空 timelineEvents + 无更新场景；若含非空 timelineEvents 则要求按增量协议重试
+            val altEvents = obj.get("timelineEvents")
+            if (altEvents != null && altEvents.isJsonArray) {
+                if (altEvents.asJsonArray.size() == 0) {
+                    return IncrementalTimelineParseResult.NoChange
+                }
+                return IncrementalTimelineParseResult.Invalid("增量提取请使用 newEvent 对象而非 timelineEvents 数组")
+            }
+            return IncrementalTimelineParseResult.Invalid("JSON 缺少约定的提取字段")
+        }
+
+        fun nullableStringField(target: JsonObject, key: String): Pair<Boolean, String?> {
+            val el = target.get(key) ?: return true to null
+            if (el.isJsonNull) return true to null
+            if (!el.isJsonPrimitive || !el.asJsonPrimitive.isString) return false to null
+            return true to el.asString.trim()
+        }
+
+        // 检查显式无更新布尔标记
+        obj.get("noUpdate")?.takeUnless { it.isJsonNull }?.let { el ->
+            if (!el.isJsonPrimitive || !el.asJsonPrimitive.isBoolean) {
+                return IncrementalTimelineParseResult.Invalid("noUpdate 必须为布尔值")
+            }
+            if (el.asBoolean) return IncrementalTimelineParseResult.NoChange
+        }
+        listOf("hasUpdate", "hasUpdates").forEach { key ->
+            obj.get(key)?.takeUnless { it.isJsonNull }?.let { el ->
+                if (!el.isJsonPrimitive || !el.asJsonPrimitive.isBoolean) {
+                    return IncrementalTimelineParseResult.Invalid("$key 必须为布尔值")
+                }
+                if (!el.asBoolean) return IncrementalTimelineParseResult.NoChange
+            }
+        }
+
+        val (timeOk, rawStoryTime) = nullableStringField(obj, "newStoryTime")
+        if (!timeOk) return IncrementalTimelineParseResult.Invalid("newStoryTime 必须为字符串或 null")
+        val modelStoryTime = rawStoryTime?.takeIf { it.isNotBlank() && it != "未确定" && it != "未知" }
+
+        val (actionOk, rawActionStr) = nullableStringField(obj, "action")
+        if (!actionOk) return IncrementalTimelineParseResult.Invalid("action 必须为字符串或 null")
+        val upperAction = rawActionStr?.uppercase(java.util.Locale.ROOT).orEmpty()
+        val parsedAction = when (upperAction) {
+            "", "APPEND", "TIME_ONLY", "SETTINGS_ONLY", "NO_UPDATE", "NOOP", "NONE" -> "APPEND"
+            "UPDATE" -> "UPDATE"
+            else -> return IncrementalTimelineParseResult.Invalid("action 字段取值无效：$upperAction")
+        }
+
+        var parsedTargetNodeId: Long? = null
+        obj.get("targetNodeId")?.takeUnless { it.isJsonNull }?.let { el ->
+            val numeric = exactJsonLong(el)
+                ?: el.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.trim()?.toLongOrNull()
+            if (numeric == null) {
+                return IncrementalTimelineParseResult.Invalid("targetNodeId 必须为整数或 null")
+            }
+            parsedTargetNodeId = numeric
+        }
+
+        var parsedEvent: TimelineEventItem? = null
+        var parsedEventEvidence = ""
+        obj.get("newEvent")?.takeUnless { it.isJsonNull }?.let { el ->
+            if (!el.isJsonObject) {
+                return IncrementalTimelineParseResult.Invalid("newEvent 必须为对象或 null")
+            }
+            val eventObj = el.asJsonObject
+            val (contentOk, contentStr) = nullableStringField(eventObj, "content")
+            if (!contentOk) return IncrementalTimelineParseResult.Invalid("newEvent.content 必须为字符串")
+            val (altEventOk, altEventStr) = nullableStringField(eventObj, "event")
+            if (!altEventOk) return IncrementalTimelineParseResult.Invalid("newEvent.event 必须为字符串")
+            val (tagOk, tagStr) = nullableStringField(eventObj, "timeTag")
+            if (!tagOk) return IncrementalTimelineParseResult.Invalid("newEvent.timeTag 必须为字符串")
+            val (altTimeOk, altTimeStr) = nullableStringField(eventObj, "time")
+            if (!altTimeOk) return IncrementalTimelineParseResult.Invalid("newEvent.time 必须为字符串")
+            val (catOk, catStr) = nullableStringField(eventObj, "category")
+            if (!catOk) return IncrementalTimelineParseResult.Invalid("newEvent.category 必须为字符串")
+            val (evOk, evStr) = nullableStringField(eventObj, "evidence")
+            if (!evOk) return IncrementalTimelineParseResult.Invalid("newEvent.evidence 必须为字符串")
+
+            val content = contentStr?.ifBlank { null } ?: altEventStr.orEmpty()
+            val tag = tagStr?.ifBlank { null } ?: altTimeStr.orEmpty()
+            val cat = TimelineCategory.fromKey(catStr)
+            parsedEventEvidence = evStr.orEmpty()
+            if (content.isNotBlank()) {
+                parsedEvent = TimelineEventItem(timeTag = tag, content = content, category = cat)
+            }
+        }
+
+        val settingsKey = listOf("atemporalSettings", "settings", "globalSettings").firstOrNull { obj.has(it) }
+        val parsedSettings = mutableListOf<AtemporalSettingItem>()
+        if (settingsKey != null) {
+            val settingsEl = obj.get(settingsKey)
+            if (settingsEl != null && !settingsEl.isJsonNull) {
+                if (!settingsEl.isJsonArray) {
+                    return IncrementalTimelineParseResult.Invalid("$settingsKey 必须为数组或 null")
+                }
+                for (item in settingsEl.asJsonArray) {
+                    if (item.isJsonObject) {
+                        val itemObj = item.asJsonObject
+                        for (field in listOf("content", "setting", "category", "action", "evidence", "changeReason", "targetScope")) {
+                            val (ok, _) = nullableStringField(itemObj, field)
+                            if (!ok) return IncrementalTimelineParseResult.Invalid("atemporalSettings.$field 必须为字符串")
+                        }
+                        itemObj.get("targetMemoryId")?.takeUnless { it.isJsonNull }?.let { idEl ->
+                            val idValid = exactJsonLong(idEl) != null ||
+                                (idEl.isJsonPrimitive && idEl.asJsonPrimitive.isString && idEl.asString.trim().toLongOrNull() != null)
+                            if (!idValid) return IncrementalTimelineParseResult.Invalid("atemporalSettings.targetMemoryId 必须为整数或 null")
+                        }
+                        SessionSettingReconciler.parse(itemObj)?.let(parsedSettings::add)
+                    } else if (item.isJsonPrimitive && item.asJsonPrimitive.isString) {
+                        val text = item.asString.trim()
+                        if (text.isNotBlank()) {
+                            parsedSettings.add(
+                                AtemporalSettingItem(
+                                    category = "角色核心特质",
+                                    content = compactSettingFact(text),
+                                    isSelected = true
+                                )
+                            )
+                        }
+                    } else {
+                        return IncrementalTimelineParseResult.Invalid("atemporalSettings 条目格式无效")
+                    }
+                }
+            }
+        }
+
+        return IncrementalTimelineParseResult.Valid(
+            newStoryTime = modelStoryTime,
+            action = parsedAction,
+            targetNodeId = parsedTargetNodeId,
+            newEvent = parsedEvent,
+            newEventEvidence = parsedEventEvidence,
+            atemporalSettings = parsedSettings
+        )
+    }
+
     /** 空数组也是有效的“无新事实”结果；格式失败不能冒充已处理完整片段。 */
     fun hasStructuredTimelinePayload(rawOutput: String): Boolean = runCatching {
         val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching false
@@ -675,7 +878,7 @@ object TimelineMemoryHelper {
     fun hasCompleteSourceCoverage(rawOutput: String, expectedMessageIds: Collection<Long>): Boolean = runCatching {
         val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching false
         val obj = JsonParser.parseString(json).asJsonObject
-        validateSourceCoverage(obj, expectedMessageIds)
+        validateSourceCoverageDetailed(obj, expectedMessageIds) == null
     }.getOrDefault(false)
 
     private fun exactJsonLong(value: JsonElement?): Long? = runCatching {
@@ -689,93 +892,190 @@ object TimelineMemoryHelper {
         return value.asString.trim()
     }
 
-    private fun validateSourceCoverage(obj: JsonObject, expectedMessageIds: Collection<Long>): Boolean {
-        val coverage = obj.getAsJsonArray("sourceCoverage") ?: return false
-        val events = obj.getAsJsonArray("timelineEvents") ?: return false
-        val settings = obj.getAsJsonArray("atemporalSettings")
+    private fun validateSourceCoverageDetailed(obj: JsonObject, expectedMessageIds: Collection<Long>): String? {
+        val coverageEl = obj.get("sourceCoverage")
+        if (coverageEl == null || !coverageEl.isJsonArray) return "缺少合法的 sourceCoverage 数组"
+        val eventsEl = obj.get("timelineEvents")
+        if (eventsEl == null || !eventsEl.isJsonArray) return "缺少合法的 timelineEvents 数组"
+        val coverage = coverageEl.asJsonArray
+        val events = eventsEl.asJsonArray
+        val settings = obj.get("atemporalSettings")?.takeIf { it.isJsonArray }?.asJsonArray
         val expected = expectedMessageIds.toSet()
         val reviewed = mutableSetOf<Long>()
         val sourcedEvents = mutableSetOf<Int>()
         val sourcedSettings = mutableSetOf<Int>()
         for (entry in coverage) {
-            if (!entry.isJsonObject) return false
+            if (!entry.isJsonObject) return "sourceCoverage 条目必须为对象"
             val item = entry.asJsonObject
-            val id = exactJsonLong(item.get("messageId")) ?: return false
-            if (id !in expected || !reviewed.add(id)) return false
-            fun indices(key: String): List<Int> {
+            val id = exactJsonLong(item.get("messageId")) ?: return "sourceCoverage.messageId 必须为精确整数"
+            if (id !in expected) return "sourceCoverage 包含不属于本段的消息 ID: $id"
+            if (!reviewed.add(id)) return "sourceCoverage 重复列出消息 ID: $id"
+            fun indices(key: String): List<Int>? {
                 val value = item.get(key) ?: return emptyList()
-                require(value.isJsonArray)
-                return value.asJsonArray.map { index ->
-                    val number = requireNotNull(exactJsonLong(index))
-                    require(number in 0L..Int.MAX_VALUE.toLong())
-                    number.toInt()
-                }.also { require(it.distinct().size == it.size) }
+                if (!value.isJsonArray) return null
+                val list = mutableListOf<Int>()
+                for (index in value.asJsonArray) {
+                    val number = exactJsonLong(index) ?: return null
+                    if (number !in 0L..Int.MAX_VALUE.toLong()) return null
+                    list += number.toInt()
+                }
+                return if (list.distinct().size == list.size) list else null
             }
-            val eventIndices = indices("eventIndices")
-            val settingIndices = indices("settingIndices")
-            if (eventIndices.any { it !in 0 until events.size() } ||
-                settingIndices.any { it !in 0 until (settings?.size() ?: 0) }) return false
-            val reason = optionalJsonString(item, "noFactReason")
-            if (eventIndices.isEmpty() && settingIndices.isEmpty() && reason.isBlank()) return false
+            val eventIndices = indices("eventIndices") ?: return "sourceCoverage.eventIndices 必须为唯一非负整数数组"
+            val settingIndices = indices("settingIndices") ?: return "sourceCoverage.settingIndices 必须为唯一非负整数数组"
+            if (eventIndices.any { it !in 0 until events.size() }) return "sourceCoverage.eventIndices 索引越界"
+            if (settingIndices.any { it !in 0 until (settings?.size() ?: 0) }) return "sourceCoverage.settingIndices 索引越界"
+            val reason = runCatching { optionalJsonString(item, "noFactReason") }.getOrElse {
+                return "sourceCoverage.noFactReason 必须为字符串"
+            }
+            if (eventIndices.isEmpty() && settingIndices.isEmpty() && reason.isBlank()) {
+                return "消息 $id 未关联事件或设定且缺少 noFactReason"
+            }
             sourcedEvents += eventIndices
             sourcedSettings += settingIndices
         }
-        return reviewed == expected && sourcedEvents == (0 until events.size()).toSet() &&
-            sourcedSettings == (0 until (settings?.size() ?: 0)).toSet()
+        val missingIds = expected - reviewed
+        if (missingIds.isNotEmpty()) {
+            return "sourceCoverage 漏覆盖消息 ID: ${missingIds.take(5).joinToString(",")}"
+        }
+        if (sourcedEvents != (0 until events.size()).toSet()) {
+            return "存在未关联源消息的 timelineEvents 条目"
+        }
+        if (sourcedSettings != (0 until (settings?.size() ?: 0)).toSet()) {
+            return "存在未关联源消息的 atemporalSettings 条目"
+        }
+        return null
     }
 
     /**
      * 新请求使用严格解析：同一 JSON 完成类型、精确整数、目标设定和来源校验后才生成结果。
      * 不走旧格式的行文本兜底，避免损坏 JSON 被当作剧情并推进已处理水线。
      */
+    fun parseVerifiedModelOutputDetailed(
+        rawOutput: String,
+        expectedMessageIds: Collection<Long>,
+        existingSettingIds: Collection<Long>,
+        fallbackCurrentTime: String? = null
+    ): VerifiedTimelineParseResult {
+        val stripped = stripThinkingTags(rawOutput)
+        if (stripped.isBlank()) {
+            return VerifiedTimelineParseResult.Invalid("模型未返回有效提取正文")
+        }
+        val json = extractJsonObjectCandidate(stripped)
+            ?: return VerifiedTimelineParseResult.Invalid("未返回有效的 JSON 对象")
+        val parsedElement = runCatching { JsonParser.parseString(json) }.getOrNull()
+            ?: return VerifiedTimelineParseResult.Invalid("JSON 语法无效或被截断")
+        if (!parsedElement.isJsonObject) {
+            return VerifiedTimelineParseResult.Invalid("根节点必须为 JSON 对象")
+        }
+        val obj = parsedElement.asJsonObject
+        val currentTime = runCatching { optionalJsonString(obj, "currentStoryTime") }.getOrElse {
+            return VerifiedTimelineParseResult.Invalid(it.message ?: "currentStoryTime 必须为字符串")
+        }
+        val rawEventsEl = obj.get("timelineEvents")
+        if (rawEventsEl == null || !rawEventsEl.isJsonArray) {
+            return VerifiedTimelineParseResult.Invalid("缺少合法的 timelineEvents 数组")
+        }
+        val rawSettingsEl = obj.get("atemporalSettings")
+        if (rawSettingsEl == null || !rawSettingsEl.isJsonArray) {
+            return VerifiedTimelineParseResult.Invalid("缺少合法的 atemporalSettings 数组")
+        }
+        val events = runCatching {
+            rawEventsEl.asJsonArray.map { element ->
+                require(element.isJsonObject) { "timelineEvents 条目必须为对象" }
+                val item = element.asJsonObject
+                val content = optionalJsonString(item, "content").also { require(it.isNotBlank()) { "timelineEvents.content 不能为空" } }
+                TimelineEventItem(
+                    timeTag = optionalJsonString(item, "timeTag"),
+                    content = compactEventFact(content),
+                    category = TimelineCategory.fromKey(optionalJsonString(item, "category"))
+                )
+            }
+        }.getOrElse {
+            return VerifiedTimelineParseResult.Invalid(it.message ?: "timelineEvents 条目格式无效")
+        }
+        val knownTargets = existingSettingIds.toSet()
+        val settings = runCatching {
+            rawSettingsEl.asJsonArray.map { element ->
+                require(element.isJsonObject) { "atemporalSettings 条目必须为对象" }
+                val item = element.asJsonObject
+                require(optionalJsonString(item, "content").isNotBlank()) { "atemporalSettings.content 不能为空" }
+                listOf("category", "evidence", "changeReason", "targetScope").forEach { optionalJsonString(item, it) }
+                val action = optionalJsonString(item, "action", "ADD").uppercase(java.util.Locale.ROOT)
+                require(action in setOf("ADD", "SUPPLEMENT", "REVISE")) { "atemporalSettings.action 无效：$action" }
+                val target = item.get("targetMemoryId")
+                val targetId = if (action == "ADD") {
+                    require(target == null || target.isJsonNull) { "ADD 设定不能指定 targetMemoryId" }
+                    null
+                } else {
+                    val id = exactJsonLong(target) ?: throw IllegalArgumentException("$action 设定缺少有效 targetMemoryId")
+                    require(id > 0L && id in knownTargets) { "targetMemoryId ($id) 不属于当前会话既有设定" }
+                    id
+                }
+                requireNotNull(SessionSettingReconciler.parse(item)) { "atemporalSettings 条目解析失败" }.copy(targetMemoryId = targetId)
+            }
+        }.getOrElse {
+            return VerifiedTimelineParseResult.Invalid(it.message ?: "atemporalSettings 条目格式无效")
+        }
+        val coverageError = validateSourceCoverageDetailed(obj, expectedMessageIds)
+        if (coverageError != null) {
+            return VerifiedTimelineParseResult.Invalid(coverageError)
+        }
+        val normalizedEvents = normalizeMonotonicTimeline(events)
+        val resolvedTime = currentTime.takeIf { it.isNotBlank() && it !in setOf("未确定", "未知") && !isRetrospectiveTime(it) }
+            ?: inferCurrentStoryTime(normalizedEvents, fallbackCurrentTime)
+        return VerifiedTimelineParseResult.Valid(
+            TimelineReconcileResult(
+                currentStoryTime = resolvedTime,
+                events = normalizedEvents.toMutableList(),
+                atemporalSettings = settings.toMutableList()
+            )
+        )
+    }
+
     fun parseVerifiedModelOutput(
         rawOutput: String,
         expectedMessageIds: Collection<Long>,
         existingSettingIds: Collection<Long>,
         fallbackCurrentTime: String? = null
-    ): TimelineReconcileResult? = runCatching {
-        val json = extractJsonString(stripThinkingTags(rawOutput)) ?: return@runCatching null
-        val obj = JsonParser.parseString(json).asJsonObject
-        val currentTime = optionalJsonString(obj, "currentStoryTime")
-        val rawEvents = obj.getAsJsonArray("timelineEvents") ?: return@runCatching null
-        val rawSettings = obj.getAsJsonArray("atemporalSettings") ?: return@runCatching null
-        val events = rawEvents.map { element ->
-            require(element.isJsonObject)
-            val item = element.asJsonObject
-            val content = optionalJsonString(item, "content").also { require(it.isNotBlank()) }
-            TimelineEventItem(timeTag = optionalJsonString(item, "timeTag"), content = compactEventFact(content),
-                category = TimelineCategory.fromKey(optionalJsonString(item, "category")))
+    ): TimelineReconcileResult? =
+        (parseVerifiedModelOutputDetailed(rawOutput, expectedMessageIds, existingSettingIds, fallbackCurrentTime)
+            as? VerifiedTimelineParseResult.Valid)?.result
+
+    /**
+     * 从文本中定位 JSON 对象候选：优先匹配包含 `{` 的围栏代码块，其次截取首个 `{` 到末个 `}`；
+     * 若存在未闭合的 `{`，同样返回截断片段以触发语法校验与重试，防止误判为自然语言无变化。
+     */
+    private fun extractJsonObjectCandidate(text: String): String? {
+        val codeBlockRegex = Regex("""```(?:json)?\s*([\s\S]*?)\s*```""", RegexOption.IGNORE_CASE)
+        val fencedCandidates = codeBlockRegex.findAll(text)
+            .map { it.groupValues[1].trim() }
+            .filter { it.contains('{') }
+            .toList()
+        if (fencedCandidates.isNotEmpty()) {
+            // 优先选能直接解析为 JSON Object 的围栏块
+            fencedCandidates.firstOrNull { candidate ->
+                runCatching { JsonParser.parseString(candidate).isJsonObject }.getOrDefault(false)
+            }?.let { return it }
+            return fencedCandidates.first()
         }
-        val knownTargets = existingSettingIds.toSet()
-        val settings = rawSettings.map { element ->
-            require(element.isJsonObject)
-            val item = element.asJsonObject
-            require(optionalJsonString(item, "content").isNotBlank())
-            listOf("category", "evidence", "changeReason", "targetScope").forEach { optionalJsonString(item, it) }
-            val action = optionalJsonString(item, "action", "ADD").uppercase(java.util.Locale.ROOT)
-            require(action in setOf("ADD", "SUPPLEMENT", "REVISE"))
-            val target = item.get("targetMemoryId")
-            val targetId = if (action == "ADD") {
-                require(target == null || target.isJsonNull)
-                null
-            } else {
-                requireNotNull(exactJsonLong(target)).also { require(it > 0L && it in knownTargets) }
-            }
-            requireNotNull(SessionSettingReconciler.parse(item)).copy(targetMemoryId = targetId)
+        val firstBrace = text.indexOf('{')
+        if (firstBrace == -1) return null
+        val lastBrace = text.lastIndexOf('}')
+        return if (lastBrace > firstBrace) {
+            text.substring(firstBrace, lastBrace + 1).trim()
+        } else {
+            text.substring(firstBrace).trim()
         }
-        require(validateSourceCoverage(obj, expectedMessageIds))
-        val normalizedEvents = normalizeMonotonicTimeline(events)
-        val resolvedTime = currentTime.takeIf { it.isNotBlank() && it !in setOf("未确定", "未知") && !isRetrospectiveTime(it) }
-            ?: inferCurrentStoryTime(normalizedEvents, fallbackCurrentTime)
-        TimelineReconcileResult(currentStoryTime = resolvedTime, events = normalizedEvents.toMutableList(),
-            atemporalSettings = settings.toMutableList())
-    }.getOrNull()
+    }
 
     private fun extractJsonString(text: String): String? {
         val codeBlockRegex = Regex("""```(?:json)?\s*([\s\S]*?)\s*```""", RegexOption.IGNORE_CASE)
-        val match = codeBlockRegex.find(text)
-        if (match != null) {
-            return match.groupValues[1].trim()
+        val fencedWithBrace = codeBlockRegex.findAll(text)
+            .map { it.groupValues[1].trim() }
+            .firstOrNull { it.contains('{') }
+        if (fencedWithBrace != null) {
+            return fencedWithBrace
         }
         val firstBrace = text.indexOf('{')
         val lastBrace = text.lastIndexOf('}')

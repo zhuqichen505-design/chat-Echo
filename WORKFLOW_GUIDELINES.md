@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
+
+- 基线 `main/c057257`（源码版本 2.8.48/234，Room v37 / 20 个实体）；工作区原有未跟踪截图/目录未改动未混入；本轮未递增版本、未构建 APK。
+- 改动：
+  1. `TimelineMemoryHelper` 新增 `parseIncrementalTimelineResponse` / `parseVerifiedModelOutputDetailed`，严格区分合法无新内容（不重试）与格式/结构/拒绝异常（触发重试），修复 `JsonNull` 误报格式错误。
+  2. `AiRepository`（增量提取、事件精简、分段/全量梳理）与 `RoleplaySmartAnalyzer`（故事设定融入分析）统一接入最多 3 次尝试（1 次首试 + 2 次带具体纠错指引自动重试），排除取消与硬性客户端错误、避免叠加 `RetryPolicy`。
+  3. `ChatGenerationManager` / `ChatViewModel` 保留源上下文并提供原子防连点重新读取；`ChatPendingReviewPanels`（含全屏）、`TimelineReconcileDialog`、`EditableSettingProposalDialog` 在成功与多次重试仍失败时统一提供重新提取图标按键。
+- 涉及 `TimelineMemoryHelper.kt`、`AiRepository.kt`、`ChatGenerationManager.kt`、`RoleplaySmartAnalyzer.kt`、`ChatViewModel.kt`、`ChatPendingReviewPanels.kt`、`TimelineReconcileDialog.kt`、`EditableSettingProposalDialog.kt`、`ChatStoryDialogs.kt`、`ChatScreen.kt` 及 4 个回归测试套件。
+- 冻结验收 `20261121-173142-663`：脚本 / Gradle 退出 0，677.641 秒；96 套件 / 1,123 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 未连接真机，真实模型提取重试与三处弹窗重新提取交互待人工验收。
+
 ## 2026-11-21 · API 配置拖拽中选中项跳变修复（未发版）
 
 - 基线 `main/dc6e5d0`（已发布 2.8.48/234）；本轮未递增版本、未构建 APK。

@@ -190,6 +190,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     val showTimelineReconcileDialog: StateFlow<Boolean> = _showTimelineReconcileDialog.asStateFlow()
 
     private var timelineReconcileJob: Job? = null
+    private var lastReconcileFromCheckpoint: Boolean = false
     private val _timelineReconcileProgress = MutableStateFlow<String?>(null)
     val timelineReconcileProgress: StateFlow<String?> = _timelineReconcileProgress.asStateFlow()
 
@@ -2189,6 +2190,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
     fun startTimelineReconciliation(startFromDraft: Boolean = false, fromCheckpoint: Boolean = false) {
         if (_isReconcilingTimeline.value || _isApplyingTimeline.value) return
+        if (!startFromDraft) {
+            lastReconcileFromCheckpoint = fromCheckpoint
+        }
         _isReconcilingTimeline.value = true
         _timelineReconcileProgress.value = when {
             startFromDraft -> "正在读取先前进度继续梳理..."
@@ -2197,9 +2201,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
         timelineReconcileJob?.cancel()
         timelineReconcileJob = viewModelScope.launch {
+            val activeCfgId = apiConfig?.id ?: _currentModelOption.value?.apiConfigId
+            val activeModel = _currentModel.value?.ifBlank { null } ?: _currentModelOption.value?.modelName.orEmpty()
             try {
-                val activeCfgId = apiConfig?.id ?: _currentModelOption.value?.apiConfigId
-                val activeModel = _currentModel.value?.ifBlank { null } ?: _currentModelOption.value?.modelName.orEmpty()
                 val draft = if (startFromDraft) {
                     withContext(Dispatchers.IO) {
                         TimelineDraftManager.getDraft(AiAssistantApp.instance, conversationId)
@@ -2235,7 +2239,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 _timelineReconcileResult.value = TimelineReconcileResult(
                     currentStoryTime = "未确定",
                     events = mutableListOf(),
-                    extractionSource = "LOCAL_FALLBACK",
+                    extractionSource = "EXTRACTION_FAILED",
+                    modelUsed = activeModel,
                     extractionErrorMessage = e.message ?: "提炼请求异常"
                 )
                 _showTimelineReconcileDialog.value = true
@@ -2244,6 +2249,38 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 _timelineReconcileProgress.value = null
                 timelineReconcileJob = null
             }
+        }
+    }
+
+    /**
+     * 从时间轴与多维设定审阅/失败弹窗触发重新读取与提取：
+     * - 若本次是多段梳理在中途失败且留有未完成草稿，则从失败段接着重新提取；
+     * - 若已提取完成或从草稿预览/首段失败触发，则清理旧草稿并按原模式（全量或断点）重新读取。
+     */
+    fun reExtractTimelineReconciliation() {
+        if (_isReconcilingTimeline.value || _isApplyingTimeline.value) return
+        val currentResult = _timelineReconcileResult.value
+        val isFailureResult = currentResult?.extractionSource == "EXTRACTION_FAILED" ||
+            currentResult?.extractionSource == "LOCAL_FALLBACK"
+        dismissTimelineReconcileDialog()
+        viewModelScope.launch {
+            val existingDraft = _liveReconcileDraft.value ?: withContext(Dispatchers.IO) {
+                getSavedTimelineDraft()
+            }
+            val canResumeIncompleteDraft = isFailureResult &&
+                existingDraft != null &&
+                !existingDraft.isCompleted &&
+                existingDraft.lastProcessedMessageId > 0L
+            if (!canResumeIncompleteDraft) {
+                withContext(Dispatchers.IO) {
+                    TimelineDraftManager.clearDraft(AiAssistantApp.instance, conversationId)
+                }
+                _liveReconcileDraft.value = null
+            }
+            startTimelineReconciliation(
+                startFromDraft = canResumeIncompleteDraft,
+                fromCheckpoint = lastReconcileFromCheckpoint
+            )
         }
     }
 
@@ -2273,8 +2310,91 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             } catch (e: Exception) {
                 Log.w("ChatViewModel", "自动更新时间线后台任务异常: ${e.message}")
                 if (epoch == ChatGenerationManager.mutationEpoch(conversationId)) {
-                    ChatGenerationManager.offerTimelineProposal(conversationId, AutoTimelineUpdateResult(
-                        null, null, "本轮提取未完成", extractionErrorMessage = "本轮提取失败，请检查模型配置或手动梳理"))
+                    ChatGenerationManager.offerTimelineProposal(
+                        conversationId,
+                        AutoTimelineUpdateResult(
+                            updatedStoryTime = null,
+                            newEvent = null,
+                            summaryNotice = "本轮提取未完成",
+                            extractionErrorMessage = "本轮提取失败，请点击重新提取或检查模型配置",
+                            sourceUserMessage = userMsg,
+                            sourceAssistantReply = assistantReply,
+                            sourceConfigId = selectedOption.apiConfigId,
+                            sourceModelName = selectedOption.modelName,
+                            sourceSessionMemoryEnabled = sessionMemoryEnabled
+                        )
+                    )
+                }
+            } finally {
+                ChatGenerationManager.endTimelineExtraction(conversationId)
+            }
+        }
+    }
+
+    /**
+     * 点击本轮时间线与设定待确认/失败弹窗的重新提取按键：
+     * 原子消费旧提案后重新读取该轮原文并再次提取，提取完成时优先置顶展示；
+     * 若本轮确实无新时间线或设定则给出明确轻提示。
+     */
+    fun reExtractTimelineProposal(proposal: AutoTimelineUpdateResult) {
+        if (!ChatGenerationManager.consumeTimelineProposal(conversationId, proposal)) return
+        val latestMessages = _messages.value
+            .filter { !it.isExcluded && !AiRepository.isErrorPlaceholderMessage(it.content) }
+        val userMsg = proposal.sourceUserMessage
+            ?: latestMessages.lastOrNull { it.role == "user" }?.content.orEmpty()
+        val assistantReply = proposal.sourceAssistantReply
+            ?: latestMessages.lastOrNull { it.role == "assistant" }?.content.orEmpty()
+        if (userMsg.isBlank() && assistantReply.isBlank()) {
+            _timelineUpdateNotice.value = "未找到可重新读取的本轮对话内容"
+            return
+        }
+        val activeOption = _currentModelOption.value
+        val targetConfigId = activeOption?.apiConfigId ?: proposal.sourceConfigId ?: apiConfig?.id ?: conversation?.apiConfigId
+        val targetModelName = activeOption?.modelName?.ifBlank { null }
+            ?: _currentModel.value?.ifBlank { null }
+            ?: proposal.sourceModelName
+            ?: conversation?.modelName
+        val sessionMemEnabled = proposal.sourceSessionMemoryEnabled
+            ?: (if (_useTempSettings.value) _tempSettings.value.enableSessionMemory else conversation?.enableSessionMemory)
+        val epoch = ChatGenerationManager.mutationEpoch(conversationId)
+        ChatGenerationManager.beginTimelineExtraction(conversationId)
+        AiAssistantApp.instance.applicationScope.launch(Dispatchers.IO) {
+            try {
+                val result = repository.evaluateAndAutoUpdateTimeline(
+                    conversationId = conversationId,
+                    userMessage = userMsg,
+                    assistantReply = assistantReply,
+                    activeConfigId = targetConfigId,
+                    activeModelName = targetModelName,
+                    sessionMemoryEnabled = sessionMemEnabled
+                )
+                if (epoch == ChatGenerationManager.mutationEpoch(conversationId)) {
+                    if (result != null) {
+                        ChatGenerationManager.offerTimelineProposal(conversationId, result, prioritize = true)
+                    } else {
+                        _timelineUpdateNotice.value = "重新提取完成，本轮未发现新的时间线或设定"
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("ChatViewModel", "重新提取时间线后台任务异常: ${e.message}")
+                if (epoch == ChatGenerationManager.mutationEpoch(conversationId)) {
+                    ChatGenerationManager.offerTimelineProposal(
+                        conversationId,
+                        AutoTimelineUpdateResult(
+                            updatedStoryTime = null,
+                            newEvent = null,
+                            summaryNotice = "本轮提取未完成",
+                            extractionErrorMessage = "重新提取失败，请检查模型配置或稍后重试",
+                            sourceUserMessage = userMsg,
+                            sourceAssistantReply = assistantReply,
+                            sourceConfigId = targetConfigId,
+                            sourceModelName = targetModelName,
+                            sourceSessionMemoryEnabled = sessionMemEnabled
+                        ),
+                        prioritize = true
+                    )
                 }
             } finally {
                 ChatGenerationManager.endTimelineExtraction(conversationId)
@@ -2810,7 +2930,21 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-                val currentConfig = apiConfig?.takeIf { it.isEnabled } ?: repository.getDefaultApiConfig() ?: return@launch
+                val currentConfig = apiConfig?.takeIf { it.isEnabled } ?: repository.getDefaultApiConfig()
+                if (currentConfig == null) {
+                    val msg = "未找到可用的 API 配置"
+                    _uiState.update {
+                        it.copy(
+                            suggestedProposal = ProposedSettingBundle(
+                                summary = "故事设定提取失败",
+                                sourceText = text,
+                                errorMessage = msg
+                            )
+                        )
+                    }
+                    withContext(Dispatchers.Main) { onError(msg) }
+                    return@launch
+                }
                 val modelToUse = _currentModel.value ?: currentConfig.modelName
                 withContext(Dispatchers.Main) { onProgress("正在结合故事已有设定进行精准分析...") }
                 val currentChars = _uiState.value.roleplayCharacters
@@ -2836,17 +2970,45 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                                 updatedCharacters = proposal.updatedCharacters,
                                 newCharacters = proposal.newCharacters,
                                 scenarioUpdate = proposal.scenarioUpdate,
-                                summary = proposal.summaryReport
+                                summary = proposal.summaryReport,
+                                sourceText = text
                             )
                         )
                     }
                 } else {
                     withContext(Dispatchers.Main) { onNoProposal() }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { onError(e.message ?: "识别失败") }
+                val errMsg = e.message ?: "识别失败"
+                _uiState.update {
+                    it.copy(
+                        suggestedProposal = ProposedSettingBundle(
+                            summary = "故事设定提取失败",
+                            sourceText = text,
+                            errorMessage = errMsg
+                        )
+                    )
+                }
+                withContext(Dispatchers.Main) { onError(errMsg) }
             }
         }
+    }
+
+    fun reExtractProposedSetting(
+        onProgress: (String) -> Unit = {},
+        onNoProposal: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        val sourceText = _uiState.value.suggestedProposal?.sourceText?.takeIf { it.isNotBlank() } ?: return
+        _uiState.update { it.copy(suggestedProposal = null) }
+        analyzeAndProposeSettingFromInput(
+            text = sourceText,
+            onProgress = onProgress,
+            onNoProposal = onNoProposal,
+            onError = onError
+        )
     }
 
     fun dismissProposedSetting() {
@@ -3283,7 +3445,9 @@ data class ProposedSettingBundle(
     val updatedCharacters: List<com.aiassistant.utils.ProposedCharacterUpdate> = emptyList(),
     val newCharacters: List<com.aiassistant.utils.ProposedCharacterUpdate> = emptyList(),
     val scenarioUpdate: com.aiassistant.utils.ProposedScenarioUpdate? = null,
-    val summary: String = ""
+    val summary: String = "",
+    val sourceText: String? = null,
+    val errorMessage: String? = null
 ) {
     val allCharacters: List<CharacterProfile>
         get() = updatedCharacters.map { it.character } + newCharacters.map { it.character }

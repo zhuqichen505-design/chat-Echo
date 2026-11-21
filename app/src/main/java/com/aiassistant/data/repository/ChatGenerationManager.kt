@@ -4,6 +4,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -188,16 +189,28 @@ object ChatGenerationManager {
     private fun proposalState(conversationId: Long): MutableStateFlow<List<AutoTimelineUpdateResult>> =
         timelineProposals.computeIfAbsent(conversationId) { MutableStateFlow(emptyList()) }
 
-    fun offerTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult) {
-        proposalState(conversationId).update { it + proposal }
+    fun offerTimelineProposal(
+        conversationId: Long,
+        proposal: AutoTimelineUpdateResult,
+        prioritize: Boolean = false
+    ) {
+        proposalState(conversationId).update { pending ->
+            if (prioritize) listOf(proposal) + pending else pending + proposal
+        }
     }
 
-    fun dismissTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult?) {
-        if (proposal == null) return
-        proposalState(conversationId).update { pending ->
+    /** 原子消费指定提案；防连点导致同一轮重复触发多次重新提取。 */
+    fun consumeTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult?): Boolean {
+        if (proposal == null) return false
+        val previous = proposalState(conversationId).getAndUpdate { pending ->
             val index = pending.indexOfFirst { it.proposalId == proposal.proposalId }
             if (index < 0) pending else pending.toMutableList().apply { removeAt(index) }
         }
+        return previous.any { it.proposalId == proposal.proposalId }
+    }
+
+    fun dismissTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult?) {
+        consumeTimelineProposal(conversationId, proposal)
     }
     fun mutationEpoch(conversationId: Long): Long = mutationEpochs[conversationId] ?: 0L
 

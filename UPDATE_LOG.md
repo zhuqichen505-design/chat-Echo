@@ -1,5 +1,21 @@
 # 维护记录
 
+## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
+
+用户提出两项需求：时间线和设定总结经常无法返回有效格式，希望在单纯提取失败或返回内容错误时自动重试（允许本轮对话确实没有新设定或时间线，不误重试）；当提取到设定和时间线、或者多次重试依然提取失败时，弹出的窗口需要提供重新提取图标按键，点击后重新读取。
+
+根因：单轮增量提取（`evaluateAndAutoUpdateTimeline`）原先仅在“无 `{...}` 且非无变化文案”时重试一次，对语法损坏 JSON、缺少约定字段或字段类型错误、仅思考无正文/空响应、输出截断及 5xx 等提取失败均未重试，且 `newEvent` 中出现 `JsonNull` 会直接抛出 `UnsupportedOperationException` 被判格式无效；全量/分段梳理（`analyzeTimelineChunk`）、过长事件精简（`condenseAutoTimelineEvent`）与故事设定融入分析（`RoleplaySmartAnalyzer.analyzeStoryInputForProposal`）均无自动重试；各审阅/失败弹窗（`ChatPendingReviewPanels`、`TimelineReconcileDialog`、`EditableSettingProposalDialog`）均缺少重新提取图标按键，`AutoTimelineUpdateResult` 与 `ProposedSettingBundle` 亦未保留原文上下文以供一键重读。
+
+修复：
+- `TimelineMemoryHelper` 新增严格解析与诊断结果 `IncrementalTimelineParseResult`、`VerifiedTimelineParseResult`、`parseIncrementalTimelineResponse` 与 `parseVerifiedModelOutputDetailed`，优先从含 `{` 的围栏块提取 JSON 并修复可选字段 `JsonNull` 崩溃；清晰区分“合法无新内容（`NO_UPDATE`、无变化自然语言、合法空 JSON/空数组，直接通过不重试）”与“格式错误/安全拒绝/残缺 JSON（触发自动重试）”。
+- `AiRepository` 新增统一尝试上限 `MAX_TIMELINE_EXTRACTION_ATTEMPTS = 3`（1 次首试 + 2 次自动重试）及 `shouldAutoRetryExtractionFailure`：在单轮增量提取、过长事件精简、分段/全量时间线梳理中，遇到格式校验失败、空响应/仅推理、截断或未由 `RetryPolicy` 覆盖的 5xx/429 时附带具体纠错指引自动重试（分段梳理同步更新重试进度）；取消、本地 HTTP 拒绝及 400/401/403/404/413/422 硬性客户端错误不盲目重试，亦不与底层 `RetryPolicy` 叠加放大。`RoleplaySmartAnalyzer.analyzeStoryInputForProposal` 同步接入 3 次自动重试与 `<think>` 剥离。
+- `AutoTimelineUpdateResult` 保留当轮原文与触发上下文；`ChatGenerationManager` 新增原子 `consumeTimelineProposal` 与 `prioritize` 置顶入队；`ChatViewModel` 新增 `reExtractTimelineProposal`、`reExtractTimelineReconciliation`（中途分块失败续梳失败段，其余清理旧草稿按原全量/断点模式重读）与 `reExtractProposedSetting`（失败时亦打开弹窗展示错误并支持一键重读）。
+- `ChatPendingReviewPanels`（卡片标题栏与全屏对话框标题栏）、`TimelineReconcileDialog`（工作台标题栏）与 `EditableSettingProposalDialog`（故事设定弹窗标题栏）统一新增 `Icons.Default.Refresh`（`重新提取`）图标按键，成功提取与多次重试仍失败场景均可见并可直接重新读取。
+
+涉及文件：`utils/TimelineMemoryHelper.kt`、`data/repository/AiRepository.kt`、`data/repository/ChatGenerationManager.kt`、`utils/RoleplaySmartAnalyzer.kt`、`ui/screens/chat/ChatViewModel.kt`、`ui/screens/chat/ChatPendingReviewPanels.kt`、`ui/screens/chat/story/TimelineReconcileDialog.kt`、`ui/screens/chat/story/EditableSettingProposalDialog.kt`、`ui/screens/chat/ChatStoryDialogs.kt`、`ui/screens/chat/ChatScreen.kt` 及领域测试套件 `MemoryExtractionRepositoryTest.kt`、`TimelineNaturalTimeTest.kt`、`GenerationLifecycleTest.kt`、`UiPolishRegressionTest.kt`；Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格式不变。
+
+验证：冻结验收 `20261121-173142-663` 脚本 / Gradle 退出 0，677.641 秒；96 套件 / 1,123 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。本轮未构建 APK、未发版，版本仍为 2.8.48/234；真实模型提取与三个弹窗的重新提取交互待真机人工验收。
+
 ## 2026-11-21 · API 配置拖拽中选中项跳变修复（未发版）
 
 用户反馈 2.8.48 发布后，API 配置页按住六点手柄拖动时，拖拽过程中选中的 API 仍会突然变成另一个。上一轮只修正了“按下时读取旧下标”，但拖拽过程仍然采用“越过阈值立即交换列表数据”的实时重排。

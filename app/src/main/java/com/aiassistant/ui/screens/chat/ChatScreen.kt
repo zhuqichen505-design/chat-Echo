@@ -764,6 +764,7 @@ fun ChatScreen(
                                 onAcceptMemory = { scope, content -> viewModel.acceptPendingMemory(scope, content) },
                                 onDismissTimeline = { viewModel.dismissTimelineProposal(it) },
                                 onApplyTimeline = { viewModel.applyTimelineProposal(it) },
+                                onReExtractTimeline = { viewModel.reExtractTimelineProposal(it) },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -1991,7 +1992,8 @@ fun ChatScreen(
             onDismiss = { viewModel.dismissTimelineReconcileDialog() },
             onApply = { currentTime, events, confirmedSettings ->
                 viewModel.applyReconciledTimeline(currentTime, events, confirmedSettings)
-            }
+            },
+            onReExtract = { viewModel.reExtractTimelineReconciliation() }
         )
     }
 
@@ -2397,15 +2399,26 @@ fun ChatScreen(
     }
 
     if (uiState.suggestedProposal != null) {
+        val currentSuggestedProposal = uiState.suggestedProposal!!
         EditableSettingProposalDialog(
             hazeState = hazeState,
-            proposal = uiState.suggestedProposal!!,
+            proposal = currentSuggestedProposal,
             onDismiss = { viewModel.dismissProposedSetting() },
             onApply = { chars, sc ->
                 viewModel.applyProposedSetting(chars, sc,
                     onSaved = { Toast.makeText(context, "已保存到当前故事专属设定", Toast.LENGTH_SHORT).show() },
                     onError = { Toast.makeText(context, it, Toast.LENGTH_LONG).show() })
-            }
+            },
+            onReExtract = if (!currentSuggestedProposal.sourceText.isNullOrBlank()) {
+                {
+                    Toast.makeText(context, "正在重新读取并分析故事设定...", Toast.LENGTH_SHORT).show()
+                    viewModel.reExtractProposedSetting(
+                        onProgress = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() },
+                        onNoProposal = { Toast.makeText(context, "重新提取完成，未发现实质性设定变动", Toast.LENGTH_SHORT).show() },
+                        onError = { err -> Toast.makeText(context, "识别失败: $err", Toast.LENGTH_LONG).show() }
+                    )
+                }
+            } else null
         )
     }
 

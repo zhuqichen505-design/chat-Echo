@@ -153,7 +153,8 @@ fun EditableSettingProposalDialog(
     hazeState: dev.chrisbanes.haze.HazeState,
     proposal: ProposedSettingBundle,
     onDismiss: () -> Unit,
-    onApply: (List<CharacterProfile>, RoleplayScenario?) -> Unit
+    onApply: (List<CharacterProfile>, RoleplayScenario?) -> Unit,
+    onReExtract: (() -> Unit)? = null
 ) {
     var updatedChars by remember(proposal) {
         mutableStateOf(proposal.updatedCharacters.map { it.character })
@@ -164,17 +165,49 @@ fun EditableSettingProposalDialog(
     var scenario by remember(proposal) {
         mutableStateOf(proposal.scenario)
     }
+    val hasUpdates = updatedChars.isNotEmpty() || newChars.isNotEmpty() || scenario != null
+    val isFailureOnly = !proposal.errorMessage.isNullOrBlank() && !hasUpdates
 
     EchoGlassDialog(
         hazeState = hazeState,
         onDismissRequest = onDismiss,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text("AI 精准识别到设定融入与更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(proposal.summary.ifBlank { "已结合已知设定智能分类更新与新角色" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (isFailureOnly) Icons.Default.WarningAmber else Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = if (isFailureOnly) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            if (isFailureOnly) "故事设定提取失败" else "AI 精准识别到设定融入与更新",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            proposal.summary.ifBlank { "已结合已知设定智能分类更新与新角色" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (onReExtract != null) {
+                    IconButton(onClick = onReExtract) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "重新提取",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         },
@@ -183,6 +216,34 @@ fun EditableSettingProposalDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                proposal.errorMessage?.takeIf { it.isNotBlank() }?.let { errMsg ->
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = errMsg,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
                 // 1. 更新已有角色
                 if (updatedChars.isNotEmpty()) {
                     item {
@@ -371,6 +432,7 @@ fun EditableSettingProposalDialog(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
+                    enabled = hasUpdates,
                     onClick = {
                         val finalChars = updatedChars + newChars
                         onApply(finalChars, scenario)

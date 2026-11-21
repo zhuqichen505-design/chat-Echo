@@ -194,6 +194,109 @@ class UiPolishRegressionTest {
     }
 
     @Test
+    fun pendingTimelineReviewShowsAndTriggersReExtractIconForSuccessAndFailure() {
+        val extracted = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = "第2天·清晨",
+            newEvent = com.aiassistant.utils.TimelineEventItem(timeTag = "第2天·清晨", content = "合成角色抵达古塔"),
+            summaryNotice = "本轮提取结果",
+            atemporalSettings = listOf(com.aiassistant.utils.AtemporalSettingItem(content = "古塔禁止火焰魔法")),
+            proposalId = "synthetic-extracted-reextract"
+        )
+        val failed = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = null,
+            newEvent = null,
+            summaryNotice = "本轮提取未完成",
+            extractionErrorMessage = "模型经 3 次尝试仍未返回有效的提取 JSON，请点击重新提取",
+            proposalId = "synthetic-failed-reextract"
+        )
+
+        for (proposal in listOf(extracted, failed)) {
+            val reExtracted = mutableListOf<String>()
+            renderAndClickSemanticsNode(contentDescription = "重新提取", useDialogWindow = false) {
+                com.aiassistant.ui.screens.chat.ChatPendingReviewPanels(
+                    memory = null,
+                    timeline = proposal,
+                    onDismissMemory = {},
+                    onAcceptMemory = { _, _ -> },
+                    onDismissTimeline = {},
+                    onApplyTimeline = {},
+                    onReExtractTimeline = { reExtracted += it.proposalId }
+                )
+            }
+            assertEquals("点击重新提取图标应触发当前提案重新读取: ${proposal.proposalId}",
+                listOf(proposal.proposalId), reExtracted)
+        }
+    }
+
+    @org.robolectric.annotation.Config(shadows = [MaterialStringFallbackResources::class])
+    @Test
+    fun timelineReconcileAndSettingProposalDialogsExposeReExtractIconForSuccessAndFailure() {
+        val reconcileCases = listOf(
+            com.aiassistant.utils.TimelineReconcileResult(
+                currentStoryTime = "第1天·清晨",
+                events = mutableListOf(com.aiassistant.utils.TimelineEventItem(timeTag = "第1天·清晨", content = "合成事件")),
+                atemporalSettings = mutableListOf(com.aiassistant.utils.AtemporalSettingItem(content = "合成设定")),
+                extractionSource = "AI_MODEL",
+                modelUsed = "synthetic-model"
+            ),
+            com.aiassistant.utils.TimelineReconcileResult(
+                currentStoryTime = "未确定",
+                events = mutableListOf(),
+                extractionSource = "EXTRACTION_FAILED",
+                modelUsed = "synthetic-model",
+                extractionErrorMessage = "经 3 次尝试后提取仍未通过校验"
+            )
+        )
+        for (result in reconcileCases) {
+            var reExtractClicks = 0
+            renderAndClickSemanticsNode(contentDescription = "重新提取", useDialogWindow = true) {
+                val haze = dev.chrisbanes.haze.HazeState()
+                com.aiassistant.ui.screens.chat.TimelineReconcileDialog(
+                    hazeState = haze,
+                    initialResult = result,
+                    onDismiss = {},
+                    onApply = { _, _, _ -> },
+                    onReExtract = { reExtractClicks++ }
+                )
+            }
+            assertEquals("时间轴与多维设定工作台 (${result.extractionSource}) 必须提供可点击的重新提取图标按键", 1, reExtractClicks)
+        }
+
+        val proposalCases = listOf(
+            com.aiassistant.ui.screens.chat.ProposedSettingBundle(
+                newCharacters = listOf(
+                    com.aiassistant.utils.ProposedCharacterUpdate(
+                        character = com.aiassistant.domain.model.CharacterProfile(name = "合成角色"),
+                        isNew = true,
+                        summaryOfChanges = "新角色"
+                    )
+                ),
+                summary = "发现新角色",
+                sourceText = "合成剧情原文"
+            ),
+            com.aiassistant.ui.screens.chat.ProposedSettingBundle(
+                summary = "故事设定提取失败",
+                sourceText = "合成剧情原文",
+                errorMessage = "经 3 次尝试返回的故事设定格式仍无效"
+            )
+        )
+        for (bundle in proposalCases) {
+            var reExtractClicks = 0
+            renderAndClickSemanticsNode(contentDescription = "重新提取", useDialogWindow = true) {
+                val haze = dev.chrisbanes.haze.HazeState()
+                com.aiassistant.ui.screens.chat.EditableSettingProposalDialog(
+                    hazeState = haze,
+                    proposal = bundle,
+                    onDismiss = {},
+                    onApply = { _, _ -> },
+                    onReExtract = { reExtractClicks++ }
+                )
+            }
+            assertEquals("故事设定弹窗 (${bundle.summary}) 必须提供可点击的重新提取图标按键", 1, reExtractClicks)
+        }
+    }
+
+    @Test
     fun reasoningEffortPopupIsAnInputAnchoredCardWithInputImmediatelyBelow() {
         val bounds = measureReasoningPopup()
 
@@ -1212,5 +1315,93 @@ private fun measureComposeViewport(width: Int, height: Int, content: @Composable
         composeView.disposeComposition()
         controller.pause().stop().destroy()
         android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+    }
+}
+
+private fun renderAndClickSemanticsNode(
+    contentDescription: String,
+    useDialogWindow: Boolean,
+    content: @Composable () -> Unit
+) {
+    val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+    val activity = controller.get()
+    val composeView = ComposeView(activity)
+    val scaleKey = android.provider.Settings.Global.ANIMATOR_DURATION_SCALE
+    val previousScale = android.provider.Settings.Global.getFloat(activity.contentResolver, scaleKey, 1f)
+    android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, 0f)
+    try {
+        composeView.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                androidx.compose.material3.MaterialTheme { content() }
+            }
+        }
+        activity.setContentView(composeView, android.widget.FrameLayout.LayoutParams(400, 720))
+        val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        mainLooper.idleFor(java.time.Duration.ofMillis(64))
+        val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY)
+        val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(720, android.view.View.MeasureSpec.EXACTLY)
+        repeat(2) {
+            composeView.measure(widthSpec, heightSpec)
+            composeView.layout(0, 0, 400, 720)
+            mainLooper.idleFor(java.time.Duration.ofMillis(32))
+        }
+
+        val searchRoot: android.view.View = if (useDialogWindow) {
+            val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+            assertTrue("应当已弹出目标对话框", dialog != null && dialog.isShowing)
+            val decor = dialog!!.window!!.decorView
+            decor.measure(widthSpec, heightSpec)
+            decor.layout(0, 0, 400, 720)
+            mainLooper.idleFor(java.time.Duration.ofMillis(32))
+            decor
+        } else {
+            composeView
+        }
+
+        fun collectRoots(view: android.view.View, out: MutableList<androidx.compose.ui.node.RootForTest>) {
+            if (view is androidx.compose.ui.node.RootForTest) out += view
+            if (view is android.view.ViewGroup) {
+                for (i in 0 until view.childCount) collectRoots(view.getChildAt(i), out)
+            }
+        }
+        val roots = mutableListOf<androidx.compose.ui.node.RootForTest>()
+        collectRoots(searchRoot, roots)
+        assertTrue("未找到 Compose 语义根节点", roots.isNotEmpty())
+
+        fun findClickableTarget(node: androidx.compose.ui.semantics.SemanticsNode): androidx.compose.ui.semantics.SemanticsNode? {
+            val descriptions = node.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription) { null }
+            val hasAction = node.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsActions.OnClick) { null } != null
+            if (descriptions?.contains(contentDescription) == true && hasAction) return node
+            for (child in node.children) {
+                findClickableTarget(child)?.let { return it }
+            }
+            return null
+        }
+
+        val target = roots.firstNotNullOfOrNull { findClickableTarget(it.semanticsOwner.rootSemanticsNode) }
+        assertTrue("未找到可点击的「$contentDescription」图标按键", target != null)
+        assertFalse("「$contentDescription」图标按键不应处于禁用状态",
+            target!!.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled))
+        val onClick = target.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsActions.OnClick) { null }
+        assertTrue("「$contentDescription」点击动作应当生效", onClick?.action?.invoke() == true)
+        mainLooper.idleFor(java.time.Duration.ofMillis(32))
+    } finally {
+        composeView.disposeComposition()
+        controller.pause().stop().destroy()
+        android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+    }
+}
+
+@org.robolectric.annotation.Implements(android.content.res.Resources::class)
+class MaterialStringFallbackResources : org.robolectric.shadows.ShadowResources() {
+    @org.robolectric.annotation.RealObject
+    private lateinit var realResources: android.content.res.Resources
+
+    @Suppress("DEPRECATION")
+    @org.robolectric.annotation.Implementation
+    protected fun getString(id: Int): String = try {
+        org.robolectric.shadow.api.Shadow.directlyOn(realResources, android.content.res.Resources::class.java).getString(id)
+    } catch (_: android.content.res.Resources.NotFoundException) {
+        ""
     }
 }

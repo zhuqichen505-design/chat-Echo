@@ -19,6 +19,8 @@ import com.aiassistant.utils.TimelineEventItem
 import com.aiassistant.utils.toTimelineEventItem
 import com.aiassistant.utils.TimelineCategory
 import com.aiassistant.utils.AtemporalSettingItem
+import com.aiassistant.utils.IncrementalTimelineParseResult
+import com.aiassistant.utils.VerifiedTimelineParseResult
 import com.aiassistant.utils.AdvancedMemoryEngine
 import com.aiassistant.utils.TimelineReconcileDraft
 import com.aiassistant.utils.TimelineReconcileCheckpoint
@@ -73,7 +75,13 @@ data class AutoTimelineUpdateResult(
     val extractionErrorMessage: String? = null,
     val previousEventCategory: String? = null,
     // 每次提取独立标识；相同失败文本也必须触发 StateFlow 更新，编辑 copy 保留标识。
-    val proposalId: String = java.util.UUID.randomUUID().toString()
+    val proposalId: String = java.util.UUID.randomUUID().toString(),
+    // 保留本轮原文与触发上下文，供待确认/失败弹窗一键重新读取与重新提取。
+    val sourceUserMessage: String? = null,
+    val sourceAssistantReply: String? = null,
+    val sourceConfigId: Long? = null,
+    val sourceModelName: String? = null,
+    val sourceSessionMemoryEnabled: Boolean? = null
 )
 
 class AiRepository(
@@ -170,6 +178,8 @@ class AiRepository(
         const val MEMORY_RECENCY_WINDOW_MS = 14f * 24f * 60f * 60f * 1000f
         const val DEFAULT_UNKNOWN_CONTEXT_WINDOW_TOKENS = 256_000
         const val CONTEXT_OVERFLOW_RETRY_WINDOW_TOKENS = 200_000
+        /** 时间线与设定结构化提取的总尝试次数（1 次首试 + 2 次自动重试）。 */
+        const val MAX_TIMELINE_EXTRACTION_ATTEMPTS = 3
 
 
         fun parseNamedApiKeys(rawKey: String?): List<NamedApiKey> = ApiKeysHelper.parseNamedApiKeys(rawKey)
@@ -4314,7 +4324,56 @@ class AiRepository(
     }
 
     /**
-     * 单段消息切片的时间线与设定深度提炼
+     * 判断时间线/设定提取请求失败是否应在外层自动重试：
+     * - 取消、本地 HTTP 拦截、以及鉴权/权限/404/400/413/422 等硬性客户端错误不重试；
+     * - 底层 RetryPolicy 已经多轮重试过的网络/超时错误不重复叠加；
+     * - 空响应/仅推理无正文、输出截断、5xx/429 等提取失败自动重试。
+     */
+    internal fun shouldAutoRetryExtractionFailure(error: Throwable): Boolean {
+        if (isRequestCancellation(error)) return false
+        if (generateSequence(error) { it.cause }.take(16).any { it is com.aiassistant.data.remote.HttpAccessDeniedException }) return false
+        val type = RetryErrorType.classify(error)
+        if (type in setOf(
+                RetryErrorType.BAD_REQUEST,
+                RetryErrorType.AUTHENTICATION,
+                RetryErrorType.PERMISSION,
+                RetryErrorType.NOT_FOUND,
+                RetryErrorType.TOO_LARGE,
+                RetryErrorType.INVALID_PARAMETERS
+            )
+        ) return false
+        if (personalizationManager.getRetryPolicy().canRetry(error, 0)) return false
+        return true
+    }
+
+    internal fun extractionRetryDelayMillis(error: Throwable, attempt: Int): Long {
+        val type = RetryErrorType.classify(error)
+        return when (type) {
+            RetryErrorType.RATE_LIMIT,
+            RetryErrorType.SERVER,
+            RetryErrorType.BAD_GATEWAY,
+            RetryErrorType.UNAVAILABLE,
+            RetryErrorType.GATEWAY_TIMEOUT,
+            RetryErrorType.REQUEST_TIMEOUT,
+            RetryErrorType.TIMEOUT,
+            RetryErrorType.NETWORK,
+            RetryErrorType.TLS -> 250L * attempt.coerceAtLeast(1)
+            else -> 0L
+        }
+    }
+
+    private fun appendRetryGuidanceWithinWindow(
+        basePrompt: String,
+        guidance: String,
+        maxOutputTokens: Int,
+        analysisWindow: Int
+    ): String {
+        val candidate = "$basePrompt\n\n$guidance"
+        return if (estimateTokenCount(candidate) + maxOutputTokens + 512 <= analysisWindow) candidate else basePrompt
+    }
+
+    /**
+     * 单段消息切片的时间线与设定深度提炼（格式或提取失败自动重试，合法空数组直接通过）
      */
     private suspend fun analyzeTimelineChunk(
         messagesChunk: List<Message>,
@@ -4324,7 +4383,8 @@ class AiRepository(
         existingSettings: List<MemoryItem> = emptyList(),
         analysisWindow: Int = 32000,
         precedingEvents: List<TimelineEventItem> = emptyList(),
-        precedingSettings: List<AtemporalSettingItem> = emptyList()
+        precedingSettings: List<AtemporalSettingItem> = emptyList(),
+        onRetry: ((retryNumber: Int, maxRetries: Int, reason: String) -> Unit)? = null
     ): TimelineReconcileResult {
         val messagesToAnalyze = messagesChunk
 
@@ -4396,38 +4456,78 @@ class AiRepository(
             "本段原文、既有设定与提取指令超过模型上下文窗口，未截断或发送；请提高提取模型上下文上限"
         }
         val cfg = config.copy(modelName = targetModel)
-        var responseText: String? = null
-        var modelException: Exception? = null
-
-        try {
-            responseText = if (cfg.apiType == "anthropic") {
-                generateAnthropicTimelineAnalysis(cfg, prompt, maxTokens = analysisMaxOutput)
-            } else {
-                generateOpenAITimelineAnalysis(cfg, prompt, maxTokens = analysisMaxOutput)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            modelException = e
-            Log.e(tag, "调用大模型分析时间线切片异常: ${e.message}", e)
-        }
-
         val userMessages = messagesChunk.filter { it.role == "user" }.map { it.content }
+        val expectedMessageIds = messagesChunk.map { it.id }
+        val existingSettingIds = existingSettings.filter { it.scope == "conversation" }.map { it.id }
+        val maxRetries = MAX_TIMELINE_EXTRACTION_ATTEMPTS - 1
+        var modelException: Exception? = null
+        var lastFailureReason = "模型未返回有效提取结果"
+        var attemptsMade = 0
 
-        if (!responseText.isNullOrBlank()) {
-            val parsedResult = TimelineMemoryHelper.parseVerifiedModelOutput(responseText, messagesChunk.map { it.id },
-                existingSettings.filter { it.scope == "conversation" }.map { it.id }, fallbackCurrentTime)
-            if (parsedResult != null) {
-                parsedResult.extractionSource = "AI_MODEL"
-                parsedResult.modelUsed = targetModel
-                val settings = SessionSettingReconciler.reconcileCandidates(parsedResult.atemporalSettings, existingSettings)
-                parsedResult.atemporalSettings.clear()
-                parsedResult.atemporalSettings.addAll(settings)
-                return TimelineMemoryHelper.consolidateFinalReconcileResult(parsedResult, userMessages)
+        for (attempt in 1..MAX_TIMELINE_EXTRACTION_ATTEMPTS) {
+            currentCoroutineContext().ensureActive()
+            attemptsMade = attempt
+            val attemptPrompt = if (attempt == 1) {
+                prompt
+            } else {
+                val guidance = "【格式纠错重试（第 ${attempt - 1} 次）】上次回复未通过校验（$lastFailureReason）。请严格只输出一个完整合法 JSON 对象，不要输出任何额外说明；确保 sourceCoverage 恰好覆盖本段全部消息 ID（整数），timelineEvents 与 atemporalSettings 必须为数组（若本段无新增事件或设定，请输出空数组 [] 并在 sourceCoverage 中填写 noFactReason）。"
+                appendRetryGuidanceWithinWindow(prompt, guidance, analysisMaxOutput, analysisWindow)
+            }
+
+            var callException: Exception? = null
+            val responseText = try {
+                if (cfg.apiType == "anthropic") {
+                    generateAnthropicTimelineAnalysis(cfg, attemptPrompt, maxTokens = analysisMaxOutput)
+                } else {
+                    generateOpenAITimelineAnalysis(cfg, attemptPrompt, maxTokens = analysisMaxOutput)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                callException = e
+                modelException = e
+                Log.e(tag, "调用大模型分析时间线切片异常 (attempt $attempt/$MAX_TIMELINE_EXTRACTION_ATTEMPTS): ${e.message}", e)
+                null
+            }
+
+            if (callException != null) {
+                lastFailureReason = callException.message?.takeIf { it.isNotBlank() } ?: "模型请求失败"
+                if (attempt < MAX_TIMELINE_EXTRACTION_ATTEMPTS && shouldAutoRetryExtractionFailure(callException)) {
+                    onRetry?.invoke(attempt, maxRetries, lastFailureReason)
+                    val delayMs = extractionRetryDelayMillis(callException, attempt)
+                    if (delayMs > 0L) kotlinx.coroutines.delay(delayMs)
+                    continue
+                }
+                break
+            }
+
+            when (val parsed = TimelineMemoryHelper.parseVerifiedModelOutputDetailed(
+                responseText.orEmpty(), expectedMessageIds, existingSettingIds, fallbackCurrentTime
+            )) {
+                is VerifiedTimelineParseResult.Valid -> {
+                    val parsedResult = parsed.result
+                    parsedResult.extractionSource = "AI_MODEL"
+                    parsedResult.modelUsed = targetModel
+                    val settings = SessionSettingReconciler.reconcileCandidates(parsedResult.atemporalSettings, existingSettings)
+                    parsedResult.atemporalSettings.clear()
+                    parsedResult.atemporalSettings.addAll(settings)
+                    return TimelineMemoryHelper.consolidateFinalReconcileResult(parsedResult, userMessages)
+                }
+                is VerifiedTimelineParseResult.Invalid -> {
+                    lastFailureReason = parsed.reason
+                    Log.w(tag, "时间线切片第 $attempt 次提取校验未通过 (${parsed.reason})")
+                    if (attempt < MAX_TIMELINE_EXTRACTION_ATTEMPTS) {
+                        onRetry?.invoke(attempt, maxRetries, parsed.reason)
+                        continue
+                    }
+                }
             }
         }
 
-        throw IllegalStateException("本段提取格式或逐源覆盖校验未通过，未推进处理水线；请重试", modelException)
+        throw IllegalStateException(
+            "经 $attemptsMade 次尝试后本段提取格式或逐源覆盖校验仍未通过（$lastFailureReason），未推进处理水线；请点击重新提取",
+            modelException
+        )
     }
 
     /**
@@ -4517,8 +4617,19 @@ class AiRepository(
         if (chunks.size <= 1) {
             currentCoroutineContext().ensureActive()
             onProgress?.invoke(1, 1, if (baselineEvents.isNotEmpty()) "正在结合原有时间线梳理后续对话..." else "正在梳理时间线与核心设定...")
-            val singleResult = analyzeTimelineChunk(chunks.firstOrNull().orEmpty(), config, targetModel,
-                if (startFromDraft != null || reconcileCheckpoint != null) existingStoryTime else null, existingSettings, analysisWindow, startFromDraft?.events ?: baselineEvents, startFromDraft?.atemporalSettings.orEmpty())
+            val singleResult = analyzeTimelineChunk(
+                messagesChunk = chunks.firstOrNull().orEmpty(),
+                config = config,
+                targetModel = targetModel,
+                fallbackCurrentTime = if (startFromDraft != null || reconcileCheckpoint != null) existingStoryTime else null,
+                existingSettings = existingSettings,
+                analysisWindow = analysisWindow,
+                precedingEvents = startFromDraft?.events ?: baselineEvents,
+                precedingSettings = startFromDraft?.atemporalSettings.orEmpty(),
+                onRetry = { retryNum, maxRetries, _ ->
+                    onProgress?.invoke(1, 1, "返回格式或内容校验未通过，正在自动重试 ($retryNum/$maxRetries)...")
+                }
+            )
             val mergedEvents = if (startFromDraft != null) {
                 TimelineMemoryHelper.consolidateFinalTimelineEvents(startFromDraft.events + singleResult.events)
             } else singleResult.events
@@ -4574,7 +4685,19 @@ class AiRepository(
             onProgress?.invoke(step, chunks.size + 1, progressMsg)
 
             try {
-                val chunkResult = analyzeTimelineChunk(chunk, config, targetModel, latestStoryTime, existingSettings, analysisWindow, aggregatedEvents.ifEmpty { baselineEvents }, aggregatedSettings)
+                val chunkResult = analyzeTimelineChunk(
+                    messagesChunk = chunk,
+                    config = config,
+                    targetModel = targetModel,
+                    fallbackCurrentTime = latestStoryTime,
+                    existingSettings = existingSettings,
+                    analysisWindow = analysisWindow,
+                    precedingEvents = aggregatedEvents.ifEmpty { baselineEvents },
+                    precedingSettings = aggregatedSettings,
+                    onRetry = { retryNum, maxRetries, _ ->
+                        onProgress?.invoke(step, chunks.size + 1, "第 $step/${chunks.size} 阶段提取未通过，正在自动重试 ($retryNum/$maxRetries)...")
+                    }
+                )
                 if (chunkResult.currentStoryTime.isNotBlank() && chunkResult.currentStoryTime != "未确定") {
                     latestStoryTime = chunkResult.currentStoryTime
                 }
@@ -4605,7 +4728,8 @@ class AiRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                throw IllegalStateException("第 $step 段提取失败，已保留前面完成的草稿；重试将从已确认范围继续", e)
+                val reasonSuffix = e.message?.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()
+                throw IllegalStateException("第 $step 段多次重试后仍提取失败$reasonSuffix，已保留前面完成的草稿；重试将从已确认范围继续", e)
             }
         }
 
@@ -4768,98 +4892,113 @@ class AiRepository(
             timelineAnalysisWindow = analysisWindow
             val analysisMaxOutput = (analysisWindow / 4).coerceIn(512, 8192)
             if (estimateTokenCount(prompt) + analysisMaxOutput + 512 > analysisWindow) {
-                return@withContext AutoTimelineUpdateResult(null, null, "本轮提取未执行",
-                    extractionErrorMessage = "本轮完整原文与设定超过提取模型上下文窗口，请使用时间线中的全历史分块梳理，或提高提取模型上下文上限；未截断原文、未发送请求")
+                return@withContext AutoTimelineUpdateResult(
+                    updatedStoryTime = null,
+                    newEvent = null,
+                    summaryNotice = "本轮提取未执行",
+                    extractionErrorMessage = "本轮完整原文与设定超过提取模型上下文窗口，请使用时间线中的全历史分块梳理，或提高提取模型上下文上限；未截断原文、未发送请求",
+                    sourceUserMessage = userMessage,
+                    sourceAssistantReply = assistantReply,
+                    sourceConfigId = activeConfigId,
+                    sourceModelName = activeModelName,
+                    sourceSessionMemoryEnabled = sessionMemoryEnabled
+                )
             }
 
-            var analysisText = try {
-                val cfg = config.copy(modelName = targetModel)
-                if (cfg.apiType == "anthropic") {
-                    generateAnthropicTimelineAnalysis(cfg, prompt, conversationId, analysisMaxOutput)
+            // 单轮增量时间线与设定提取：
+            // 1. 允许本轮确实无新设定/时间线（NO_UPDATE、无变化表述、合法空 JSON），立即静默通过不重试；
+            // 2. 单纯提取失败（空响应/仅推理无正文、输出截断、5xx/429 等）或返回内容格式/结构错误时自动重试（最多 MAX_TIMELINE_EXTRACTION_ATTEMPTS 次）；
+            // 3. 取消、HTTP 策略拒绝与 400/401/403/404/413/422 客户端硬性错误不重试。
+            var lastRetryReason: String? = null
+            var attemptsMade = 0
+            for (attempt in 1..MAX_TIMELINE_EXTRACTION_ATTEMPTS) {
+                currentCoroutineContext().ensureActive()
+                attemptsMade = attempt
+                val attemptPrompt = if (attempt == 1) {
+                    prompt
                 } else {
-                    generateOpenAITimelineAnalysis(cfg, prompt, conversationId, analysisMaxOutput)
+                    val reasonHint = lastRetryReason?.takeIf { it.isNotBlank() }?.let { "（上次问题：$it）" }.orEmpty()
+                    val guidance = "【格式纠错重试（第 ${attempt - 1} 次）】$reasonHint 请严格只输出纯 JSON 对象或 NO_UPDATE，不要输出任何解释文字、前后缀或无效格式；字段仅使用 newStoryTime/action/targetNodeId/newEvent/atemporalSettings。"
+                    appendRetryGuidanceWithinWindow(prompt, guidance, analysisMaxOutput, analysisWindow)
                 }
-            } catch (e: Exception) {
-                if (isRequestCancellation(e)) throw CancellationException("本轮提取已取消", e)
-                extractionError = "模型提取请求失败，请检查模型配置、网络权限或服务端日志"
-                Log.w(tag, "自动评估时间线更新异常: ${e.message}")
-                null
-            }
 
-            // 模型未按格式输出（无 JSON 且无无变化表述）时追加一次严格格式重试：仅一次，
-            // 取消与 HTTP 错误不重试；JSON 形似但非法时不重试（模型已在尝试结构化输出，重试意义不大）。
-            if (!analysisText.isNullOrBlank()) {
-                val firstStripped = TimelineMemoryHelper.stripThinkingTags(analysisText)
-                if (Regex("""\{[\s\S]*\}""").find(firstStripped) == null &&
-                    !TimelineMemoryHelper.isNoChangeLikeResponse(firstStripped)
-                ) {
-                    currentCoroutineContext().ensureActive()
-                    Log.d(tag, "增量提取追加严格格式重试")
-                    analysisText = try {
-                        val strictPrompt = "$prompt\n\n注意：只输出纯 JSON 或 NO_UPDATE，不要输出任何解释文字。"
-                        val cfg = config.copy(modelName = targetModel)
-                        if (cfg.apiType == "anthropic") {
-                            generateAnthropicTimelineAnalysis(cfg, strictPrompt, conversationId, analysisMaxOutput)
-                        } else {
-                            generateOpenAITimelineAnalysis(cfg, strictPrompt, conversationId, analysisMaxOutput)
-                        }
-                    } catch (e: Exception) {
-                        if (isRequestCancellation(e)) throw CancellationException("本轮提取已取消", e)
-                        Log.w(tag, "增量提取严格格式重试失败: ${e.message}")
-                        analysisText
+                var callException: Exception? = null
+                val analysisText = try {
+                    val cfg = config.copy(modelName = targetModel)
+                    if (cfg.apiType == "anthropic") {
+                        generateAnthropicTimelineAnalysis(cfg, attemptPrompt, conversationId, analysisMaxOutput)
+                    } else {
+                        generateOpenAITimelineAnalysis(cfg, attemptPrompt, conversationId, analysisMaxOutput)
                     }
+                } catch (e: Exception) {
+                    if (isRequestCancellation(e)) throw CancellationException("本轮提取已取消", e)
+                    callException = e
+                    Log.w(tag, "自动评估时间线更新异常 (attempt $attempt/$MAX_TIMELINE_EXTRACTION_ATTEMPTS): ${e.message}")
+                    null
                 }
-            }
 
-            // 增量提取结果判定（顺序不可调换）：
-            // 1. 先找 JSON：模型按指令返回结构化结果时优先解析，不受正文措辞影响；
-            // 2. 无 JSON 但有自然语言无变化表述（NO_UPDATE 或中文“无变化/没有推进”等）时静默无提案；
-            // 3. 既无 JSON 又无无变化表述时才提示格式错误（另记日志前 200 字备查）。
-            if (!analysisText.isNullOrBlank()) {
-                val stripped = TimelineMemoryHelper.stripThinkingTags(analysisText)
-                val jsonMatcher = Regex("""\{[\s\S]*\}""").find(stripped)
-                if (jsonMatcher != null) {
-                    try {
-                        val jsonObj = JsonParser.parseString(jsonMatcher.value).asJsonObject
-                        modelStoryTime = jsonObj.get("newStoryTime")?.takeIf { !it.isJsonNull }?.asString?.trim()?.takeIf { it.isNotBlank() && it != "未确定" && it != "未知" }
-                        val rawAction = jsonObj.get("action")?.takeIf { !it.isJsonNull }?.asString?.trim()?.uppercase()
-                        if (rawAction == "UPDATE" || rawAction == "APPEND") {
-                            parsedAction = rawAction
-                        }
-                        parsedTargetNodeId = jsonObj.get("targetNodeId")?.takeIf { !it.isJsonNull }?.asLong
-                        val newEventObj = jsonObj.get("newEvent")?.takeIf { it.isJsonObject }?.asJsonObject
-                        if (newEventObj != null) {
-                            val tag = newEventObj.get("timeTag")?.asString?.trim().orEmpty()
-                            val content = newEventObj.get("content")?.asString?.trim().orEmpty()
-                            val cat = TimelineCategory.fromKey(newEventObj.get("category")?.asString)
-                            val evidence = newEventObj.get("evidence")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-                            val evidenceMatches = evidence.isBlank() || userMessage.contains(evidence) || assistantReply.contains(evidence)
-                            if (evidenceMatches && content.isNotBlank() && !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(content, listOf(userMessage))) {
-                                val cleanContent = TimelineMemoryHelper.compactAutoTimelineEvent(content)
+                if (callException != null) {
+                    lastRetryReason = callException.message?.takeIf { it.isNotBlank() } ?: "模型请求失败"
+                    if (attempt < MAX_TIMELINE_EXTRACTION_ATTEMPTS && shouldAutoRetryExtractionFailure(callException)) {
+                        val delayMs = extractionRetryDelayMillis(callException, attempt)
+                        if (delayMs > 0L) kotlinx.coroutines.delay(delayMs)
+                        continue
+                    }
+                    extractionError = if (attemptsMade > 1) {
+                        "模型 $targetModel 经 $attemptsMade 次尝试仍未能完成提取（${lastRetryReason}），请点击重新提取或检查模型配置"
+                    } else {
+                        "模型提取请求失败，请检查模型配置、网络权限或服务端日志"
+                    }
+                    break
+                }
+
+                when (val parsed = TimelineMemoryHelper.parseIncrementalTimelineResponse(analysisText.orEmpty())) {
+                    is IncrementalTimelineParseResult.NoChange -> {
+                        Log.d(tag, "增量提取模型判定本轮无变化，保持静默 (attempt $attempt)")
+                        extractionError = null
+                        break
+                    }
+                    is IncrementalTimelineParseResult.Valid -> {
+                        extractionError = null
+                        modelStoryTime = parsed.newStoryTime
+                        parsedAction = parsed.action
+                        parsedTargetNodeId = parsed.targetNodeId
+                        parsed.newEvent?.let { ev ->
+                            val evidenceMatches = parsed.newEventEvidence.isBlank() ||
+                                userMessage.contains(parsed.newEventEvidence) || assistantReply.contains(parsed.newEventEvidence)
+                            if (evidenceMatches && ev.content.isNotBlank() &&
+                                !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(ev.content, listOf(userMessage))
+                            ) {
+                                val cleanContent = TimelineMemoryHelper.compactAutoTimelineEvent(ev.content)
                                 if (cleanContent.isNotBlank() && !TimelineMemoryHelper.isInvalidOrUserInstructionEvent(cleanContent, listOf(userMessage))) {
-                                    newEvent = TimelineEventItem(timeTag = tag, content = cleanContent, category = cat)
+                                    newEvent = ev.copy(content = cleanContent)
                                 }
                             }
                         }
                         newSettings = SessionSettingReconciler.reconcileCandidates(
-                            TimelineMemoryHelper.parseModelOutput(jsonMatcher.value, existingStoryTime).atemporalSettings
-                                .filter { setting ->
-                                    setting.content.isNotBlank() &&
-                                        !TimelineMemoryHelper.isPureDirectorInstruction(setting.content) &&
-                                        (setting.evidence.isBlank() || userMessage.contains(setting.evidence) || assistantReply.contains(setting.evidence)) &&
-                                        setting.content.trim() != newEvent?.content?.trim()
-                                }, existingSettings)
-                    } catch (_: Exception) {
-                        extractionError = "模型提取结果格式无效，请重试或手动梳理"
+                            parsed.atemporalSettings.filter { setting ->
+                                setting.content.isNotBlank() &&
+                                    !TimelineMemoryHelper.isPureDirectorInstruction(setting.content) &&
+                                    (setting.evidence.isBlank() || userMessage.contains(setting.evidence) || assistantReply.contains(setting.evidence)) &&
+                                    setting.content.trim() != newEvent?.content?.trim()
+                            }, existingSettings
+                        )
+                        break
                     }
-                } else if (TimelineMemoryHelper.isNoChangeLikeResponse(stripped)) {
-                    Log.d(tag, "增量提取模型判定本轮无变化，保持静默")
-                } else {
-                    extractionError = "模型 $targetModel 未返回有效的提取 JSON，请重试或手动梳理"
-                    Log.w(tag, "增量提取无 JSON 且无无变化表述，前200字: ${stripped.take(200)}")
+                    is IncrementalTimelineParseResult.Invalid -> {
+                        val strippedPreview = TimelineMemoryHelper.stripThinkingTags(analysisText.orEmpty()).take(200)
+                        Log.w(tag, "增量提取第 $attempt 次格式无效 (${parsed.reason})，前200字: $strippedPreview")
+                        lastRetryReason = parsed.reason
+                        if (attempt < MAX_TIMELINE_EXTRACTION_ATTEMPTS) {
+                            continue
+                        }
+                        extractionError = if (parsed.reason.contains("未返回有效的提取 JSON") || parsed.reason.contains("未返回有效提取正文")) {
+                            "模型 $targetModel 经 $attemptsMade 次尝试仍未返回有效的提取 JSON，请点击重新提取或手动梳理"
+                        } else {
+                            "模型 $targetModel 经 $attemptsMade 次尝试提取结果格式仍无效（${parsed.reason}），请点击重新提取或手动梳理"
+                        }
+                    }
                 }
-            } else if (extractionError == null) {
-                extractionError = "模型未返回提取内容，请重试或手动梳理"
             }
         }
 
@@ -4952,7 +5091,12 @@ class AiRepository(
             previousEventContent = if (finalAction == "UPDATE") resolvedTargetNode?.event else null,
             atemporalSettings = newSettings,
             extractionErrorMessage = extractionError,
-            previousEventCategory = if (finalAction == "UPDATE") resolvedTargetNode?.category else null
+            previousEventCategory = if (finalAction == "UPDATE") resolvedTargetNode?.category else null,
+            sourceUserMessage = userMessage,
+            sourceAssistantReply = assistantReply,
+            sourceConfigId = activeConfigId,
+            sourceModelName = activeModelName,
+            sourceSessionMemoryEnabled = sessionMemoryEnabled
         )
     }
 
@@ -4967,22 +5111,44 @@ class AiRepository(
             $content
         """.trimIndent()
         if (estimateTokenCount(prompt) + 512 + 512 > contextWindow) return null
-        return try {
-            val response = if (config.apiType == "anthropic") {
-                generateAnthropicTimelineAnalysis(config, prompt, conversationId, 512)
+        for (attempt in 1..MAX_TIMELINE_EXTRACTION_ATTEMPTS) {
+            currentCoroutineContext().ensureActive()
+            val attemptPrompt = if (attempt == 1) {
+                prompt
             } else {
-                generateOpenAITimelineAnalysis(config, prompt, conversationId, 512)
+                val guidance = "【重试（第 ${attempt - 1} 次）】上次输出格式无效或超过 ${TimelineMemoryHelper.MAX_AUTO_EVENT_CHARS} 字上限，请严格输出纯 JSON {\"content\":\"...\"} 并确保正文不超过 ${TimelineMemoryHelper.MAX_AUTO_EVENT_CHARS} 字。"
+                appendRetryGuidanceWithinWindow(prompt, guidance, 512, contextWindow)
             }
-            val json = response?.let { Regex("""\{[\s\S]*\}""").find(TimelineMemoryHelper.stripThinkingTags(it))?.value }
-            val compacted = json?.let { JsonParser.parseString(it).asJsonObject.get("content") }
-                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
-                ?.let(TimelineMemoryHelper::compactAutoTimelineEvent)
-            compacted?.takeIf { it.isNotBlank() && it.length <= TimelineMemoryHelper.MAX_AUTO_EVENT_CHARS }
-        } catch (error: Exception) {
-            if (isRequestCancellation(error)) throw CancellationException("本轮提取已取消", error)
-            Log.w(tag, "自动时间线事件精简失败，保留已有节点")
-            null
+            val response = try {
+                if (config.apiType == "anthropic") {
+                    generateAnthropicTimelineAnalysis(config, attemptPrompt, conversationId, 512)
+                } else {
+                    generateOpenAITimelineAnalysis(config, attemptPrompt, conversationId, 512)
+                }
+            } catch (error: Exception) {
+                if (isRequestCancellation(error)) throw CancellationException("本轮提取已取消", error)
+                Log.w(tag, "自动时间线事件精简异常 (attempt $attempt/$MAX_TIMELINE_EXTRACTION_ATTEMPTS): ${error.message}")
+                if (attempt < MAX_TIMELINE_EXTRACTION_ATTEMPTS && shouldAutoRetryExtractionFailure(error)) {
+                    val delayMs = extractionRetryDelayMillis(error, attempt)
+                    if (delayMs > 0L) kotlinx.coroutines.delay(delayMs)
+                    continue
+                }
+                return null
+            }
+            val compacted = runCatching {
+                val stripped = TimelineMemoryHelper.stripThinkingTags(response.orEmpty())
+                val json = Regex("""\{[\s\S]*\}""").find(stripped)?.value ?: return@runCatching null
+                JsonParser.parseString(json).asJsonObject.get("content")
+                    ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                    ?.let(TimelineMemoryHelper::compactAutoTimelineEvent)
+            }.getOrNull()
+            if (!compacted.isNullOrBlank() && compacted.length <= TimelineMemoryHelper.MAX_AUTO_EVENT_CHARS) {
+                return compacted
+            }
+            Log.w(tag, "自动时间线事件第 $attempt 次精简未通过校验（长度或格式不符）")
         }
+        Log.w(tag, "自动时间线事件多次重试精简仍失败，保留已有节点")
+        return null
     }
 
     /** Apply only reviewed incremental facts; never replace the full timeline or save global story facts. */

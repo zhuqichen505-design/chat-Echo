@@ -1,5 +1,23 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
+
+用户提出两项需求：时间线和设定总结经常无法返回有效格式，希望在单纯提取失败或返回内容错误时自动重试（允许本轮确实没有新设定或时间线，不误重试）；在提取到设定与时间线、或多次重试依然提取失败时，弹出窗口需要提供重新提取图标按键，点击后重新读取。
+
+根因与证据：
+- 单轮增量提取原先仅在“无 `{...}` 且非无变化文案”时重试一次；遇到损坏 JSON、错误 schema、空响应/仅推理、截断或 5xx 失败均直接报错，且可选字段为 `JsonNull` 时 `.asString` 抛出异常被判格式无效。
+- 全量/分段梳理（`analyzeTimelineChunk`）、事件精简（`condenseAutoTimelineEvent`）与故事设定融入分析（`RoleplaySmartAnalyzer.analyzeStoryInputForProposal`）均无自动重试。
+- 待确认面板（`ChatPendingReviewPanels`）、全量时间轴工作台（`TimelineReconcileDialog`）和故事设定弹窗（`EditableSettingProposalDialog`）均无重新提取图标按键，且模型结果未保存原文上下文供重读。
+
+实现：
+- `TimelineMemoryHelper` 新增 `IncrementalTimelineParseResult` / `VerifiedTimelineParseResult` 严格解析与失败诊断，合法无变化（`NO_UPDATE`、无变化表述、合法空 JSON/空数组）直接通过不重试；格式错误、安全拒绝、残缺 JSON、漏覆盖 `sourceCoverage` 等返回具体原因供纠错重试。
+- `AiRepository` 与 `RoleplaySmartAnalyzer` 统一接入最多 3 次尝试（1 次首试 + 2 次自动重试）及错误分级过滤（不重试取消、本地 HTTP 拒绝与 400/401/403/404/413/422，且不与底层 `RetryPolicy` 叠加放大）；分段梳理重试时同步更新进度提示。
+- `ChatGenerationManager` 新增原子消费与置顶入队；`ChatViewModel` 新增 `reExtractTimelineProposal`、`reExtractTimelineReconciliation`、`reExtractProposedSetting`；三类弹窗（含 `PendingReviewCard` 全屏模式）统一提供 `Icons.Default.Refresh`（`重新提取`）图标按键，成功与失败状态均可见可点。
+
+冻结验收 `20261121-173142-663`：脚本 / Gradle 退出 0，677.641 秒；96 套件 / 1,123 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+未构建 APK、未发版，版本仍为 2.8.48/234。设备边界：本轮未连接真机，真实模型返回格式异常时的自动重试体验与三处弹窗的重新提取图标视觉及点击重读需人工实机复验。
+
 ## 2026-11-21 · API 配置拖拽中选中项跳变修复（未发版）
 
 用户反馈 2.8.48 发布后，API 配置页按住六点手柄拖动时，选中项仍会突然变成另一个。

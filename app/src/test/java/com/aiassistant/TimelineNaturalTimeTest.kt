@@ -338,4 +338,51 @@ class TimelineNaturalTimeTest {
         assertTrue(roleplayContext.contains("唯一权威的时间记忆"))
         assertTrue(roleplayContext.contains("不受相邻时段限制"))
     }
+
+    @Test
+    fun incrementalResponseParserSeparatesValidNoChangeFromMalformedAndRefusalOutputs() {
+        assertTrue(TimelineMemoryHelper.parseIncrementalTimelineResponse("NO_UPDATE") is com.aiassistant.utils.IncrementalTimelineParseResult.NoChange)
+        assertTrue(TimelineMemoryHelper.parseIncrementalTimelineResponse("```\nNO_UPDATE\n```") is com.aiassistant.utils.IncrementalTimelineParseResult.NoChange)
+        assertTrue(TimelineMemoryHelper.parseIncrementalTimelineResponse("本轮对话没有新设定，也没有时间线推进") is com.aiassistant.utils.IncrementalTimelineParseResult.NoChange)
+        assertTrue(TimelineMemoryHelper.parseIncrementalTimelineResponse("""{"noUpdate":true}""") is com.aiassistant.utils.IncrementalTimelineParseResult.NoChange)
+
+        val validWithNulls = TimelineMemoryHelper.parseIncrementalTimelineResponse(
+            """{"newStoryTime":null,"action":"APPEND","targetNodeId":null,"newEvent":{"timeTag":null,"category":null,"content":"林岚发现密道入口","evidence":null},"atemporalSettings":[]}"""
+        )
+        assertTrue(validWithNulls is com.aiassistant.utils.IncrementalTimelineParseResult.Valid)
+        val parsed = validWithNulls as com.aiassistant.utils.IncrementalTimelineParseResult.Valid
+        assertEquals("林岚发现密道入口", parsed.newEvent!!.content)
+        assertEquals("", parsed.newEvent!!.timeTag)
+
+        val invalidSamples = listOf(
+            "",
+            "<think>只有思考过程没有结论</think>",
+            "哈哈这段剧情写得真不错",
+            "{无效JSON}",
+            """{"newEvent":{"content":"无变化"""",
+            "{}",
+            """{"summary":"错误字段"}""",
+            """{"newEvent":"字符串而非对象"}""",
+            """{"atemporalSettings":"字符串而非数组"}""",
+            """{"newStoryTime":123}""",
+            """{"targetNodeId":"not-a-number"}""",
+            "抱歉，由于安全政策限制，我无法完成本次总结，因此无需更新。"
+        )
+        for (sample in invalidSamples) {
+            val result = TimelineMemoryHelper.parseIncrementalTimelineResponse(sample)
+            assertTrue("异常输出必须判定为无效以触发自动重试: $sample",
+                result is com.aiassistant.utils.IncrementalTimelineParseResult.Invalid)
+        }
+    }
+
+    @Test
+    fun verifiedDetailedParserReportsActionableFailureReasonsAndAcceptsEmptyChunks() {
+        val emptyChunk = """{"currentStoryTime":"未确定","timelineEvents":[],"atemporalSettings":[],"sourceCoverage":[{"messageId":7,"eventIndices":[],"settingIndices":[],"noFactReason":"寒暄无新事实"}]}"""
+        assertTrue(TimelineMemoryHelper.parseVerifiedModelOutputDetailed(emptyChunk, listOf(7L), emptyList()) is com.aiassistant.utils.VerifiedTimelineParseResult.Valid)
+
+        val missingCoverage = """{"currentStoryTime":"未确定","timelineEvents":[],"atemporalSettings":[],"sourceCoverage":[{"messageId":7,"eventIndices":[],"settingIndices":[],"noFactReason":"寒暄"}]}"""
+        val invalid = TimelineMemoryHelper.parseVerifiedModelOutputDetailed(missingCoverage, listOf(7L, 8L), emptyList())
+        assertTrue(invalid is com.aiassistant.utils.VerifiedTimelineParseResult.Invalid)
+        assertTrue((invalid as com.aiassistant.utils.VerifiedTimelineParseResult.Invalid).reason.contains("8"))
+    }
 }

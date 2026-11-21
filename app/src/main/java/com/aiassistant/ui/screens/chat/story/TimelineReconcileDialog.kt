@@ -165,7 +165,8 @@ fun TimelineReconcileDialog(
     initialResult: TimelineReconcileResult,
     onDismiss: () -> Unit,
     onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
-    isApplying: Boolean = false
+    isApplying: Boolean = false,
+    onReExtract: (() -> Unit)? = null
 ) {
     var storyTime by remember(initialResult) { mutableStateOf(initialResult.currentStoryTime) }
     val events = remember(initialResult) {
@@ -216,7 +217,10 @@ fun TimelineReconcileDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
                         Icons.Default.HistoryEdu,
                         contentDescription = null,
@@ -234,6 +238,18 @@ fun TimelineReconcileDialog(
                             "已提炼 ${events.size} 条时间节点 · ${atemporalSettings.size} 条会话设定",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+                if (onReExtract != null) {
+                    IconButton(
+                        onClick = onReExtract,
+                        enabled = !isApplying
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "重新提取",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -356,8 +372,15 @@ fun TimelineReconcileDialog(
                                 } else {
                                     errorDetail.ifBlank { "未检测到模型响应" }
                                 }
+                                val isExtractionFailed = initialResult.extractionSource == "EXTRACTION_FAILED" ||
+                                    (initialResult.events.isEmpty() && initialResult.atemporalSettings.isEmpty())
+                                val fallbackText = if (isExtractionFailed) {
+                                    "⚠️ 多次自动重试后仍未能提取有效内容（$modelHint$timeoutHint）。可点击右上角重新提取，或在「设置 -> 辅助模型」指定独立模型或检查当前网络。"
+                                } else {
+                                    "⚠️ 模型响应未成功（$modelHint$timeoutHint），当前显示本地精纯扫描。可点击右上角重新提取，或在「设置 -> 辅助模型」指定独立模型或检查当前网络。"
+                                }
                                 Text(
-                                    text = "⚠️ 模型响应未成功（$modelHint$timeoutHint），当前显示本地精纯扫描。可在「设置 -> 辅助模型」指定独立模型或检查当前网络。",
+                                    text = fallbackText,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )

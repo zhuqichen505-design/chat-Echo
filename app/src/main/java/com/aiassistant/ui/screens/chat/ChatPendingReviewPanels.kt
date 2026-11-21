@@ -86,7 +86,8 @@ internal fun ChatPendingReviewPanels(
     onAcceptMemory: (String, String?) -> Unit,
     onDismissTimeline: (AutoTimelineUpdateResult) -> Unit,
     onApplyTimeline: (AutoTimelineUpdateResult) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onReExtractTimeline: ((AutoTimelineUpdateResult) -> Unit)? = null
 ) {
     var selectedPanel by rememberSaveable { mutableStateOf("timeline") }
     val memoryExpanded = memory != null && (timeline == null || selectedPanel == "memory")
@@ -110,6 +111,7 @@ internal fun ChatPendingReviewPanels(
                 onExpand = { selectedPanel = "timeline" },
                 onDismiss = { onDismissTimeline(proposal) },
                 onApply = onApplyTimeline,
+                onReExtract = onReExtractTimeline?.let { callback -> { callback(proposal) } },
                 modifier = if (timelineExpanded) Modifier.weight(1f, fill = false) else Modifier
             )
         }
@@ -127,6 +129,8 @@ private fun PendingReviewCard(
     onDismiss: () -> Unit,
     scrollState: ScrollState,
     modifier: Modifier = Modifier,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
+    onReExtract: (() -> Unit)? = null,
     containerColor: Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
     body: @Composable ColumnScope.() -> Unit,
     actions: @Composable FlowRowScope.() -> Unit
@@ -144,10 +148,15 @@ private fun PendingReviewCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(icon, null, Modifier.size(18.dp), tint = iconTint)
                     Text(title, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (!expanded) Icon(Icons.Default.ExpandMore, "展开待确认内容", Modifier.size(20.dp))
+                }
+                if (onReExtract != null) {
+                    IconButton(onClick = { fullScreen = false; onReExtract() }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.Refresh, "重新提取", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
                 IconButton(onClick = { fullScreen = true }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.OpenInFull, "全屏查看和编辑", Modifier.size(18.dp))
@@ -180,6 +189,11 @@ private fun PendingReviewCard(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold)
+                        if (onReExtract != null) {
+                            IconButton(onClick = { fullScreen = false; onReExtract() }) {
+                                Icon(Icons.Default.Refresh, "重新提取", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         IconButton(onClick = { fullScreen = false }) {
                             Icon(Icons.Default.CloseFullscreen, "返回聊天候选面板")
                         }
@@ -250,6 +264,7 @@ private fun PendingTimelineReview(
     onExpand: () -> Unit,
     onDismiss: () -> Unit,
     onApply: (AutoTimelineUpdateResult) -> Unit,
+    onReExtract: (() -> Unit)?,
     modifier: Modifier
 ) {
     var editing by remember(proposal.proposalId) { mutableStateOf(false) }
@@ -258,13 +273,21 @@ private fun PendingTimelineReview(
     var eventContent by remember(proposal.proposalId) { mutableStateOf(proposal.newEvent?.content.orEmpty()) }
     var settings by remember(proposal.proposalId) { mutableStateOf(proposal.atemporalSettings.map { it.copy() }) }
     val scrollState = remember(proposal.proposalId) { ScrollState(0) }
+    val hasExtractedContent = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || settings.isNotEmpty()
+    val isFailureOnly = !proposal.extractionErrorMessage.isNullOrBlank() && !hasExtractedContent
     PendingReviewCard(
         reviewKey = proposal.proposalId,
-        title = if (editing) "编辑本轮时间线与设定" else "本轮时间线与设定待确认",
-        icon = Icons.Default.HistoryEdu,
+        title = when {
+            editing -> "编辑本轮时间线与设定"
+            isFailureOnly -> "本轮时间线与设定提取失败"
+            else -> "本轮时间线与设定待确认"
+        },
+        icon = if (isFailureOnly) Icons.Default.WarningAmber else Icons.Default.HistoryEdu,
+        iconTint = if (isFailureOnly) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         expanded = expanded,
         onExpand = onExpand,
         onDismiss = onDismiss,
+        onReExtract = onReExtract,
         scrollState = scrollState,
         modifier = modifier,
         body = {

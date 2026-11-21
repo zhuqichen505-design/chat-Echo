@@ -403,15 +403,63 @@ object RoleplaySmartAnalyzer {
                     }
                 """.trimIndent()
 
-                val jsonResponse = executeAiPrompt(repository, config, systemPrompt, trimmed, modelToUse)
-                val jsonStr = extractJsonBlock(jsonResponse)
-                val proposal = parseStorySettingProposalJson(jsonStr, existingCharacters, existingScenario, isAi = true)
-                safeProgress(onProgress, if (proposal.hasAnyUpdates) "识别到可补充/更新的故事设定！" else "已有设定已覆盖这些内容，无需重复提取")
-                return@withContext proposal
+                val maxAttempts = AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS
+                val maxRetries = maxAttempts - 1
+                var lastParseException: JsonParseException? = null
+                var lastRequestException: Exception? = null
+                var attemptsMade = 0
+
+                for (attempt in 1..maxAttempts) {
+                    attemptsMade = attempt
+                    val attemptPrompt = if (attempt == 1) {
+                        systemPrompt
+                    } else {
+                        "$systemPrompt\n\n【格式纠错重试（第 ${attempt - 1} 次）】上次输出未通过格式校验或未完整结束。请严格只输出合法 JSON 对象，禁止输出任何其他说明文字；若确实没有新设定变化，请输出 {\"hasSettingUpdates\":false,\"updatedCharacters\":[],\"newCharacters\":[],\"scenarioUpdate\":null}。"
+                    }
+                    try {
+                        val jsonResponse = executeAiPrompt(repository, config, attemptPrompt, trimmed, modelToUse)
+                        val jsonStr = extractJsonBlock(jsonResponse)
+                        val proposal = parseStorySettingProposalJson(jsonStr, existingCharacters, existingScenario, isAi = true)
+                        safeProgress(onProgress, if (proposal.hasAnyUpdates) "识别到可补充/更新的故事设定！" else "已有设定已覆盖这些内容，无需重复提取")
+                        return@withContext proposal
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (invalidResponse: JsonParseException) {
+                        lastParseException = invalidResponse
+                        lastRequestException = null
+                        Log.w(TAG, "AI 故事设定第 $attempt 次返回格式无效", invalidResponse)
+                        if (attempt < maxAttempts) {
+                            safeProgress(onProgress, "设定格式无效，正在自动重试 ($attempt/$maxRetries)...")
+                            continue
+                        }
+                    } catch (e: Exception) {
+                        lastRequestException = e
+                        lastParseException = null
+                        Log.w(TAG, "AI 设定融合识别第 $attempt 次异常: ${e.message}", e)
+                        val isPreFlightError = e is IllegalArgumentException ||
+                            e.message.orEmpty().contains("已停用") ||
+                            e.message.orEmpty().contains("已不存在") ||
+                            e.message.orEmpty().contains("超过解析模型上下文窗口")
+                        if (!isPreFlightError && attempt < maxAttempts && repository.shouldAutoRetryExtractionFailure(e)) {
+                            safeProgress(onProgress, "设定提取失败，正在自动重试 ($attempt/$maxRetries)...")
+                            val delayMs = repository.extractionRetryDelayMillis(e, attempt)
+                            if (delayMs > 0L) kotlinx.coroutines.delay(delayMs)
+                            continue
+                        }
+                        break
+                    }
+                }
+
+                if (lastParseException != null) {
+                    throw IllegalStateException("AI 经 $attemptsMade 次尝试返回的故事设定格式仍无效，分析未完成，请点击重新提取；已有设定保持原样。", lastParseException)
+                }
+                if (lastRequestException != null) {
+                    throw IllegalStateException("AI 经 $attemptsMade 次尝试仍未能提取有效故事设定（${lastRequestException.message ?: "请求异常"}），请点击重新提取；已有设定保持原样。", lastRequestException)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (invalidResponse: JsonParseException) {
-                throw IllegalStateException("AI 返回的故事设定格式无效，分析未完成，请重试；已有设定保持原样。", invalidResponse)
+            } catch (e: IllegalStateException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "AI 设定融合识别失败，使用本地规则解析", e)
                 safeProgress(onProgress, "AI 分析异常 (${e.message})，使用本地规则解析...")
@@ -477,8 +525,9 @@ object RoleplaySmartAnalyzer {
             var scenarioUpdate: ProposedScenarioUpdate? = null
             if (root.has("scenarioUpdate") && !root.get("scenarioUpdate").isJsonNull && root.get("scenarioUpdate").isJsonObject) {
                 val scObj = root.getAsJsonObject("scenarioUpdate")
-                val summary = scObj.get("summaryOfChanges")?.asString.orEmpty().ifBlank { "世界观/场景设定更新" }
-                val rawSc = scObj.getAsJsonObject("scenario") ?: scObj
+                val summary = scObj.get("summaryOfChanges")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asString.orEmpty()
+                    .ifBlank { "世界观/场景设定更新" }
+                val rawSc = scObj.get("scenario")?.takeIf { it.isJsonObject }?.asJsonObject ?: scObj
                 val finalScenario = if (existingScenario != null) {
                     applySettingPatch(existingScenario, rawSc, scenarioSettingFields, RoleplayScenario::class.java)
                         .takeIf { it != existingScenario }?.copy(updatedAt = System.currentTimeMillis())
@@ -594,10 +643,14 @@ object RoleplaySmartAnalyzer {
             gson.toJson(userText)
 
     private fun extractJsonBlock(text: String): String {
-        val trimmed = text.trim()
-        val markdownMatch = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```").find(trimmed)
-        if (markdownMatch != null) {
-            return markdownMatch.groupValues[1].trim()
+        val stripped = TimelineMemoryHelper.stripThinkingTags(text)
+        val trimmed = stripped.ifBlank { text.trim() }
+        val markdownRegex = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```", RegexOption.IGNORE_CASE)
+        val fencedWithBrace = markdownRegex.findAll(trimmed)
+            .map { it.groupValues[1].trim() }
+            .firstOrNull { it.contains('{') }
+        if (fencedWithBrace != null) {
+            return fencedWithBrace
         }
         val firstBrace = trimmed.indexOf('{')
         val lastBrace = trimmed.lastIndexOf('}')
@@ -607,32 +660,35 @@ object RoleplaySmartAnalyzer {
         return trimmed
     }
 
+    private fun JsonObject.safeString(key: String): String? =
+        get(key)?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() }
+
     private fun parseSingleCharacterJson(jsonStr: String): CharacterProfile? {
         return try {
             val obj = gson.fromJson(jsonStr, JsonObject::class.java)
-            val charObj = if (obj.has("characters") && obj.getAsJsonArray("characters").size() > 0) {
+            val charObj = if (obj.has("characters") && obj.get("characters").isJsonArray && obj.getAsJsonArray("characters").size() > 0) {
                 obj.getAsJsonArray("characters").get(0).asJsonObject
-            } else if (obj.has("character")) {
+            } else if (obj.has("character") && obj.get("character").isJsonObject) {
                 obj.getAsJsonObject("character")
             } else {
                 obj
             }
 
-            val name = charObj.get("name")?.asString?.trim().orEmpty().ifBlank { "提取角色" }
+            val name = charObj.safeString("name")?.trim().orEmpty().ifBlank { "提取角色" }
             CharacterProfile(
                 name = name,
-                identity = charObj.get("identity")?.asString.orEmpty(),
-                personality = charObj.get("personality")?.asString.orEmpty(),
-                background = charObj.get("background")?.asString.orEmpty(),
-                speakingStyle = charObj.get("speakingStyle")?.asString.orEmpty(),
-                goals = charObj.get("goals")?.asString.orEmpty(),
-                relationships = charObj.get("relationships")?.asString.orEmpty(),
-                knowledge = charObj.get("knowledge")?.asString.orEmpty(),
-                constraints = charObj.get("constraints")?.asString.orEmpty().ifBlank { charObj.get("behaviorRules")?.asString.orEmpty() },
-                behaviorRules = charObj.get("behaviorRules")?.asString.orEmpty(),
-                greeting = charObj.get("greeting")?.asString.orEmpty(),
-                exampleDialogue = charObj.get("exampleDialogue")?.asString.orEmpty(),
-                tags = charObj.get("tags")?.asString
+                identity = charObj.safeString("identity").orEmpty(),
+                personality = charObj.safeString("personality").orEmpty(),
+                background = charObj.safeString("background").orEmpty(),
+                speakingStyle = charObj.safeString("speakingStyle").orEmpty(),
+                goals = charObj.safeString("goals").orEmpty(),
+                relationships = charObj.safeString("relationships").orEmpty(),
+                knowledge = charObj.safeString("knowledge").orEmpty(),
+                constraints = charObj.safeString("constraints").orEmpty().ifBlank { charObj.safeString("behaviorRules").orEmpty() },
+                behaviorRules = charObj.safeString("behaviorRules").orEmpty(),
+                greeting = charObj.safeString("greeting").orEmpty(),
+                exampleDialogue = charObj.safeString("exampleDialogue").orEmpty(),
+                tags = charObj.safeString("tags")
             )
         } catch (e: Exception) {
             Log.w(TAG, "解析角色 JSON 异常", e)
@@ -643,30 +699,30 @@ object RoleplaySmartAnalyzer {
     private fun parseSingleScenarioJson(jsonStr: String): RoleplayScenario? {
         return try {
             val root = gson.fromJson(jsonStr, JsonObject::class.java)
-            val scObj = if (root.has("scenario")) {
+            val scObj = if (root.has("scenario") && root.get("scenario").isJsonObject) {
                 root.getAsJsonObject("scenario")
             } else {
                 root
             }
 
-            val name = scObj.get("name")?.asString?.trim().orEmpty().ifBlank { "提取场景" }
+            val name = scObj.safeString("name")?.trim().orEmpty().ifBlank { "提取场景" }
             RoleplayScenario(
                 name = name,
-                worldview = scObj.get("worldview")?.asString.orEmpty(),
-                time = scObj.get("time")?.asString.orEmpty(),
-                location = scObj.get("location")?.asString.orEmpty(),
-                environment = scObj.get("environment")?.asString.orEmpty(),
-                premise = scObj.get("premise")?.asString.orEmpty(),
-                rules = scObj.get("rules")?.asString.orEmpty().ifBlank { scObj.get("worldRules")?.asString.orEmpty() },
-                relationshipState = scObj.get("relationshipState")?.asString.orEmpty(),
-                conflict = scObj.get("conflict")?.asString.orEmpty(),
-                plotGoal = scObj.get("plotGoal")?.asString.orEmpty().ifBlank { scObj.get("goal")?.asString.orEmpty() },
-                atmosphere = scObj.get("atmosphere")?.asString.orEmpty(),
-                narrativePerspective = scObj.get("narrativePerspective")?.asString.orEmpty().ifBlank { "第二人称" },
-                outputFormat = scObj.get("outputFormat")?.asString.orEmpty(),
-                contentRestrictions = scObj.get("contentRestrictions")?.asString.orEmpty(),
-                openingPrompt = scObj.get("openingPrompt")?.asString.orEmpty(),
-                tags = scObj.get("tags")?.asString
+                worldview = scObj.safeString("worldview").orEmpty(),
+                time = scObj.safeString("time").orEmpty(),
+                location = scObj.safeString("location").orEmpty(),
+                environment = scObj.safeString("environment").orEmpty(),
+                premise = scObj.safeString("premise").orEmpty(),
+                rules = scObj.safeString("rules").orEmpty().ifBlank { scObj.safeString("worldRules").orEmpty() },
+                relationshipState = scObj.safeString("relationshipState").orEmpty(),
+                conflict = scObj.safeString("conflict").orEmpty(),
+                plotGoal = scObj.safeString("plotGoal").orEmpty().ifBlank { scObj.safeString("goal").orEmpty() },
+                atmosphere = scObj.safeString("atmosphere").orEmpty(),
+                narrativePerspective = scObj.safeString("narrativePerspective").orEmpty().ifBlank { "第二人称" },
+                outputFormat = scObj.safeString("outputFormat").orEmpty(),
+                contentRestrictions = scObj.safeString("contentRestrictions").orEmpty(),
+                openingPrompt = scObj.safeString("openingPrompt").orEmpty(),
+                tags = scObj.safeString("tags")
             )
         } catch (e: Exception) {
             Log.w(TAG, "解析场景 JSON 异常", e)

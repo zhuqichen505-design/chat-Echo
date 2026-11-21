@@ -859,7 +859,7 @@ class MemoryExtractionRepositoryTest {
             assertNull(proposal.newEvent)
             assertNull(proposal.targetNodeId)
             assertTrue(proposal.extractionErrorMessage.orEmpty().contains("精简校验"))
-            assertEquals(2, endpoint.payloads.size)
+            assertEquals(1 + AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS, endpoint.payloads.size)
             val rewrite = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
             assertTrue("合并旧事件后再精简，不能丢掉既有未决事项", rewrite.contains(original))
             f.repository.applyAutoTimelineProposal(id, proposal)
@@ -990,7 +990,7 @@ class MemoryExtractionRepositoryTest {
             assertTrue(result.extractionErrorMessage!!.contains(config.modelName))
             assertNull(result.newEvent)
             assertTrue(result.atemporalSettings.isEmpty())
-            assertEquals("严格格式重试必须恰好一次，不反复追打模型", 2, endpoint.payloads.size)
+            assertEquals("无效自然语言回复应自动重试至上限后报错", AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS, endpoint.payloads.size)
         } }
     }
 
@@ -1021,7 +1021,8 @@ class MemoryExtractionRepositoryTest {
                 assertNotNull(result.extractionErrorMessage)
                 assertNull(result.newEvent)
                 assertTrue(result.atemporalSettings.isEmpty())
-                assertEquals(1, endpoint.payloads.size)
+                val expectedCalls = if (malformed) AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS else 1
+                assertEquals(expectedCalls, endpoint.payloads.size)
             } }
         }
     }
@@ -1065,11 +1066,10 @@ class MemoryExtractionRepositoryTest {
                 assertTrue(proposal.atemporalSettings.isEmpty())
                 assertTrue(f.repository.getTimelineNodes(id).isEmpty())
                 assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
-                assertEquals("不能把失败正文当格式错误再发一次严格JSON请求", 1, endpoint.payloads.size)
-                val stat = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE).single()
-                assertEquals("timeline", stat.requestKind)
-                assertFalse(stat.success)
-                assertEquals(if (truncated) "interrupted" else "failed", stat.completionStatus)
+                assertEquals("截断或仅推理无正文时必须自动重试至上限且绝不接受残缺结果", AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS, endpoint.payloads.size)
+                val stats = f.db.usageStatDao().getStatsListByTimeRange(0, Long.MAX_VALUE)
+                assertEquals(AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS, stats.size)
+                assertTrue(stats.all { it.requestKind == "timeline" && !it.success && it.completionStatus == if (truncated) "interrupted" else "failed" })
             } }
         }
     }
@@ -3148,7 +3148,8 @@ class MemoryExtractionRepositoryTest {
             assertEquals("购物当天·返家后", result.currentStoryTime)
             assertEquals(sourceIds.last(), result.lastProcessedMessageId)
             assertEquals(20, result.totalProcessedMessages)
-            assertEquals("失败一次、成功一次；完成后不再调用模型二次压缩", 2, endpoint.payloads.size)
+            assertEquals("失败分支自动重试至上限、成功一次；完成后不再调用模型二次压缩",
+                AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS + 1, endpoint.payloads.size)
             val prompt = endpoint.payloads.last().getAsJsonArray("messages").single().asJsonObject.get("content").asString
             sourceIds.forEach { assertTrue(prompt.contains("消息 $it ·")) }
             assertTrue(endpoint.failures.isEmpty())
@@ -3214,7 +3215,7 @@ class MemoryExtractionRepositoryTest {
             assertTrue(supplemented.atemporalSettings.single().content.contains("额外标注过敏食材"))
             assertEquals(beforeNodes, f.repository.getTimelineNodes(id))
             assertEquals(beforeSettings, f.db.memoryDao().getConversationMemories(id))
-            assertEquals(malformed.size + 2, endpoint.payloads.size)
+            assertEquals(malformed.size * AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS + 2, endpoint.payloads.size)
             assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
         } }
     }
@@ -3254,7 +3255,7 @@ class MemoryExtractionRepositoryTest {
             assertEquals(beforeNodes, f.repository.getTimelineNodes(id))
             assertTrue(f.db.memoryDao().getConversationMemories(id).isEmpty())
             assertEquals("购物当天·出发前", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
-            assertEquals(2, endpoint.payloads.size)
+            assertEquals(1 + AiRepository.MAX_TIMELINE_EXTRACTION_ATTEMPTS, endpoint.payloads.size)
             assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
         } }
     }
@@ -3478,6 +3479,165 @@ class MemoryExtractionRepositoryTest {
             assertEquals(originals, f.db.messageDao().getMessagesList(id))
             assertTrue("本地超预算不得调用聊天或额外摘要", endpoint.payloads.isEmpty())
             assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun incrementalExtractionAutoRetriesMalformedAndWrongSchemaThenRecoversAndKeepsSourceContext() = runBlocking {
+        val calls = AtomicInteger(0)
+        Endpoint { socket, _ ->
+            when (calls.incrementAndGet()) {
+                1 -> memoryReply(socket, "{格式损坏")
+                2 -> memoryReply(socket, """{"message":"无关字段"}""")
+                else -> memoryReply(socket, """{"newStoryTime":"第2天·清晨","action":"APPEND","targetNodeId":null,"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"林岚取得古塔通行印并启程"},"atemporalSettings":[{"category":"世界规则","content":"古塔通道仅在黎明开启"}]}""")
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-retry-model")
+            val userMsg = "继续进入古塔"
+            val reply = "黎明时分，林岚取得古塔通行印并启程；古塔通道仅在黎明开启。"
+            val result = f.repository.evaluateAndAutoUpdateTimeline(id, userMsg, reply, config.id, config.modelName)!!
+            assertNull(result.extractionErrorMessage)
+            assertEquals("第2天·清晨", result.updatedStoryTime)
+            assertEquals("林岚取得古塔通行印并启程", result.newEvent!!.content)
+            assertEquals("古塔通道仅在黎明开启", result.atemporalSettings.single().content)
+            assertEquals(userMsg, result.sourceUserMessage)
+            assertEquals(reply, result.sourceAssistantReply)
+            assertEquals(config.id, result.sourceConfigId)
+            assertEquals(config.modelName, result.sourceModelName)
+            assertEquals(3, endpoint.payloads.size)
+            val secondPrompt = endpoint.payloads[1].getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            val thirdPrompt = endpoint.payloads[2].getAsJsonArray("messages").single().asJsonObject.get("content").asString
+            assertTrue(secondPrompt.contains("格式纠错重试"))
+            assertTrue(thirdPrompt.contains("缺少约定的提取字段"))
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun incrementalExtractionRetriesReasoningOnlyAndTruncatedResponsesThenRecovers() = runBlocking {
+        val calls = AtomicInteger(0)
+        val validJson = """{"newStoryTime":null,"action":"APPEND","newEvent":{"timeTag":"第1天·上午","category":"PLOT_EVENT","content":"合成角色甲签收航图"},"atemporalSettings":[]}"""
+        Endpoint { socket, _ ->
+            when (calls.incrementAndGet()) {
+                1 -> reply(socket, Gson().toJson(mapOf("choices" to listOf(mapOf("finish_reason" to "stop",
+                    "message" to mapOf("reasoning_content" to "只输出思考没有正文"))))))
+                2 -> reply(socket, Gson().toJson(mapOf("choices" to listOf(mapOf("finish_reason" to "length",
+                    "message" to mapOf("content" to validJson))))))
+                else -> memoryReply(socket, validJson)
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            f.settings.setModelRetryEnabled(false)
+            val (config, id) = f.conversation(endpoint.url, "synthetic-thinking-model")
+            val result = f.repository.evaluateAndAutoUpdateTimeline(id, "继续剧情", "合成角色甲签收航图", config.id, config.modelName)!!
+            assertNull(result.extractionErrorMessage)
+            assertEquals("合成角色甲签收航图", result.newEvent!!.content)
+            assertEquals(3, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @Test fun incrementalExtractionDoesNotRetryValidEmptyNoChangeResponses() = runBlocking {
+        val noChangeReplies = listOf(
+            "NO_UPDATE",
+            "本次对话没有新设定，也没有新时间线变化",
+            """{"newStoryTime":null,"newEvent":null,"atemporalSettings":[]}""",
+            """{"noUpdate":true}"""
+        )
+        for (modelReply in noChangeReplies) {
+            Endpoint { socket, _ -> memoryReply(socket, modelReply) }.use { endpoint -> Fixture().use { f ->
+                val (config, id) = f.conversation(endpoint.url, "synthetic-nochange-model")
+                assertNull("合法无变化响应不得产生提案: $modelReply",
+                    f.repository.evaluateAndAutoUpdateTimeline(id, "继续聊聊日常", "两人喝着热茶聊了聊天气", config.id, config.modelName))
+                assertEquals("合法无变化响应不得触发重试: $modelReply", 1, endpoint.payloads.size)
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } }
+        }
+    }
+
+    @Test fun timelineReconciliationAutoRetriesInvalidResponsesAndAcceptsValidEmptyChunkWithoutRetry() = runBlocking {
+        var sourceIds = emptyList<Long>()
+        val calls = AtomicInteger(0)
+        val retryProgress = mutableListOf<String>()
+        Endpoint { socket, _ ->
+            when (calls.incrementAndGet()) {
+                1 -> memoryReply(socket, "不是 JSON")
+                2 -> memoryReply(socket, Gson().toJson(mapOf(
+                    "currentStoryTime" to "购物当天",
+                    "timelineEvents" to listOf(mapOf("timeTag" to "购物当天", "content" to "合成角色领回钱包")),
+                    "atemporalSettings" to emptyList<String>(),
+                    "sourceCoverage" to sourceIds.take(1).map { mapOf("messageId" to it, "eventIndices" to listOf(0)) }
+                )))
+                else -> memoryReply(socket, Gson().toJson(mapOf(
+                    "currentStoryTime" to "购物当天",
+                    "timelineEvents" to emptyList<Map<String, Any>>(),
+                    "atemporalSettings" to emptyList<Map<String, Any>>(),
+                    "sourceCoverage" to sourceIds.map { mapOf("messageId" to it, "eventIndices" to emptyList<Int>(), "settingIndices" to emptyList<Int>(), "noFactReason" to "纯日常寒暄无新事实") }
+                )))
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-reconcile-retry-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(contextWindowTokens = 32000))
+            sourceIds = listOf(
+                f.repository.saveMessage(Message(conversationId = id, role = "user", content = "今天天气真好", createdAt = 1L)),
+                f.repository.saveMessage(Message(conversationId = id, role = "assistant", content = "是的，微风很舒服", createdAt = 2L))
+            )
+            val recovered = f.repository.reconcileConversationTimeline(
+                conversationId = id,
+                activeConfigId = config.id,
+                activeModelName = config.modelName,
+                onProgress = { _, _, detail -> retryProgress += detail }
+            )
+            assertTrue(recovered.events.isEmpty())
+            assertTrue(recovered.atemporalSettings.isEmpty())
+            assertEquals("AI_MODEL", recovered.extractionSource)
+            assertEquals(3, endpoint.payloads.size)
+            assertTrue("自动重试应通过进度回调通知用户", retryProgress.any { it.contains("自动重试") })
+            assertTrue(endpoint.payloads[2].getAsJsonArray("messages").single().asJsonObject.get("content").asString.contains("漏覆盖消息 ID"))
+
+            // 合法空结果首试即通过，不再多余重试
+            val beforeSecondRun = endpoint.payloads.size
+            val emptyOk = f.repository.reconcileConversationTimeline(id, config.id, config.modelName)
+            assertTrue(emptyOk.events.isEmpty())
+            assertEquals(beforeSecondRun + 1, endpoint.payloads.size)
+            assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+        } }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun storySettingProposalAutoRetriesInvalidFormatAndAcceptsValidNoUpdateWithoutRetry() = runBlocking {
+        val calls = AtomicInteger(0)
+        Endpoint { socket, _ ->
+            when (calls.incrementAndGet()) {
+                1 -> completedSummaryReply(socket, """{"hasSettingUpdates":false,"updatedCharacters":[],"newCharacters":[],"scenarioUpdate":null}""")
+                2 -> completedSummaryReply(socket, "{坏掉的JSON")
+                3 -> completedSummaryReply(socket, "{}")
+                else -> completedSummaryReply(socket, """{"hasSettingUpdates":true,"updatedCharacters":[],"newCharacters":[{"name":"合成新角","summaryOfChanges":"新登场","profile":{"name":"合成新角","identity":"守塔人"}}],"scenarioUpdate":null}""")
+            }
+        }.use { endpoint -> Fixture().use { f ->
+            val (config, _) = f.conversation(endpoint.url, "synthetic-story-retry-model")
+            val mainExecutor = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+            Dispatchers.setMain(mainExecutor)
+            try {
+                val noUpdate = withTimeout(10000) {
+                    RoleplaySmartAnalyzer.analyzeStoryInputForProposal(
+                        f.context, "两人闲聊了一会儿天气", emptyList(), null, f.repository, config, config.modelName
+                    )
+                }
+                assertTrue(noUpdate.isAiAnalyzed)
+                assertFalse(noUpdate.hasAnyUpdates)
+                assertEquals("合法无新设定不得触发重试", 1, endpoint.payloads.size)
+
+                val recovered = withTimeout(10000) {
+                    RoleplaySmartAnalyzer.analyzeStoryInputForProposal(
+                        f.context, "新角色合成新角登场，身份是守塔人", emptyList(), null, f.repository, config, config.modelName
+                    )
+                }
+                assertTrue(recovered.isAiAnalyzed)
+                assertEquals("合成新角", recovered.newCharacters.single().character.name)
+                assertEquals("两次格式错误后第三次恢复成功", 4, endpoint.payloads.size)
+                assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
+            } finally {
+                Dispatchers.resetMain()
+                mainExecutor.close()
+            }
         } }
     }
 
