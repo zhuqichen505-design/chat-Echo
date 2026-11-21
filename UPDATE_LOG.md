@@ -1,5 +1,17 @@
 # 维护记录
 
+## 2026-11-21 · 发布 Echo 2.8.49（时间线/设定提取自动重试与重新提取按键 + API 拖拽跳变修复）
+
+版本由 2.8.48/234 递增至 2.8.49/235（仅更新 `app/build.gradle.kts`）；本次发版汇总 `v2.8.48` 之后的两笔源码更新：
+1. `c057257`：API 配置拖拽中选中项跳变修复（拖拽期间仅视觉位移、松手 move 一次、全程按稳定 key 识别、目标判定计入列表项间距、清理旧动画 Job 并在拖拽期忽略数据库回流，覆盖 API 配置 / API Key / 模型列表 / 排队消息四处手柄）。
+2. `ea4e71d`：时间线与设定总结自动重试（最多 3 次尝试：1 次首试 + 2 次带纠错提示自动重试，合法无新内容不重试，修复可选字段 `JsonNull` 误判，取消与硬性客户端错误不重试、不叠加 `RetryPolicy`）及三类审阅/失败弹窗（`ChatPendingReviewPanels` 含全屏模式、`TimelineReconcileDialog`、`EditableSettingProposalDialog`）统一新增 `Icons.Default.Refresh`（`重新提取`）图标按键。
+
+Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格式均不变。
+
+验证与构建：版本递增后源码冻结，执行冻结验收 `20261121-181145-031`，脚本 / Gradle 退出 0，754.762 秒；96 套件 / 1,123 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon` 退出 0，5 分 24 秒（324.811 秒）；排他复制至本机发布目录 `Echo-v2.8.49.apk`（复制非移动，244 → 245 文件、243 → 244 APK，历史包全部保留）。
+
+APK 元数据与审计：`Echo-v2.8.49.apk` 25,640,079 字节，SHA-256 `a4fac731f28ba50bdc859febe6f94aa2bb4f10d40931f642ca9621de501bbd53`；`com.aiassistant`、2.8.49/235、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目 CRC 全部通过，条目名集合与 2.8.48 一致，仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,451 条（+191 / -71），新增可读中文均为本版重试纠错与重新提取提示，隐私扫描新增命中 0。未连接真机，时间线/设定自动重试、三类弹窗重新提取交互及四处拖拽手柄手感待人工验收。
+
 ## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
 
 用户提出两项需求：时间线和设定总结经常无法返回有效格式，希望在单纯提取失败或返回内容错误时自动重试（允许本轮对话确实没有新设定或时间线，不误重试）；当提取到设定和时间线、或者多次重试依然提取失败时，弹出的窗口需要提供重新提取图标按键，点击后重新读取。

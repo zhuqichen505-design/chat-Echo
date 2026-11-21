@@ -1,5 +1,19 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-21 · 2.8.49 时间线/设定提取自动重试、重新提取按键与 API 拖拽跳变修复
+
+版本 2.8.49/235；Room v37 / 20 个实体不变。本次发版汇总 `v2.8.48` 之后已合入 `main` 的两笔改动：
+- `c057257`（API 配置拖拽中选中项跳变修复）：`SmoothReorderState` 改为拖拽期间仅视觉位移与平滑让位、松手才执行一次 move；全程按稳定 key 识别身份，目标位置计入条目中心与列表间距（API 配置 8dp、Key / 模型 6dp、排队消息 8dp），新增拖拽代次与动画 Job 清理，API 配置页拖拽期间忽略数据库回流，同步覆盖四处手柄。
+- `ea4e71d`（时间线与设定总结自动重试及重新提取图标按键）：`TimelineMemoryHelper` 新增严格解析与失败诊断并修复 `JsonNull` 误判，合法无新内容不重试；`AiRepository`（增量提取、事件精简、全量/分段梳理）与 `RoleplaySmartAnalyzer`（故事设定融入分析）统一接入最多 3 次尝试（1 次首试 + 2 次带纠错指引自动重试），不重试取消与硬性客户端错误、不叠加 `RetryPolicy`；`ChatPendingReviewPanels`（含全屏模式）、`TimelineReconcileDialog`、`EditableSettingProposalDialog` 在提取成功与多次重试仍失败时均提供 `Icons.Default.Refresh`（`重新提取`）图标按键一键重读源上下文。
+
+冻结验收 `20261121-181145-031`：脚本 / Gradle 退出 0，754.762 秒；96 套件 / 1,123 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 115 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，5 分 24 秒（324.811 秒）。`Echo-v2.8.49.apk` 25,640,079 字节，SHA-256 `a4fac731f28ba50bdc859febe6f94aa2bb4f10d40931f642ca9621de501bbd53`；`com.aiassistant`、2.8.49/235、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：450 条目，CRC 全部通过；条目名集合与 2.8.48 完全一致，5 项内容变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,451 条（较 2.8.48 新增 191 / 移除 71），新增可读中文均为本版重试纠错与重新提取提示，隐私扫描新增命中 0。排他复制到本机发布目录（244 → 245 文件，243 → 244 APK），全部历史包保留。
+
+设备边界：本轮未连接真机，未验证安装、启动及界面交互；需人工实机复验：① 真实模型返回残缺/非 JSON 时时间线与故事设定自动重试并在成功或多次失败后均可点击刷新图标重读（含待确认卡片、全屏预览、时间轴工作台、故事设定弹窗）；② API 配置、API Key、模型列表与排队消息四处拖动手柄的连续拖动、跨项排序与松手归位。
+
 ## 2026-11-21 · 时间线与设定总结自动重试及弹窗重新提取按键（未发版）
 
 用户提出两项需求：时间线和设定总结经常无法返回有效格式，希望在单纯提取失败或返回内容错误时自动重试（允许本轮确实没有新设定或时间线，不误重试）；在提取到设定与时间线、或多次重试依然提取失败时，弹出窗口需要提供重新提取图标按键，点击后重新读取。
