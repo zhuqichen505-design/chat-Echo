@@ -45,3 +45,13 @@ data class CitationInfo(
     val url: String,
     val snippet: String = ""
 )
+
+/** 页面上方展示的设定/时间线应用反馈语义级别。 */
+enum class SettingApplyNoticeTone { Success, Error, Info }
+
+data class SettingApplyNotice(
+    val message: String,
+    val tone: SettingApplyNoticeTone = SettingApplyNoticeTone.Info,
+    val showInspectAction: Boolean = true,
+    val id: Long = System.nanoTime()
+)

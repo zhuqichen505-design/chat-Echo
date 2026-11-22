@@ -511,7 +511,10 @@ fun AppearanceTab(
                         AppearancePresetOption(EchoAppearancePreset.COTTON, "棉纸诗笺", "冷白棉纸、松绿蓝墨、舒展留白", listOf(0xFFF4F5F1, 0xFF375D70, 0xFFDDE6E6)),
                         AppearancePresetOption(EchoAppearancePreset.FOLIO, "拾页", "书页纹理、章节排版、页边批注", listOf(0xFFF3EDDF, 0xFF6F3345, 0xFFB9A78A)),
                         AppearancePresetOption(EchoAppearancePreset.SONAR, "声呐", "深空网格、切角面板、荧光信号", listOf(0xFF071411, 0xFF63F5D2, 0xFF82D7E8)),
-                        AppearancePresetOption(EchoAppearancePreset.BAUHAUS, "构型", "几何色块、粗描边、硬质投影", listOf(0xFFF2EDDF, 0xFFC93F32, 0xFF1668B4))
+                        AppearancePresetOption(EchoAppearancePreset.BAUHAUS, "构型", "几何色块、粗描边、硬质投影", listOf(0xFFF2EDDF, 0xFFC93F32, 0xFF1668B4)),
+                        AppearancePresetOption(EchoAppearancePreset.CELADON, "青瓷", "天青冰裂釉纹、双唇柔润圆角、宋瓷书题", listOf(0xFFEDF3F0, 0xFF286860, 0xFF825F32)),
+                        AppearancePresetOption(EchoAppearancePreset.BLUEPRINT, "蓝图", "工程标尺网格、注册角标线框、等宽技术标头", listOf(0xFF0A1B2E, 0xFF7EC0FF, 0xFFA83D2A)),
+                        AppearancePresetOption(EchoAppearancePreset.LACQUER, "漆匣", "丝缎大漆横纹、描金内双框、典籍缩进排版", listOf(0xFF151110, 0xFFE4B96E, 0xFF9E2B22))
                     )
                     presets.forEach { preset ->
                         val selected = settings.appearancePreset == preset.id

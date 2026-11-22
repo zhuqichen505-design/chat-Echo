@@ -662,7 +662,14 @@ private fun MarkdownContent(
                                 text = parseInlineMarkdown(mergedLines.toString()),
                                 style = paperParagraphStyle(MaterialTheme.typography.bodyLarge, LocalEchoThemeStyle.current.paperMaterial),
                                 color = color,
-                                modifier = Modifier.padding(vertical = if (LocalEchoThemeStyle.current.paperMaterial == EchoPaperMaterial.Cotton) 5.dp else 2.dp),
+                                modifier = Modifier.padding(
+                                    vertical = when (LocalEchoThemeStyle.current.paperMaterial) {
+                                        EchoPaperMaterial.Cotton -> 5.dp
+                                        EchoPaperMaterial.Celadon -> 4.dp
+                                        EchoPaperMaterial.Lacquer -> 3.dp
+                                        else -> 2.dp
+                                    }
+                                ),
                                 onCitationClick = onCitationClick,
                                 endCursorColor = if (index >= lines.size) endCursorColor else null,
                                 endCursorFading = endCursorFading
@@ -709,6 +716,8 @@ internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial):
     EchoPaperMaterial.Deckle -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 2.em))
     EchoPaperMaterial.Cotton -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent.None)
     EchoPaperMaterial.Folio -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = .8.em))
+    EchoPaperMaterial.Celadon -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
+    EchoPaperMaterial.Lacquer -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 1.2.em))
     EchoPaperMaterial.None -> style
 }
 

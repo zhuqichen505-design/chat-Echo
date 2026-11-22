@@ -66,6 +66,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.echoPaperTexture
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 import dev.chrisbanes.haze.HazeDefaults
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -132,7 +133,7 @@ fun echoGlassPalette(): EchoGlassPalette {
             panel = colors.surface, panelStrong = colors.surface,
             panelSoft = colors.surfaceContainerLow, control = colors.surfaceContainer,
             controlSelected = colors.primaryContainer, input = colors.surfaceContainerLow,
-            userBubble = if (LocalEchoThemeStyle.current.hardShadow) colors.primaryContainer
+            userBubble = if (LocalEchoThemeStyle.current.accentUserBubble || LocalEchoThemeStyle.current.hardShadow) colors.primaryContainer
                 else colors.surfaceContainerHigh,
             assistantBubble = Color.Transparent,
             outline = if (LocalEchoThemeStyle.current.strongOutline) colors.outline else colors.outlineVariant,
@@ -209,6 +210,11 @@ fun Modifier.echoHazePanel(
         val style = LocalEchoThemeStyle.current
         val surface = if (tint == Color.Unspecified) colorScheme.surface
             else tint.compositeOver(colorScheme.surface).copy(alpha = 1f)
+        val ornamentRadius = when (shape) {
+            EchoGlassDialogShape -> style.dialogCornerRadius
+            EchoGlassControlShape -> style.controlCornerRadius
+            else -> style.panelCornerRadius
+        }
         return this
             .echoThemeHardShadow()
             .clip(shape)
@@ -221,6 +227,7 @@ fun Modifier.echoHazePanel(
                     shape
                 ) else Modifier
             )
+            .then(if (showBorder) Modifier.echoThemeFrameOrnament(cornerRadius = ornamentRadius) else Modifier)
     }
     val isDark = colorScheme.background.luminance() < 0.5f
     val resolvedTint = if (tint != Color.Unspecified) {
@@ -577,7 +584,9 @@ fun EchoGlassDropdownMenu(
                 exit = fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
             ) {
                 Surface(
-                    modifier = modifier.echoThemeHardShadow(),
+                    modifier = modifier
+                        .echoThemeHardShadow()
+                        .echoThemeFrameOrnament(cornerRadius = LocalEchoThemeStyle.current.panelCornerRadius, compact = true),
                     shape = menuShape,
                     color = containerColor,
                     contentColor = colors.onSurface,

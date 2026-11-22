@@ -154,7 +154,8 @@ fun EditableSettingProposalDialog(
     proposal: ProposedSettingBundle,
     onDismiss: () -> Unit,
     onApply: (List<CharacterProfile>, RoleplayScenario?) -> Unit,
-    onReExtract: (() -> Unit)? = null
+    onReExtract: (() -> Unit)? = null,
+    applyErrorMessage: String? = null
 ) {
     var updatedChars by remember(proposal) {
         mutableStateOf(proposal.updatedCharacters.map { it.character })
@@ -216,6 +217,34 @@ fun EditableSettingProposalDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                applyErrorMessage?.takeIf { it.isNotBlank() }?.let { applyErr ->
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = applyErr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
                 proposal.errorMessage?.takeIf { it.isNotBlank() }?.let { errMsg ->
                     item {
                         Surface(

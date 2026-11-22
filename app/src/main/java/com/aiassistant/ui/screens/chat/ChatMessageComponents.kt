@@ -44,6 +44,8 @@ import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.EchoPaperMaterial
+import com.aiassistant.ui.theme.EchoFrameOrnament
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -512,7 +514,20 @@ internal fun MessageBubble(
         fallbackSurface = resolvedReadableBackdrop
     )
     val themeStyle = LocalEchoThemeStyle.current
+    val bubbleCornerRadius = when {
+        themeStyle.frameOrnament == EchoFrameOrnament.CeramicRim -> 20.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> 2.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> 10.dp
+        themeStyle.cutCorners -> if (isUser) 10.dp else 8.dp
+        themeStyle.hardShadow -> if (isUser) 3.dp else 2.dp
+        themeStyle.paperMaterial != EchoPaperMaterial.None -> if (isUser) 5.dp else 3.dp
+        else -> 18.dp
+    }
     val bubbleShape = when {
+        themeStyle.frameOrnament == EchoFrameOrnament.CeramicRim ->
+            if (isUser) RoundedCornerShape(20.dp, 6.dp, 20.dp, 20.dp) else RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> RoundedCornerShape(2.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> RoundedCornerShape(10.dp)
         themeStyle.cutCorners -> CutCornerShape(if (isUser) 10.dp else 8.dp)
         themeStyle.hardShadow -> RoundedCornerShape(if (isUser) 3.dp else 2.dp)
         themeStyle.paperMaterial != EchoPaperMaterial.None ->
@@ -679,11 +694,12 @@ internal fun MessageBubble(
         MaterialTheme.colorScheme.primary
     }
 
-    // 连接等待计时（气泡级）：以"尝试阶段"为计时窗口——生成发起或重试状态切换（换 Key/重连，
-    // 表现为 reconnectStatus 文案变化）时重新计时；计时器常驻气泡组合内，
+    // 连接等待计时（气泡级）：以"尝试阶段"为计时窗口——生成发起或真实重试状态切换（换 Key/重连）
+    // 时重新计时；120s 慢响应安抚提示不重置计时，避免归零后重新计起。计时器常驻气泡组合内，
     // 不会因状态块离场而意外归零后"消失又重现"
     var connectElapsedSec by remember { mutableIntStateOf(0) }
-    LaunchedEffect(isGenerating, reconnectStatus) {
+    val connectTimerKey = GenerationUiStateRules.connectTimerKey(reconnectStatus)
+    LaunchedEffect(isGenerating, connectTimerKey) {
         if (!isGenerating) {
             connectElapsedSec = 0
             return@LaunchedEffect
@@ -880,15 +896,19 @@ internal fun MessageBubble(
                             }
                         } else {
                         Surface(
-                            modifier = Modifier,
+                            modifier = Modifier.echoThemeFrameOrnament(
+                                cornerRadius = bubbleCornerRadius,
+                                compact = true,
+                                isUserBubble = true
+                            ),
                             color = bubbleColor,
                             contentColor = textColor,
                             shape = bubbleShape,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             border = BorderStroke(
-                                width = 0.8.dp,
-                                color = glass.outlineSelected.copy(alpha = 0.35f)
+                                width = if (themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets) 1.dp else 0.8.dp,
+                                color = glass.outlineSelected.copy(alpha = if (themeStyle.frameOrnament != EchoFrameOrnament.None) 0.45f else 0.35f)
                             )
                         ) {
                             MessageContent(textColor)

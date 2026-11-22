@@ -2,10 +2,14 @@
 
 package com.aiassistant.ui.screens.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,18 +18,22 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aiassistant.data.repository.AutoTimelineUpdateResult
 import com.aiassistant.domain.model.PendingMemoryCandidate
 import com.aiassistant.ui.components.EchoGlassCard
+import com.aiassistant.ui.components.echoCheckboxColors
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.utils.TimelineCategory
 
 /** 先测量输入栏和它消耗的 IME，再分配审阅区；消息区始终保留可视空间。 */
 @Composable
@@ -233,15 +241,28 @@ private fun PendingMemoryReview(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
         body = {
-            SessionSettingChangeDetails(candidate.action, candidate.previousContent,
-                candidate.evidence, candidate.changeReason)
             if (editing) {
+                SessionSettingChangeDetails(candidate.action, candidate.previousContent,
+                    candidate.evidence, candidate.changeReason)
                 OutlinedTextField(value = content, onValueChange = { content = it },
                     modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5,
                     textStyle = MaterialTheme.typography.bodySmall,
                     label = { Text("编辑设定/记忆内容") })
             } else {
-                Text("「${candidate.distilledContent}」", style = MaterialTheme.typography.bodySmall)
+                PendingStructuredItemCard(selected = true) {
+                    ReviewActionBadgeRow(action = candidate.action)
+                    Text(
+                        text = candidate.distilledContent,
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    ReviewSettingMetadataBlock(
+                        previousContent = candidate.previousContent,
+                        evidence = candidate.evidence,
+                        changeReason = candidate.changeReason
+                    )
+                }
             }
         },
         actions = {
@@ -291,8 +312,32 @@ private fun PendingTimelineReview(
         scrollState = scrollState,
         modifier = modifier,
         body = {
-            proposal.extractionErrorMessage?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            proposal.extractionErrorMessage?.takeIf { it.isNotBlank() }?.let { errMsg ->
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.38f),
+                    border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 1.dp).size(15.dp)
+                        )
+                        Text(
+                            text = errMsg,
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
             if (editing) {
                 if (!proposal.updatedStoryTime.isNullOrBlank()) {
@@ -312,28 +357,166 @@ private fun PendingTimelineReview(
                         minLines = 1, maxLines = 4)
                 }
             } else {
-                if (!proposal.updatedStoryTime.isNullOrBlank()) {
-                    Text("推进时空：${proposal.updatedStoryTime}", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
-                }
-                proposal.newEvent?.let { event ->
-                    if (proposal.action == "UPDATE" && !proposal.previousEventContent.isNullOrBlank()) {
-                        Text("原事件：${proposal.previousEventContent}", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // 1. 推进时空：顶部醒目紧凑条
+                proposal.updatedStoryTime?.takeIf { it.isNotBlank() }?.let { updatedTime ->
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+                        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "推进时空",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = updatedTime,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
-                    Text("${if (proposal.action == "UPDATE") "更新事件" else "新增事件"}：[${event.timeTag}]【${event.category.displayName}】${event.content}",
-                        style = MaterialTheme.typography.bodySmall)
                 }
-                settings.forEachIndexed { index, setting ->
-                    SessionSettingChangeDetails(setting.action, setting.previousContent, setting.evidence, setting.changeReason)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = setting.isSelected, onCheckedChange = { selected ->
-                            settings = settings.mapIndexed { i, item -> if (i == index) item.copy(isSelected = selected) else item }
-                        })
-                        Text("【${setting.category}】${setting.content}", style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f).clickable {
-                                settings = settings.mapIndexed { i, item -> if (i == index) item.copy(isSelected = !item.isSelected) else item }
-                            })
+
+                // 2. 时间线事件：胶囊标签行 + 原事件对照 + 清晰正文
+                proposal.newEvent?.let { event ->
+                    val isUpdate = proposal.action == "UPDATE"
+                    val categoryColor = remember(event.category) { parseTimelineCategoryColor(event.category) }
+                    PendingStructuredItemCard(selected = true) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            ReviewTagBadge(
+                                text = if (isUpdate) "更新事件" else "新增事件",
+                                containerColor = if (isUpdate) {
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                                },
+                                contentColor = if (isUpdate) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                }
+                            )
+                            if (event.timeTag.isNotBlank()) {
+                                ReviewTagBadge(
+                                    text = event.timeTag,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            ReviewTagBadge(
+                                text = event.category.displayName,
+                                containerColor = categoryColor.copy(alpha = 0.14f),
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                leadingDotColor = categoryColor
+                            )
+                        }
+                        if (isUpdate && !proposal.previousEventContent.isNullOrBlank()) {
+                            ReviewPreviousQuoteBlock(
+                                label = "原记录",
+                                content = proposal.previousEventContent
+                            )
+                        }
+                        Text(
+                            text = event.content,
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                // 3. 会话设定：分节计数 + 每条设定自成卡片（操作/类别/正文/变更依据同卡聚合）
+                if (settings.isNotEmpty()) {
+                    val selectedCount = settings.count { it.isSelected }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp, start = 2.dp, end = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "提取设定",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "已选 $selectedCount/${settings.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selectedCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    settings.forEachIndexed { index, setting ->
+                        val toggleSelection = {
+                            settings = settings.mapIndexed { i, item ->
+                                if (i == index) item.copy(isSelected = !item.isSelected) else item
+                            }
+                        }
+                        PendingStructuredItemCard(
+                            selected = setting.isSelected,
+                            onClick = toggleSelection
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Checkbox(
+                                    checked = setting.isSelected,
+                                    onCheckedChange = null,
+                                    colors = echoCheckboxColors(),
+                                    modifier = Modifier.padding(top = 2.dp).size(20.dp)
+                                )
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        if (setting.category.isNotBlank()) {
+                                            ReviewTagBadge(
+                                                text = setting.category,
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        ReviewActionBadge(action = setting.action, compact = true)
+                                    }
+                                    Text(
+                                        text = setting.content,
+                                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
+                                        color = if (setting.isSelected) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                                        }
+                                    )
+                                }
+                            }
+                            ReviewSettingMetadataBlock(
+                                previousContent = setting.previousContent,
+                                evidence = setting.evidence,
+                                changeReason = setting.changeReason
+                            )
+                        }
                     }
                 }
             }
@@ -362,4 +545,191 @@ private fun PendingTimelineReview(
             }
         }
     )
+}
+
+@Composable
+private fun PendingStructuredItemCard(
+    selected: Boolean,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    }
+    val containerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (selected) 0.80f else 0.44f)
+    Surface(
+        shape = shape,
+        color = containerColor,
+        border = BorderStroke(0.75.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clip(shape).clickable(onClick = onClick) else Modifier)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun ReviewTagBadge(
+    text: String,
+    containerColor: Color,
+    contentColor: Color,
+    leadingDotColor: Color? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = containerColor
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (leadingDotColor != null) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(leadingDotColor)
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewActionBadge(action: String, compact: Boolean = false) {
+    val (label, container, content) = when (action) {
+        "SUPPLEMENT" -> Triple(
+            if (compact) "补充" else "补充已有设定 · 保留旧信息",
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.onSecondaryContainer
+        )
+        "REVISE" -> Triple(
+            if (compact) "修订 · 核对" else "修订已有设定 · 请核对后确认",
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+            MaterialTheme.colorScheme.onErrorContainer
+        )
+        else -> Triple(
+            if (compact) "新增" else "新增设定",
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    }
+    ReviewTagBadge(text = label, containerColor = container, contentColor = content)
+}
+
+@Composable
+private fun ReviewActionBadgeRow(action: String) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        ReviewActionBadge(action = action, compact = false)
+    }
+}
+
+@Composable
+private fun ReviewPreviousQuoteBlock(label: String, content: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .width(2.dp)
+                .height(14.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.65f))
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+            )
+            Text(
+                text = content,
+                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewSettingMetadataBlock(
+    previousContent: String?,
+    evidence: String,
+    changeReason: String
+) {
+    val hasPrev = !previousContent.isNullOrBlank()
+    val hasEvidence = evidence.isNotBlank()
+    val hasReason = changeReason.isNotBlank()
+    if (!hasPrev && !hasEvidence && !hasReason) return
+
+    HorizontalDivider(
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+        thickness = 0.5.dp
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (hasPrev) {
+            ReviewPreviousQuoteBlock(label = "原设定", content = previousContent!!)
+        }
+        if (hasEvidence) {
+            ReviewMetadataLine(label = "依据", value = evidence)
+        }
+        if (hasReason) {
+            ReviewMetadataLine(label = "说明", value = changeReason)
+        }
+    }
+}
+
+@Composable
+private fun ReviewMetadataLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+private fun parseTimelineCategoryColor(category: TimelineCategory): Color = try {
+    Color(android.graphics.Color.parseColor(category.tagColorHex))
+} catch (_: Exception) {
+    Color(0xFF2196F3)
 }

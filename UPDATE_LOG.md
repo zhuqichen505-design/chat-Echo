@@ -1,5 +1,27 @@
 # 维护记录
 
+## 2026-11-22 · 120s 慢响应误显重试修复、审阅面板内部排版与顶部应用提示及三套新主题（未发版）
+
+用户提出三项需求：① 连接超时设为 300s 时，在等待 120s–300s 之间误弹出“连接重试中”，需要修复；② 优化提取时间线和设定成功展示窗口的内部信息排版，窗口位置与大小不变，并将应用设定成功与失败弹窗改为在页面上方显示；③ 新增三套注重细节刻画（不止换色）的不同风格主题，并按实际页面给出预览。
+
+改动：
+1. **120s 慢响应提示误显为“连接重试中”修复**：
+   - `GenerationUiStateRules` 新增 `SLOW_RESPONSE_NOTICE_PREFIX`、`isSlowResponseNotice` 与 `connectTimerKey`：`derive` 在等待首字期命中慢响应提示时保持 `GenerationUiState.Connecting`（不再归类为 `Reconnecting`），隐藏思考气泡时仍保留该提示文案。
+   - `ChatMessageComponents` 连接等待计时器改为按 `connectTimerKey(reconnectStatus)` 重置，120s 慢响应提示出现时继续平滑递增秒数（不再归零重算并于 150s 误显“连接重试中，已等待 30s…”）；仅真实触发重连/切换 Key 时才进入 `Reconnecting` 并按重试尝试重新计时。
+   - `ChatViewModel` 的 `slowTimeoutJob` 增加首字/思考为空守卫，并在收到首个内容/思考 token 或真实状态更新时立即取消并清理残留慢响应提示。
+2. **审阅面板内部排版优化 + 应用设定成功/失败横幅迁至页面上方**：
+   - `ChatPendingReviewPanels` 严格保持 `ChatReviewInputLayout`（上限 440dp、锚定输入框上方）与 `PendingReviewCard` 外框位置、尺寸及按钮栏不变，仅重构内部信息排版：推进时空采用紧凑徽章条；时间线事件独立轻卡片并拆分为操作/时间/带色点分类胶囊、`UPDATE` 原记录左竖线对照块与清晰正文；提取设定新增分节与选中计数，每条设定自成可点击轻卡片并将 `原设定`/`依据`/`说明` 收拢于同卡细分隔线之下，消除多条设定说明错位。`PendingMemoryReview` 与 `ChatContextComponents.SessionSettingChangeDetails` 同步采用统一徽章与分层结构。
+   - `ChatScreenModels` 新增 `SettingApplyNoticeTone` / `SettingApplyNotice`；`ChatViewModel` 与 `ChatScreen` 将 `timelineUpdateNotice` 从底部 `bottomBar` 完整迁至页面顶部浮层 `Column`（紧邻顶栏，复用 `TransientChatBanner` 动效），统一承接 `applyTimelineProposal`、`acceptPendingMemory`、`applyReconciledTimeline` 与 `applyProposedSetting`（替代原底部 `Toast`）的成功（绿）/ 失败（红）/ 信息提示，故事模式下点「查看」直达故事管理弹窗；同时为 `TimelineReconcileDialog` 与 `EditableSettingProposalDialog` 补充弹窗顶部内嵌失败条，避免弹窗未关闭时遮挡失败原因。
+3. **三套细节工艺主题（青瓷 / 蓝图 / 漆匣）**：
+   - `PersonalizationManager`（`EchoAppearancePreset`）新增 `CELADON`（青瓷）、`BLUEPRINT`（蓝图）、`LACQUER`（漆匣）三个可持久化预设；`SettingsAppearanceTab` 接入三项预设及色板与工艺说明。
+   - `EchoThemeStyle` 扩展 `EchoSurfacePattern`（`CeladonCrackle`、`BlueprintDraft`、`LacquerFrame`）、`EchoFrameOrnament`（`CeramicRim`、`BlueprintBrackets`、`LacquerDoubleFrame`）与 `accentUserBubble`。
+   - `EchoPaperTexture` 扩展 `EchoPaperMaterial`（`Celadon` 瓷釉微矿粒、`Lacquer` 丝缎横刷漆纹），实现宋瓷冰裂开片网纹、工程制图 16/80dp 坐标网格+十字准星+左缘精密标尺刻度、大漆左右双线描金页框，以及不拦截触控的 `Modifier.echoThemeFrameOrnament`（青瓷顶缘釉光双唇边 / 蓝图四角 L 形注册角标与气泡左索引条 / 漆匣内缩描金双框、四角金点与气泡右印章竖边）。
+   - `Theme.kt` 提供三套主题完整的浅深双模式 `ColorScheme`（全对文本对比度均 ≥ 4.5:1）；`Type.kt` 与 `MarkdownText.kt` 分别配置衬线标题×舒朗行高（青瓷）、等宽标头×利落正文（蓝图）、全链路衬线×`1.2em` 典籍缩进（漆匣）；`EchoGlassCard`、`EchoHaze`、`ChatMessageComponents` 全共享容器与用户气泡统一消费工艺令牌。
+
+涉及文件：`GenerationUiState.kt`、`ChatMessageComponents.kt`、`ChatViewModel.kt`、`ChatPendingReviewPanels.kt`、`ChatContextComponents.kt`、`ChatScreenModels.kt`、`ChatScreen.kt`、`ChatStoryDialogs.kt`、`EditableSettingProposalDialog.kt`、`TimelineReconcileDialog.kt`、`PersonalizationManager.kt`、`EchoThemeStyle.kt`、`EchoPaperTexture.kt`、`Theme.kt`、`Type.kt`、`MarkdownText.kt`、`EchoGlassCard.kt`、`EchoHaze.kt`、`SettingsAppearanceTab.kt` 及领域测试 `ChatEnhancementsTest.kt`、`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`；Room v37 / 20 个实体、请求协议、消息格式与备份格式不变。
+
+验证：冻结验收 `20261122-221737-118` 脚本 / Gradle 退出 0，598.201 秒；96 套件 / 1,126 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning（新增 1 条 `UseKtx` 风格提示）；输入哈希一致；`git diff --check` 退出 0。本轮未递增版本、未构建 APK；真实设备 120s+ 长等待、审阅面板实际渲染、顶部提示及三套主题真机视觉待人工验收。
+
 ## 2026-11-21 · 发布 Echo 2.8.49（时间线/设定提取自动重试与重新提取按键 + API 拖拽跳变修复）
 
 版本由 2.8.48/234 递增至 2.8.49/235（仅更新 `app/build.gradle.kts`）；本次发版汇总 `v2.8.48` 之后的两笔源码更新：

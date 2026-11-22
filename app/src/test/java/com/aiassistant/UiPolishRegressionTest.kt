@@ -818,6 +818,110 @@ class UiPolishRegressionTest {
         )
     }
 
+    @Test fun celadonBlueprintAndLacquerCarryDistinctCraftDetailsTexturesAndContrast() {
+        val presets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.CELADON,
+            com.aiassistant.utils.EchoAppearancePreset.BLUEPRINT,
+            com.aiassistant.utils.EchoAppearancePreset.LACQUER
+        )
+        assertEquals(presets, presets.map { com.aiassistant.utils.EchoAppearancePreset.sanitize(it) })
+        assertTrue(com.aiassistant.utils.EchoAppearancePreset.values.containsAll(presets))
+
+        val celadon = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.CELADON)
+        val blueprint = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.BLUEPRINT)
+        val lacquer = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.LACQUER)
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.Celadon, celadon.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.CeladonCrackle, celadon.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.CeramicRim, celadon.frameOrnament)
+        assertTrue("青瓷应使用温润大圆角", celadon.panelCornerRadius >= androidx.compose.ui.unit.Dp(18f))
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.None, blueprint.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.BlueprintDraft, blueprint.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.BlueprintBrackets, blueprint.frameOrnament)
+        assertTrue("蓝图应使用精密小圆角", blueprint.panelCornerRadius <= androidx.compose.ui.unit.Dp(4f))
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.Lacquer, lacquer.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.LacquerFrame, lacquer.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.LacquerDoubleFrame, lacquer.frameOrnament)
+        assertTrue("漆匣应使用独立中圆角", lacquer.panelCornerRadius > blueprint.panelCornerRadius && lacquer.panelCornerRadius < celadon.panelCornerRadius)
+
+        assertEquals(
+            androidx.compose.ui.text.font.FontFamily.Monospace,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.BLUEPRINT).labelMedium.fontFamily
+        )
+        assertTrue(
+            "青瓷标题应使用衬线字体",
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.CELADON).titleLarge.fontFamily
+                != androidx.compose.ui.text.font.FontFamily.Default
+        )
+        assertTrue(
+            "漆匣正文应使用衬线字体",
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.LACQUER).bodyLarge.fontFamily
+                != androidx.compose.ui.text.font.FontFamily.Default
+        )
+        val base = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp))
+        assertEquals(androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Em),
+            com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Lacquer).textIndent?.firstLine)
+        assertEquals(androidx.compose.ui.text.style.TextIndent.None,
+            com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Celadon).textIndent)
+
+        // 纹理贴图在浅深双模式下均可正常生成且尺寸一致
+        for (material in listOf(com.aiassistant.ui.theme.EchoPaperMaterial.Celadon, com.aiassistant.ui.theme.EchoPaperMaterial.Lacquer)) {
+            for (dark in listOf(false, true)) {
+                val bmp = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
+                assertTrue(bmp.width >= 128 && bmp.height >= 128)
+            }
+        }
+    }
+
+    @Test fun redesignedPendingTimelineReviewPreservesOuterBoundsAndStructuredContent() {
+        val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = "第3天·暮色",
+            newEvent = com.aiassistant.utils.TimelineEventItem(
+                timeTag = "第3天·暮色",
+                content = "主角在钟楼顶层发现旧怀表",
+                category = com.aiassistant.utils.TimelineCategory.PLOT_EVENT
+            ),
+            action = "UPDATE",
+            previousEventContent = "主角准备前往钟楼调查",
+            summaryNotice = "合成摘要",
+            atemporalSettings = listOf(
+                com.aiassistant.utils.AtemporalSettingItem(
+                    id = "s1",
+                    category = "物品",
+                    content = "怀表背面刻有北境徽记",
+                    action = "ADD",
+                    evidence = "对话原文提到北境徽记",
+                    isSelected = true
+                ),
+                com.aiassistant.utils.AtemporalSettingItem(
+                    id = "s2",
+                    category = "规则",
+                    content = "钟楼在午夜后封锁",
+                    action = "REVISE",
+                    previousContent = "钟楼全天开放",
+                    changeReason = "最新剧情修订",
+                    isSelected = false
+                )
+            ),
+            proposalId = "synthetic-structured-review"
+        )
+        val bounds = measureReviewInput(statusHeight = 28) {
+            com.aiassistant.ui.screens.chat.ChatPendingReviewPanels(
+                memory = null,
+                timeline = proposal,
+                onDismissMemory = {},
+                onAcceptMemory = { _, _ -> },
+                onDismissTimeline = {},
+                onApplyTimeline = {}
+            )
+        }
+        assertTrue("结构化排版应保持原有高度上限约束", bounds.getValue("review").height <= 440f)
+        assertTrue("内容应具备清晰可见高度", bounds.getValue("pending").height > 140f)
+        assertReviewAdjacentToInput(bounds)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun frequentSelectionUpdatesKeepScrollingAndIdleReleasesTheMutationLock() = runTest {
         val selections = MutableStateFlow(TextRange.Zero)

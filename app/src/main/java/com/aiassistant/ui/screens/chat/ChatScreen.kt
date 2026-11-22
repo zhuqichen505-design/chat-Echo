@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalUriHandler
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
 import com.aiassistant.ui.components.EchoTextToolbar
 import com.aiassistant.ui.components.EchoTextToolbarHost
 import androidx.compose.ui.layout.onSizeChanged
@@ -275,7 +276,9 @@ fun ChatScreen(
     val timelineReconcileProgress by viewModel.timelineReconcileProgress.collectAsState()
     val timelineReconcileResult by viewModel.timelineReconcileResult.collectAsState()
     val showTimelineReconcileDialog by viewModel.showTimelineReconcileDialog.collectAsState()
-    val timelineUpdateNotice by viewModel.timelineUpdateNotice.collectAsState()
+    val settingApplyNotice by viewModel.settingApplyNotice.collectAsState()
+    val timelineApplyError by viewModel.timelineApplyError.collectAsState()
+    val proposedSettingApplyError by viewModel.proposedSettingApplyError.collectAsState()
     val pendingTimelineProposal by viewModel.pendingTimelineProposal.collectAsState()
     val timelineExtractionCount by viewModel.timelineExtractionCount.collectAsState()
     val liveReconcileDraft by viewModel.liveReconcileDraft.collectAsState()
@@ -845,81 +848,6 @@ fun ChatScreen(
                             Text("正在提取本轮时间线与设定…", style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp))
-                        }
-
-                        // 时间线变动提示显示数秒后自动消失（退场由下方 AnimatedVisibility 平滑收起），
-                        // 手动「查看/关闭」仍即时生效
-                        LaunchedEffect(timelineUpdateNotice) {
-                            if (timelineUpdateNotice != null) {
-                                kotlinx.coroutines.delay(5000)
-                                viewModel.dismissTimelineUpdateNotice()
-                            }
-                        }
-
-                        // 时间线自动增量更新提醒胶囊
-                        AnimatedVisibility(
-                            visible = timelineUpdateNotice != null,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            timelineUpdateNotice?.let { notice ->
-                                EchoGlassCard(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-                                    shape = EchoTokens.Radius.shapeMd
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.weight(1f),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.HistoryEdu,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Text(
-                                                text = notice,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            TextButton(
-                                                onClick = {
-                                                    viewModel.dismissTimelineUpdateNotice()
-                                                    showSettingsDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                            ) {
-                                                Text("查看", style = MaterialTheme.typography.labelSmall)
-                                            }
-                                            IconButton(
-                                                onClick = { viewModel.dismissTimelineUpdateNotice() },
-                                                modifier = Modifier.size(36.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "关闭",
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         // 需求 6：模型回复时排队消息悬浮卡片 (UI 严格按照 media_1789390149204.png 设计落地)
@@ -1614,6 +1542,98 @@ fun ChatScreen(
                     }
                 }
 
+                // 应用设定/时间线成功与失败横幅：统一显示在页面上方（紧邻顶栏），不再在底部弹出
+                LaunchedEffect(settingApplyNotice?.id) {
+                    val notice = settingApplyNotice ?: return@LaunchedEffect
+                    val durationMs = if (notice.tone == SettingApplyNoticeTone.Error) 6500L else 4500L
+                    kotlinx.coroutines.delay(durationMs)
+                    if (viewModel.settingApplyNotice.value?.id == notice.id) {
+                        viewModel.dismissTimelineUpdateNotice()
+                    }
+                }
+                var retainedApplyNotice by remember { mutableStateOf<SettingApplyNotice?>(null) }
+                if (settingApplyNotice != null) {
+                    SideEffect { retainedApplyNotice = settingApplyNotice }
+                }
+                TransientChatBanner(bannerKey = "setting_apply_notice", message = settingApplyNotice?.message) { noticeMsg ->
+                    val activeNotice = settingApplyNotice ?: retainedApplyNotice
+                    val tone = activeNotice?.tone ?: SettingApplyNoticeTone.Info
+                    val showInspect = activeNotice?.showInspectAction == true
+                    val bannerShape = EchoGlassPagePanelShape
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    val semantic = rememberEchoSemanticColors()
+                    val statusGroup = when (tone) {
+                        SettingApplyNoticeTone.Success -> semantic.success
+                        SettingApplyNoticeTone.Error -> semantic.error
+                        SettingApplyNoticeTone.Info -> semantic.info
+                    }
+                    val tintColor = statusGroup.container.copy(alpha = if (isDark) 0.90f else 0.94f)
+                    val borderColor = statusGroup.border.copy(alpha = if (isDark) 0.42f else 0.72f)
+                    val bannerContentColor = statusGroup.onContainer
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = bannerShape,
+                        color = tintColor,
+                        contentColor = bannerContentColor,
+                        border = BorderStroke(1.dp, borderColor),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = when (tone) {
+                                    SettingApplyNoticeTone.Success -> Icons.Default.CheckCircle
+                                    SettingApplyNoticeTone.Error -> Icons.Default.ErrorOutline
+                                    SettingApplyNoticeTone.Info -> Icons.Default.HistoryEdu
+                                },
+                                contentDescription = null,
+                                tint = statusGroup.main,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = noticeMsg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = bannerContentColor,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (showInspect) {
+                                TextButton(
+                                    onClick = {
+                                        viewModel.dismissTimelineUpdateNotice()
+                                        if (uiState.isRoleplay) {
+                                            showStoryManagerDialog = true
+                                        } else {
+                                            showSettingsDialog = true
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.heightIn(min = 34.dp)
+                                ) {
+                                    Text("查看", style = MaterialTheme.typography.labelSmall, color = bannerContentColor)
+                                }
+                            }
+                            IconButton(
+                                onClick = { viewModel.dismissTimelineUpdateNotice() },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "关闭",
+                                    tint = bannerContentColor.copy(alpha = 0.75f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 TransientChatBanner(bannerKey = "error", message = error) { errorMsg ->
                     val errorShape = RoundedCornerShape(22.dp)
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -1993,7 +2013,8 @@ fun ChatScreen(
             onApply = { currentTime, events, confirmedSettings ->
                 viewModel.applyReconciledTimeline(currentTime, events, confirmedSettings)
             },
-            onReExtract = { viewModel.reExtractTimelineReconciliation() }
+            onReExtract = { viewModel.reExtractTimelineReconciliation() },
+            applyErrorMessage = timelineApplyError
         )
     }
 
@@ -2405,9 +2426,7 @@ fun ChatScreen(
             proposal = currentSuggestedProposal,
             onDismiss = { viewModel.dismissProposedSetting() },
             onApply = { chars, sc ->
-                viewModel.applyProposedSetting(chars, sc,
-                    onSaved = { Toast.makeText(context, "已保存到当前故事专属设定", Toast.LENGTH_SHORT).show() },
-                    onError = { Toast.makeText(context, it, Toast.LENGTH_LONG).show() })
+                viewModel.applyProposedSetting(chars, sc)
             },
             onReExtract = if (!currentSuggestedProposal.sourceText.isNullOrBlank()) {
                 {
@@ -2418,7 +2437,8 @@ fun ChatScreen(
                         onError = { err -> Toast.makeText(context, "识别失败: $err", Toast.LENGTH_LONG).show() }
                     )
                 }
-            } else null
+            } else null,
+            applyErrorMessage = proposedSettingApplyError
         )
     }
 

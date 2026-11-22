@@ -166,7 +166,8 @@ fun TimelineReconcileDialog(
     onDismiss: () -> Unit,
     onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
     isApplying: Boolean = false,
-    onReExtract: (() -> Unit)? = null
+    onReExtract: (() -> Unit)? = null,
+    applyErrorMessage: String? = null
 ) {
     var storyTime by remember(initialResult) { mutableStateOf(initialResult.currentStoryTime) }
     val events = remember(initialResult) {
@@ -260,6 +261,32 @@ fun TimelineReconcileDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                applyErrorMessage?.takeIf { it.isNotBlank() }?.let { applyErr ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = applyErr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
                 // 0. 模型提炼来源与状态指示
                 when (initialResult.extractionSource) {
                     "AI_MODEL" -> {

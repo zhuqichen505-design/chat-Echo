@@ -105,9 +105,22 @@ object GenerationUiStateRules {
         else -> false
     }
 
+    /** 慢响应安抚提示前缀：仍处于首次请求的正常等待阶段，不属于断线重连或报错。 */
+    const val SLOW_RESPONSE_NOTICE_PREFIX = "响应耗时较长"
+
+    fun isSlowResponseNotice(text: String?): Boolean =
+        !text.isNullOrBlank() && text.trimStart().startsWith(SLOW_RESPONSE_NOTICE_PREFIX)
+
+    /**
+     * 连接等待计时器重置键：仅在进入真实重试/切换 Key 时重置阶段计时；
+     * 120s 慢响应安抚提示出现时不重置计时，避免计时归零后再次从 0 计起。
+     */
+    fun connectTimerKey(reconnectStatus: String?): String? =
+        reconnectStatus?.takeUnless(::isSlowResponseNotice)
+
     /** 隐藏思考气泡后保留必要操作状态；正文开始后不再显示旧重试提示。 */
     fun statusWithoutThinking(state: GenerationUiState, reconnectStatus: String?, contentEmpty: Boolean): String? = when (state) {
-        GenerationUiState.Connecting -> "正在连接…"
+        GenerationUiState.Connecting -> reconnectStatus?.takeIf(::isSlowResponseNotice) ?: "正在连接…"
         GenerationUiState.Reconnecting -> reconnectStatus?.takeIf { it.isNotBlank() } ?: "正在重新连接…"
         GenerationUiState.ChoosingDirection -> reconnectStatus?.takeIf { it.isNotBlank() } ?: "等待选择回复方向"
         GenerationUiState.Thinking -> "正在生成回复…"
@@ -151,7 +164,9 @@ object GenerationUiStateRules {
         isGenerating && reconnectStatus in listOf("等待选择回复方向", "回复方向生成失败，等待处理") -> GenerationUiState.ChoosingDirection
         isGenerating && content.isBlank() && !hasThinking -> {
             if (reconnectStatus != null) {
-                if (reconnectStatus.contains("正在尝试重新连接") || reconnectStatus.contains("正在自动尝试备用 Key")) {
+                if (isSlowResponseNotice(reconnectStatus)) {
+                    GenerationUiState.Connecting
+                } else if (reconnectStatus.contains("正在尝试重新连接") || reconnectStatus.contains("正在自动尝试备用 Key")) {
                     GenerationUiState.Reconnecting
                 } else if (isErrorText(reconnectStatus)) GenerationUiState.Failed else GenerationUiState.Reconnecting
             } else {

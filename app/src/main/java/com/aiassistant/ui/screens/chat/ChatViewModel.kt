@@ -197,6 +197,15 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val _timelineUpdateNotice = MutableStateFlow<String?>(null)
     val timelineUpdateNotice: StateFlow<String?> = _timelineUpdateNotice.asStateFlow()
 
+    private val _settingApplyNotice = MutableStateFlow<SettingApplyNotice?>(null)
+    val settingApplyNotice: StateFlow<SettingApplyNotice?> = _settingApplyNotice.asStateFlow()
+
+    private val _timelineApplyError = MutableStateFlow<String?>(null)
+    val timelineApplyError: StateFlow<String?> = _timelineApplyError.asStateFlow()
+
+    private val _proposedSettingApplyError = MutableStateFlow<String?>(null)
+    val proposedSettingApplyError: StateFlow<String?> = _proposedSettingApplyError.asStateFlow()
+
     // 时间线变动待确认提案（需求 1：自动识别需用户确认）
     val pendingTimelineProposal: StateFlow<AutoTimelineUpdateResult?> =
         ChatGenerationManager.timelineProposals(conversationId).map { it.firstOrNull() }
@@ -217,8 +226,22 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val _showDraftDialog = MutableStateFlow(false)
     val showDraftDialog: StateFlow<Boolean> = _showDraftDialog.asStateFlow()
 
+    private fun postSettingApplyNotice(
+        message: String,
+        tone: SettingApplyNoticeTone,
+        showInspectAction: Boolean = tone != SettingApplyNoticeTone.Error
+    ) {
+        _timelineUpdateNotice.value = message
+        _settingApplyNotice.value = SettingApplyNotice(
+            message = message,
+            tone = tone,
+            showInspectAction = showInspectAction
+        )
+    }
+
     fun dismissTimelineUpdateNotice() {
         _timelineUpdateNotice.value = null
+        _settingApplyNotice.value = null
     }
 
     fun dismissTimelineProposal(proposal: AutoTimelineUpdateResult? = pendingTimelineProposal.value) {
@@ -1323,8 +1346,13 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
 
             val slowTimeoutJob = launch {
                 kotlinx.coroutines.delay(120_000L)
-                if (_isGenerating.value && !session.directionPhase && _reconnectStatus.value == null) {
-                    val slowMsg = "响应耗时较长（已持续 120s+），若为长篇生成或深度推理请耐心稍候，也可随时点击停止..."
+                if (_isGenerating.value &&
+                    !session.directionPhase &&
+                    _reconnectStatus.value == null &&
+                    session.currentResponse.value.isBlank() &&
+                    session.currentThinking.value.isBlank()
+                ) {
+                    val slowMsg = "${GenerationUiStateRules.SLOW_RESPONSE_NOTICE_PREFIX}（已持续 120s+），若为长篇生成或深度推理请耐心稍候，也可随时点击停止..."
                     session.setStatus(slowMsg)
                     _reconnectStatus.value = slowMsg
                 }
@@ -1492,14 +1520,27 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         assistantVariantGroupId = assistantVariantGroupId,
                         assistantVariantIndex = assistantVariantIndex,
                         onToken = { token ->
+                            if (token.isNotEmpty()) {
+                                slowTimeoutJob.cancel()
+                                if (GenerationUiStateRules.isSlowResponseNotice(session.reconnectStatus.value)) {
+                                    session.setStatus(null)
+                                }
+                            }
                             session.appendResponse(token)
                             publishGenerationState(session)
                         },
                         onThinkingToken = { token ->
+                            if (token.isNotEmpty()) {
+                                slowTimeoutJob.cancel()
+                                if (GenerationUiStateRules.isSlowResponseNotice(session.reconnectStatus.value)) {
+                                    session.setStatus(null)
+                                }
+                            }
                             session.appendThinking(token)
                             publishGenerationState(session)
                         },
                         onStatusUpdate = { status ->
+                            slowTimeoutJob.cancel()
                             session.setStatus(status)
                             publishGenerationState(session)
                         },
@@ -2138,8 +2179,19 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     previousContent = candidate.previousContent
                 )
                 _pendingMemoryCandidate.compareAndSet(candidate, null)
+                postSettingApplyNotice(
+                    message = if (targetScope == "conversation") "已保存到本会话设定" else "已存为长期记忆",
+                    tone = SettingApplyNoticeTone.Success,
+                    showInspectAction = true
+                )
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { _error.value = e.message ?: "保存设定失败，候选已保留" }
+            catch (e: Exception) {
+                postSettingApplyNotice(
+                    message = e.message ?: "保存设定失败，候选已保留",
+                    tone = SettingApplyNoticeTone.Error,
+                    showInspectAction = false
+                )
+            }
         }
     }
 
@@ -2345,7 +2397,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         val assistantReply = proposal.sourceAssistantReply
             ?: latestMessages.lastOrNull { it.role == "assistant" }?.content.orEmpty()
         if (userMsg.isBlank() && assistantReply.isBlank()) {
-            _timelineUpdateNotice.value = "未找到可重新读取的本轮对话内容"
+            postSettingApplyNotice("未找到可重新读取的本轮对话内容", SettingApplyNoticeTone.Info, showInspectAction = false)
             return
         }
         val activeOption = _currentModelOption.value
@@ -2372,7 +2424,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     if (result != null) {
                         ChatGenerationManager.offerTimelineProposal(conversationId, result, prioritize = true)
                     } else {
-                        _timelineUpdateNotice.value = "重新提取完成，本轮未发现新的时间线或设定"
+                        postSettingApplyNotice("重新提取完成，本轮未发现新的时间线或设定", SettingApplyNoticeTone.Info, showInspectAction = false)
                     }
                 }
             } catch (e: CancellationException) {
@@ -2433,14 +2485,22 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
             try {
                 repository.applyAutoTimelineProposal(conversationId, proposal)
                 ChatGenerationManager.dismissTimelineProposal(conversationId, proposal)
-                _timelineUpdateNotice.value = "已保存确认的时间线与设定"
+                postSettingApplyNotice(
+                    message = "已保存确认的时间线与设定",
+                    tone = SettingApplyNoticeTone.Success,
+                    showInspectAction = true
+                )
                 loadConversation()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "应用时间线提案失败: ${e.message}", e)
-                _timelineUpdateNotice.value = e.message?.takeIf { it.contains("请重新提取或审阅") }
-                    ?: "保存失败，待确认内容已保留，请重试"
+                postSettingApplyNotice(
+                    message = e.message?.takeIf { it.contains("请重新提取或审阅") }
+                        ?: "保存失败，待确认内容已保留，请重试",
+                    tone = SettingApplyNoticeTone.Error,
+                    showInspectAction = false
+                )
             }
         }
     }
@@ -2448,6 +2508,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     fun dismissTimelineReconcileDialog() {
         _showTimelineReconcileDialog.value = false
         _timelineReconcileResult.value = null
+        _timelineApplyError.value = null
     }
 
     fun getSavedTimelineDraft(): TimelineReconcileDraft? {
@@ -2514,6 +2575,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     ) {
         if (_isApplyingTimeline.value) return
         _isApplyingTimeline.value = true
+        _timelineApplyError.value = null
         val sourceMessageId = reviewedMessageId
             ?: _timelineReconcileResult.value?.lastProcessedMessageId?.takeIf { it > 0 }
             ?: 0L
@@ -2582,11 +2644,22 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 _liveReconcileDraft.value = null
 
                 dismissTimelineReconcileDialog()
+                postSettingApplyNotice(
+                    message = "已保存时间线与设定",
+                    tone = SettingApplyNoticeTone.Success,
+                    showInspectAction = true
+                )
                 loadConversation()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 Log.e("ChatViewModel", "保存时间线与设定失败", e)
-                _error.value = e.message ?: "保存失败，提取结果和草稿已保留，请重试"
+                val errMsg = e.message ?: "保存失败，提取结果和草稿已保留，请重试"
+                _timelineApplyError.value = errMsg
+                postSettingApplyNotice(
+                    message = errMsg,
+                    tone = SettingApplyNoticeTone.Error,
+                    showInspectAction = false
+                )
             } finally {
                 _isApplyingTimeline.value = false
             }
@@ -3002,6 +3075,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         onError: (String) -> Unit = {}
     ) {
         val sourceText = _uiState.value.suggestedProposal?.sourceText?.takeIf { it.isNotBlank() } ?: return
+        _proposedSettingApplyError.value = null
         _uiState.update { it.copy(suggestedProposal = null) }
         analyzeAndProposeSettingFromInput(
             text = sourceText,
@@ -3012,6 +3086,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun dismissProposedSetting() {
+        _proposedSettingApplyError.value = null
         _uiState.update { it.copy(suggestedProposal = null) }
     }
 
@@ -3022,6 +3097,7 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         onError: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
+            _proposedSettingApplyError.value = null
             try {
                 storySettingsSaveMutex.withLock {
                     val roleplayRepo = AiAssistantApp.instance.roleplayRepository
@@ -3063,12 +3139,24 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         )
                     }
                 }
+                postSettingApplyNotice(
+                    message = "已保存到当前故事专属设定",
+                    tone = SettingApplyNoticeTone.Success,
+                    showInspectAction = true
+                )
                 onSaved()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "应用故事设定失败", e)
-                onError("保存失败，提取设定已保留，请重试")
+                val errMsg = "保存失败，提取设定已保留，请重试"
+                _proposedSettingApplyError.value = errMsg
+                postSettingApplyNotice(
+                    message = errMsg,
+                    tone = SettingApplyNoticeTone.Error,
+                    showInspectAction = false
+                )
+                onError(errMsg)
             }
         }
     }

@@ -108,14 +108,16 @@ fun EditableSettingProposalDialog(
     proposal: ProposedSettingBundle,
     onDismiss: () -> Unit,
     onApply: (List<CharacterProfile>, RoleplayScenario?) -> Unit,
-    onReExtract: (() -> Unit)? = null
+    onReExtract: (() -> Unit)? = null,
+    applyErrorMessage: String? = null
 ) {
     com.aiassistant.ui.screens.chat.story.EditableSettingProposalDialog(
         hazeState = hazeState,
         proposal = proposal,
         onDismiss = onDismiss,
         onApply = onApply,
-        onReExtract = onReExtract
+        onReExtract = onReExtract,
+        applyErrorMessage = applyErrorMessage
     )
 }
 
@@ -148,7 +150,8 @@ fun TimelineReconcileDialog(
     onDismiss: () -> Unit,
     onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
     isApplying: Boolean = false,
-    onReExtract: (() -> Unit)? = null
+    onReExtract: (() -> Unit)? = null,
+    applyErrorMessage: String? = null
 ) {
     com.aiassistant.ui.screens.chat.story.TimelineReconcileDialog(
         hazeState = hazeState,
@@ -156,6 +159,7 @@ fun TimelineReconcileDialog(
         onDismiss = onDismiss,
         onApply = onApply,
         isApplying = isApplying,
-        onReExtract = onReExtract
+        onReExtract = onReExtract,
+        applyErrorMessage = applyErrorMessage
     )
 }

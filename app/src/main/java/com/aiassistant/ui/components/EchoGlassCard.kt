@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.echoPaperTexture
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 import dev.chrisbanes.haze.HazeState
 
 
@@ -68,7 +69,9 @@ fun EchoGlassCard(
                     borderColor ?: if (style.strongOutline) colorScheme.outline else colorScheme.outlineVariant,
                     shape
                 ) else Modifier
-            ), content = content)
+            )
+            .then(if (showBorder) Modifier.echoThemeFrameOrnament(cornerRadius = style.panelCornerRadius) else Modifier),
+            content = content)
         return
     }
     val isDark = colorScheme.background.luminance() < 0.5f

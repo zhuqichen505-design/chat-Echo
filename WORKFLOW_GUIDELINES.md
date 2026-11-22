@@ -26,6 +26,17 @@
 
 ## 本次记录
 
+## 2026-11-22 · 120s 慢响应误显重试修复、审阅面板内部排版与顶部应用提示及三套新主题（未发版）
+
+- 基线 `main/16e0cbc`（源码版本 2.8.49/235，Room v37 / 20 个实体）；工作区原有未跟踪截图/目录未改动未混入；本轮未递增版本、未构建 APK。
+- 改动：
+  1. `GenerationUiState` / `ChatMessageComponents` / `ChatViewModel`：慢响应提示保持 `Connecting` 态且不重置等待计时器，首字/思考到达或真实状态更新时自动取消 `slowTimeoutJob`，彻底消除 120s–300s 间误显“连接重试中”。
+  2. `ChatPendingReviewPanels` / `ChatContextComponents`：保持待确认面板外框位置、440dp 上限与按钮栏不变，重构内部推进时空条、时间线事件卡片（操作/时间/分类胶囊 + 原记录对照）、提取设定分节计数与单卡聚合元数据；`ChatScreenModels` / `ChatViewModel` / `ChatScreen` / `TimelineReconcileDialog` / `EditableSettingProposalDialog` 将所有设定/时间线应用成功与失败提示统一迁至页面上方横幅（含未关闭弹窗内的顶部失败条）。
+  3. `PersonalizationManager` / `EchoThemeStyle` / `EchoPaperTexture` / `Theme` / `Type` / `MarkdownText` / `EchoGlassCard` / `EchoHaze` / `ChatMessageComponents` / `SettingsAppearanceTab`：新增「青瓷」「蓝图」「漆匣」三套细节工艺主题（各自独立底纹、边框装饰、圆角、气泡边饰、排版韵律与浅深双模式高对比配色）。
+- 涉及 19 个源码文件与 3 个领域测试套件（`ChatEnhancementsTest.kt`、`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`）。
+- 冻结验收 `20261122-221737-118`：脚本 / Gradle 退出 0，598.201 秒；96 套件 / 1,126 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 未连接真机；长等待状态切换、审阅卡片内部排版、顶部横幅及三套新主题视觉待真机人工验收。
+
 ## 2026-11-21 · 发布 Echo 2.8.49（时间线/设定提取自动重试与重新提取按键 + API 拖拽跳变修复）
 
 - 基线 `main/ea4e71d`（含 `c057257` API 拖拽跳变修复与 `ea4e71d` 时间线/设定提取自动重试及重新提取按键）；确认实际更新源仅为 `app/chat-Echo`，工作区原有未跟踪截图/目录未改动未混入；版本顺延为 2.8.49/235（仅更新 `app/build.gradle.kts`）；Room v37 / 20 个实体不变。

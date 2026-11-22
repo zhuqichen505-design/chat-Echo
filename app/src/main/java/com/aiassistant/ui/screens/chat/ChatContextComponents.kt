@@ -999,20 +999,57 @@ internal fun SessionSettingChangeDetails(
     evidence: String,
     changeReason: String
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(
-            when (action) {
-                "SUPPLEMENT" -> "补充已有设定 · 保留旧信息"
-                "REVISE" -> "修订已有设定 · 请核对后确认"
-                else -> "新增设定"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (action == "REVISE") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val (actionLabel, badgeContainer, badgeContent) = when (action) {
+        "SUPPLEMENT" -> Triple(
+            "补充已有设定 · 保留旧信息",
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.onSecondaryContainer
         )
-        if (!previousContent.isNullOrBlank()) Text("原设定：$previousContent",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (evidence.isNotBlank()) Text("依据：$evidence", style = MaterialTheme.typography.labelSmall)
-        if (changeReason.isNotBlank()) Text("变更说明：$changeReason", style = MaterialTheme.typography.labelSmall)
+        "REVISE" -> Triple(
+            "修订已有设定 · 请核对后确认",
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+            MaterialTheme.colorScheme.onErrorContainer
+        )
+        else -> Triple(
+            "新增设定",
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = badgeContainer
+        ) {
+            Text(
+                text = actionLabel,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = badgeContent,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+        if (!previousContent.isNullOrBlank()) {
+            Text(
+                text = "原设定：$previousContent",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (evidence.isNotBlank()) {
+            Text(
+                text = "依据：$evidence",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (changeReason.isNotBlank()) {
+            Text(
+                text = "变更说明：$changeReason",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

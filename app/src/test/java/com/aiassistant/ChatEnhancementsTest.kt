@@ -152,6 +152,34 @@ class ChatEnhancementsTest {
     }
 
     @Test
+    fun slowResponseNoticeRemainsConnectingAndPreservesWaitTimer() {
+        val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
+        val slowMsg = "${rules.SLOW_RESPONSE_NOTICE_PREFIX}（已持续 120s+），若为长篇生成或深度推理请耐心稍候，也可随时点击停止..."
+        assertTrue(rules.isSlowResponseNotice(slowMsg))
+        assertEquals(
+            "120s 慢响应安抚提示仍属于首次请求等待，不得误判为 Reconnecting",
+            com.aiassistant.ui.screens.chat.GenerationUiState.Connecting,
+            rules.derive(isGenerating = true, content = "", hasThinking = false, reconnectStatus = slowMsg)
+        )
+        assertNull(
+            "慢响应提示出现时不得改变等待计时器 key，避免计时归零重算",
+            rules.connectTimerKey(slowMsg)
+        )
+        assertEquals(
+            "隐藏思考气泡时仍应保留慢响应提示文案",
+            slowMsg,
+            rules.statusWithoutThinking(com.aiassistant.ui.screens.chat.GenerationUiState.Connecting, slowMsg, contentEmpty = true)
+        )
+        val realRetry = "连接超时，正在尝试重新连接 (1/2)..."
+        assertFalse(rules.isSlowResponseNotice(realRetry))
+        assertEquals(
+            com.aiassistant.ui.screens.chat.GenerationUiState.Reconnecting,
+            rules.derive(isGenerating = true, content = "", hasThinking = false, reconnectStatus = realRetry)
+        )
+        assertEquals(realRetry, rules.connectTimerKey(realRetry))
+    }
+
+    @Test
     fun stoppedRepliesAreNeutralAndDoNotAnimateSuccessfulCompletion() {
         val rules = com.aiassistant.ui.screens.chat.GenerationUiStateRules
         for (content in listOf(rules.stoppedReplyContent(""), rules.stoppedReplyContent("合成部分正文"),

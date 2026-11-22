@@ -217,5 +217,48 @@ internal fun echoTypographyFor(appearancePreset: String): Typography =
             labelLarge = Typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = .4.sp),
             labelMedium = Typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = .5.sp)
         )
+        EchoAppearancePreset.CELADON -> Typography.copy(
+            displayLarge = Typography.displayLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .2.sp),
+            displayMedium = Typography.displayMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .2.sp),
+            displaySmall = Typography.displaySmall.copy(fontFamily = PaperFontFamily, letterSpacing = .15.sp),
+            headlineLarge = Typography.headlineLarge.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Normal, letterSpacing = .4.sp),
+            headlineMedium = Typography.headlineMedium.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Normal, letterSpacing = .35.sp),
+            headlineSmall = Typography.headlineSmall.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Normal, letterSpacing = .3.sp),
+            titleLarge = Typography.titleLarge.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            titleMedium = Typography.titleMedium.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Medium, letterSpacing = .25.sp),
+            bodyLarge = Typography.bodyLarge.copy(lineHeight = 27.sp, letterSpacing = .25.sp),
+            bodyMedium = Typography.bodyMedium.copy(lineHeight = 23.sp, letterSpacing = .2.sp),
+            bodySmall = Typography.bodySmall.copy(lineHeight = 18.sp),
+            labelMedium = Typography.labelMedium.copy(letterSpacing = .4.sp)
+        )
+        EchoAppearancePreset.BLUEPRINT -> Typography.copy(
+            headlineLarge = Typography.headlineLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, letterSpacing = .6.sp),
+            headlineMedium = Typography.headlineMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, letterSpacing = .5.sp),
+            headlineSmall = Typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            titleLarge = Typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, letterSpacing = .5.sp),
+            titleMedium = Typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            titleSmall = Typography.titleSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            labelLarge = Typography.labelLarge.copy(fontFamily = FontFamily.Monospace, letterSpacing = .6.sp),
+            labelMedium = Typography.labelMedium.copy(fontFamily = FontFamily.Monospace, letterSpacing = .7.sp),
+            labelSmall = Typography.labelSmall.copy(fontFamily = FontFamily.Monospace, letterSpacing = .6.sp),
+            bodyLarge = Typography.bodyLarge.copy(lineHeight = 25.sp, letterSpacing = .2.sp),
+            bodyMedium = Typography.bodyMedium.copy(lineHeight = 22.sp, letterSpacing = .15.sp)
+        )
+        EchoAppearancePreset.LACQUER -> Typography.copy(
+            displayLarge = Typography.displayLarge.copy(fontFamily = PaperFontFamily, letterSpacing = .4.sp),
+            displayMedium = Typography.displayMedium.copy(fontFamily = PaperFontFamily, letterSpacing = .35.sp),
+            displaySmall = Typography.displaySmall.copy(fontFamily = PaperFontFamily, letterSpacing = .3.sp),
+            headlineLarge = Typography.headlineLarge.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = .5.sp),
+            headlineMedium = Typography.headlineMedium.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = .45.sp),
+            headlineSmall = Typography.headlineSmall.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            titleLarge = Typography.titleLarge.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.SemiBold, letterSpacing = .6.sp),
+            titleMedium = Typography.titleMedium.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+            titleSmall = Typography.titleSmall.copy(fontFamily = PaperFontFamily, fontWeight = FontWeight.Medium, letterSpacing = .3.sp),
+            bodyLarge = Typography.bodyLarge.copy(fontFamily = PaperFontFamily, lineHeight = 29.sp, letterSpacing = .2.sp),
+            bodyMedium = Typography.bodyMedium.copy(fontFamily = PaperFontFamily, lineHeight = 25.sp, letterSpacing = .15.sp),
+            bodySmall = Typography.bodySmall.copy(fontFamily = PaperFontFamily, lineHeight = 20.sp),
+            labelLarge = Typography.labelLarge.copy(letterSpacing = .35.sp),
+            labelMedium = Typography.labelMedium.copy(letterSpacing = .45.sp)
+        )
         else -> Typography
     }
