@@ -13,6 +13,8 @@ Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格�
 
 APK 元数据与审计：`Echo-v2.9.1.apk` 25,656,459 字节，SHA-256 `be4c300dcd1839ddeae2a90a37bd162d45a67b675b741344fc42043585dc566b`；`com.aiassistant`、2.9.1/236、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目 CRC 全部通过，条目名集合与 2.8.49 一致，仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,500 条（+74 / -25），新增可读中文 17 条均为本版功能与主题提示，隐私扫描新增命中 0。未连接真机，长等待表现、审阅卡片排版、顶部应用横幅及三套新主题视觉待人工验收。
 
+发布核验：版本提交 `88694880fbb56e9057153e4c8fef4b7c6b2925e3` 与 annotated 标签 `v2.9.1`（对象 `c2d5f639af2f7786d89e4b16651c5507797ecd40`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.9.1 Release 为 Latest，唯一附件 `Echo-v2.9.1.apk` 的平台 digest（`sha256:be4c300dcd1839ddeae2a90a37bd162d45a67b675b741344fc42043585dc566b`）、独立下载 SHA-256 与大小（25,656,459 字节）均与本机一致，正文与 `release-notes/latest.md` 逐字一致。按仅保留最新版策略已删除远端旧 v2.8.49 Release 与远端标签；本机 `v2.8.49` 标签（`48086858f217404e64f5b29d152e41b7387a5dc8`）与全部历史 APK 保留未改。隐私核查：暂存区 8 个文件全量与新增行扫描本机路径、用户名、手机号、私网地址、设备标识与真实密钥命中 0（历史文档中仅含既有 `android@android.com` 调试证书常量说明）；提交作者为 `Echo Maintenance <echo-maintenance@users.noreply.github.com>`。
+
 ## 2026-11-22 · 120s 慢响应误显重试修复、审阅面板内部排版与顶部应用提示及三套新主题（未发版）
 
 用户提出三项需求：① 连接超时设为 300s 时，在等待 120s–300s 之间误弹出“连接重试中”，需要修复；② 优化提取时间线和设定成功展示窗口的内部信息排版，窗口位置与大小不变，并将应用设定成功与失败弹窗改为在页面上方显示；③ 新增三套注重细节刻画（不止换色）的不同风格主题，并按实际页面给出预览。

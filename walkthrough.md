@@ -13,6 +13,8 @@ Release 构建 `assembleRelease --no-daemon` 退出 0，5 分 22 秒（323.076 �
 
 APK 审计：450 条目，CRC 全部通过；条目名集合与 2.8.49 完全一致，5 项内容变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 逐字节一致，186 张位图按内容一致；DEX 字符串 32,500 条（较 2.8.49 新增 74 / 移除 25），新增可读中文 17 条均为本版功能与主题提示，隐私扫描新增命中 0。排他复制到本机发布目录（245 → 246 文件，244 → 245 APK），全部历史包保留。
 
+发布核验：版本提交 `8869488` 与 annotated 标签 `v2.9.1`（对象 `c2d5f63`）已推送，远端 main 与 peeled 标签一致；Release 为 Latest，唯一附件平台 digest、独立下载 SHA-256 与大小（25,656,459 字节）均与本机一致，正文与 `release-notes/latest.md` 一致；远端旧 v2.8.49 Release / 标签已撤，本机 `v2.8.49` 标签与全部历史 APK 保留。
+
 设备边界：本轮未连接真机，未验证安装、启动及界面交互；需人工实机复验：① 自定义 300s 超时等待超过 120s 时的胶囊文案与连续递增计时；② 提取后待确认审阅卡片排版及页面上方成功/失败横幅；③ 青瓷、蓝图、漆匣在真机浅深模式下的材质纹路与字体观感。
 
 ## 2026-11-22 · 120s 慢响应误显重试修复、审阅排版与顶部提示及三套新主题（未发版）
