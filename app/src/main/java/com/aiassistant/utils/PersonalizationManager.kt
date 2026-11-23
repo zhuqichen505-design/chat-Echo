@@ -18,8 +18,13 @@ object EchoAppearancePreset {
     const val CELADON = "celadon"
     const val BLUEPRINT = "blueprint"
     const val LACQUER = "lacquer"
+    const val EDITION = "edition"
+    const val SCREENING = "screening"
 
-    val values = listOf(EXISTING, CLEAR_SKY, NIGHT_VOYAGE, INDEX, MONO, DECKLE, COTTON, FOLIO, SONAR, BAUHAUS, CELADON, BLUEPRINT, LACQUER)
+    val values = listOf(
+        EXISTING, CLEAR_SKY, NIGHT_VOYAGE, INDEX, MONO, DECKLE, COTTON, FOLIO, SONAR, BAUHAUS,
+        CELADON, BLUEPRINT, LACQUER, EDITION, SCREENING
+    )
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: EXISTING
 }

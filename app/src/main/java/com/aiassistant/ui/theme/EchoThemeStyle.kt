@@ -10,10 +10,14 @@ import com.aiassistant.utils.EchoAppearancePreset
  * Shared containers consume these tokens so selecting a preset changes the rendered interface,
  * including controls, menus and dialogs, rather than only replacing its accent color.
  */
-enum class EchoSurfacePattern { None, SonarGrid, CeladonCrackle, BlueprintDraft, LacquerFrame }
+enum class EchoSurfacePattern {
+    None, SonarGrid, CeladonCrackle, BlueprintDraft, LacquerFrame, NewsRegister, FilmScanline
+}
 
 /** 卡片、弹窗与气泡共享的细部边框工艺，避免主题停留在单一换色。 */
-enum class EchoFrameOrnament { None, CeramicRim, BlueprintBrackets, LacquerDoubleFrame }
+enum class EchoFrameOrnament {
+    None, CeramicRim, BlueprintBrackets, LacquerDoubleFrame, CropMarks, ReelPerforation
+}
 
 data class EchoThemeStyle(
     val isMonochrome: Boolean = false,
@@ -104,6 +108,28 @@ internal fun echoThemeStyleFor(appearancePreset: String): EchoThemeStyle =
             surfacePattern = EchoSurfacePattern.LacquerFrame,
             frameOrnament = EchoFrameOrnament.LacquerDoubleFrame,
             accentUserBubble = true
+        )
+        EchoAppearancePreset.EDITION -> EchoThemeStyle(
+            panelCornerRadius = 2.dp,
+            controlCornerRadius = 2.dp,
+            dialogCornerRadius = 4.dp,
+            flatSurfaces = true,
+            paperMaterial = EchoPaperMaterial.Newsprint,
+            surfacePattern = EchoSurfacePattern.NewsRegister,
+            frameOrnament = EchoFrameOrnament.CropMarks,
+            accentUserBubble = false,
+            strongOutline = true
+        )
+        EchoAppearancePreset.SCREENING -> EchoThemeStyle(
+            panelCornerRadius = 8.dp,
+            controlCornerRadius = 5.dp,
+            dialogCornerRadius = 10.dp,
+            flatSurfaces = true,
+            paperMaterial = EchoPaperMaterial.ProjectorGrain,
+            surfacePattern = EchoSurfacePattern.FilmScanline,
+            frameOrnament = EchoFrameOrnament.ReelPerforation,
+            accentUserBubble = true,
+            strongOutline = true
         )
         else -> EchoThemeStyle()
     }

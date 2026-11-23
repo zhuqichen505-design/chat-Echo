@@ -151,7 +151,8 @@ fun TimelineReconcileDialog(
     onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
     isApplying: Boolean = false,
     onReExtract: (() -> Unit)? = null,
-    applyErrorMessage: String? = null
+    applyErrorMessage: String? = null,
+    onApplySelection: ((String, List<TimelineEventItem>, List<AtemporalSettingItem>, Boolean, Boolean) -> Unit)? = null
 ) {
     com.aiassistant.ui.screens.chat.story.TimelineReconcileDialog(
         hazeState = hazeState,
@@ -160,6 +161,7 @@ fun TimelineReconcileDialog(
         onApply = onApply,
         isApplying = isApplying,
         onReExtract = onReExtract,
-        applyErrorMessage = applyErrorMessage
+        applyErrorMessage = applyErrorMessage,
+        onApplySelection = onApplySelection
     )
 }

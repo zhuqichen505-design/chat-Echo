@@ -1,5 +1,28 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-24 · 2.9.2 时间线 / 设定独立勾选与晨刊 / 放映室两套新主题
+
+版本 2.9.2/237；Room v37 / 20 个实体不变。本次按用户要求将既有时间线 / 记忆提取改动与新主题一并出包：
+- **时间线 / 设定**：原依据变更二次确认后强行应用（存在覆盖、删除 / 重建则新增）；设定严格校验隔离；单轮审阅与全量 / 断点工作台支持推进时空、时间线事件、提取设定各自独立勾选、局部全选 / 全不选与动态禁用，旧草稿默认选中兼容。
+- **两套细节主题**：「晨刊」使用新闻纸纤维、印刷对准标、裁切角标、宋体正文 / 等宽小字、1.6em 首行缩进与 2dp 直角纸片；「放映室」使用胶片颗粒、扫描线与片边刻度、齿孔描边、场记板斜纹用户气泡、等宽时间码与 8dp 硬质面板。两套均含浅深双模式，全部文本对比度 ≥ 4.5:1，外观预设共 15 套。
+- **共享组件**：`EchoThemeStyle` 新增 `NewsRegister` / `FilmScanline` 页面纹样与 `CropMarks` / `ReelPerforation` 边框工艺；`EchoPaperMaterial` 新增 `Newsprint` / `ProjectorGrain`；`EchoGlassCard`、`EchoHaze`、用户气泡与 Markdown 正文统一消费主题令牌。
+
+冻结验收 `20261124-011632-331`：脚本 / Gradle 退出 0，394.532 秒；96 套件 / 1,134 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，4 分 34 秒（274 秒）。`Echo-v2.9.2.apk` 25,672,843 字节，SHA-256 `dabfd21816956c6c13a17cdfdbaaebd05d2904b9cc450635a7abdd136e6590dd`；`com.aiassistant`、2.9.2/237、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：450 条目且条目名集合与 2.9.1 一致，解压校验通过；`resources.arsc` 哈希一致，186 张位图全部一致；DEX 7,413,312 字节，字符串 32,566 条（+82 / -22），新增可读中文均为本版主题、时间线与设定勾选提示，隐私扫描新增命中 0。排他复制到本机发布目录（246 → 247 文件，245 → 246 APK），全部历史包保留。
+
+设备边界：未连接真机；晨刊 / 放映室在真机浅深模式下的材质、字体与气泡观感，以及时间线二次确认弹窗、两处审阅面板的勾选交互，待人工实机复验。
+
+## 2026-11-23 · 时间线依据变更二次提醒与独立勾选机制（未发版）
+
+源码版本保持 `2.9.1/236`，Room v37 / 20 个实体不变（未构建 APK / 未提交发版）：
+- **时间线依据变更二次确认（1.A）与设定严格校验隔离（2.A）**：`AiRepository` 拆分 `previousEventTimeTag` 并在冲突时抛出 `TimelineBasisChangedException`，经 `ChatViewModel.pendingTimelineBasisConflict` 弹出 `TimelineBasisChangedConfirmDialog` 对照展示库内当前节点与待覆盖/新增内容；点击「仍要应用」后按 `forceApplyChangedTimeline = true` 覆盖原节点或新增插入；设定校验链（`processSavedMessageMemory` / `saveConfirmedMemory` / `applyConfirmedSessionSettings` / `EditableSettingProposalDialog`）保持原样不受影响。
+- **时间线与时空独立勾选**：`PendingTimelineReview` 为推进时空（`applyStoryTime`）与时间线事件（`applyNewEvent`）提供独立勾选卡片（全不选禁用应用）；`TimelineReconcileDialog` 与 `TimelineEventItem`（含 `TimelineDraftManager` 旧草稿默认勾选反序列化）提供“当前故事停留在”与“时间轴发展脉络”逐条复选框及局部全选/全不选，`ChatViewModel.applyReconciledTimeline` 按勾选分流保存且全不选事件不清空库内节点。
+
+冻结验收 `20261123-173922-054`：脚本 / Gradle 退出 0，273.787 秒；96 套件 / 1,133 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0；`app/src` 差异隐私扫描命中 0。设备边界：未连接真机，未验证实机 UI 触摸与二次确认弹窗手感，待人工实机复验。
+
 ## 2026-11-22 · 2.9.1 120s 慢响应修复、审阅排版与顶部应用提示及青瓷/蓝图/漆匣主题
 
 版本 2.9.1/236；Room v37 / 20 个实体不变。本次发版汇总 `b531e30` 已合入 `main` 的三项改动：

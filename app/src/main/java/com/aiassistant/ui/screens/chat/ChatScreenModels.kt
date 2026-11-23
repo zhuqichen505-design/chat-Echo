@@ -55,3 +55,12 @@ data class SettingApplyNotice(
     val showInspectAction: Boolean = true,
     val id: Long = System.nanoTime()
 )
+
+/** 二次确认：待应用的时间线原依据在库内已被修改或删除。 */
+data class PendingTimelineBasisConflict(
+    val proposal: com.aiassistant.data.repository.AutoTimelineUpdateResult,
+    val currentEventContent: String?,
+    val currentTimeTag: String?,
+    val currentCategory: String?,
+    val wasDeletedOrRetimed: Boolean
+)

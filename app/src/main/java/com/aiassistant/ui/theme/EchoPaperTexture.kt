@@ -26,7 +26,9 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
-enum class EchoPaperMaterial { None, Deckle, Cotton, Folio, Celadon, Lacquer }
+enum class EchoPaperMaterial {
+    None, Deckle, Cotton, Folio, Celadon, Lacquer, Newsprint, ProjectorGrain
+}
 
 private data class PaperTextureKey(val material: EchoPaperMaterial, val dark: Boolean, val density: Int)
 private val paperBrushCache = object : LruCache<PaperTextureKey, ShaderBrush>(12) {
@@ -59,6 +61,10 @@ fun Modifier.echoPaperTexture(enabled: Boolean = true, pageRuling: Boolean = fal
     val draftCross = colors.primary.copy(alpha = if (dark) .32f else .24f)
     val lacquerRuleOuter = colors.secondary.copy(alpha = if (dark) .16f else .14f)
     val lacquerRuleInner = colors.primary.copy(alpha = if (dark) .11f else .09f)
+    val registerMark = colors.primary.copy(alpha = if (dark) .14f else .11f)
+    val registerAccent = colors.secondary.copy(alpha = if (dark) .16f else .12f)
+    val scanline = colors.onSurface.copy(alpha = if (dark) .022f else .018f)
+    val sprocketTick = colors.secondary.copy(alpha = if (dark) .12f else .09f)
     return drawBehind {
         brush?.let { drawRect(it) }
         if (material == EchoPaperMaterial.Folio && pageRuling) {
@@ -168,6 +174,38 @@ fun Modifier.echoPaperTexture(enabled: Boolean = true, pageRuling: Boolean = fal
                     tickY += step
                     tickIdx++
                 }
+            }
+        }
+        if (style.surfacePattern == EchoSurfacePattern.NewsRegister && pageRuling) {
+            // 报纸印刷对准标记：四角细 L 标与套准圆点，只出现在整页背景
+            val inset = 10.dp.toPx()
+            val arm = 8.dp.toPx()
+            val stroke = .7.dp.toPx()
+            drawLine(registerMark, Offset(inset, inset), Offset(inset + arm, inset), stroke)
+            drawLine(registerMark, Offset(inset, inset), Offset(inset, inset + arm), stroke)
+            drawLine(registerMark, Offset(size.width - inset - arm, inset), Offset(size.width - inset, inset), stroke)
+            drawLine(registerMark, Offset(size.width - inset, inset), Offset(size.width - inset, inset + arm), stroke)
+            drawLine(registerMark, Offset(inset, size.height - inset), Offset(inset + arm, size.height - inset), stroke)
+            drawLine(registerMark, Offset(inset, size.height - inset - arm), Offset(inset, size.height - inset), stroke)
+            drawLine(registerMark, Offset(size.width - inset - arm, size.height - inset), Offset(size.width - inset, size.height - inset), stroke)
+            drawLine(registerMark, Offset(size.width - inset, size.height - inset - arm), Offset(size.width - inset, size.height - inset), stroke)
+            drawCircle(registerAccent, radius = 1.6.dp.toPx(), center = Offset(size.width - inset - 3.dp.toPx(), inset + 3.dp.toPx()))
+            drawCircle(registerAccent, radius = 1.6.dp.toPx(), center = Offset(inset + 3.dp.toPx(), size.height - inset - 3.dp.toPx()))
+        }
+        if (style.surfacePattern == EchoSurfacePattern.FilmScanline && pageRuling) {
+            // 胶片细扫描线与左右片边刻度，只覆盖整页背景
+            var scanY = 0f
+            while (scanY < size.height) {
+                drawLine(scanline, Offset(0f, scanY), Offset(size.width, scanY), 1.dp.toPx())
+                scanY += 3.dp.toPx()
+            }
+            val step = 26.dp.toPx()
+            val tickLength = 4.dp.toPx()
+            var tickY = 12.dp.toPx()
+            while (tickY < size.height) {
+                drawLine(sprocketTick, Offset(0f, tickY), Offset(tickLength, tickY), .6.dp.toPx())
+                drawLine(sprocketTick, Offset(size.width - tickLength, tickY), Offset(size.width, tickY), .6.dp.toPx())
+                tickY += step
             }
         }
         if (style.surfacePattern == EchoSurfacePattern.LacquerFrame && pageRuling) {
@@ -287,6 +325,80 @@ fun Modifier.echoThemeFrameOrnament(
                     )
                 }
             }
+            EchoFrameOrnament.CropMarks -> {
+                // 晨刊：印刷裁切角标 + 用户气泡朱红索引竖线
+                val arm = (if (compact) 4.dp else 7.dp).toPx()
+                    .coerceAtMost(minOf(size.width, size.height) * 0.30f)
+                val stroke = .9.dp.toPx()
+                val mark = primary.copy(alpha = if (dark) .74f else .62f)
+                val pad = (if (compact) 2.dp else 3.dp).toPx()
+                val w = size.width
+                val h = size.height
+                drawLine(mark, Offset(pad, pad), Offset(pad + arm, pad), stroke)
+                drawLine(mark, Offset(pad, pad), Offset(pad, pad + arm), stroke)
+                drawLine(mark, Offset(w - pad - arm, pad), Offset(w - pad, pad), stroke)
+                drawLine(mark, Offset(w - pad, pad), Offset(w - pad, pad + arm), stroke)
+                drawLine(mark, Offset(pad, h - pad), Offset(pad + arm, h - pad), stroke)
+                drawLine(mark, Offset(pad, h - pad - arm), Offset(pad, h - pad), stroke)
+                drawLine(mark, Offset(w - pad - arm, h - pad), Offset(w - pad, h - pad), stroke)
+                drawLine(mark, Offset(w - pad, h - pad - arm), Offset(w - pad, h - pad), stroke)
+                if (isUserBubble) {
+                    val ruleInset = 4.dp.toPx()
+                    drawRect(
+                        color = primary.copy(alpha = if (dark) .82f else .72f),
+                        topLeft = Offset(0f, ruleInset),
+                        size = Size(2.dp.toPx(), (h - ruleInset * 2f).coerceAtLeast(0f))
+                    )
+                }
+            }
+            EchoFrameOrnament.ReelPerforation -> {
+                // 放映室：卡片上缘齿孔描边；用户气泡叠入场记板斜纹与银幕左线
+                val holeWidth = (if (compact) 5.dp else 7.dp).toPx()
+                val holeHeight = (if (compact) 2.2.dp else 2.8.dp).toPx()
+                val holeGap = (if (compact) 4.dp else 6.dp).toPx()
+                val holeInset = 4.dp.toPx()
+                val holeColor = secondary.copy(alpha = if (dark) .30f else .26f)
+                if (!isUserBubble) {
+                    var holeX = holeInset + 2.dp.toPx()
+                    while (holeX + holeWidth <= size.width - holeInset) {
+                        drawRoundRect(
+                            color = holeColor,
+                            topLeft = Offset(holeX, holeInset),
+                            size = Size(holeWidth, holeHeight),
+                            cornerRadius = CornerRadius(holeHeight / 2f, holeHeight / 2f),
+                            style = Stroke(width = .65.dp.toPx())
+                        )
+                        holeX += holeWidth + holeGap
+                    }
+                }
+                if (isUserBubble) {
+                    val band = 5.dp.toPx()
+                    val horizontalInset = 7.dp.toPx()
+                    if (size.width > horizontalInset * 2f && size.height > band * 2f) {
+                        val bandTop = 2.dp.toPx()
+                        drawRect(
+                            color = primary.copy(alpha = if (dark) .24f else .18f),
+                            topLeft = Offset(horizontalInset, bandTop),
+                            size = Size(size.width - horizontalInset * 2f, band)
+                        )
+                        var stripeX = horizontalInset - band
+                        while (stripeX < size.width - horizontalInset) {
+                            drawLine(
+                                color = secondary.copy(alpha = if (dark) .48f else .42f),
+                                start = Offset(stripeX, bandTop + band),
+                                end = Offset(stripeX + band, bandTop),
+                                strokeWidth = 1.1.dp.toPx()
+                            )
+                            stripeX += band * 2f
+                        }
+                        drawRect(
+                            color = secondary.copy(alpha = .62f),
+                            topLeft = Offset(0f, band + 5.dp.toPx()),
+                            size = Size(1.6.dp.toPx(), (size.height - band - 10.dp.toPx()).coerceAtLeast(0f))
+                        )
+                    }
+                }
+            }
             EchoFrameOrnament.None -> Unit
         }
     }
@@ -303,22 +415,30 @@ internal fun createPaperTexture(material: EchoPaperMaterial, dark: Boolean, dens
         EchoPaperMaterial.Folio -> 103
         EchoPaperMaterial.Celadon -> 149
         EchoPaperMaterial.Lacquer -> 197
+        EchoPaperMaterial.Newsprint -> 233
+        EchoPaperMaterial.ProjectorGrain -> 263
         EchoPaperMaterial.None -> 0
     })
     val rgb = when {
         dark && material == EchoPaperMaterial.Celadon -> 0xCFE8E0
         dark && material == EchoPaperMaterial.Lacquer -> 0xE8C88A
+        dark && material == EchoPaperMaterial.Newsprint -> 0xD8CDBB
+        dark && material == EchoPaperMaterial.ProjectorGrain -> 0xD9CFC0
         dark -> 0xE6DEC9
         material == EchoPaperMaterial.Deckle -> 0x745E3F
         material == EchoPaperMaterial.Folio -> 0x75644F
         material == EchoPaperMaterial.Celadon -> 0x4E726B
         material == EchoPaperMaterial.Lacquer -> 0x7A5736
+        material == EchoPaperMaterial.Newsprint -> 0x6E6250
+        material == EchoPaperMaterial.ProjectorGrain -> 0x6B5F4C
         else -> 0x647477
     }
     val maximumAlpha = if (dark) {
         when (material) {
             EchoPaperMaterial.Celadon -> 7
             EchoPaperMaterial.Lacquer -> 8
+            EchoPaperMaterial.Newsprint -> 7
+            EchoPaperMaterial.ProjectorGrain -> 9
             else -> 9
         }
     } else when (material) {
@@ -326,12 +446,61 @@ internal fun createPaperTexture(material: EchoPaperMaterial, dark: Boolean, dens
         EchoPaperMaterial.Folio -> 12
         EchoPaperMaterial.Celadon -> 10
         EchoPaperMaterial.Lacquer -> 11
+        EchoPaperMaterial.Newsprint -> 16
+        EchoPaperMaterial.ProjectorGrain -> 14
         else -> 15
     }
     val pixels = IntArray(side * side) { (random.nextInt(maximumAlpha + 1) shl 24) or rgb }
     bitmap.setPixels(pixels, 0, side, 0, 0, side, side)
     val canvas = Canvas(bitmap)
     when (material) {
+        EchoPaperMaterial.Newsprint -> {
+            // 新闻纸：细密短纤维与轻微油墨颗粒
+            val fiberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = rgb or ((if (dark) 11 else 18) shl 24)
+                strokeWidth = (.3f * scale).coerceAtLeast(.42f)
+                strokeCap = Paint.Cap.ROUND
+            }
+            repeat(190) {
+                val x = random.nextFloat() * side
+                val y = random.nextFloat() * side
+                val length = (1f + random.nextFloat() * 3.2f) * scale
+                canvas.drawLine(x, y, x + length, y + (random.nextFloat() - .5f) * .8f * scale, fiberPaint)
+            }
+            val fleckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = rgb or ((if (dark) 9 else 15) shl 24)
+                style = Paint.Style.FILL
+            }
+            repeat(24) {
+                canvas.drawCircle(random.nextFloat() * side, random.nextFloat() * side, (.4f + random.nextFloat() * .7f) * scale, fleckPaint)
+            }
+        }
+        EchoPaperMaterial.ProjectorGrain -> {
+            // 放映室：细胶片颗粒 + 极少量竖向片痕
+            val grainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = rgb or ((if (dark) 12 else 16) shl 24)
+                style = Paint.Style.FILL
+            }
+            repeat(170) {
+                canvas.drawCircle(
+                    random.nextFloat() * side,
+                    random.nextFloat() * side,
+                    (.35f + random.nextFloat() * .65f) * scale,
+                    grainPaint
+                )
+            }
+            val scratchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = rgb or ((if (dark) 8 else 11) shl 24)
+                strokeWidth = (.35f * scale).coerceAtLeast(.45f)
+                strokeCap = Paint.Cap.ROUND
+            }
+            repeat(7) {
+                val x = random.nextFloat() * side
+                val y = random.nextFloat() * side
+                val length = (10f + random.nextFloat() * 26f) * scale
+                canvas.drawLine(x, y, x + (random.nextFloat() - .5f) * 1.2f * scale, y + length, scratchPaint)
+            }
+        }
         EchoPaperMaterial.Celadon -> {
             // 瓷釉微矿粒与极淡窑变气孔点
             val speckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

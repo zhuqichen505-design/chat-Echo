@@ -31,6 +31,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.aiassistant.data.repository.AutoTimelineUpdateResult
 import com.aiassistant.domain.model.PendingMemoryCandidate
 import com.aiassistant.ui.components.EchoGlassCard
+import com.aiassistant.ui.components.EchoGlassDialog
 import com.aiassistant.ui.components.echoCheckboxColors
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.utils.TimelineCategory
@@ -292,10 +293,16 @@ private fun PendingTimelineReview(
     var storyTime by remember(proposal.proposalId) { mutableStateOf(proposal.updatedStoryTime.orEmpty()) }
     var eventTime by remember(proposal.proposalId) { mutableStateOf(proposal.newEvent?.timeTag.orEmpty()) }
     var eventContent by remember(proposal.proposalId) { mutableStateOf(proposal.newEvent?.content.orEmpty()) }
+    var applyStoryTime by remember(proposal.proposalId) { mutableStateOf(proposal.applyStoryTime) }
+    var applyNewEvent by remember(proposal.proposalId) { mutableStateOf(proposal.applyNewEvent) }
     var settings by remember(proposal.proposalId) { mutableStateOf(proposal.atemporalSettings.map { it.copy() }) }
     val scrollState = remember(proposal.proposalId) { ScrollState(0) }
     val hasExtractedContent = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || settings.isNotEmpty()
     val isFailureOnly = !proposal.extractionErrorMessage.isNullOrBlank() && !hasExtractedContent
+    val hasSelectedStoryTime = applyStoryTime && storyTime.isNotBlank()
+    val hasSelectedEvent = applyNewEvent && proposal.newEvent != null && eventContent.isNotBlank()
+    val hasSelectedSetting = settings.any { it.isSelected && it.content.isNotBlank() }
+    val canApplyAny = hasSelectedStoryTime || hasSelectedEvent || hasSelectedSetting
     PendingReviewCard(
         reviewKey = proposal.proposalId,
         title = when {
@@ -341,39 +348,119 @@ private fun PendingTimelineReview(
             }
             if (editing) {
                 if (!proposal.updatedStoryTime.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { applyStoryTime = !applyStoryTime },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = applyStoryTime,
+                            onCheckedChange = null,
+                            colors = echoCheckboxColors(),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "应用推进时空",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     OutlinedTextField(value = storyTime, onValueChange = { storyTime = it },
                         label = { Text("推进时空") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
                 if (proposal.newEvent != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { applyNewEvent = !applyNewEvent },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = applyNewEvent,
+                            onCheckedChange = null,
+                            colors = echoCheckboxColors(),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "应用时间线事件",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     OutlinedTextField(value = eventTime, onValueChange = { eventTime = it },
                         label = { Text("事件时间节点") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = eventContent, onValueChange = { eventContent = it },
                         label = { Text("事件内容") }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth())
                 }
                 settings.forEachIndexed { index, setting ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            settings = settings.mapIndexed { i, item ->
+                                if (i == index) item.copy(isSelected = !item.isSelected) else item
+                            }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = setting.isSelected,
+                            onCheckedChange = null,
+                            colors = echoCheckboxColors(),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "应用设定 · ${setting.category}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     OutlinedTextField(value = setting.content, onValueChange = { value ->
                         settings = settings.mapIndexed { i, item -> if (i == index) item.copy(content = value) else item }
                     }, label = { Text("设定 · ${setting.category}") }, modifier = Modifier.fillMaxWidth(),
                         minLines = 1, maxLines = 4)
                 }
             } else {
-                // 1. 推进时空：顶部醒目紧凑条
+                // 1. 推进时空：支持单独勾选是否应用
                 proposal.updatedStoryTime?.takeIf { it.isNotBlank() }?.let { updatedTime ->
+                    val timeShape = RoundedCornerShape(9.dp)
                     Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
-                        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
-                        modifier = Modifier.fillMaxWidth()
+                        shape = timeShape,
+                        color = if (applyStoryTime) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
+                        } else {
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.44f)
+                        },
+                        border = BorderStroke(
+                            0.75.dp,
+                            if (applyStoryTime) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(timeShape)
+                            .clickable { applyStoryTime = !applyStoryTime }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Checkbox(
+                                checked = applyStoryTime,
+                                onCheckedChange = null,
+                                colors = echoCheckboxColors(),
+                                modifier = Modifier.size(20.dp)
+                            )
                             Icon(
                                 Icons.Default.Schedule,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = if (applyStoryTime) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
@@ -384,7 +471,11 @@ private fun PendingTimelineReview(
                             Text(
                                 text = updatedTime,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (applyStoryTime) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                                },
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f)
                             )
@@ -392,53 +483,77 @@ private fun PendingTimelineReview(
                     }
                 }
 
-                // 2. 时间线事件：胶囊标签行 + 原事件对照 + 清晰正文
+                // 2. 时间线事件：独立勾选是否应用 + 胶囊标签行 + 原事件对照 + 清晰正文
                 proposal.newEvent?.let { event ->
                     val isUpdate = proposal.action == "UPDATE"
                     val categoryColor = remember(event.category) { parseTimelineCategoryColor(event.category) }
-                    PendingStructuredItemCard(selected = true) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                    PendingStructuredItemCard(
+                        selected = applyNewEvent,
+                        onClick = { applyNewEvent = !applyNewEvent }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            ReviewTagBadge(
-                                text = if (isUpdate) "更新事件" else "新增事件",
-                                containerColor = if (isUpdate) {
-                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
-                                } else {
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
-                                },
-                                contentColor = if (isUpdate) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                }
+                            Checkbox(
+                                checked = applyNewEvent,
+                                onCheckedChange = null,
+                                colors = echoCheckboxColors(),
+                                modifier = Modifier.padding(top = 2.dp).size(20.dp)
                             )
-                            if (event.timeTag.isNotBlank()) {
-                                ReviewTagBadge(
-                                    text = event.timeTag,
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    ReviewTagBadge(
+                                        text = if (isUpdate) "更新事件" else "新增事件",
+                                        containerColor = if (isUpdate) {
+                                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                                        } else {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                                        },
+                                        contentColor = if (isUpdate) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        }
+                                    )
+                                    if (event.timeTag.isNotBlank()) {
+                                        ReviewTagBadge(
+                                            text = event.timeTag,
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    ReviewTagBadge(
+                                        text = event.category.displayName,
+                                        containerColor = categoryColor.copy(alpha = 0.14f),
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
+                                        leadingDotColor = categoryColor
+                                    )
+                                }
+                                if (isUpdate && !proposal.previousEventContent.isNullOrBlank()) {
+                                    ReviewPreviousQuoteBlock(
+                                        label = "原记录",
+                                        content = proposal.previousEventContent
+                                    )
+                                }
+                                Text(
+                                    text = event.content,
+                                    style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
+                                    color = if (applyNewEvent) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                                    }
                                 )
                             }
-                            ReviewTagBadge(
-                                text = event.category.displayName,
-                                containerColor = categoryColor.copy(alpha = 0.14f),
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                                leadingDotColor = categoryColor
-                            )
                         }
-                        if (isUpdate && !proposal.previousEventContent.isNullOrBlank()) {
-                            ReviewPreviousQuoteBlock(
-                                label = "原记录",
-                                content = proposal.previousEventContent
-                            )
-                        }
-                        Text(
-                            text = event.content,
-                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
                     }
                 }
 
@@ -527,21 +642,39 @@ private fun PendingTimelineReview(
                     storyTime = proposal.updatedStoryTime.orEmpty()
                     eventTime = proposal.newEvent?.timeTag.orEmpty()
                     eventContent = proposal.newEvent?.content.orEmpty()
+                    applyStoryTime = proposal.applyStoryTime
+                    applyNewEvent = proposal.applyNewEvent
                     settings = proposal.atemporalSettings.map { it.copy() }
                     editing = false
                 }) { Text("取消编辑") }
                 Button(
-                    enabled = (proposal.newEvent == null || eventContent.isNotBlank()) &&
-                        (storyTime.isNotBlank() || eventContent.isNotBlank() || settings.any { it.isSelected && it.content.isNotBlank() }),
-                    onClick = { onApply(proposal.copy(updatedStoryTime = storyTime.trim().ifBlank { null },
-                        newEvent = proposal.newEvent?.copy(timeTag = eventTime.trim(), content = eventContent.trim()),
-                        atemporalSettings = settings)) }
+                    enabled = (!applyNewEvent || proposal.newEvent == null || eventContent.isNotBlank()) && canApplyAny,
+                    onClick = {
+                        onApply(
+                            proposal.copy(
+                                updatedStoryTime = storyTime.trim().ifBlank { null },
+                                newEvent = proposal.newEvent?.copy(timeTag = eventTime.trim(), content = eventContent.trim()),
+                                atemporalSettings = settings,
+                                applyStoryTime = applyStoryTime,
+                                applyNewEvent = applyNewEvent
+                            )
+                        )
+                    }
                 ) { Text("应用") }
             } else {
                 TextButton(enabled = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || settings.isNotEmpty(),
                     onClick = { editing = true }) { Text("编辑") }
-                Button(enabled = proposal.newEvent != null || !proposal.updatedStoryTime.isNullOrBlank() || settings.any { it.isSelected && it.content.isNotBlank() },
-                    onClick = { onApply(proposal.copy(atemporalSettings = settings)) }) { Text("确认应用") }
+                Button(enabled = canApplyAny,
+                    onClick = {
+                        onApply(
+                            proposal.copy(
+                                atemporalSettings = settings,
+                                applyStoryTime = applyStoryTime,
+                                applyNewEvent = applyNewEvent
+                            )
+                        )
+                    }
+                ) { Text("确认应用") }
             }
         }
     )
@@ -732,4 +865,89 @@ private fun parseTimelineCategoryColor(category: TimelineCategory): Color = try 
     Color(android.graphics.Color.parseColor(category.tagColorHex))
 } catch (_: Exception) {
     Color(0xFF2196F3)
+}
+
+/** 二次确认弹窗：时间线原事实依据在库内被修改或删除时，提醒用户但不禁止继续应用。 */
+@Composable
+internal fun TimelineBasisChangedConfirmDialog(
+    conflict: PendingTimelineBasisConflict,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    hazeState: dev.chrisbanes.haze.HazeState? = null
+) {
+    val proposedEvent = conflict.proposal.newEvent
+    val currentText = conflict.currentEventContent?.trim().orEmpty()
+    val hasCurrentNode = currentText.isNotBlank()
+    EchoGlassDialog(
+        hazeState = hazeState,
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(24.dp)
+            )
+        },
+        title = {
+            Text(
+                text = "原时间线依据已改变",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (hasCurrentNode) {
+                        "提取该条时间线时参照的原节点已在当前时间线中被修改。是否仍要用当前待确认内容更新覆盖该节点？"
+                    } else {
+                        "提取该条时间线时参照的原节点在当前时间线中已被删除或重建。是否改为新增为一条时间线节点？"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (hasCurrentNode) {
+                    val currentTag = conflict.currentTimeTag?.takeIf { it.isNotBlank() }?.let { "[$it] " }.orEmpty()
+                    ReviewPreviousQuoteBlock(
+                        label = "当前库内节点",
+                        content = "$currentTag$currentText"
+                    )
+                }
+                proposedEvent?.let { ev ->
+                    val tagPrefix = ev.timeTag.takeIf { it.isNotBlank() }?.let { "[$it] " }.orEmpty()
+                    ReviewPreviousQuoteBlock(
+                        label = if (hasCurrentNode) "将要覆盖应用的内容" else "将要新增的内容",
+                        content = "$tagPrefix${ev.content}"
+                    )
+                }
+                Text(
+                    text = "注：这只控制本次时间线写入，已勾选设定的提取与校验规则不受影响。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.heightIn(min = 44.dp)
+            ) {
+                Text("仍要应用")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 44.dp)
+            ) {
+                Text("取消")
+            }
+        }
+    )
 }

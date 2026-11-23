@@ -518,6 +518,8 @@ internal fun MessageBubble(
         themeStyle.frameOrnament == EchoFrameOrnament.CeramicRim -> 20.dp
         themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> 2.dp
         themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> 10.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.CropMarks -> 2.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.ReelPerforation -> if (isUser) 9.dp else 7.dp
         themeStyle.cutCorners -> if (isUser) 10.dp else 8.dp
         themeStyle.hardShadow -> if (isUser) 3.dp else 2.dp
         themeStyle.paperMaterial != EchoPaperMaterial.None -> if (isUser) 5.dp else 3.dp
@@ -528,6 +530,9 @@ internal fun MessageBubble(
             if (isUser) RoundedCornerShape(20.dp, 6.dp, 20.dp, 20.dp) else RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> RoundedCornerShape(2.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> RoundedCornerShape(10.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.CropMarks -> RoundedCornerShape(2.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.ReelPerforation ->
+            RoundedCornerShape(if (isUser) 9.dp else 7.dp)
         themeStyle.cutCorners -> CutCornerShape(if (isUser) 10.dp else 8.dp)
         themeStyle.hardShadow -> RoundedCornerShape(if (isUser) 3.dp else 2.dp)
         themeStyle.paperMaterial != EchoPaperMaterial.None ->

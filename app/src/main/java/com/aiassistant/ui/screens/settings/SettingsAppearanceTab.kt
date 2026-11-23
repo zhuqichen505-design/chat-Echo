@@ -514,7 +514,9 @@ fun AppearanceTab(
                         AppearancePresetOption(EchoAppearancePreset.BAUHAUS, "构型", "几何色块、粗描边、硬质投影", listOf(0xFFF2EDDF, 0xFFC93F32, 0xFF1668B4)),
                         AppearancePresetOption(EchoAppearancePreset.CELADON, "青瓷", "天青冰裂釉纹、双唇柔润圆角、宋瓷书题", listOf(0xFFEDF3F0, 0xFF286860, 0xFF825F32)),
                         AppearancePresetOption(EchoAppearancePreset.BLUEPRINT, "蓝图", "工程标尺网格、注册角标线框、等宽技术标头", listOf(0xFF0A1B2E, 0xFF7EC0FF, 0xFFA83D2A)),
-                        AppearancePresetOption(EchoAppearancePreset.LACQUER, "漆匣", "丝缎大漆横纹、描金内双框、典籍缩进排版", listOf(0xFF151110, 0xFFE4B96E, 0xFF9E2B22))
+                        AppearancePresetOption(EchoAppearancePreset.LACQUER, "漆匣", "丝缎大漆横纹、描金内双框、典籍缩进排版", listOf(0xFF151110, 0xFFE4B96E, 0xFF9E2B22)),
+                        AppearancePresetOption(EchoAppearancePreset.EDITION, "晨刊", "新闻纸、宋体正文、裁切角标与双线报头", listOf(0xFFF1ECE1, 0xFFA63A2B, 0xFF1B1A17)),
+                        AppearancePresetOption(EchoAppearancePreset.SCREENING, "放映室", "胶片齿孔、场记板气泡、字幕条与时间码", listOf(0xFF0B0C0E, 0xFFD9675A, 0xFFC8B78D))
                     )
                     presets.forEach { preset ->
                         val selected = settings.appearancePreset == preset.id

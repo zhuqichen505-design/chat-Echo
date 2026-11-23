@@ -144,6 +144,7 @@ import com.aiassistant.domain.model.RoleplaySession
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoPrimaryButton
 import com.aiassistant.ui.components.EchoGlassButton
+import com.aiassistant.ui.components.echoCheckboxColors
 import com.aiassistant.ui.screens.roleplay.ConflictAction
 import com.aiassistant.ui.theme.EchoTokens
 
@@ -167,9 +168,12 @@ fun TimelineReconcileDialog(
     onApply: (String, List<TimelineEventItem>, List<AtemporalSettingItem>) -> Unit,
     isApplying: Boolean = false,
     onReExtract: (() -> Unit)? = null,
-    applyErrorMessage: String? = null
+    applyErrorMessage: String? = null,
+    onApplySelection: ((String, List<TimelineEventItem>, List<AtemporalSettingItem>, Boolean, Boolean) -> Unit)? = null
 ) {
     var storyTime by remember(initialResult) { mutableStateOf(initialResult.currentStoryTime) }
+    val hasInitialStoryTime = initialResult.currentStoryTime.isNotBlank() && initialResult.currentStoryTime != "未确定"
+    var applyStoryTime by remember(initialResult) { mutableStateOf(hasInitialStoryTime) }
     val events = remember(initialResult) {
         mutableStateListOf<TimelineEventItem>().apply {
             addAll(initialResult.events.map { it.copy() })
@@ -416,33 +420,45 @@ fun TimelineReconcileDialog(
                     }
                 }
 
-                // 1. 顶部当前故事时间编辑卡片
+                // 1. 顶部当前故事时间编辑卡片（独立勾选是否应用）
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (applyStoryTime) 0.35f else 0.16f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (applyStoryTime) 0.45f else 0.22f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Checkbox(
+                            checked = applyStoryTime,
+                            onCheckedChange = { applyStoryTime = it },
+                            colors = echoCheckboxColors(),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Icon(
                             Icons.Default.Schedule,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = if (applyStoryTime) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "当前故事停留在：",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (applyStoryTime) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         BasicTextField(
                             value = storyTime,
-                            onValueChange = { storyTime = it },
+                            onValueChange = { newVal ->
+                                storyTime = newVal
+                                if (!applyStoryTime && newVal.isNotBlank() && newVal != "未确定") {
+                                    applyStoryTime = true
+                                }
+                            },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 color = MaterialTheme.colorScheme.primary,
@@ -784,27 +800,67 @@ fun TimelineReconcileDialog(
                     }
 
                     if (showTimelineEvents) {
-                        // B. 编年史事件列表标题
+                        // B. 编年史事件列表标题（支持全选 / 全不选）
                         item {
+                            val selectedEventsCount = events.count { it.isSelected }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "时间轴发展脉络 (${filteredEvents.size}/${events.size}条)：",
+                                    text = if (filteredEvents.size == events.size) {
+                                        "时间轴发展脉络 ($selectedEventsCount/${events.size}条)："
+                                    } else {
+                                        "时间轴发展脉络 (筛选 ${filteredEvents.size} · 已选 $selectedEventsCount/${events.size})："
+                                    },
                                     style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                if (selectedTimeFilter != "全部" || selectedCategoryFilter != null) {
-                                    TextButton(
-                                        onClick = {
-                                            selectedTimeFilter = "全部"
-                                            selectedCategoryFilter = null
-                                        },
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text("重置筛选", style = MaterialTheme.typography.labelSmall)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (events.isNotEmpty()) {
+                                        val filteredIds = filteredEvents.map { it.id }.toSet()
+                                        TextButton(
+                                            onClick = {
+                                                for (i in events.indices) {
+                                                    if (events[i].id in filteredIds) {
+                                                        events[i] = events[i].copy(isSelected = true)
+                                                    }
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("全选", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                                        }
+                                        TextButton(
+                                            onClick = {
+                                                for (i in events.indices) {
+                                                    if (events[i].id in filteredIds) {
+                                                        events[i] = events[i].copy(isSelected = false)
+                                                    }
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("全不选", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                    if (selectedTimeFilter != "全部" || selectedCategoryFilter != null) {
+                                        TextButton(
+                                            onClick = {
+                                                selectedTimeFilter = "全部"
+                                                selectedCategoryFilter = null
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("重置筛选", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                                        }
                                     }
                                 }
                             }
@@ -831,14 +887,14 @@ fun TimelineReconcileDialog(
                                     Box(
                                         modifier = Modifier
                                             .size(14.dp)
-                                            .background(catColor.copy(alpha = 0.22f), CircleShape)
-                                            .border(2.dp, catColor, CircleShape),
+                                            .background(catColor.copy(alpha = if (item.isSelected) 0.22f else 0.10f), CircleShape)
+                                            .border(2.dp, catColor.copy(alpha = if (item.isSelected) 1f else 0.4f), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Box(
                                             modifier = Modifier
                                                 .size(5.dp)
-                                                .background(catColor, CircleShape)
+                                                .background(catColor.copy(alpha = if (item.isSelected) 1f else 0.4f), CircleShape)
                                         )
                                     }
 
@@ -864,8 +920,8 @@ fun TimelineReconcileDialog(
                                 // 事件编辑卡片
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                                    border = BorderStroke(1.dp, catColor.copy(alpha = 0.35f)),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = if (item.isSelected) 0.72f else 0.36f),
+                                    border = BorderStroke(1.dp, catColor.copy(alpha = if (item.isSelected) 0.35f else 0.16f)),
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(bottom = 6.dp)
@@ -874,11 +930,23 @@ fun TimelineReconcileDialog(
                                         modifier = Modifier.padding(10.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        // 头部操作行：类别切换胶囊 + 时间标签修改 + 相对时间距离徽章 + 删除
+                                        // 头部操作行：勾选 + 类别切换胶囊 + 时间标签修改 + 相对时间距离徽章 + 删除
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Checkbox(
+                                                checked = item.isSelected,
+                                                onCheckedChange = { checked ->
+                                                    val idxInMaster = events.indexOfFirst { it.id == item.id }
+                                                    if (idxInMaster != -1) {
+                                                        events[idxInMaster] = item.copy(isSelected = checked)
+                                                    }
+                                                },
+                                                colors = echoCheckboxColors(),
+                                                modifier = Modifier.size(26.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
                                             // 类别胶囊 (点击循环切换分类)
                                             Surface(
                                                 shape = RoundedCornerShape(6.dp),
@@ -1056,6 +1124,17 @@ fun TimelineReconcileDialog(
             }
         },
         buttons = {
+            val selectedEvents = events.filter { it.isSelected && it.content.isNotBlank() }
+            val confirmedSettings = atemporalSettings.filter { it.isSelected && it.content.isNotBlank() }
+            val applyTimelineEvents = selectedEvents.isNotEmpty()
+            val hasAnythingToApply = (applyStoryTime && storyTime.isNotBlank()) || applyTimelineEvents || confirmedSettings.isNotEmpty()
+            val saveButtonLabel = when {
+                isApplying -> "保存中…"
+                (applyStoryTime || applyTimelineEvents) && confirmedSettings.isNotEmpty() -> "保存时间线与独立设定"
+                applyStoryTime || applyTimelineEvents -> "保存时间线"
+                confirmedSettings.isNotEmpty() -> "仅保存独立设定"
+                else -> "请至少选择一项"
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1087,7 +1166,7 @@ fun TimelineReconcileDialog(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = "时间节点 ${events.size} 条",
+                                text = "时间节点 ${events.count { it.isSelected }}/${events.size} 条",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -1106,9 +1185,9 @@ fun TimelineReconcileDialog(
                         }
 
                         Text(
-                            text = storyTime.ifBlank { "未指定时间" },
+                            text = if (applyStoryTime) storyTime.ifBlank { "未指定时间" } else "保持原时间",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (applyStoryTime) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -1143,17 +1222,24 @@ fun TimelineReconcileDialog(
                     }
 
                     // 保存并同步到记忆按钮 (高级 Echo 渐变流动光泽立体胶囊)
+                    val buttonEnabled = !isApplying && hasAnythingToApply
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = Color.Transparent,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                        border = BorderStroke(
+                            1.dp,
+                            if (buttonEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp)
-                            .clickable(enabled = !isApplying) {
-                                val validEvents = events.filter { it.content.isNotBlank() }
-                                val confirmedSettings = atemporalSettings.filter { it.isSelected && it.content.isNotBlank() }
-                                onApply(storyTime, validEvents, confirmedSettings)
+                            .clickable(enabled = buttonEnabled) {
+                                if (onApplySelection != null) {
+                                    onApplySelection(storyTime, selectedEvents, confirmedSettings, applyStoryTime, applyTimelineEvents)
+                                } else {
+                                    onApply(storyTime, selectedEvents, confirmedSettings)
+                                }
                             }
                     ) {
                         Box(
@@ -1161,10 +1247,17 @@ fun TimelineReconcileDialog(
                                 .fillMaxSize()
                                 .background(
                                     Brush.horizontalGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.primary,
-                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.9f)
-                                        )
+                                        colors = if (buttonEnabled) {
+                                            listOf(
+                                                MaterialTheme.colorScheme.primary,
+                                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.9f)
+                                            )
+                                        } else {
+                                            listOf(
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                            )
+                                        }
                                     )
                                 )
                                 .padding(horizontal = 16.dp),
@@ -1177,15 +1270,15 @@ fun TimelineReconcileDialog(
                                 Icon(
                                     Icons.Default.BookmarkAdded,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = if (buttonEnabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (isApplying) "保存中…" else "保存时间线与独立设定",
+                                    text = saveButtonLabel,
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = if (buttonEnabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }

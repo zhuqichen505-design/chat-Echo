@@ -768,7 +768,9 @@ class RetryPreferencesTest {
             EchoAppearancePreset.BAUHAUS,
             EchoAppearancePreset.CELADON,
             EchoAppearancePreset.BLUEPRINT,
-            EchoAppearancePreset.LACQUER
+            EchoAppearancePreset.LACQUER,
+            EchoAppearancePreset.EDITION,
+            EchoAppearancePreset.SCREENING
         )) {
             assertTrue("纸本主题必须是可持久化的有效预设", preset in EchoAppearancePreset.values)
             assertTrue(manager.saveSettings(manager.getSettings().copy(appearancePreset = preset)))

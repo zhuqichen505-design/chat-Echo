@@ -42,7 +42,31 @@ object TimelineDraftManager {
     private const val TAG = "TimelineDraftManager"
     private const val DRAFT_DIR_NAME = "timeline_drafts"
 
-    private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+    private val gson: Gson = GsonBuilder()
+        .registerTypeAdapter(
+            TimelineEventItem::class.java,
+            com.google.gson.JsonDeserializer { json, _, _ ->
+                val obj = json.asJsonObject
+                val rawCat = obj.get("category")?.takeUnless { it.isJsonNull }?.let {
+                    runCatching { it.asString }.getOrNull()
+                }
+                val parsedCat = rawCat?.let { name ->
+                    TimelineCategory.entries.firstOrNull { it.name == name } ?: TimelineCategory.fromKey(name)
+                } ?: TimelineCategory.PLOT_EVENT
+                TimelineEventItem(
+                    id = obj.get("id")?.takeUnless { it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() }
+                        ?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
+                    timeTag = obj.get("timeTag")?.takeUnless { it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() }.orEmpty(),
+                    content = obj.get("content")?.takeUnless { it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() }.orEmpty(),
+                    category = parsedCat,
+                    isSelected = obj.get("isSelected")?.takeUnless { it.isJsonNull }?.let {
+                        runCatching { it.asBoolean }.getOrNull()
+                    } ?: true
+                )
+            }
+        )
+        .setPrettyPrinting()
+        .create()
 
     private fun getDraftDir(context: Context): File {
         val dir = File(context.filesDir, DRAFT_DIR_NAME)

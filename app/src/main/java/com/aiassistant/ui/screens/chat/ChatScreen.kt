@@ -279,6 +279,7 @@ fun ChatScreen(
     val settingApplyNotice by viewModel.settingApplyNotice.collectAsState()
     val timelineApplyError by viewModel.timelineApplyError.collectAsState()
     val proposedSettingApplyError by viewModel.proposedSettingApplyError.collectAsState()
+    val pendingTimelineBasisConflict by viewModel.pendingTimelineBasisConflict.collectAsState()
     val pendingTimelineProposal by viewModel.pendingTimelineProposal.collectAsState()
     val timelineExtractionCount by viewModel.timelineExtractionCount.collectAsState()
     val liveReconcileDraft by viewModel.liveReconcileDraft.collectAsState()
@@ -2013,8 +2014,26 @@ fun ChatScreen(
             onApply = { currentTime, events, confirmedSettings ->
                 viewModel.applyReconciledTimeline(currentTime, events, confirmedSettings)
             },
+            onApplySelection = { currentTime, events, confirmedSettings, applyStoryTime, applyTimelineEvents ->
+                viewModel.applyReconciledTimeline(
+                    currentStoryTime = currentTime,
+                    events = events,
+                    confirmedSettings = confirmedSettings,
+                    applyStoryTime = applyStoryTime,
+                    applyTimelineEvents = applyTimelineEvents
+                )
+            },
             onReExtract = { viewModel.reExtractTimelineReconciliation() },
             applyErrorMessage = timelineApplyError
+        )
+    }
+
+    pendingTimelineBasisConflict?.let { conflict ->
+        TimelineBasisChangedConfirmDialog(
+            conflict = conflict,
+            onConfirm = { viewModel.confirmPendingTimelineBasisConflict() },
+            onDismiss = { viewModel.dismissPendingTimelineBasisConflict() },
+            hazeState = hazeState
         )
     }
 

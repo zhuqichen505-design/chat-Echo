@@ -105,7 +105,8 @@ data class TimelineEventItem(
     val id: String = UUID.randomUUID().toString(),
     var timeTag: String = "",
     var content: String = "",
-    var category: TimelineCategory = TimelineCategory.PLOT_EVENT
+    var category: TimelineCategory = TimelineCategory.PLOT_EVENT,
+    var isSelected: Boolean = true
 )
 
 /**

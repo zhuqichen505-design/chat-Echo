@@ -429,8 +429,13 @@ class UiPolishRegressionTest {
                 return Triple(shows, CountingInputMethodManager.showRequests, focused)
             } finally {
                 ImeInsetsViewRoot.visible = false
-                composeView.disposeComposition()
-                activityController.pause().stop().destroy()
+                runCatching { composeView.disposeComposition() }
+                runCatching { activityController.pause().stop().destroy() }
+                runCatching {
+                    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    mainLooper.idleFor(java.time.Duration.ofMillis(64))
+                    mainLooper.idle()
+                }
             }
         }
 
@@ -871,6 +876,93 @@ class UiPolishRegressionTest {
             for (dark in listOf(false, true)) {
                 val bmp = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
                 assertTrue(bmp.width >= 128 && bmp.height >= 128)
+            }
+        }
+    }
+
+    @Test fun editionAndScreeningThemesCarryEditorialAndCinemaDetails() {
+        val presets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.EDITION,
+            com.aiassistant.utils.EchoAppearancePreset.SCREENING
+        )
+        assertEquals(presets, presets.map { com.aiassistant.utils.EchoAppearancePreset.sanitize(it) })
+        assertTrue(com.aiassistant.utils.EchoAppearancePreset.values.containsAll(presets))
+
+        val edition = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.EDITION)
+        val screening = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.SCREENING)
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.Newsprint, edition.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.NewsRegister, edition.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.CropMarks, edition.frameOrnament)
+        assertTrue("晨刊应使用纸片平面材质", edition.flatSurfaces)
+        assertTrue("晨刊应使用硬朗油墨描边", edition.strongOutline)
+        assertFalse("晨刊问句不铺强调底色", edition.accentUserBubble)
+        assertTrue("晨刊面板应保持报纸式直角", edition.panelCornerRadius.value <= 2f)
+
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.ProjectorGrain, screening.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.FilmScanline, screening.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.ReelPerforation, screening.frameOrnament)
+        assertTrue("放映室应使用硬质面板", screening.flatSurfaces)
+        assertTrue("放映室用户消息应使用强调底色", screening.accentUserBubble)
+        assertTrue("放映室面板应使用独立中圆角", screening.panelCornerRadius.value in 6f..10f)
+
+        assertTrue(
+            "晨刊正文应使用衬线字体",
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.EDITION).bodyLarge.fontFamily
+                != androidx.compose.ui.text.font.FontFamily.Default
+        )
+        assertEquals(
+            androidx.compose.ui.text.font.FontFamily.Monospace,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.EDITION).labelSmall.fontFamily
+        )
+        assertEquals(
+            androidx.compose.ui.text.font.FontFamily.Monospace,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.SCREENING).labelSmall.fontFamily
+        )
+        assertEquals(
+            androidx.compose.ui.text.font.FontWeight.Bold,
+            com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.SCREENING).titleLarge.fontWeight
+        )
+
+        val base = androidx.compose.ui.text.TextStyle(
+            fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp)
+        )
+        assertEquals(
+            androidx.compose.ui.text.style.TextAlign.Justify,
+            com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Newsprint).textAlign
+        )
+        assertEquals(
+            androidx.compose.ui.unit.TextUnit(1.6f, androidx.compose.ui.unit.TextUnitType.Em),
+            com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.Newsprint).textIndent?.firstLine
+        )
+        assertEquals(
+            androidx.compose.ui.text.style.TextIndent.None,
+            com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.ProjectorGrain).textIndent
+        )
+
+        for (material in listOf(
+            com.aiassistant.ui.theme.EchoPaperMaterial.Newsprint,
+            com.aiassistant.ui.theme.EchoPaperMaterial.ProjectorGrain
+        )) {
+            for (dark in listOf(false, true)) {
+                val bitmap = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
+                assertTrue(bitmap.width >= 128 && bitmap.height >= 128)
+            }
+        }
+
+        fun contrast(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float =
+            (maxOf(a.luminance(), b.luminance()) + 0.05f) / (minOf(a.luminance(), b.luminance()) + 0.05f)
+        for (preset in presets) {
+            for (dark in listOf(false, true)) {
+                val scheme = com.aiassistant.ui.theme.echoColorScheme(preset, dark)
+                assertTrue("$preset 正文对比度不足", contrast(scheme.onBackground, scheme.background) >= 4.5f)
+                assertTrue("$preset 主操作对比度不足", contrast(scheme.onPrimary, scheme.primary) >= 4.5f)
+                assertTrue("$preset 次操作对比度不足", contrast(scheme.onSecondary, scheme.secondary) >= 4.5f)
+                assertTrue("$preset 第三操作对比度不足", contrast(scheme.onTertiary, scheme.tertiary) >= 4.5f)
+                assertTrue("$preset 主容器对比度不足", contrast(scheme.onPrimaryContainer, scheme.primaryContainer) >= 4.5f)
+                assertTrue("$preset 次容器对比度不足", contrast(scheme.onSecondaryContainer, scheme.secondaryContainer) >= 4.5f)
+                assertTrue("$preset 第三容器对比度不足", contrast(scheme.onTertiaryContainer, scheme.tertiaryContainer) >= 4.5f)
+                assertTrue("$preset 辅助文字对比度不足", contrast(scheme.onSurfaceVariant, scheme.surfaceVariant) >= 4.5f)
             }
         }
     }
@@ -1328,6 +1420,418 @@ class UiPolishRegressionTest {
 
         assertEquals(listOf(103L, 101L, 102L, 104L), sorted.map { it.id })
     }
+
+    @org.robolectric.annotation.Config(shadows = [MaterialStringFallbackResources::class])
+    @Test fun pendingTimelineReviewAllowsTogglingStoryTimeAndEventAndDisablesWhenAllUnchecked() {
+        val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = "第2天·清晨",
+            newEvent = com.aiassistant.utils.TimelineEventItem("第2天·清晨", "林岚进入北港灯塔", "PLOT_EVENT"),
+            summaryNotice = "剧情推进至第2天·清晨",
+            atemporalSettings = listOf(
+                com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "北港灯塔每晚十点锁门", isSelected = true)
+            )
+        )
+        var applied: com.aiassistant.data.repository.AutoTimelineUpdateResult? = null
+        renderInteractiveCompose(useDialogWindow = false, width = 400, height = 960, content = {
+            com.aiassistant.ui.screens.chat.ChatPendingReviewPanels(
+                memory = null,
+                timeline = proposal,
+                onDismissMemory = {},
+                onAcceptMemory = { _, _ -> },
+                onDismissTimeline = {},
+                onApplyTimeline = { applied = it }
+            )
+        }) { h ->
+            val initialText = h.allText()
+            assertTrue(initialText.contains("推进时空"))
+            assertTrue(initialText.contains("林岚进入北港灯塔"))
+            assertTrue(initialText.contains("北港灯塔每晚十点锁门"))
+
+            // 取消勾选“推进时空”和时间线事件，只保留设定
+            h.invokeSemanticsClickByText("推进时空")
+            h.invokeSemanticsClickByText("林岚进入北港灯塔")
+            h.invokeSemanticsClickByText("确认应用")
+            org.junit.Assert.assertNotNull(applied)
+            assertFalse(applied!!.applyStoryTime)
+            assertFalse(applied!!.applyNewEvent)
+            assertTrue(applied!!.atemporalSettings.single().isSelected)
+
+            // 取消最后一项设定后，“确认应用”应禁用
+            h.invokeSemanticsClickByText("北港灯塔每晚十点锁门")
+            assertTrue("确认应用未禁用:\n${h.debugDump()}", h.isButtonDisabled("确认应用"))
+
+            // 切到编辑态后同样受勾选控制，重新勾选时空后“应用”可用并透传状态
+            applied = null
+            val editSem = h.invokeSemanticsClickByText("编辑")
+            assertTrue("点击编辑(sem=$editSem)后未进入编辑态:\n${h.debugDump()}", h.allText().contains("取消编辑"))
+            assertTrue("编辑态应用未禁用:\n${h.debugDump()}", h.isButtonDisabled("应用"))
+            h.invokeSemanticsClickByText("应用推进时空")
+            assertFalse("编辑态勾选时空后应用仍禁用 toggles=${h.toggleStates()}:\n${h.debugDump()}", h.isButtonDisabled("应用"))
+            h.invokeSemanticsClickByText("应用")
+            org.junit.Assert.assertNotNull(applied)
+            assertTrue(applied!!.applyStoryTime)
+            assertFalse(applied!!.applyNewEvent)
+            assertFalse(applied!!.atemporalSettings.single().isSelected)
+        }
+    }
+
+    @Test fun timelineBasisChangedConfirmDialogWarnsAndSupportsConfirmOrDismissForModifiedAndDeletedNodes() {
+        val baseProposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(
+            updatedStoryTime = "第2天·傍晚",
+            newEvent = com.aiassistant.utils.TimelineEventItem("第2天·下午", "林岚在灯塔内破译密信", "PLOT_EVENT"),
+            summaryNotice = "更新密信记录"
+        )
+        var confirms = 0
+        var dismisses = 0
+        renderInteractiveCompose(useDialogWindow = true, content = {
+            com.aiassistant.ui.screens.chat.TimelineBasisChangedConfirmDialog(
+                conflict = com.aiassistant.ui.screens.chat.PendingTimelineBasisConflict(
+                    proposal = baseProposal,
+                    currentEventContent = "库内已被改写的旧节点内容",
+                    currentTimeTag = "第2天·正午",
+                    currentCategory = "PLOT_EVENT",
+                    wasDeletedOrRetimed = false
+                ),
+                onConfirm = { confirms++ },
+                onDismiss = { dismisses++ }
+            )
+        }) { h ->
+            val allText = h.allText()
+            assertTrue(allText.contains("原时间线依据已改变"))
+            assertTrue(allText.contains("当前库内节点"))
+            assertTrue(allText.contains("库内已被改写的旧节点内容"))
+            assertTrue(allText.contains("将要覆盖应用的内容"))
+            assertTrue(allText.contains("林岚在灯塔内破译密信"))
+            h.clickText("仍要应用")
+            assertEquals(1, confirms)
+            assertEquals(0, dismisses)
+        }
+
+        renderInteractiveCompose(useDialogWindow = true, content = {
+            com.aiassistant.ui.screens.chat.TimelineBasisChangedConfirmDialog(
+                conflict = com.aiassistant.ui.screens.chat.PendingTimelineBasisConflict(
+                    proposal = baseProposal,
+                    currentEventContent = null,
+                    currentTimeTag = null,
+                    currentCategory = null,
+                    wasDeletedOrRetimed = true
+                ),
+                onConfirm = { confirms++ },
+                onDismiss = { dismisses++ }
+            )
+        }) { h ->
+            val allText = h.allText()
+            assertTrue(allText.contains("已被删除或重建"))
+            assertTrue(allText.contains("将要新增的内容"))
+            assertFalse(allText.contains("当前库内节点"))
+            h.clickText("取消")
+            assertEquals(1, dismisses)
+        }
+    }
+
+    @org.robolectric.annotation.Config(qualifiers = "w480dp-h1200dp", shadows = [MaterialStringFallbackResources::class])
+    @Test fun timelineReconcileDialogSupportsIndependentStoryTimeAndTimelineSelection() {
+        val result = com.aiassistant.utils.TimelineReconcileResult(
+            currentStoryTime = "第3天·夜",
+            events = mutableListOf(
+                com.aiassistant.utils.TimelineEventItem("第1天·清晨", "事件甲：进入北港", "PLOT_EVENT"),
+                com.aiassistant.utils.TimelineEventItem("第2天·傍晚", "事件乙：解开灯塔机关", "PLOT_EVENT")
+            ),
+            atemporalSettings = mutableListOf(
+                com.aiassistant.utils.AtemporalSettingItem(category = "世界规则", content = "灯塔密码每日更换", isSelected = true)
+            )
+        )
+        var captured: Triple<Boolean, Boolean, Pair<Int, Int>>? = null
+        renderInteractiveCompose(useDialogWindow = true, width = 480, height = 1200, content = {
+            com.aiassistant.ui.screens.chat.TimelineReconcileDialog(
+                hazeState = androidx.compose.runtime.remember { dev.chrisbanes.haze.HazeState() },
+                initialResult = result,
+                onDismiss = {},
+                onApply = { _, _, _ -> org.junit.Assert.fail("提供 onApplySelection 时应优先回调带勾选项的分发接口") },
+                onApplySelection = { _, evs, sets, applyTime, applyEvs ->
+                    captured = Triple(applyTime, applyEvs, evs.size to sets.size)
+                }
+            )
+        }) { h ->
+            // 初始：1个故事时间勾选框 + 1个设定勾选框 + 2个时间线事件勾选框 = 全选
+            assertEquals(listOf(
+                androidx.compose.ui.state.ToggleableState.On,
+                androidx.compose.ui.state.ToggleableState.On,
+                androidx.compose.ui.state.ToggleableState.On,
+                androidx.compose.ui.state.ToggleableState.On
+            ), h.toggleStates())
+            assertTrue(h.allText().contains("保存时间线与独立设定"))
+
+            // 取消勾选“当前故事停留在”，并通过时间线区域的“全不选”取消全部时间线事件
+            h.invokeToggleSemanticsAt(0)
+            assertTrue("点击toggle[0]后缺少保持原时间 toggles=${h.toggleStates()}:\n${h.debugDump()}", h.allText().contains("保持原时间"))
+            h.invokeLastSemanticsClickByText("全不选")
+            assertEquals(listOf(
+                androidx.compose.ui.state.ToggleableState.Off,
+                androidx.compose.ui.state.ToggleableState.On,
+                androidx.compose.ui.state.ToggleableState.Off,
+                androidx.compose.ui.state.ToggleableState.Off
+            ), h.toggleStates())
+            assertTrue("缺少仅保存独立设定:\n${h.debugDump()}", h.allText().contains("仅保存独立设定"))
+
+            h.invokeSemanticsClickByText("仅保存独立设定")
+            assertEquals(Triple(false, false, 0 to 1), captured)
+
+            // 点击“全选”恢复时间线事件后按钮恢复联合提示
+            h.invokeSemanticsClickByText("全选")
+            assertTrue(h.allText().contains("保存时间线与独立设定"))
+
+            // 再把设定和时间线都取消勾选 -> 提示“请至少选择一项”并禁用
+            h.invokeSemanticsClickByText("全不选")
+            h.invokeLastSemanticsClickByText("全不选")
+            assertTrue(h.allText().contains("请至少选择一项"))
+            assertTrue(h.isButtonDisabled("请至少选择一项"))
+        }
+    }
+
+    private class InteractiveComposeHarness(
+        private val activity: ComponentActivity,
+        private val useDialogWindow: Boolean,
+        private val advanceAndIdle: (Long) -> Unit
+    ) {
+
+        private fun rootViews(): List<Pair<androidx.compose.ui.node.RootForTest, androidx.compose.ui.semantics.SemanticsNode>> {
+            val rootView = if (useDialogWindow) {
+                org.robolectric.shadows.ShadowDialog.getLatestDialog()?.window?.decorView
+            } else {
+                activity.window.decorView
+            } ?: return emptyList()
+            val composeRoots = mutableListOf<androidx.compose.ui.node.RootForTest>()
+            fun walk(view: android.view.View) {
+                if (view is androidx.compose.ui.node.RootForTest) composeRoots += view
+                if (view is android.view.ViewGroup) {
+                    for (i in 0 until view.childCount) walk(view.getChildAt(i))
+                }
+            }
+            walk(rootView)
+            return composeRoots.mapNotNull { root ->
+                runCatching { root to root.semanticsOwner.rootSemanticsNode }.getOrNull()
+            }
+        }
+
+        private fun roots(): List<androidx.compose.ui.semantics.SemanticsNode> = rootViews().map { it.second }
+
+        private fun allOwnedNodes(): List<Pair<androidx.compose.ui.node.RootForTest, androidx.compose.ui.semantics.SemanticsNode>> {
+            val out = mutableListOf<Pair<androidx.compose.ui.node.RootForTest, androidx.compose.ui.semantics.SemanticsNode>>()
+            for ((owner, root) in rootViews()) {
+                fun visit(node: androidx.compose.ui.semantics.SemanticsNode) {
+                    out += owner to node
+                    node.children.forEach(::visit)
+                }
+                visit(root)
+            }
+            return out
+        }
+
+        private fun allNodes(): List<androidx.compose.ui.semantics.SemanticsNode> = allOwnedNodes().map { it.second }
+
+        private fun nodeOwnText(node: androidx.compose.ui.semantics.SemanticsNode): String {
+            val props = androidx.compose.ui.semantics.SemanticsProperties
+            val text = if (props.Text in node.config) {
+                node.config[props.Text].joinToString("") { it.text }
+            } else ""
+            val editable = if (props.EditableText in node.config) {
+                node.config[props.EditableText].text
+            } else ""
+            return listOf(text, editable).filter { it.isNotEmpty() }.joinToString(" ")
+        }
+
+        private fun subtreeText(node: androidx.compose.ui.semantics.SemanticsNode): String =
+            (listOf(nodeOwnText(node)) + node.children.map { subtreeText(it) })
+                .filter { it.isNotEmpty() }
+                .joinToString(" ")
+
+        fun allText(): String = roots().joinToString("\n") { subtreeText(it) }
+
+        private fun toggleOwnedNodes() =
+            allOwnedNodes().filter { androidx.compose.ui.semantics.SemanticsProperties.ToggleableState in it.second.config }
+
+        fun toggleStates(): List<androidx.compose.ui.state.ToggleableState> =
+            toggleOwnedNodes().map { it.second.config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] }
+
+        private fun performClick(owner: androidx.compose.ui.node.RootForTest, node: androidx.compose.ui.semantics.SemanticsNode, label: String): String {
+            val view = owner as? android.view.View
+            val bounds = node.boundsInRoot
+            if (view != null && !bounds.isEmpty && view.width > 0 && view.height > 0) {
+                advanceAndIdle(500L)
+                val downTime = android.os.SystemClock.uptimeMillis()
+                val cx = bounds.center.x
+                val cy = bounds.center.y
+                val down = android.view.MotionEvent.obtain(downTime, downTime, android.view.MotionEvent.ACTION_DOWN, cx, cy, 0)
+                val up = android.view.MotionEvent.obtain(downTime, downTime + 20L, android.view.MotionEvent.ACTION_UP, cx, cy, 0)
+                val handledDown: Boolean
+                val handledUp: Boolean
+                try {
+                    handledDown = view.dispatchTouchEvent(down)
+                    handledUp = view.dispatchTouchEvent(up)
+                    if (!handledDown && !handledUp && androidx.compose.ui.semantics.SemanticsActions.OnClick in node.config) {
+                        assertTrue("$label must be clickable", node.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action?.invoke() == true)
+                    }
+                } finally {
+                    down.recycle()
+                    up.recycle()
+                }
+                advanceAndIdle(0L)
+                return "touch($cx,$cy down=$handledDown up=$handledUp)"
+            } else {
+                val action = if (androidx.compose.ui.semantics.SemanticsActions.OnClick in node.config) {
+                    node.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action
+                } else null
+                assertTrue("$label must be clickable (empty bounds=$bounds)", action?.invoke() == true)
+                advanceAndIdle(0L)
+                return "sem(empty=$bounds)"
+            }
+        }
+
+        fun invokeToggleSemanticsAt(index: Int): Boolean {
+            val pair = toggleOwnedNodes().getOrNull(index)
+                ?: error("Missing toggle node at $index; count=${toggleOwnedNodes().size}")
+            val action = if (androidx.compose.ui.semantics.SemanticsActions.OnClick in pair.second.config) {
+                pair.second.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action
+            } else null
+            val ok = action?.invoke() == true
+            assertTrue("Toggle[$index] must be clickable", ok)
+            advanceAndIdle(0L)
+            return ok
+        }
+
+        private fun clickableMatches(text: String): List<Pair<androidx.compose.ui.node.RootForTest, androidx.compose.ui.semantics.SemanticsNode>> {
+            val clickable = allOwnedNodes().filter {
+                androidx.compose.ui.semantics.SemanticsActions.OnClick in it.second.config
+            }
+            val exact = clickable.filter { subtreeText(it.second).trim() == text }
+            if (exact.isNotEmpty()) return exact
+            return clickable.filter { subtreeText(it.second).contains(text) }
+                .sortedBy { subtreeText(it.second).length }
+        }
+
+        fun clickText(text: String) {
+            val pair = clickableMatches(text).firstOrNull()
+                ?: error("Missing clickable text '$text' in:\n${allText()}")
+            performClick(pair.first, pair.second, "Click '$text'")
+        }
+
+        fun invokeSemanticsClickByText(text: String): Boolean {
+            val pair = clickableMatches(text).firstOrNull()
+                ?: error("Missing clickable text '$text'")
+            val ok = pair.second.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action?.invoke() == true
+            advanceAndIdle(0L)
+            return ok
+        }
+
+        fun invokeLastSemanticsClickByText(text: String): Boolean {
+            val pair = clickableMatches(text).lastOrNull()
+                ?: error("Missing clickable text '$text'")
+            val ok = pair.second.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action?.invoke() == true
+            advanceAndIdle(0L)
+            return ok
+        }
+
+        fun isButtonDisabled(text: String): Boolean {
+            val matching = clickableMatches(text).map { it.second }.ifEmpty {
+                allNodes().filter { nodeOwnText(it).trim() == text || subtreeText(it).trim() == text }
+            }
+            val node = matching.firstOrNull()
+                ?: error("Missing button '$text' in:\n${allText()}")
+            return androidx.compose.ui.semantics.SemanticsProperties.Disabled in node.config ||
+                generateSequence(node) { it.parent }.any {
+                    androidx.compose.ui.semantics.SemanticsProperties.Disabled in it.config
+                }
+        }
+
+        fun debugDump(): String = allOwnedNodes().joinToString("\n") { (owner, n) ->
+            val v = owner as? android.view.View
+            val keys = n.config.map { it.key.name }
+            "id=${n.id} bounds=${n.boundsInRoot} view=${v?.width}x${v?.height} own='${nodeOwnText(n)}' sub='${subtreeText(n).take(40)}' keys=$keys"
+        }
+    }
+
+    private fun renderInteractiveCompose(
+        useDialogWindow: Boolean,
+        width: Int = 400,
+        height: Int = 800,
+        content: @Composable () -> Unit,
+        block: (InteractiveComposeHarness) -> Unit
+    ) {
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val activity = controller.get()
+        val composeView = ComposeView(activity)
+        val scaleKey = android.provider.Settings.Global.ANIMATOR_DURATION_SCALE
+        val previousScale = android.provider.Settings.Global.getFloat(activity.contentResolver, scaleKey, 1f)
+        android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, 0f)
+        val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val frameClock = androidx.compose.runtime.BroadcastFrameClock()
+        val dispatcher = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+                mainHandler.post(block)
+            }
+        }
+        val recomposerJob = kotlinx.coroutines.Job()
+        val recomposer = androidx.compose.runtime.Recomposer(dispatcher + frameClock + recomposerJob)
+        val recomposerScope = kotlinx.coroutines.CoroutineScope(dispatcher + frameClock + recomposerJob)
+        recomposerScope.launch {
+            recomposer.runRecomposeAndApplyChanges()
+        }
+        var frameTimeNanos = System.nanoTime()
+        try {
+            composeView.setParentCompositionContext(recomposer)
+            composeView.setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                    androidx.compose.material3.MaterialTheme { content() }
+                }
+            }
+            activity.setContentView(composeView, android.widget.FrameLayout.LayoutParams(width, height))
+            val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY)
+            val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(height, android.view.View.MeasureSpec.EXACTLY)
+            fun pumpFrames(extraDelayMs: Long = 0L) {
+                if (extraDelayMs > 0L) mainLooper.idleFor(java.time.Duration.ofMillis(extraDelayMs))
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                repeat(8) {
+                    mainLooper.idle()
+                    frameTimeNanos += 16_000_000L
+                    frameClock.sendFrame(frameTimeNanos)
+                    mainLooper.idle()
+                    mainLooper.idleFor(java.time.Duration.ofMillis(16))
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                }
+                if (useDialogWindow) {
+                    org.robolectric.shadows.ShadowDialog.getLatestDialog()?.takeIf { it.isShowing }?.window?.decorView?.let { decor ->
+                        decor.measure(widthSpec, heightSpec)
+                        decor.layout(0, 0, width, height)
+                    }
+                }
+                mainLooper.idle()
+            }
+            pumpFrames()
+            composeView.measure(widthSpec, heightSpec)
+            composeView.layout(0, 0, width, height)
+            composeView.dispatchWindowFocusChanged(true)
+            pumpFrames()
+            val harness = InteractiveComposeHarness(activity, useDialogWindow) { delayMs ->
+                pumpFrames(delayMs)
+            }
+            block(harness)
+        } finally {
+            android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+            if (useDialogWindow) {
+                runCatching { org.robolectric.shadows.ShadowDialog.getLatestDialog()?.dismiss() }
+            }
+            runCatching { composeView.disposeComposition() }
+            runCatching { recomposer.cancel() }
+            runCatching { recomposerJob.cancel() }
+            runCatching { controller.pause().stop().destroy() }
+            runCatching {
+                mainLooper.idleFor(java.time.Duration.ofMillis(64))
+                mainLooper.idle()
+            }
+        }
+    }
 }
 
 private fun assertReviewAdjacentToInput(bounds: Map<String, Rect>) {
@@ -1416,9 +1920,14 @@ private fun measureComposeViewport(width: Int, height: Int, content: @Composable
         assertEquals("测量视口宽度必须固定", width, composeView.width)
         assertEquals("测量视口高度必须固定", height, composeView.height)
     } finally {
-        composeView.disposeComposition()
-        controller.pause().stop().destroy()
+        runCatching { composeView.disposeComposition() }
+        runCatching { controller.pause().stop().destroy() }
         android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+        runCatching {
+            val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+            mainLooper.idleFor(java.time.Duration.ofMillis(64))
+            mainLooper.idle()
+        }
     }
 }
 
@@ -1490,9 +1999,17 @@ private fun renderAndClickSemanticsNode(
         assertTrue("「$contentDescription」点击动作应当生效", onClick?.action?.invoke() == true)
         mainLooper.idleFor(java.time.Duration.ofMillis(32))
     } finally {
-        composeView.disposeComposition()
-        controller.pause().stop().destroy()
+        if (useDialogWindow) {
+            runCatching { org.robolectric.shadows.ShadowDialog.getLatestDialog()?.dismiss() }
+        }
+        runCatching { composeView.disposeComposition() }
+        runCatching { controller.pause().stop().destroy() }
         android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+        runCatching {
+            val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+            mainLooper.idleFor(java.time.Duration.ofMillis(64))
+            mainLooper.idle()
+        }
     }
 }
 

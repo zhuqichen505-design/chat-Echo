@@ -64,6 +64,14 @@ data class KeyAttemptFailure(
     val isTimeout: Boolean = false
 )
 
+class TimelineBasisChangedException(
+    message: String,
+    val currentEventContent: String?,
+    val currentTimeTag: String?,
+    val currentCategory: String?,
+    val wasDeletedOrRetimed: Boolean
+) : IllegalStateException(message)
+
 data class AutoTimelineUpdateResult(
     val updatedStoryTime: String?,
     val newEvent: TimelineEventItem?,
@@ -81,7 +89,10 @@ data class AutoTimelineUpdateResult(
     val sourceAssistantReply: String? = null,
     val sourceConfigId: Long? = null,
     val sourceModelName: String? = null,
-    val sourceSessionMemoryEnabled: Boolean? = null
+    val sourceSessionMemoryEnabled: Boolean? = null,
+    val previousEventTimeTag: String? = null,
+    val applyStoryTime: Boolean = true,
+    val applyNewEvent: Boolean = true
 )
 
 class AiRepository(
@@ -5096,7 +5107,8 @@ class AiRepository(
             sourceAssistantReply = assistantReply,
             sourceConfigId = activeConfigId,
             sourceModelName = activeModelName,
-            sourceSessionMemoryEnabled = sessionMemoryEnabled
+            sourceSessionMemoryEnabled = sessionMemoryEnabled,
+            previousEventTimeTag = if (finalAction == "UPDATE") resolvedTargetNode?.timeTag else null
         )
     }
 
@@ -5152,40 +5164,88 @@ class AiRepository(
     }
 
     /** Apply only reviewed incremental facts; never replace the full timeline or save global story facts. */
-    suspend fun applyAutoTimelineProposal(conversationId: Long, proposal: AutoTimelineUpdateResult) = withContext(Dispatchers.IO) {
+    suspend fun applyAutoTimelineProposal(
+        conversationId: Long,
+        proposal: AutoTimelineUpdateResult,
+        forceApplyChangedTimeline: Boolean = false
+    ) = withContext(Dispatchers.IO) {
         val db = com.aiassistant.AiAssistantApp.instance.database
         db.withTransaction {
             val conversation = conversationDao.getConversationById(conversationId) ?: return@withTransaction
-            proposal.updatedStoryTime?.trim()?.takeIf { it.isNotBlank() }?.let { updateStoryTime(conversationId, it) }
-            proposal.newEvent?.takeIf { it.content.isNotBlank() }?.let { event ->
-                val dao = timelineNodeDao ?: error("时间线存储不可用")
-                val nodes = dao.getTimelineNodes(conversationId)
-                val eventTime = event.timeTag.ifBlank { proposal.updatedStoryTime ?: conversation.currentStoryTime ?: "未确定" }
-                val existing = if (proposal.action == "UPDATE") {
-                    val target = nodes.firstOrNull { it.id == proposal.targetNodeId }
-                    check(target != null && TimelineMemoryHelper.isSameTimelineEventTime(target.timeTag, eventTime)) {
-                        "该时间线事件已被修改或删除，请重新提取或审阅；已保留现有内容"
+            if (proposal.applyStoryTime) {
+                proposal.updatedStoryTime?.trim()?.takeIf { it.isNotBlank() }?.let { updateStoryTime(conversationId, it) }
+            }
+            if (proposal.applyNewEvent) {
+                proposal.newEvent?.takeIf { it.content.isNotBlank() }?.let { event ->
+                    val dao = timelineNodeDao ?: error("时间线存储不可用")
+                    val nodes = dao.getTimelineNodes(conversationId)
+                    val eventTime = event.timeTag.ifBlank { proposal.updatedStoryTime ?: conversation.currentStoryTime ?: "未确定" }
+                    if (proposal.action == "UPDATE") {
+                        val target = nodes.firstOrNull { it.id == proposal.targetNodeId }
+                        val baselineTime = proposal.previousEventTimeTag ?: eventTime
+                        val alreadyApplied = target != null &&
+                            target.event == event.content.trim() &&
+                            target.category == event.category.key &&
+                            (event.timeTag.isBlank() || TimelineMemoryHelper.isSameTimelineEventTime(target.timeTag, event.timeTag))
+                        val timeMatches = target != null &&
+                            TimelineMemoryHelper.isSameTimelineEventTime(target.timeTag, baselineTime)
+                        if (!forceApplyChangedTimeline && !alreadyApplied && !timeMatches) {
+                            throw TimelineBasisChangedException(
+                                message = "该时间线事件已被修改或删除，请重新提取或审阅；已保留现有内容",
+                                currentEventContent = target?.event,
+                                currentTimeTag = target?.timeTag,
+                                currentCategory = target?.category,
+                                wasDeletedOrRetimed = true
+                            )
+                        }
+                        if (target != null) {
+                            val matchesSnapshot = proposal.previousEventContent != null && proposal.previousEventCategory != null &&
+                                target.event == proposal.previousEventContent && target.category == proposal.previousEventCategory
+                            if (!forceApplyChangedTimeline && !alreadyApplied && !matchesSnapshot) {
+                                throw TimelineBasisChangedException(
+                                    message = "该时间线事件已被修改，请重新提取或审阅；已保留现有内容",
+                                    currentEventContent = target.event,
+                                    currentTimeTag = target.timeTag,
+                                    currentCategory = target.category,
+                                    wasDeletedOrRetimed = false
+                                )
+                            }
+                            dao.updateTimelineNode(
+                                target.copy(
+                                    timeTag = event.timeTag.ifBlank { target.timeTag },
+                                    event = event.content.trim(),
+                                    category = event.category.key,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        } else if (nodes.none {
+                            TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime) &&
+                                TimelineMemoryHelper.isSameTimelineFact(it.event, event.content)
+                        }) {
+                            dao.insertTimelineNode(
+                                TimelineNode(
+                                    conversationId = conversationId,
+                                    timeTag = eventTime,
+                                    event = event.content.trim(),
+                                    category = event.category.key,
+                                    orderIndex = (nodes.maxOfOrNull { it.orderIndex } ?: -1) + 1
+                                )
+                            )
+                        }
+                    } else if (nodes.none {
+                        TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime) &&
+                            TimelineMemoryHelper.isSameTimelineFact(it.event, event.content)
+                    }) {
+                        dao.insertTimelineNode(
+                            TimelineNode(
+                                conversationId = conversationId,
+                                timeTag = eventTime,
+                                event = event.content.trim(),
+                                category = event.category.key,
+                                orderIndex = (nodes.maxOfOrNull { it.orderIndex } ?: -1) + 1
+                            )
+                        )
                     }
-                    target
-                } else null
-                if (existing != null) {
-                    // Reapplying the same accepted proposal is harmless; a concurrent edit is not.
-                    val alreadyApplied = existing.event == event.content.trim() && existing.category == event.category.key
-                    val matchesSnapshot = proposal.previousEventContent != null && proposal.previousEventCategory != null &&
-                        existing.event == proposal.previousEventContent && existing.category == proposal.previousEventCategory
-                    check(alreadyApplied || matchesSnapshot) {
-                        "该时间线事件已被修改，请重新提取或审阅；已保留现有内容"
-                    }
-                    dao.updateTimelineNode(existing.copy(timeTag = event.timeTag.ifBlank { existing.timeTag },
-                        event = event.content.trim(), category = event.category.key, updatedAt = System.currentTimeMillis()))
-                } else if (nodes.none {
-                    TimelineMemoryHelper.isSameTimelineEventTime(it.timeTag, eventTime) &&
-                        TimelineMemoryHelper.isSameTimelineFact(it.event, event.content)
-                }) {
-                    dao.insertTimelineNode(TimelineNode(conversationId = conversationId,
-                        timeTag = eventTime,
-                        event = event.content.trim(), category = event.category.key,
-                        orderIndex = (nodes.maxOfOrNull { it.orderIndex } ?: -1) + 1))
                 }
             }
             applyConfirmedSessionSettings(conversationId, proposal.atemporalSettings)

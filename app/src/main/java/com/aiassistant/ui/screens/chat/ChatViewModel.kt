@@ -206,6 +206,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     private val _proposedSettingApplyError = MutableStateFlow<String?>(null)
     val proposedSettingApplyError: StateFlow<String?> = _proposedSettingApplyError.asStateFlow()
 
+    private val _pendingTimelineBasisConflict = MutableStateFlow<PendingTimelineBasisConflict?>(null)
+    val pendingTimelineBasisConflict: StateFlow<PendingTimelineBasisConflict?> = _pendingTimelineBasisConflict.asStateFlow()
+
     // 时间线变动待确认提案（需求 1：自动识别需用户确认）
     val pendingTimelineProposal: StateFlow<AutoTimelineUpdateResult?> =
         ChatGenerationManager.timelineProposals(conversationId).map { it.firstOrNull() }
@@ -245,6 +248,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun dismissTimelineProposal(proposal: AutoTimelineUpdateResult? = pendingTimelineProposal.value) {
+        if (proposal == null || _pendingTimelineBasisConflict.value?.proposal?.proposalId == proposal.proposalId) {
+            _pendingTimelineBasisConflict.value = null
+        }
         ChatGenerationManager.dismissTimelineProposal(conversationId, proposal)
     }
 
@@ -2390,6 +2396,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
      */
     fun reExtractTimelineProposal(proposal: AutoTimelineUpdateResult) {
         if (!ChatGenerationManager.consumeTimelineProposal(conversationId, proposal)) return
+        if (_pendingTimelineBasisConflict.value?.proposal?.proposalId == proposal.proposalId) {
+            _pendingTimelineBasisConflict.value = null
+        }
         val latestMessages = _messages.value
             .filter { !it.isExcluded && !AiRepository.isErrorPlaceholderMessage(it.content) }
         val userMsg = proposal.sourceUserMessage
@@ -2480,29 +2489,64 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
     }
 
-    fun applyTimelineProposal(proposal: AutoTimelineUpdateResult) {
+    fun applyTimelineProposal(
+        proposal: AutoTimelineUpdateResult,
+        forceApplyChangedTimeline: Boolean = false
+    ) {
         viewModelScope.launch {
             try {
-                repository.applyAutoTimelineProposal(conversationId, proposal)
+                repository.applyAutoTimelineProposal(
+                    conversationId = conversationId,
+                    proposal = proposal,
+                    forceApplyChangedTimeline = forceApplyChangedTimeline
+                )
+                _pendingTimelineBasisConflict.value = null
                 ChatGenerationManager.dismissTimelineProposal(conversationId, proposal)
+                val appliedTimeline = (proposal.applyStoryTime && !proposal.updatedStoryTime.isNullOrBlank()) ||
+                    (proposal.applyNewEvent && proposal.newEvent?.content?.isNotBlank() == true)
+                val appliedSettings = proposal.atemporalSettings.any { it.isSelected && it.content.isNotBlank() }
+                val noticeMessage = when {
+                    appliedTimeline && appliedSettings -> "已保存确认的时间线与设定"
+                    appliedTimeline -> "已保存确认的时间线"
+                    else -> "已保存确认的设定"
+                }
                 postSettingApplyNotice(
-                    message = "已保存确认的时间线与设定",
+                    message = noticeMessage,
                     tone = SettingApplyNoticeTone.Success,
                     showInspectAction = true
                 )
                 loadConversation()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: com.aiassistant.data.repository.TimelineBasisChangedException) {
+                Log.w("ChatViewModel", "时间线原事实依据已改变，等待二次确认: ${e.message}")
+                _pendingTimelineBasisConflict.value = PendingTimelineBasisConflict(
+                    proposal = proposal,
+                    currentEventContent = e.currentEventContent,
+                    currentTimeTag = e.currentTimeTag,
+                    currentCategory = e.currentCategory,
+                    wasDeletedOrRetimed = e.wasDeletedOrRetimed
+                )
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "应用时间线提案失败: ${e.message}", e)
                 postSettingApplyNotice(
-                    message = e.message?.takeIf { it.contains("请重新提取或审阅") }
+                    message = e.message?.takeIf { it.contains("请重新提取") }
                         ?: "保存失败，待确认内容已保留，请重试",
                     tone = SettingApplyNoticeTone.Error,
                     showInspectAction = false
                 )
             }
         }
+    }
+
+    fun confirmPendingTimelineBasisConflict() {
+        val conflict = _pendingTimelineBasisConflict.value ?: return
+        _pendingTimelineBasisConflict.value = null
+        applyTimelineProposal(conflict.proposal, forceApplyChangedTimeline = true)
+    }
+
+    fun dismissPendingTimelineBasisConflict() {
+        _pendingTimelineBasisConflict.value = null
     }
 
     fun dismissTimelineReconcileDialog() {
@@ -2571,7 +2615,9 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         currentStoryTime: String,
         events: List<TimelineEventItem>,
         confirmedSettings: List<AtemporalSettingItem> = emptyList(),
-        reviewedMessageId: Long? = null
+        reviewedMessageId: Long? = null,
+        applyStoryTime: Boolean = true,
+        applyTimelineEvents: Boolean = true
     ) {
         if (_isApplyingTimeline.value) return
         _isApplyingTimeline.value = true
@@ -2587,56 +2633,64 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 timelineReconcileJob?.cancelAndJoin()
                 timelineReconcileJob = null
                 val cleanStoryTime = currentStoryTime.trim().takeIf { it.isNotBlank() && it != "未确定" }
-                val nodesToSave = events.filter { it.content.isNotBlank() }.mapIndexed { idx, ev ->
+                val nodesToSave = events.filter { it.isSelected && it.content.isNotBlank() }.mapIndexed { idx, ev ->
                     TimelineNode(conversationId = conversationId, timeTag = ev.timeTag.trim(),
                         event = ev.content.trim(), category = ev.category.key, orderIndex = idx)
                 }
+                val shouldApplyTimelineEvents = applyTimelineEvents && nodesToSave.isNotEmpty()
+                val hasConfirmedSettings = confirmedSettings.any { it.isSelected && it.content.isNotBlank() }
                 AiAssistantApp.instance.database.withTransaction {
                     // 1. 故事时间独立存入 Conversation 表
-                    repository.updateStoryTime(conversationId, cleanStoryTime)
+                    if (applyStoryTime) {
+                        repository.updateStoryTime(conversationId, cleanStoryTime)
+                    }
 
-                    // 时间标签保留原文证据与人工顺序，不强制改写成日历。
-                    repository.replaceTimelineNodes(conversationId, nodesToSave)
+                    // 2. 时间标签保留原文证据与人工顺序，不强制改写成日历；未勾选任何时间节点时不覆盖原有时间线。
+                    if (shouldApplyTimelineEvents) {
+                        repository.replaceTimelineNodes(conversationId, nodesToSave)
 
-                    // 3. 清理之前误存放在 memory_items 中的时间线碎片，但完整保留用户自定义的纯净设定与规则
-                    try {
-                        val oldMemories = repository.getConversationMemoriesList(conversationId)
-                        for (oldMem in oldMemories) {
-                            val trimmed = oldMem.content.trim()
-                            if (trimmed.startsWith("【当前故事时间】：") || trimmed.startsWith("当前故事时间：") || TimelineMemoryHelper.isExplicitTimelineEvent(trimmed)) {
-                                repository.deleteMemory(oldMem.id)
+                        // 3. 清理之前误存放在 memory_items 中的时间线碎片，但完整保留用户自定义的纯净设定与规则
+                        try {
+                            val oldMemories = repository.getConversationMemoriesList(conversationId)
+                            for (oldMem in oldMemories) {
+                                val trimmed = oldMem.content.trim()
+                                if (trimmed.startsWith("【当前故事时间】：") || trimmed.startsWith("当前故事时间：") || TimelineMemoryHelper.isExplicitTimelineEvent(trimmed)) {
+                                    repository.deleteMemory(oldMem.id)
+                                }
                             }
+                        } catch (e: Exception) {
+                            Log.w("ChatViewModel", "清理旧时间线记忆缓存失败: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.w("ChatViewModel", "清理旧时间线记忆缓存失败: ${e.message}")
                     }
 
                     // 所有设定由同一个增量维护入口保存，不重复插入旧设定或角色记忆镜像。
                     repository.applyConfirmedSessionSettings(conversationId, confirmedSettings)
                     val latest = AiAssistantApp.instance.database.conversationDao().getConversationById(conversationId)
                         ?: error("当前会话已不存在")
-                    if (latest.enableSessionMemory != true) {
+                    if ((shouldApplyTimelineEvents || hasConfirmedSettings) && latest.enableSessionMemory != true) {
                         repository.updateConversation(latest.copy(enableSessionMemory = true))
                     }
                 } // transaction: 时间、事件与设定共同提交；冲突时全部回滚。
 
-                // 记录时间线水线检查点 (Checkpoint)
-                try {
-                    val lastIdx = reviewedMessages.indexOfFirst { it.id == sourceMessageId }
-                        .takeIf { it >= 0 }?.let { it + 1 } ?: 0
-                    val checkpoint = TimelineReconcileCheckpoint(
-                        conversationId = conversationId,
-                        lastReconciledMessageId = sourceMessageId,
-                        lastReconciledMessageIndex = lastIdx,
-                        totalMessageCountAtReconciliation = reviewedMessages.size,
-                        storyTimeAtReconciliation = cleanStoryTime,
-                        nodeCountAtReconciliation = nodesToSave.size,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    TimelineDraftManager.saveCheckpoint(AiAssistantApp.instance, checkpoint)
-                    _timelineCheckpoint.value = checkpoint
-                } catch (e: Exception) {
-                    Log.w("ChatViewModel", "记录时间线水线检查点失败: ${e.message}")
+                // 仅当实际写入时间节点时推进时间线水线检查点 (Checkpoint)
+                if (shouldApplyTimelineEvents) {
+                    try {
+                        val lastIdx = reviewedMessages.indexOfFirst { it.id == sourceMessageId }
+                            .takeIf { it >= 0 }?.let { it + 1 } ?: 0
+                        val checkpoint = TimelineReconcileCheckpoint(
+                            conversationId = conversationId,
+                            lastReconciledMessageId = sourceMessageId,
+                            lastReconciledMessageIndex = lastIdx,
+                            totalMessageCountAtReconciliation = reviewedMessages.size,
+                            storyTimeAtReconciliation = cleanStoryTime,
+                            nodeCountAtReconciliation = nodesToSave.size,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        TimelineDraftManager.saveCheckpoint(AiAssistantApp.instance, checkpoint)
+                        _timelineCheckpoint.value = checkpoint
+                    } catch (e: Exception) {
+                        Log.w("ChatViewModel", "记录时间线水线检查点失败: ${e.message}")
+                    }
                 }
 
                 // 清理已应用的草稿
@@ -2644,8 +2698,14 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 _liveReconcileDraft.value = null
 
                 dismissTimelineReconcileDialog()
+                val appliedTimeline = applyStoryTime || shouldApplyTimelineEvents
+                val noticeMsg = when {
+                    appliedTimeline && hasConfirmedSettings -> "已保存时间线与设定"
+                    appliedTimeline -> "已保存时间线"
+                    else -> "已保存确认的设定"
+                }
                 postSettingApplyNotice(
-                    message = "已保存时间线与设定",
+                    message = noticeMsg,
                     tone = SettingApplyNoticeTone.Success,
                     showInspectAction = true
                 )

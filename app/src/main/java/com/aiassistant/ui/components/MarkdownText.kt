@@ -718,6 +718,8 @@ internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial):
     EchoPaperMaterial.Folio -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = .8.em))
     EchoPaperMaterial.Celadon -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
     EchoPaperMaterial.Lacquer -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 1.2.em))
+    EchoPaperMaterial.Newsprint -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 1.6.em))
+    EchoPaperMaterial.ProjectorGrain -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
     EchoPaperMaterial.None -> style
 }
 

@@ -3641,4 +3641,214 @@ class MemoryExtractionRepositoryTest {
         } }
     }
 
+    @Test fun timelineBasisChangedWarnsFirstAndForceApplyOverwritesOrInsertsWhileKeepingSettingsStrict() = runBlocking {
+        var jsonPayload = ""
+        Endpoint { socket, _ -> memoryReply(socket, jsonPayload) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-basis-model")
+            val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(
+                conversationId = id, timeTag = "第1天·上午", event = "林岚首次抵达北港灯塔", category = "PLOT_EVENT", orderIndex = 1
+            ))
+            jsonPayload = """{"newStoryTime":"第1天·傍晚","action":"UPDATE","targetNodeId":$nodeId,"newEvent":{"timeTag":"第1天·上午","category":"PLOT_EVENT","content":"林岚在北港灯塔取得备用钥匙"},"atemporalSettings":[{"category":"世界规则","content":"北港灯塔每晚十点锁门"}]}"""
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续调查", "林岚进入灯塔取得钥匙，每晚十点锁门", config.id, config.modelName)!!
+            assertEquals("UPDATE", proposal.action)
+            assertEquals(nodeId, proposal.targetNodeId)
+            assertEquals("第1天·上午", proposal.previousEventTimeTag)
+
+            // 1. 原时间线节点在应用前被外部改写或改时：首次应用仅抛二次确认异常并回滚，不写入任何数据
+            f.db.openHelper.writableDatabase.execSQL(
+                "UPDATE timeline_nodes SET eventContent = ? WHERE id = ?",
+                arrayOf<Any?>("林岚在南港码头临时修船", nodeId)
+            )
+            val contentModified = try {
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                null
+            } catch (e: com.aiassistant.data.repository.TimelineBasisChangedException) {
+                e
+            }
+            assertNotNull("仅内容被改写时必须触发二次确认异常", contentModified)
+            assertEquals("林岚在南港码头临时修船", contentModified!!.currentEventContent)
+            assertEquals("第1天·上午", contentModified.currentTimeTag)
+            assertFalse("仅改内容且未删未改时，wasDeletedOrRetimed 应为 false", contentModified.wasDeletedOrRetimed)
+
+            f.db.openHelper.writableDatabase.execSQL(
+                "UPDATE timeline_nodes SET timeTag = ?, eventContent = ? WHERE id = ?",
+                arrayOf<Any?>("第1天·正午", "林岚在南港码头临时修船", nodeId)
+            )
+            val blocked = try {
+                f.repository.applyAutoTimelineProposal(id, proposal)
+                null
+            } catch (e: com.aiassistant.data.repository.TimelineBasisChangedException) {
+                e
+            }
+            assertNotNull("原依据被改写且改时时必须触发二次确认异常", blocked)
+            assertEquals("林岚在南港码头临时修船", blocked!!.currentEventContent)
+            assertEquals("第1天·正午", blocked.currentTimeTag)
+            assertTrue("原节点时间标签被改时，wasDeletedOrRetimed 应为 true", blocked.wasDeletedOrRetimed)
+            assertNull("事务回滚后故事时间不得提前写入", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertTrue("事务回滚后设定不得部分写入", f.db.memoryDao().getConversationMemories(id).isEmpty())
+
+            // 用户确认“仍要应用”(1.A)：目标节点仍存在 -> 覆盖更新，同时写入时间与设定
+            f.repository.applyAutoTimelineProposal(id, proposal, forceApplyChangedTimeline = true)
+            val overwrittenNodes = f.repository.getTimelineNodes(id)
+            assertEquals(1, overwrittenNodes.size)
+            assertEquals(nodeId, overwrittenNodes.single().id)
+            assertEquals("第1天·上午", overwrittenNodes.single().timeTag)
+            assertEquals(proposal.newEvent!!.content, overwrittenNodes.single().event)
+            assertTrue(overwrittenNodes.single().event.contains("取得备用钥匙"))
+            assertEquals("第1天·傍晚", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertTrue(f.db.memoryDao().getConversationMemories(id).any { it.content.contains("北港灯塔每晚十点锁门") })
+
+            // 2. 目标节点在应用前被删除或重建：首次应用告知原节点已不存在，确认“仍要应用”(1.A) 后改为新增
+            val secondNodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(
+                conversationId = id, timeTag = "第2天·清晨", event = "旧夜巡记录", category = "PLOT_EVENT", orderIndex = 2
+            ))
+            jsonPayload = """{"newStoryTime":"第2天·正午","action":"UPDATE","targetNodeId":$secondNodeId,"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"补充新发现的旧船航志"},"atemporalSettings":[]}"""
+            val deletedTargetProposal = f.repository.evaluateAndAutoUpdateTimeline(id, "翻看档案", "补充旧船航志记录", config.id, config.modelName)!!
+            assertEquals("UPDATE", deletedTargetProposal.action)
+            f.db.timelineNodeDao().replaceTimelineNodes(id, overwrittenNodes)
+
+            val missingBasis = try {
+                f.repository.applyAutoTimelineProposal(id, deletedTargetProposal)
+                null
+            } catch (e: com.aiassistant.data.repository.TimelineBasisChangedException) {
+                e
+            }
+            assertNotNull("原节点已被删除时也应触发二次确认异常", missingBasis)
+            assertNull(missingBasis!!.currentEventContent)
+            assertTrue(missingBasis.wasDeletedOrRetimed)
+            assertEquals("第1天·傍晚", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+
+            f.repository.applyAutoTimelineProposal(id, deletedTargetProposal, forceApplyChangedTimeline = true)
+            val afterAppendNodes = f.repository.getTimelineNodes(id)
+            assertEquals(2, afterAppendNodes.size)
+            assertEquals(deletedTargetProposal.newEvent!!.content, afterAppendNodes.last().event)
+            assertTrue(afterAppendNodes.last().event.contains("补充新发现的旧船航志"))
+            assertEquals("第2天·清晨", afterAppendNodes.last().timeTag)
+            assertEquals("第2天·正午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+
+            // 3. 设定的提取与校验仍保持严格校验 (2.A)：即使强制应用已改变的时间线，设定依据改变仍须拒绝并整笔回滚
+            val memId = f.db.memoryDao().insertMemory(MemoryItem(
+                scope = "conversation", conversationId = id, content = "【角色设定】合成旅人只在白昼使用信标"
+            ))
+            val thirdNode = afterAppendNodes.last()
+            jsonPayload = """{"newStoryTime":"第2天·傍晚","action":"UPDATE","targetNodeId":${thirdNode.id},"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"再次更新航志细节"},"atemporalSettings":[{"action":"SUPPLEMENT","targetMemoryId":$memId,"category":"角色设定","content":"随身携带备用电池","evidence":"她随身携带备用电池","changeReason":"补充装备细节"}]}"""
+            val combinedExtracted = f.repository.evaluateAndAutoUpdateTimeline(id, "继续检查", "林岚说她随身携带备用电池并修改航志", config.id, config.modelName)!!
+            assertEquals("UPDATE", combinedExtracted.action)
+            val combinedProposal = if (combinedExtracted.atemporalSettings.isNotEmpty()) {
+                combinedExtracted
+            } else {
+                combinedExtracted.copy(
+                    atemporalSettings = listOf(
+                        AtemporalSettingItem(
+                            category = "角色设定",
+                            content = "随身携带备用电池",
+                            action = "SUPPLEMENT",
+                            targetMemoryId = memId,
+                            previousContent = "【角色设定】合成旅人只在白昼使用信标",
+                            evidence = "她随身携带备用电池",
+                            changeReason = "补充装备细节",
+                            isSelected = true
+                        )
+                    )
+                )
+            }
+            assertEquals(memId, combinedProposal.atemporalSettings.single().targetMemoryId)
+            assertTrue(combinedProposal.atemporalSettings.single().isSelected)
+
+            f.db.openHelper.writableDatabase.execSQL(
+                "UPDATE timeline_nodes SET eventContent = ? WHERE id = ?",
+                arrayOf<Any?>("被手动改写的航志", thirdNode.id)
+            )
+            val oldMem = f.db.memoryDao().getConversationMemories(id).single { it.id == memId }
+            f.db.memoryDao().updateMemory(oldMem.copy(content = "【角色设定】合成旅人已改用夜间信标"))
+
+            val settingBlocked = try {
+                f.repository.applyAutoTimelineProposal(id, combinedProposal, forceApplyChangedTimeline = true)
+                null
+            } catch (e: IllegalStateException) {
+                e
+            }
+            assertNotNull("设定原依据变化时即使强制应用时间线也必须拒绝", settingBlocked)
+            assertFalse("设定冲突不应被误归类为时间线二次确认异常",
+                settingBlocked is com.aiassistant.data.repository.TimelineBasisChangedException)
+            assertTrue(settingBlocked!!.message.orEmpty().contains("请重新提取"))
+            assertEquals("被手动改写的航志", f.repository.getTimelineNodes(id).last().event)
+            assertEquals("第2天·正午", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertEquals("【角色设定】合成旅人已改用夜间信标",
+                f.db.memoryDao().getConversationMemories(id).single { it.id == memId }.content)
+        } }
+    }
+
+    @Test fun timelineUpdateProposalAllowsUserTimeTagEditAndIsIdempotentWithoutFalseConflict() = runBlocking {
+        var jsonPayload = ""
+        Endpoint { socket, _ -> memoryReply(socket, jsonPayload) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-edit-model")
+            val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(
+                conversationId = id, timeTag = "第1天·上午", event = "林岚登船起航", category = "PLOT_EVENT", orderIndex = 1
+            ))
+            jsonPayload = """{"newStoryTime":"第1天·黄昏","action":"UPDATE","targetNodeId":$nodeId,"newEvent":{"timeTag":"第1天·上午","category":"PLOT_EVENT","content":"林岚登船起航并在甲板核对罗盘"},"atemporalSettings":[]}"""
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续航行", "在甲板核对罗盘", config.id, config.modelName)!!
+            assertEquals("UPDATE", proposal.action)
+            val userEdited = proposal.copy(newEvent = proposal.newEvent!!.copy(timeTag = "第1天·傍晚"))
+
+            // 编辑卡片修改 timeTag 后不应因拿新 timeTag 对比库内旧 timeTag 而误报原事实已改变
+            f.repository.applyAutoTimelineProposal(id, userEdited)
+            val saved = f.repository.getTimelineNodes(id).single()
+            assertEquals("第1天·傍晚", saved.timeTag)
+            assertEquals("林岚登船起航并在甲板核对罗盘", saved.event)
+            assertEquals("第1天·黄昏", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+
+            // 二次幂等应用同样不能误报冲突
+            f.repository.applyAutoTimelineProposal(id, userEdited)
+            assertEquals("第1天·傍晚", f.repository.getTimelineNodes(id).single().timeTag)
+        } }
+    }
+
+    @Test fun singleTurnTimelineSelectionFlagsSkipUncheckedStoryTimeOrEventWithoutBlockingSettings() = runBlocking {
+        var jsonPayload = ""
+        Endpoint { socket, _ -> memoryReply(socket, jsonPayload) }.use { endpoint -> Fixture().use { f ->
+            val (config, id) = f.conversation(endpoint.url, "synthetic-timeline-flags-model")
+            f.db.conversationDao().updateConversation(f.db.conversationDao().getConversationById(id)!!.copy(currentStoryTime = "第1天·清晨"))
+            val nodeId = f.db.timelineNodeDao().insertTimelineNode(TimelineNode(
+                conversationId = id, timeTag = "第1天·清晨", event = "旧码头巡逻记录", category = "PLOT_EVENT", orderIndex = 1
+            ))
+            jsonPayload = """{"newStoryTime":"第2天·清晨","action":"UPDATE","targetNodeId":$nodeId,"newEvent":{"timeTag":"第2天·清晨","category":"PLOT_EVENT","content":"更新后的巡逻记录"},"atemporalSettings":[{"category":"世界规则","content":"港口雾天禁止鸣笛"}]}"""
+            val proposal = f.repository.evaluateAndAutoUpdateTimeline(id, "继续巡逻", "次日清晨雾天禁止鸣笛", config.id, config.modelName)!!
+
+            // 即使原节点已被修改，只要取消勾选“推进时空”和“时间线事件”，应可只应用勾选的设定且不触发时间线冲突
+            f.db.openHelper.writableDatabase.execSQL(
+                "UPDATE timeline_nodes SET eventContent = ? WHERE id = ?",
+                arrayOf<Any?>("手工修订后的巡逻记录", nodeId)
+            )
+            f.repository.applyAutoTimelineProposal(id, proposal.copy(applyStoryTime = false, applyNewEvent = false))
+            assertEquals("第1天·清晨", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertEquals("手工修订后的巡逻记录", f.repository.getTimelineNodes(id).single().event)
+            assertTrue(f.db.memoryDao().getConversationMemories(id).any { it.content.contains("港口雾天禁止鸣笛") })
+
+            // 只勾选“推进时空”、不勾选“时间线事件”
+            f.repository.applyAutoTimelineProposal(id, proposal.copy(applyStoryTime = true, applyNewEvent = false, atemporalSettings = emptyList()))
+            assertEquals("第2天·清晨", f.db.conversationDao().getConversationById(id)!!.currentStoryTime)
+            assertEquals("手工修订后的巡逻记录", f.repository.getTimelineNodes(id).single().event)
+        } }
+    }
+
+    @Test fun timelineDraftDeserializesLegacyEventsAsSelectedWhilePreservingExplicitFalse() {
+        Fixture().use { f ->
+            val id = 918273L
+            val dir = java.io.File(f.context.filesDir, "timeline_drafts").apply { mkdirs() }
+            val draftFile = java.io.File(dir, "draft_${id}.json")
+            try {
+                draftFile.writeText(
+                    """{"conversationId":$id,"currentStoryTime":"第3天·上午","updatedAt":123456,"events":[{"timeTag":"第1天·清晨","content":"合成旧草稿未带勾选字段","category":"PLOT_EVENT"},{"timeTag":"第2天·傍晚","content":"合成明确取消勾选条目","category":"PLOT_EVENT","isSelected":false}],"atemporalSettings":[]}"""
+                )
+                val loaded = com.aiassistant.utils.TimelineDraftManager.getDraft(f.context, id)!!
+                assertEquals(2, loaded.events.size)
+                assertTrue("缺少 isSelected 的历史草稿条目必须默认勾选", loaded.events[0].isSelected)
+                assertFalse("明确保存为 false 的条目必须保持未勾选", loaded.events[1].isSelected)
+            } finally {
+                com.aiassistant.utils.TimelineDraftManager.clearDraft(f.context, id)
+            }
+        }
+    }
+
 }
