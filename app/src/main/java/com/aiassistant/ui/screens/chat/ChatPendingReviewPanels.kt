@@ -32,6 +32,7 @@ import com.aiassistant.data.repository.AutoTimelineUpdateResult
 import com.aiassistant.domain.model.PendingMemoryCandidate
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoGlassDialog
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
 import com.aiassistant.ui.components.echoCheckboxColors
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.utils.TimelineCategory
@@ -148,7 +149,7 @@ private fun PendingReviewCard(
     EchoGlassCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         containerColor = containerColor,
-        shape = EchoTokens.Radius.shapeMd
+        shape = EchoGlassPagePanelShape
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

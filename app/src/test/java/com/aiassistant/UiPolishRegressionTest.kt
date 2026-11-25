@@ -967,6 +967,295 @@ class UiPolishRegressionTest {
         }
     }
 
+    @Test fun clearSkyAndIndexThemesCarryAirAndCatalogueDetails() {
+        val presets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY,
+            com.aiassistant.utils.EchoAppearancePreset.INDEX
+        )
+        assertEquals(presets, presets.map { com.aiassistant.utils.EchoAppearancePreset.sanitize(it) })
+        assertTrue(com.aiassistant.utils.EchoAppearancePreset.values.containsAll(presets))
+
+        val clearSky = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY)
+        val index = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.INDEX)
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.SkyMist, clearSky.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.SkyCurrents, clearSky.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.SkyHorizon, clearSky.frameOrnament)
+        assertTrue("晴空应使用开阔的大圆角", clearSky.panelCornerRadius.value >= 22f)
+        assertTrue("晴空用户消息应使用轻蓝强调底色", clearSky.accentUserBubble)
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.IndexStock, index.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.IndexCatalogue, index.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.IndexTab, index.frameOrnament)
+        assertTrue("索引应使用目录卡式小圆角", index.panelCornerRadius.value <= 6f)
+        assertTrue("索引应使用清晰卡片描边", index.strongOutline)
+        assertFalse("索引用户消息应保留卡纸底色", index.accentUserBubble)
+        assertTrue(com.aiassistant.ui.theme.echoShapesFor(com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY).medium is androidx.compose.foundation.shape.RoundedCornerShape)
+        assertTrue(com.aiassistant.ui.theme.echoShapesFor(com.aiassistant.utils.EchoAppearancePreset.INDEX).medium is androidx.compose.foundation.shape.RoundedCornerShape)
+
+        val clearTypography = com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY)
+        val indexTypography = com.aiassistant.ui.theme.echoTypographyFor(com.aiassistant.utils.EchoAppearancePreset.INDEX)
+        assertEquals(androidx.compose.ui.text.font.FontWeight.Medium, clearTypography.titleLarge.fontWeight)
+        assertEquals(27f, clearTypography.bodyLarge.lineHeight.value)
+        assertTrue("索引标题应使用目录衬线字体", indexTypography.titleLarge.fontFamily != androidx.compose.ui.text.font.FontFamily.Default)
+        assertEquals(androidx.compose.ui.text.font.FontFamily.Monospace, indexTypography.labelMedium.fontFamily)
+        assertTrue("索引正文节奏应比晴空紧凑", indexTypography.bodyLarge.lineHeight.value < clearTypography.bodyLarge.lineHeight.value)
+
+        val base = androidx.compose.ui.text.TextStyle(
+            fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp)
+        )
+        val skyParagraph = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.SkyMist)
+        val indexParagraph = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.IndexStock)
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Start, skyParagraph.textAlign)
+        assertEquals(androidx.compose.ui.text.style.TextIndent.None, skyParagraph.textIndent)
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Justify, indexParagraph.textAlign)
+        assertEquals(androidx.compose.ui.text.style.TextIndent.None, indexParagraph.textIndent)
+        assertEquals(base.fontSize, skyParagraph.fontSize)
+        assertEquals(base.fontSize, indexParagraph.fontSize)
+
+        for (material in listOf(
+            com.aiassistant.ui.theme.EchoPaperMaterial.SkyMist,
+            com.aiassistant.ui.theme.EchoPaperMaterial.IndexStock
+        )) {
+            for (dark in listOf(false, true)) {
+                val bitmap = com.aiassistant.ui.theme.createPaperTexture(material, dark, 1f)
+                assertTrue(bitmap.width >= 128 && bitmap.height >= 128)
+            }
+        }
+    }
+
+    @Test fun everyPresetHasNonColorStructuralStyleAndTypography() {
+        val nonDefaultPresets = com.aiassistant.utils.EchoAppearancePreset.values
+            .filter { it != com.aiassistant.utils.EchoAppearancePreset.EXISTING }
+        for (preset in nonDefaultPresets) {
+            val style = com.aiassistant.ui.theme.echoThemeStyleFor(preset)
+            assertTrue("$preset 必须启用独立面板形态（不得只是纯换色）", style.flatSurfaces)
+            assertTrue(
+                "$preset 必须具备结构/边饰/材质或版式特征",
+                style.frameOrnament != com.aiassistant.ui.theme.EchoFrameOrnament.None ||
+                    style.surfacePattern != com.aiassistant.ui.theme.EchoSurfacePattern.None ||
+                    style.headerStyle != com.aiassistant.ui.theme.EchoHeaderStyle.Default ||
+                    style.cutCorners ||
+                    style.hardShadow
+            )
+            assertTrue(
+                "$preset 必须有独立排版字体参数",
+                com.aiassistant.ui.theme.echoTypographyFor(preset) != com.aiassistant.ui.theme.Typography
+            )
+            val lightScheme = com.aiassistant.ui.theme.echoColorScheme(preset, false)
+            assertTrue(
+                "$preset 浅色模式下卡片 surface 与画布 background 必须可区分",
+                lightScheme.surface != lightScheme.background
+            )
+        }
+
+        val voyage = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.NIGHT_VOYAGE)
+        assertEquals(com.aiassistant.ui.theme.EchoPaperMaterial.NauticalVellum, voyage.paperMaterial)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.NauticalChart, voyage.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.VoyageCompass, voyage.frameOrnament)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.Logbook, voyage.messageMetaStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.NauticalHeading, voyage.markdownHeadingStyle)
+
+        val mono = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.MONO)
+        assertTrue(mono.isMonochrome)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.SwissGrid, mono.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoFrameOrnament.SwissRule, mono.frameOrnament)
+        assertEquals(com.aiassistant.ui.theme.EchoHeaderStyle.SwissEditorial, mono.headerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.SwissStamp, mono.messageMetaStyle)
+
+        val clearSky = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY)
+        assertEquals(com.aiassistant.ui.theme.EchoDividerStyle.HorizonFade, clearSky.dividerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.AiryHorizon, clearSky.markdownHeadingStyle)
+
+        val index = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.INDEX)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.CatalogHeading, index.markdownHeadingStyle)
+
+        val deckle = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.DECKLE)
+        assertEquals(com.aiassistant.ui.theme.EchoSurfacePattern.DeckleEdge, deckle.surfacePattern)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.Colophon, deckle.messageMetaStyle)
+
+        val cotton = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.COTTON)
+        assertEquals(com.aiassistant.ui.theme.EchoDividerStyle.VersePause, cotton.dividerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.VerseHeading, cotton.markdownHeadingStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.VerseNote, cotton.messageMetaStyle)
+
+        val folio = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.FOLIO)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.FolioChapter, folio.markdownHeadingStyle)
+
+        val sonar = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.SONAR)
+        val blueprint = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.BLUEPRINT)
+        assertEquals(com.aiassistant.ui.theme.EchoDividerStyle.RadarPulse, sonar.dividerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.TelemetryHud, sonar.markdownHeadingStyle)
+        assertTrue("声呐与蓝图分隔线风格必须区分", sonar.dividerStyle != blueprint.dividerStyle)
+        assertTrue("声呐与蓝图标题装饰必须区分", sonar.markdownHeadingStyle != blueprint.markdownHeadingStyle)
+
+        val bauhaus = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.BAUHAUS)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.GeometricTag, bauhaus.messageMetaStyle)
+
+        val celadon = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.CELADON)
+        val lacquer = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.LACQUER)
+        assertEquals(com.aiassistant.ui.theme.EchoDividerStyle.CeramicWave, celadon.dividerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.CeladonSeal, celadon.markdownHeadingStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.SealMark, celadon.messageMetaStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoDividerStyle.GiltDoubleRule, lacquer.dividerStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMarkdownHeadingStyle.LacquerPlaque, lacquer.markdownHeadingStyle)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.PlaqueStamp, lacquer.messageMetaStyle)
+
+        val edition = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.EDITION)
+        assertEquals(com.aiassistant.ui.theme.EchoMessageMetaStyle.PressDateline, edition.messageMetaStyle)
+
+        val identities = nonDefaultPresets.map { preset ->
+            val s = com.aiassistant.ui.theme.echoThemeStyleFor(preset)
+            s.frameOrnament to s.headerStyle
+        }.toSet()
+        assertEquals("全部 14 套非默认主题必须拥有互异的框饰与版头组合", nonDefaultPresets.size, identities.size)
+
+        val editionLight = com.aiassistant.ui.theme.echoColorScheme(com.aiassistant.utils.EchoAppearancePreset.EDITION, false)
+        val screeningLight = com.aiassistant.ui.theme.echoColorScheme(com.aiassistant.utils.EchoAppearancePreset.SCREENING, false)
+        assertTrue("放映室浅色画布应与晨刊暖新闻纸明显区隔", screeningLight.background != editionLight.background)
+        assertTrue("放映室浅色主色应与晨刊主色区分", screeningLight.primary != editionLight.primary)
+
+        fun contrast(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float =
+            (maxOf(a.luminance(), b.luminance()) + 0.05f) / (minOf(a.luminance(), b.luminance()) + 0.05f)
+        for (preset in com.aiassistant.utils.EchoAppearancePreset.values) {
+            for (dark in listOf(false, true)) {
+                val scheme = com.aiassistant.ui.theme.echoColorScheme(preset, dark)
+                assertTrue("$preset 正文对比度不足", contrast(scheme.onBackground, scheme.background) >= 4.5f)
+                assertTrue("$preset 主操作对比度不足", contrast(scheme.onPrimary, scheme.primary) >= 4.5f)
+                assertTrue("$preset 次操作对比度不足", contrast(scheme.onSecondary, scheme.secondary) >= 4.5f)
+                assertTrue("$preset 第三操作对比度不足", contrast(scheme.onTertiary, scheme.tertiary) >= 4.5f)
+                assertTrue("$preset 主容器对比度不足", contrast(scheme.onPrimaryContainer, scheme.primaryContainer) >= 4.5f)
+                assertTrue("$preset 次容器对比度不足", contrast(scheme.onSecondaryContainer, scheme.secondaryContainer) >= 4.5f)
+                assertTrue("$preset 第三容器对比度不足", contrast(scheme.onTertiaryContainer, scheme.tertiaryContainer) >= 4.5f)
+                assertTrue("$preset 辅助文字对比度不足", contrast(scheme.onSurfaceVariant, scheme.surfaceVariant) >= 4.5f)
+            }
+        }
+
+        val base = androidx.compose.ui.text.TextStyle(
+            fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp)
+        )
+        val nauticalParagraph = com.aiassistant.ui.components.paperParagraphStyle(base, com.aiassistant.ui.theme.EchoPaperMaterial.NauticalVellum)
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Start, nauticalParagraph.textAlign)
+        assertEquals(androidx.compose.ui.text.style.TextIndent.None, nauticalParagraph.textIndent)
+        assertEquals(base.fontSize, nauticalParagraph.fontSize)
+    }
+
+    @Test fun inputResizeHandleMatchesPanelGeometryAcrossAllPresets() {
+        val rightAnglePresets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.BLUEPRINT,
+            com.aiassistant.utils.EchoAppearancePreset.EDITION,
+            com.aiassistant.utils.EchoAppearancePreset.BAUHAUS,
+            com.aiassistant.utils.EchoAppearancePreset.FOLIO,
+            com.aiassistant.utils.EchoAppearancePreset.MONO
+        )
+        rightAnglePresets.forEach { preset ->
+            val style = com.aiassistant.ui.theme.echoThemeStyleFor(preset)
+            assertEquals(
+                "$preset 方角输入框右上角拖拽手柄应为直角",
+                com.aiassistant.ui.screens.chat.InputResizeHandleStyle.RightAngle,
+                com.aiassistant.ui.screens.chat.inputResizeHandleStyleFor(style)
+            )
+            assertEquals(style.panelCornerRadius, com.aiassistant.ui.screens.chat.inputOuterCornerRadius(style))
+        }
+
+        val sonarStyle = com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.SONAR)
+        assertEquals(
+            com.aiassistant.ui.screens.chat.InputResizeHandleStyle.CutBevel,
+            com.aiassistant.ui.screens.chat.inputResizeHandleStyleFor(sonarStyle)
+        )
+
+        val roundedAnglePresets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.INDEX,
+            com.aiassistant.utils.EchoAppearancePreset.DECKLE,
+            com.aiassistant.utils.EchoAppearancePreset.COTTON,
+            com.aiassistant.utils.EchoAppearancePreset.SCREENING,
+            com.aiassistant.utils.EchoAppearancePreset.LACQUER
+        )
+        roundedAnglePresets.forEach { preset ->
+            val style = com.aiassistant.ui.theme.echoThemeStyleFor(preset)
+            assertEquals(
+                "$preset 中小圆角输入框手柄应匹配圆角拐角",
+                com.aiassistant.ui.screens.chat.InputResizeHandleStyle.RoundedAngle,
+                com.aiassistant.ui.screens.chat.inputResizeHandleStyleFor(style)
+            )
+        }
+
+        val arcPresets = listOf(
+            com.aiassistant.utils.EchoAppearancePreset.EXISTING,
+            com.aiassistant.utils.EchoAppearancePreset.CLEAR_SKY,
+            com.aiassistant.utils.EchoAppearancePreset.CELADON,
+            com.aiassistant.utils.EchoAppearancePreset.NIGHT_VOYAGE
+        )
+        arcPresets.forEach { preset ->
+            val style = com.aiassistant.ui.theme.echoThemeStyleFor(preset)
+            assertEquals(
+                "$preset 大圆角输入框手柄应为同心圆弧",
+                com.aiassistant.ui.screens.chat.InputResizeHandleStyle.Arc,
+                com.aiassistant.ui.screens.chat.inputResizeHandleStyleFor(style)
+            )
+        }
+        assertEquals(
+            androidx.compose.ui.unit.Dp(22f),
+            com.aiassistant.ui.screens.chat.inputOuterCornerRadius(
+                com.aiassistant.ui.theme.echoThemeStyleFor(com.aiassistant.utils.EchoAppearancePreset.EXISTING)
+            )
+        )
+    }
+
+    @Test fun themedMessageClockAndDurationReflectThemeMetaStyle() {
+        val ts = 1_700_000_000_000L
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.TimecodeSubtitle)
+                .startsWith("TC ")
+        )
+        assertEquals(
+            "00:04.2",
+            com.aiassistant.ui.theme.formatThemedDuration(4_200L, com.aiassistant.ui.theme.EchoMessageMetaStyle.TimecodeSubtitle)
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.Marginalia)
+                .startsWith("¶ ")
+        )
+        val telemetry = com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.Telemetry)
+        assertTrue(telemetry.startsWith("[") && telemetry.endsWith("]"))
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.Logbook)
+                .startsWith("LOG ")
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.CatalogueStamp)
+                .contains(" / ")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.chat.formatMessageClock(ts),
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.Default)
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.SwissStamp)
+                .contains(" · ")
+        )
+        val colophon = com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.Colophon)
+        assertTrue(colophon.startsWith("— ") && colophon.endsWith(" —"))
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.VerseNote)
+                .startsWith("· ")
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.GeometricTag)
+                .startsWith("■ ")
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.SealMark)
+                .startsWith("○ ")
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.PlaqueStamp)
+                .startsWith("◆ ")
+        )
+        assertTrue(
+            com.aiassistant.ui.theme.formatThemedMessageClock(ts, com.aiassistant.ui.theme.EchoMessageMetaStyle.PressDateline)
+                .startsWith("ED. ")
+        )
+    }
+
     @Test fun redesignedPendingTimelineReviewPreservesOuterBoundsAndStructuredContent() {
         val proposal = com.aiassistant.data.repository.AutoTimelineUpdateResult(
             updatedStoryTime = "第3天·暮色",

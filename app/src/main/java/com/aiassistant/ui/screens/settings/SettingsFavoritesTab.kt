@@ -25,7 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aiassistant.AiAssistantApp
 import com.aiassistant.ui.components.EchoGlassCard
-import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 import com.aiassistant.utils.FavoriteMessage
 import com.aiassistant.utils.FavoriteStore
 import dev.chrisbanes.haze.HazeState
@@ -60,7 +61,7 @@ fun FavoritesTab(
     ) {
         if (favorites.isEmpty()) {
             item(key = "favorites_empty") {
-                EchoGlassCard(modifier = Modifier.fillMaxWidth(), shape = EchoTokens.Radius.shapeMd) {
+                EchoGlassCard(modifier = Modifier.fillMaxWidth(), shape = EchoGlassPagePanelShape) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -105,7 +106,7 @@ private fun FavoriteRow(
     EchoGlassCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = EchoTokens.Radius.shapeMd,
+        shape = EchoGlassSubPanelShape,
         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
     ) {
         Column(

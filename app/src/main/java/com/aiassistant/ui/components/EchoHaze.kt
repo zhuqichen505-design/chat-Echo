@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,8 @@ import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -63,6 +66,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
+import com.aiassistant.ui.theme.EchoThemeStyle
 import com.aiassistant.ui.theme.EchoTokens
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.echoPaperTexture
@@ -95,15 +99,43 @@ val EchoGlassPagePanelShape: Shape
 val EchoGlassControlShape: Shape
     @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
         echoPanelShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapePill
+val EchoGlassInputShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        echoPanelShape(LocalEchoThemeStyle.current.panelCornerRadius) else EchoTokens.Radius.shapeInput
+val EchoGlassSubPanelShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        echoPanelShape(LocalEchoThemeStyle.current.controlCornerRadius) else EchoTokens.Radius.shapeMd
+val EchoGlassCompactPanelShape: Shape
+    @Composable get() = if (LocalEchoThemeStyle.current.flatSurfaces)
+        echoPanelShape(LocalEchoThemeStyle.current.controlCornerRadius) else RoundedCornerShape(16.dp)
+val EchoGlassIconButtonShape: Shape
+    @Composable get() {
+        val style = LocalEchoThemeStyle.current
+        return when {
+            !style.flatSurfaces || style.panelCornerRadius >= 18.dp -> CircleShape
+            style.cutCorners -> CutCornerShape(style.controlCornerRadius)
+            else -> RoundedCornerShape(style.controlCornerRadius)
+        }
+    }
 
-/** Bauhaus uses a displaced solid block instead of a blurred elevation shadow. */
 @Composable
-fun Modifier.echoThemeHardShadow(offset: Dp = 4.dp): Modifier {
+internal fun ornamentCornerRadiusFor(shape: Shape, style: EchoThemeStyle = LocalEchoThemeStyle.current): Dp = when (shape) {
+    EchoGlassDialogShape -> style.dialogCornerRadius
+    EchoGlassControlShape, EchoGlassSubPanelShape, EchoGlassCompactPanelShape -> style.controlCornerRadius
+    else -> style.panelCornerRadius
+}
+
+/** Bauhaus uses a displaced solid block matching the exact silhouette instead of a blurred elevation shadow. */
+@Composable
+fun Modifier.echoThemeHardShadow(offset: Dp = 4.dp, shape: Shape = EchoGlassPagePanelShape): Modifier {
     if (!LocalEchoThemeStyle.current.hardShadow) return this
     val shadow = MaterialTheme.colorScheme.onSurface.copy(alpha = .82f)
     return drawBehind {
         val shift = offset.toPx()
-        drawRect(color = shadow, topLeft = Offset(shift, shift), size = size)
+        val outline = shape.createOutline(size, layoutDirection, this)
+        translate(left = shift, top = shift) {
+            drawOutline(outline = outline, color = shadow)
+        }
     }
 }
 
@@ -210,13 +242,9 @@ fun Modifier.echoHazePanel(
         val style = LocalEchoThemeStyle.current
         val surface = if (tint == Color.Unspecified) colorScheme.surface
             else tint.compositeOver(colorScheme.surface).copy(alpha = 1f)
-        val ornamentRadius = when (shape) {
-            EchoGlassDialogShape -> style.dialogCornerRadius
-            EchoGlassControlShape -> style.controlCornerRadius
-            else -> style.panelCornerRadius
-        }
+        val ornamentRadius = ornamentCornerRadiusFor(shape, style)
         return this
-            .echoThemeHardShadow()
+            .echoThemeHardShadow(shape = shape)
             .clip(shape)
             .background(surface, shape)
             .echoPaperTexture()
@@ -585,7 +613,7 @@ fun EchoGlassDropdownMenu(
             ) {
                 Surface(
                     modifier = modifier
-                        .echoThemeHardShadow()
+                        .echoThemeHardShadow(shape = menuShape)
                         .echoThemeFrameOrnament(cornerRadius = LocalEchoThemeStyle.current.panelCornerRadius, compact = true),
                     shape = menuShape,
                     color = containerColor,

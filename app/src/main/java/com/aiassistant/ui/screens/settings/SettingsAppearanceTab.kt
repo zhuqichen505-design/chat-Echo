@@ -32,6 +32,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.input.pointer.pointerInput
@@ -75,6 +76,8 @@ import com.aiassistant.domain.model.ModelCapabilityEngine
 import com.aiassistant.domain.model.ModelCustomSettings
 import com.aiassistant.domain.model.PromptTemplate
 import com.aiassistant.ui.components.EchoGlassCard
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
+import com.aiassistant.ui.theme.echoThemeStyleFor
 import com.aiassistant.ui.components.EchoStreamingIndicator
 import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.EchoModelMarkState
@@ -502,24 +505,32 @@ fun AppearanceTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Column(Modifier.fillMaxWidth().selectableGroup()) {
                     val presets = listOf(
-                        AppearancePresetOption(EchoAppearancePreset.EXISTING, "经典", "保留当前 Echo 配色", listOf(0xFF3B82F6, 0xFF38BDF8, 0xFFFB7185)),
-                        AppearancePresetOption(EchoAppearancePreset.CLEAR_SKY, "晴空", "蓝白层次，清晰舒展", listOf(0xFF2C73B7, 0xFF83D3F0, 0xFFEDF4FC)),
-                        AppearancePresetOption(EchoAppearancePreset.NIGHT_VOYAGE, "夜航", "墨绿与暖金，安静阅读", listOf(0xFF172B29, 0xFFD6BB83, 0xFFA5C9AD)),
-                        AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "纸色与赭红，温和分明", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354)),
-                        AppearancePresetOption(EchoAppearancePreset.MONO, "墨白", "黑白对照、细线轮廓、平面材质", listOf(0xFF242424, 0xFFE9E9E9, 0xFFFFFFFF)),
-                        AppearancePresetOption(EchoAppearancePreset.DECKLE, "毛边文库", "暖纸纤维、砖红铅墨、书页排版", listOf(0xFFF2E8D3, 0xFF8B3E2D, 0xFFEADAC0)),
-                        AppearancePresetOption(EchoAppearancePreset.COTTON, "棉纸诗笺", "冷白棉纸、松绿蓝墨、舒展留白", listOf(0xFFF4F5F1, 0xFF375D70, 0xFFDDE6E6)),
-                        AppearancePresetOption(EchoAppearancePreset.FOLIO, "拾页", "书页纹理、章节排版、页边批注", listOf(0xFFF3EDDF, 0xFF6F3345, 0xFFB9A78A)),
-                        AppearancePresetOption(EchoAppearancePreset.SONAR, "声呐", "深空网格、切角面板、荧光信号", listOf(0xFF071411, 0xFF63F5D2, 0xFF82D7E8)),
-                        AppearancePresetOption(EchoAppearancePreset.BAUHAUS, "构型", "几何色块、粗描边、硬质投影", listOf(0xFFF2EDDF, 0xFFC93F32, 0xFF1668B4)),
-                        AppearancePresetOption(EchoAppearancePreset.CELADON, "青瓷", "天青冰裂釉纹、双唇柔润圆角、宋瓷书题", listOf(0xFFEDF3F0, 0xFF286860, 0xFF825F32)),
-                        AppearancePresetOption(EchoAppearancePreset.BLUEPRINT, "蓝图", "工程标尺网格、注册角标线框、等宽技术标头", listOf(0xFF0A1B2E, 0xFF7EC0FF, 0xFFA83D2A)),
-                        AppearancePresetOption(EchoAppearancePreset.LACQUER, "漆匣", "丝缎大漆横纹、描金内双框、典籍缩进排版", listOf(0xFF151110, 0xFFE4B96E, 0xFF9E2B22)),
-                        AppearancePresetOption(EchoAppearancePreset.EDITION, "晨刊", "新闻纸、宋体正文、裁切角标与双线报头", listOf(0xFFF1ECE1, 0xFFA63A2B, 0xFF1B1A17)),
-                        AppearancePresetOption(EchoAppearancePreset.SCREENING, "放映室", "胶片齿孔、场记板气泡、字幕条与时间码", listOf(0xFF0B0C0E, 0xFFD9675A, 0xFFC8B78D))
+                        AppearancePresetOption(EchoAppearancePreset.EXISTING, "经典", "液态玻璃折射、柔和圆角与经典 Echo 配色", listOf(0xFF3B82F6, 0xFF38BDF8, 0xFFFB7185)),
+                        AppearancePresetOption(EchoAppearancePreset.CLEAR_SKY, "晴空", "气流曲线、地平线露点、宽圆角与舒展排版", listOf(0xFF2C73B7, 0xFF83D3F0, 0xFFEDF4FC)),
+                        AppearancePresetOption(EchoAppearancePreset.NIGHT_VOYAGE, "夜航", "航海双环罗盘、羊皮纤维、衬线书题与日志标签", listOf(0xFF172B29, 0xFFD6BB83, 0xFFA5C9AD)),
+                        AppearancePresetOption(EchoAppearancePreset.INDEX, "索引", "目录卡纸横格、穿孔挂签气泡、衬线标题与等宽标签", listOf(0xFFAF4D34, 0xFFF0E7DF, 0xFF706354)),
+                        AppearancePresetOption(EchoAppearancePreset.MONO, "墨白", "瑞士四栏网格、黑白粗重版式线、直角秩序与等宽标注", listOf(0xFF242424, 0xFFE9E9E9, 0xFFFFFFFF)),
+                        AppearancePresetOption(EchoAppearancePreset.DECKLE, "毛边文库", "毛边页缘折影、针脚书脊、暖纸铅墨与首行缩进排版", listOf(0xFFF2E8D3, 0xFF8B3E2D, 0xFFEADAC0)),
+                        AppearancePresetOption(EchoAppearancePreset.COTTON, "棉纸诗笺", "棉纸直行诗栏、松绿蓝墨、三点诗节分隔与舒展留白", listOf(0xFFF4F5F1, 0xFF375D70, 0xFFDDE6E6)),
+                        AppearancePresetOption(EchoAppearancePreset.FOLIO, "拾页", "书行双栏红批注、章节节号、页边助记线与典籍排版", listOf(0xFFF3EDDF, 0xFF6F3345, 0xFFB9A78A)),
+                        AppearancePresetOption(EchoAppearancePreset.SONAR, "声呐", "雷达扫描网格、45°切角面板、脉冲分隔与遥测 HUD", listOf(0xFF071411, 0xFF63F5D2, 0xFF82D7E8)),
+                        AppearancePresetOption(EchoAppearancePreset.BAUHAUS, "构型", "红蓝黄三原色几何、粗描边、实体硬阴影与方正版式", listOf(0xFFF2EDDF, 0xFFC93F32, 0xFF1668B4)),
+                        AppearancePresetOption(EchoAppearancePreset.CELADON, "青瓷", "天青冰裂釉纹、双唇暖金高光、印章前缀与瓷环分隔", listOf(0xFFEDF3F0, 0xFF286860, 0xFF825F32)),
+                        AppearancePresetOption(EchoAppearancePreset.BLUEPRINT, "蓝图", "双轴工程标尺网格、注册角标与图签线框、等宽批注", listOf(0xFF0A1B2E, 0xFF7EC0FF, 0xFFA83D2A)),
+                        AppearancePresetOption(EchoAppearancePreset.LACQUER, "漆匣", "丝缎大漆回纹页框、描金双线菱结、典籍缩进排版", listOf(0xFF151110, 0xFFE4B96E, 0xFF9E2B22)),
+                        AppearancePresetOption(EchoAppearancePreset.EDITION, "晨刊", "新闻纸分栏线、宋体正文、裁切角标与三线刊头", listOf(0xFFF1ECE1, 0xFFA63A2B, 0xFF1B1A17)),
+                        AppearancePresetOption(EchoAppearancePreset.SCREENING, "放映室", "银盐/暗黑胶片齿孔、场记斜纹气泡、字幕条与时间码", listOf(0xFF0B0C0E, 0xFF9C2935, 0xFFC8B78D))
                     )
                     presets.forEach { preset ->
                         val selected = settings.appearancePreset == preset.id
+                        val presetStyle = remember(preset.id) { echoThemeStyleFor(preset.id) }
+                        val swatchCorner = if (!presetStyle.flatSurfaces) 8.dp
+                            else (presetStyle.panelCornerRadius.value * 0.35f).coerceIn(1.5f, 8f).dp
+                        val swatchShape = if (presetStyle.cutCorners) CutCornerShape(swatchCorner)
+                            else RoundedCornerShape(swatchCorner)
+                        val swatchBorderWidth = if (presetStyle.strongOutline) 1.2.dp else 0.6.dp
+                        val swatchBorderColor = if (presetStyle.strongOutline) MaterialTheme.colorScheme.outline
+                            else MaterialTheme.colorScheme.outlineVariant
                         Row(
                             modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp)
                                 .clip(MaterialTheme.shapes.medium)
@@ -536,10 +547,36 @@ fun AppearanceTab(
                                     Text(preset.label, modifier = Modifier.weight(1f),
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        val shadowColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                                         preset.colors.forEach { color ->
-                                            Box(Modifier.size(16.dp).clip(CircleShape).background(Color(color))
-                                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                                            if (presetStyle.hardShadow) {
+                                                Box(modifier = Modifier.size(18.dp)) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .size(16.dp)
+                                                            .clip(swatchShape)
+                                                            .background(shadowColor)
+                                                    )
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopStart)
+                                                            .size(16.dp)
+                                                            .clip(swatchShape)
+                                                            .background(Color(color))
+                                                            .border(swatchBorderWidth, swatchBorderColor, swatchShape)
+                                                    )
+                                                }
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(16.dp)
+                                                        .clip(swatchShape)
+                                                        .background(Color(color))
+                                                        .border(swatchBorderWidth, swatchBorderColor, swatchShape)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -634,7 +671,7 @@ fun AppearanceTab(
                             state = modelMarkPreviewState,
                             completionEvent = modelMarkPreviewCompletionEvent,
                             idleEffects = true,
-                            modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)),
+                            modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.surface, SettingsInnerShape),
                             description = "当前模型标识预览"
                         )
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -804,7 +841,7 @@ fun AppearanceTab(
                             "你好！我是 Echo 智能助手，这是一段用于预览对话与排版字体大小的示例文本。",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = chatFontSize.sp,
-                                fontFamily = if (settings.applyReadingFontToChats) com.aiassistant.ui.screens.chat.readingFontFamily(settings.storyFont) else FontFamily.SansSerif
+                                fontFamily = if (settings.applyReadingFontToChats) com.aiassistant.ui.screens.chat.readingFontFamily(settings.storyFont) else MaterialTheme.typography.bodyLarge.fontFamily
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -1149,12 +1186,13 @@ private fun HomeLayoutChoice(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    Column(modifier.clip(RoundedCornerShape(12.dp))
+    val choiceShape = EchoGlassSubPanelShape
+    Column(modifier.clip(choiceShape)
         .selectable(selected = selected, role = Role.RadioButton, onClick = onSelected)
         .padding(4.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(106.dp).clip(RoundedCornerShape(8.dp))
+        Canvas(Modifier.fillMaxWidth().height(106.dp).clip(choiceShape)
             .background(colors.surface).border(if (selected) 2.dp else 1.dp,
-                if (selected) colors.primary else colors.outlineVariant, RoundedCornerShape(8.dp))
+                if (selected) colors.primary else colors.outlineVariant, choiceShape)
             .clearAndSetSemantics { }) {
             val gap = 9.dp.toPx()
             val isWorkbench = style == EchoHomeLayoutStyle.WORKBENCH

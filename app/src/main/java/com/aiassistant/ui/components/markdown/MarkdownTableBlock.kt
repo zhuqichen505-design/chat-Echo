@@ -13,8 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 import com.aiassistant.ui.components.InlineMarkdownText
 import com.aiassistant.ui.components.markdown.MarkdownInlineParser.parseInlineMarkdown
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 
 /**
  * Markdown 表格解析与排版渲染组件（支持双列卡片与水平滚动两套适配）
@@ -131,10 +133,10 @@ fun MobileTwoColumnTable(
             val detail = row.getOrNull(1).orEmpty()
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = EchoGlassSubPanelShape,
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                 border = BorderStroke(
-                    width = 1.dp,
+                    width = if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                 )
             ) {

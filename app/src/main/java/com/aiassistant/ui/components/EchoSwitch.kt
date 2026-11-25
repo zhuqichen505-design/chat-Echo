@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.rememberRipple // 工具链约束：BOM 2024.06（foundation 1.6.x）尚无 ripple() 新 API（需 1.7+），保留弃用 API 仅警告
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,10 +25,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.aiassistant.ui.theme.EchoMotion
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.rememberReducedMotion
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -118,7 +121,17 @@ private fun EchoCompactSwitchTrack(
     val trackHeight = EchoTokens.Component.switchTrackHeight // 26dp
     val thumbSize = 20.dp
     val thumbMargin = 3.dp
-    val pillShape = RoundedCornerShape(trackHeight / 2)
+    val themeStyle = LocalEchoThemeStyle.current
+    val pillShape: Shape = when {
+        themeStyle.cutCorners -> CutCornerShape(4.dp)
+        themeStyle.flatSurfaces && themeStyle.panelCornerRadius <= 4.dp -> RoundedCornerShape(themeStyle.controlCornerRadius)
+        else -> RoundedCornerShape(trackHeight / 2)
+    }
+    val thumbShape: Shape = when {
+        themeStyle.cutCorners -> CutCornerShape(3.dp)
+        themeStyle.flatSurfaces && themeStyle.panelCornerRadius <= 4.dp -> RoundedCornerShape((themeStyle.controlCornerRadius - 1.dp).coerceAtLeast(1.dp))
+        else -> CircleShape
+    }
 
     // A5：reduced motion 时颜色/位移瞬切（snap），否则弹簧节奏动画
     val reduced = rememberReducedMotion()
@@ -176,7 +189,7 @@ private fun EchoCompactSwitchTrack(
                     .align(Alignment.CenterStart) // 垂直居中于 26dp 轨道（缺省会贴顶，底部悬空 6dp）
                     .offset(x = thumbOffset)
                     .size(thumbSize)
-                    .clip(CircleShape)
+                    .clip(thumbShape)
                     .background(
                         if (enabled) thumbColor else if (checked) colors.disabledCheckedThumbColor else colors.disabledUncheckedThumbColor
                     )

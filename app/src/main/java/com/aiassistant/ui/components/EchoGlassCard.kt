@@ -58,8 +58,9 @@ fun EchoGlassCard(
     if (LocalEchoThemeStyle.current.flatSurfaces) {
         val style = LocalEchoThemeStyle.current
         val surface = (containerColor ?: colorScheme.surface).compositeOver(colorScheme.surface).copy(alpha = 1f)
+        val ornamentRadius = ornamentCornerRadiusFor(shape, style)
         Box(modifier = modifier
-            .echoThemeHardShadow()
+            .echoThemeHardShadow(shape = shape)
             .clip(shape)
             .background(surface, shape)
             .echoPaperTexture()
@@ -70,7 +71,7 @@ fun EchoGlassCard(
                     shape
                 ) else Modifier
             )
-            .then(if (showBorder) Modifier.echoThemeFrameOrnament(cornerRadius = style.panelCornerRadius) else Modifier),
+            .then(if (showBorder) Modifier.echoThemeFrameOrnament(cornerRadius = ornamentRadius) else Modifier),
             content = content)
         return
     }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -967,6 +968,19 @@ internal fun ChatHeaderTitle(
     onLongClick: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
+    val themeStyle = com.aiassistant.ui.theme.LocalEchoThemeStyle.current
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val titlePrefix = when (themeStyle.headerStyle) {
+        com.aiassistant.ui.theme.EchoHeaderStyle.BlueprintSpec -> "// "
+        com.aiassistant.ui.theme.EchoHeaderStyle.TelemetryHud -> ":: "
+        com.aiassistant.ui.theme.EchoHeaderStyle.FolioChapter -> "§ "
+        com.aiassistant.ui.theme.EchoHeaderStyle.NauticalLog -> "◇ "
+        com.aiassistant.ui.theme.EchoHeaderStyle.CatalogueBar -> "▪ "
+        com.aiassistant.ui.theme.EchoHeaderStyle.BookPlate -> "— "
+        com.aiassistant.ui.theme.EchoHeaderStyle.LacquerPlaque -> "◆ "
+        else -> null
+    }
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -980,14 +994,63 @@ internal fun ChatHeaderTitle(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            when (themeStyle.headerStyle) {
+                com.aiassistant.ui.theme.EchoHeaderStyle.BauhausBar -> {
+                    Box(Modifier.padding(end = 6.dp).size(7.dp).background(primaryColor))
+                }
+                com.aiassistant.ui.theme.EchoHeaderStyle.SwissEditorial -> {
+                    Box(Modifier.padding(end = 6.dp).size(width = 3.dp, height = 14.dp).background(primaryColor))
+                }
+                com.aiassistant.ui.theme.EchoHeaderStyle.CinemaSlate -> {
+                    Box(Modifier.padding(end = 6.dp).size(6.dp).clip(CircleShape).background(primaryColor))
+                }
+                com.aiassistant.ui.theme.EchoHeaderStyle.AiryHorizon -> {
+                    Box(Modifier.padding(end = 6.dp).size(5.dp).clip(CircleShape).background(secondaryColor))
+                }
+                com.aiassistant.ui.theme.EchoHeaderStyle.VerseSlip -> {
+                    Box(Modifier.padding(end = 6.dp).size(width = 2.dp, height = 13.dp).background(primaryColor.copy(alpha = 0.72f)))
+                }
+                com.aiassistant.ui.theme.EchoHeaderStyle.CeladonSeal -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(11.dp)
+                            .border(1.dp, primaryColor.copy(alpha = 0.72f), RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(Modifier.size(3.dp).clip(CircleShape).background(secondaryColor))
+                    }
+                }
+                else -> Unit
+            }
+            if (titlePrefix != null) {
+                Text(
+                    text = titlePrefix,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = if (themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.BlueprintSpec ||
+                            themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.TelemetryHud
+                        ) FontFamily.Monospace else MaterialTheme.typography.titleMedium.fontFamily,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = if (themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.NauticalLog ||
+                        themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.LacquerPlaque
+                    ) secondaryColor else primaryColor
+                )
+            }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium.copy(
-                    fontFamily = FontFamily.SansSerif,
                     fontWeight = FontWeight.Bold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        if (themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.NewspaperMasthead) {
+            Spacer(Modifier.height(2.dp))
+            Box(Modifier.fillMaxWidth(0.55f).height(1.dp).background(primaryColor.copy(alpha = 0.55f)))
+        } else if (themeStyle.headerStyle == com.aiassistant.ui.theme.EchoHeaderStyle.LacquerPlaque) {
+            Spacer(Modifier.height(2.dp))
+            Box(Modifier.fillMaxWidth(0.45f).height(0.8.dp).background(secondaryColor.copy(alpha = 0.55f)))
         }
     }
 }
@@ -1178,9 +1241,12 @@ internal fun ContextCompressionTierSelectorCard(
     }
 
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = com.aiassistant.ui.components.EchoGlassPagePanelShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        border = BorderStroke(
+            if (com.aiassistant.ui.theme.LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -1544,7 +1610,7 @@ private fun ComparisonBarRow(
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "~$tokens T",
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.SansSerif),
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = if (highlight) FontWeight.Bold else FontWeight.Medium,
                 color = valueColor
             )

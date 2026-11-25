@@ -7,9 +7,12 @@ import com.aiassistant.ui.components.markdown.parseMarkdownTable
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -21,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -42,7 +46,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.key
+import com.aiassistant.ui.theme.EchoDividerStyle
+import com.aiassistant.ui.theme.EchoMarkdownHeadingStyle
 import com.aiassistant.ui.theme.EchoPaperMaterial
+import com.aiassistant.ui.theme.EchoThemedDivider
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
@@ -455,6 +462,7 @@ private fun MarkdownContent(
                         color = color,
                         topPad = 8.dp,
                         bottomPad = 4.dp,
+                        headingLevel = 1,
                         endCursorColor = if (isLastLine) endCursorColor else null,
                         endCursorFading = endCursorFading
                     )
@@ -468,6 +476,7 @@ private fun MarkdownContent(
                         color = color,
                         topPad = 6.dp,
                         bottomPad = 3.dp,
+                        headingLevel = 2,
                         endCursorColor = if (isLastLine) endCursorColor else null,
                         endCursorFading = endCursorFading
                     )
@@ -481,6 +490,7 @@ private fun MarkdownContent(
                         color = color,
                         topPad = 5.dp,
                         bottomPad = 3.dp,
+                        headingLevel = 3,
                         endCursorColor = if (isLastLine) endCursorColor else null,
                         endCursorFading = endCursorFading
                     )
@@ -595,25 +605,66 @@ private fun MarkdownContent(
 
                     // 引用
                     line.startsWith("> ") -> {
+                        val themeStyle = LocalEchoThemeStyle.current
+                        val isScreeningQuote = themeStyle.paperMaterial == EchoPaperMaterial.ProjectorGrain
+                        val isDoubleQuote = themeStyle.dividerStyle == EchoDividerStyle.DoubleRule ||
+                            themeStyle.dividerStyle == EchoDividerStyle.GiltDoubleRule
+                        val isTechQuote = themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.TechnicalPrefix ||
+                            themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.TelemetryHud
+                        val isSharpQuote = themeStyle.dividerStyle == EchoDividerStyle.HeavyEditorial ||
+                            themeStyle.cutCorners ||
+                            themeStyle.panelCornerRadius <= 4.dp
+                        val isSoftQuote = themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.VerseHeading ||
+                            themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.CeladonSeal ||
+                            themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.AiryHorizon
+                        val barCorner = if (isSharpQuote || isDoubleQuote) 0.dp else 2.dp
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                                .padding(vertical = if (isSoftQuote) 6.dp else 4.dp)
+                                .then(
+                                    when {
+                                        isScreeningQuote || isTechQuote || (themeStyle.isMonochrome && themeStyle.dividerStyle == EchoDividerStyle.HeavyEditorial) -> Modifier
+                                            .clip(EchoGlassSubPanelShape)
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (isScreeningQuote) 0.5f else 0.35f))
+                                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                                        else -> Modifier
+                                    }
+                                )
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(4.dp)
-                                    .height(24.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                        RoundedCornerShape(2.dp)
+                            if (isDoubleQuote) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(24.dp)
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f))
                                     )
-                            )
+                                    Box(
+                                        modifier = Modifier
+                                            .width(0.8.dp)
+                                            .height(24.dp)
+                                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f))
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .width(if (isSharpQuote) 3.5.dp else if (isScreeningQuote) 2.5.dp else if (isSoftQuote) 2.dp else 3.5.dp)
+                                        .height(24.dp)
+                                        .background(
+                                            (if (isScreeningQuote) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary).copy(alpha = 0.65f),
+                                            RoundedCornerShape(barCorner)
+                                        )
+                                )
+                            }
                             Spacer(modifier = Modifier.width(8.dp))
                             InlineMarkdownText(
                                 text = parseInlineMarkdown(line.removePrefix("> ")),
-                                style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic),
-                                color = color.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontStyle = if (isSharpQuote || isScreeningQuote || isTechQuote) FontStyle.Normal else FontStyle.Italic
+                                ),
+                                color = color.copy(alpha = 0.84f),
                                 endCursorColor = if (isLastLine) endCursorColor else null,
                                 endCursorFading = endCursorFading
                             )
@@ -623,7 +674,7 @@ private fun MarkdownContent(
 
                     // 分割线
                     line.trim() == "---" || line.trim() == "***" -> {
-                        HorizontalDivider(
+                        EchoThemedDivider(
                             modifier = Modifier.padding(vertical = 8.dp),
                             color = MaterialTheme.colorScheme.outlineVariant
                         )
@@ -665,8 +716,9 @@ private fun MarkdownContent(
                                 modifier = Modifier.padding(
                                     vertical = when (LocalEchoThemeStyle.current.paperMaterial) {
                                         EchoPaperMaterial.Cotton -> 5.dp
-                                        EchoPaperMaterial.Celadon -> 4.dp
-                                        EchoPaperMaterial.Lacquer -> 3.dp
+                                        EchoPaperMaterial.SkyMist, EchoPaperMaterial.Celadon -> 4.dp
+                                        EchoPaperMaterial.Lacquer, EchoPaperMaterial.NauticalVellum -> 3.dp
+                                        EchoPaperMaterial.IndexStock -> 1.dp
                                         else -> 2.dp
                                     }
                                 ),
@@ -720,6 +772,9 @@ internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial):
     EchoPaperMaterial.Lacquer -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 1.2.em))
     EchoPaperMaterial.Newsprint -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent(firstLine = 1.6.em))
     EchoPaperMaterial.ProjectorGrain -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
+    EchoPaperMaterial.SkyMist -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
+    EchoPaperMaterial.IndexStock -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent.None)
+    EchoPaperMaterial.NauticalVellum -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
     EchoPaperMaterial.None -> style
 }
 
@@ -760,10 +815,12 @@ private fun renderHeadingText(
     color: Color,
     topPad: Dp,
     bottomPad: Dp,
+    headingLevel: Int = 3,
     endCursorColor: Color? = null,
     endCursorFading: Boolean = false
 ) {
     val isSpecial = isSpecialKeywordTitle(text)
+    val themeStyle = LocalEchoThemeStyle.current
     val finalStyle = if (isSpecial) {
         MaterialTheme.typography.titleMedium.copy(
             fontSize = 17.5.sp,
@@ -775,14 +832,201 @@ private fun renderHeadingText(
     }
     val finalColor = if (isSpecial) MaterialTheme.colorScheme.primary else color
 
-    InlineMarkdownText(
-        text = parseInlineMarkdown(text),
-        style = finalStyle,
-        color = finalColor,
-        modifier = Modifier.padding(top = topPad, bottom = bottomPad),
-        endCursorColor = endCursorColor,
-        endCursorFading = endCursorFading
-    )
+    val extraPad = if (themeStyle.markdownHeadingStyle == EchoMarkdownHeadingStyle.VerseHeading) 2.dp else 0.dp
+    Column(modifier = Modifier.padding(top = topPad + extraPad, bottom = bottomPad + extraPad)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            when (themeStyle.markdownHeadingStyle) {
+                EchoMarkdownHeadingStyle.TechnicalPrefix -> {
+                    val prefix = when (headingLevel) {
+                        1 -> "§ "
+                        2 -> "// "
+                        else -> "› "
+                    }
+                    Text(
+                        text = prefix,
+                        style = finalStyle.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoMarkdownHeadingStyle.TelemetryHud -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(if (headingLevel <= 2) 7.dp else 5.dp)
+                            .clip(CutCornerShape(2.5.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                    Text(
+                        text = if (headingLevel == 1) ":: " else "> ",
+                        style = finalStyle.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                EchoMarkdownHeadingStyle.CatalogHeading -> {
+                    Text(
+                        text = if (headingLevel == 1) "▪ " else "· ",
+                        style = finalStyle,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoMarkdownHeadingStyle.NauticalHeading -> {
+                    Text(
+                        text = "◇ ",
+                        style = finalStyle,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                EchoMarkdownHeadingStyle.AiryHorizon -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(if (headingLevel <= 2) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondary)
+                    )
+                }
+                EchoMarkdownHeadingStyle.VerseHeading -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .size(width = 1.8.dp, height = if (headingLevel <= 2) 15.dp else 12.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f))
+                    )
+                }
+                EchoMarkdownHeadingStyle.FolioChapter -> {
+                    Text(
+                        text = if (headingLevel <= 2) "§ " else "¶ ",
+                        style = finalStyle,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoMarkdownHeadingStyle.CeladonSeal -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(if (headingLevel <= 2) 12.dp else 9.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f), RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary))
+                    }
+                }
+                EchoMarkdownHeadingStyle.LacquerPlaque -> {
+                    Row(modifier = Modifier.padding(end = 7.dp), horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+                        Box(Modifier.size(width = 2.dp, height = if (headingLevel <= 2) 16.dp else 12.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)))
+                        Box(Modifier.size(width = 1.dp, height = if (headingLevel <= 2) 16.dp else 12.dp).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f)))
+                    }
+                }
+                EchoMarkdownHeadingStyle.EditorialRule -> {
+                    if (!themeStyle.isMonochrome && headingLevel == 1) {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(6.dp)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
+                EchoMarkdownHeadingStyle.GeometricBlock -> {
+                    Row(modifier = Modifier.padding(end = 7.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = if (headingLevel <= 2) 5.dp else 4.dp, height = if (headingLevel == 1) 18.dp else 14.dp)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        if (headingLevel <= 2) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 2.5.dp, height = if (headingLevel == 1) 18.dp else 14.dp)
+                                    .background(MaterialTheme.colorScheme.secondary)
+                            )
+                        }
+                    }
+                }
+                EchoMarkdownHeadingStyle.CinemaCue -> {
+                    if (headingLevel <= 2) {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 7.dp)
+                                .size(width = 3.dp, height = 15.dp)
+                                .background(MaterialTheme.colorScheme.secondary)
+                        )
+                    }
+                }
+                EchoMarkdownHeadingStyle.LiteraryChapter -> {
+                    if (headingLevel <= 2) {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 7.dp)
+                                .size(width = 2.5.dp, height = 15.dp)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f))
+                        )
+                    }
+                }
+                EchoMarkdownHeadingStyle.Default -> Unit
+            }
+            InlineMarkdownText(
+                text = parseInlineMarkdown(text),
+                style = finalStyle,
+                color = finalColor,
+                endCursorColor = endCursorColor,
+                endCursorFading = endCursorFading
+            )
+        }
+        if (headingLevel <= 2) {
+            when (themeStyle.markdownHeadingStyle) {
+                EchoMarkdownHeadingStyle.EditorialRule, EchoMarkdownHeadingStyle.CatalogHeading -> {
+                    Spacer(Modifier.height(3.dp))
+                    EchoThemedDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = if (headingLevel == 1) 0.55f else 0.35f))
+                }
+                EchoMarkdownHeadingStyle.TechnicalPrefix, EchoMarkdownHeadingStyle.TelemetryHud, EchoMarkdownHeadingStyle.CinemaCue -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(if (headingLevel == 1) 0.72f else 0.45f)
+                            .height(0.8.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.32f))
+                    )
+                }
+                EchoMarkdownHeadingStyle.AiryHorizon -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(if (headingLevel == 1) 0.65f else 0.42f)
+                            .height(0.8.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), Color.Transparent)
+                                )
+                            )
+                    )
+                }
+                EchoMarkdownHeadingStyle.NauticalHeading -> {
+                    Spacer(Modifier.height(3.dp))
+                    EchoThemedDivider(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.42f))
+                }
+                EchoMarkdownHeadingStyle.FolioChapter, EchoMarkdownHeadingStyle.CeladonSeal -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(if (headingLevel == 1) 0.52f else 0.34f)
+                            .height(0.7.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+                    )
+                }
+                EchoMarkdownHeadingStyle.LacquerPlaque -> {
+                    Spacer(Modifier.height(3.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth(if (headingLevel == 1) 0.60f else 0.38f)
+                            .height(0.8.dp)
+                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f))
+                    )
+                }
+                else -> Unit
+            }
+        }
+    }
 }
 
 /**
@@ -813,9 +1057,12 @@ private fun MathBlock(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = EchoGlassSubPanelShape,
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+        border = BorderStroke(
+            if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+        )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(

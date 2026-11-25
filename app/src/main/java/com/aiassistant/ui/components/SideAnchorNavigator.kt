@@ -225,7 +225,7 @@ private fun ExpandedAnchorPanel(
     onSelected: (SideAnchorItem) -> Unit
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val panelShape = RoundedCornerShape(24.dp)
+    val panelShape = EchoGlassPagePanelShape
     val panelListState = rememberLazyListState()
     val activeIndex = remember(items, currentIndex) {
         items.indexOfLast { it.itemIndex <= currentIndex }.coerceAtLeast(0)

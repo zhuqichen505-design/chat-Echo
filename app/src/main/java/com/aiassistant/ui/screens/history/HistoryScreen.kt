@@ -224,7 +224,7 @@ fun HistoryScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(22.dp),
+                    shape = com.aiassistant.ui.components.EchoGlassInputShape,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = searchTextColor,
                         unfocusedTextColor = searchTextColor,
@@ -468,7 +468,6 @@ fun HistoryConversationCard(
                 Text(
                     text = highlightedTitle,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                     ),
                     color = content,

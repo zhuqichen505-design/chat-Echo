@@ -97,7 +97,11 @@ import com.aiassistant.ui.components.rememberEchoHazeState
 import com.aiassistant.ui.components.rememberSmoothReorderState
 import com.aiassistant.ui.components.reorderItem
 import com.aiassistant.ui.components.reorderDragHandle
+import com.aiassistant.ui.components.EchoGlassInputShape
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
 import com.aiassistant.utils.BackupManager
@@ -531,8 +535,10 @@ internal val V1923UserUpdates = listOf(
     "液态玻璃组件优化"
 )
 
-val SettingsPanelShape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeXl
-val SettingsInnerShape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeLg
+val SettingsPanelShape: androidx.compose.ui.graphics.Shape
+    @Composable get() = EchoGlassPagePanelShape
+val SettingsInnerShape: androidx.compose.ui.graphics.Shape
+    @Composable get() = EchoGlassSubPanelShape
 
 @Composable
 fun SettingsGlassCard(
@@ -655,7 +661,7 @@ fun SettingsScreen(
             }
         }
         val readableBackdrops = rememberReadableBackdropColors(settingsBackgroundBitmap)
-        val toolbarShape = RoundedCornerShape(22.dp)
+        val toolbarShape = EchoGlassInputShape
         val toolbarTint = glass.input
         val toolbarContentColor = readableTextColorFor(
             background = toolbarTint,
@@ -769,7 +775,7 @@ fun SettingsScreen(
                     shape = toolbarShape,
                     color = Color.Transparent,
                     contentColor = toolbarContentColor,
-                    border = BorderStroke(1.dp, glass.outline),
+                    border = null,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
                 ) {
@@ -866,9 +872,12 @@ fun SettingsMenu(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = EchoGlassPagePanelShape,
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant)
+                        border = BorderStroke(
+                            if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 0.8.dp,
+                            if (LocalEchoThemeStyle.current.strongOutline) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant
+                        )
                     ) {
                         Column {
                             entries.forEachIndexed { index, entry ->

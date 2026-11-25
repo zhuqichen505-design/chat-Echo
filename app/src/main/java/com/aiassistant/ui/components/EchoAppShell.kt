@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.aiassistant.ui.theme.EchoThemedDivider
 import com.aiassistant.utils.EchoHomeLayoutStyle
 import androidx.navigation.NavHostController
 
@@ -104,7 +105,7 @@ internal fun EchoAppShell(
             }
             Box(Modifier.weight(1f).fillMaxWidth().then(insetsModifier)) { content() }
             if (useBottomBar) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                EchoThemedDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
                     modifier = Modifier.fillMaxWidth().navigationBarsPadding()

@@ -192,7 +192,7 @@ fun StatsScreen(
         // v2.6.7 需求 5a：与设置页同款真悬浮栏——列表从透明毛玻璃栏下方穿透滚动；
         // 顶栏（返回/标题/刷新）下方同一行放「时间范围」「模型」两个悬浮下拉胶囊
         val glass = echoGlassPalette()
-        val toolbarShape = RoundedCornerShape(22.dp)
+        val toolbarShape = com.aiassistant.ui.components.EchoGlassInputShape
         val toolbarTint = glass.input
         val toolbarContentColor = readableTextColorFor(
             background = toolbarTint,
@@ -375,7 +375,7 @@ fun StatsScreen(
                     shape = toolbarShape,
                     color = Color.Transparent,
                     contentColor = toolbarContentColor,
-                    border = BorderStroke(1.dp, glass.outline),
+                    border = null,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
                 ) {
@@ -743,7 +743,6 @@ private fun HeroSummaryCard(
                     text = formatNumber(summary.totalTokens),
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontSize = 32.sp,
-                        fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Bold
                     ),
                     color = content
@@ -917,7 +916,7 @@ private fun DeltaChip(
         )
         Text(
             text = "$label ${formatDeltaPct(deltaPct)}",
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.SansSerif),
+            style = MaterialTheme.typography.labelSmall,
             color = textColor.copy(alpha = 0.85f),
             maxLines = 1
         )
@@ -1079,7 +1078,6 @@ private fun TokenDonutCard(
                         Text(
                             text = formatNumber(total),
                             style = MaterialTheme.typography.titleLarge.copy(
-                                fontFamily = FontFamily.SansSerif,
                                 fontWeight = FontWeight.Bold
                             ),
                             color = content
@@ -1120,7 +1118,7 @@ private fun TokenDonutCard(
                             )
                             Text(
                                 text = "${formatNumber(slice.value)} · ${formatPercent(if (total > 0) slice.value.toFloat() / total else 0f)}",
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.SansSerif),
+                                style = MaterialTheme.typography.labelSmall,
                                 color = content,
                                 maxLines = 1
                             )
@@ -1172,8 +1170,9 @@ private fun MetricPill(
             }
             Text(
                 text = value,
-                style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.SansSerif,
-                    fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold
+                ),
                 color = contentColor
             )
         }
@@ -1677,7 +1676,7 @@ private fun ProviderShareCard(
                             }
                             Text(
                                 text = "${formatNumber(share.totalTokens)} · ${formatPercent(share.share)} · ${share.requestCount}次",
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.SansSerif),
+                                style = MaterialTheme.typography.labelSmall,
                                 color = content.copy(alpha = 0.75f),
                                 maxLines = 1
                             )
@@ -1781,7 +1780,6 @@ private fun FailureAnalysisCard(
                             Text(
                                 text = "${failure.count} 次",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.SansSerif,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = chartColors.tertiary
@@ -2313,8 +2311,9 @@ private fun ModernModelStatsTable(
                                     ) {
                                         Text(
                                             text = com.aiassistant.domain.model.ModelDisplayName.format(row.modelName),
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.SansSerif,
-                                                fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold
+                                            ),
                                             color = content,
                                             maxLines = 1
                                         )
@@ -2496,7 +2495,7 @@ private fun MiniStatsChip(
         )
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.SansSerif),
+            style = MaterialTheme.typography.labelSmall,
             color = if (isHighlighted) MaterialTheme.colorScheme.primary else tint,
             fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1

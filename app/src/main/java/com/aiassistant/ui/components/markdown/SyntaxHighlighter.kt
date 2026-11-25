@@ -25,7 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 
 /**
  * 代码块组件（支持语法高亮与复制）
@@ -44,7 +44,7 @@ fun CodeBlock(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = EchoTokens.Radius.shapeCodeBlock,
+        shape = EchoGlassSubPanelShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(
             if (com.aiassistant.ui.theme.LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,

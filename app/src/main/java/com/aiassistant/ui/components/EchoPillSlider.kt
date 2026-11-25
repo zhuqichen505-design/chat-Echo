@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,9 +43,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.luminance
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -78,6 +82,12 @@ fun EchoPillSlider(
     val scope = rememberCoroutineScope()
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val resolvedInactiveColor = inactiveColor ?: MaterialTheme.colorScheme.surfaceContainerHighest
+    val themeStyle = LocalEchoThemeStyle.current
+    val thumbShape: Shape = when {
+        themeStyle.cutCorners -> CutCornerShape(5.dp)
+        themeStyle.flatSurfaces && themeStyle.panelCornerRadius <= 4.dp -> RoundedCornerShape(themeStyle.controlCornerRadius)
+        else -> CircleShape
+    }
 
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentValue by rememberUpdatedState(value)
@@ -200,10 +210,15 @@ fun EchoPillSlider(
                     ) { change, _ -> updateContinuous(change.position.x) }
                 }
         ) {
-            // 1. 绘制药丸圆角背景轨道与离散点
+            // 1. 绘制轨道与离散点（按主题圆角/切角自适应）
             Canvas(modifier = Modifier.matchParentSize()) {
                 val trackTop = (heightPx - trackHeightPx) / 2f
-                val cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
+                val cornerRadiusPx = when {
+                    themeStyle.cutCorners -> 4.dp.toPx()
+                    themeStyle.flatSurfaces && themeStyle.panelCornerRadius <= 4.dp -> themeStyle.controlCornerRadius.toPx()
+                    else -> trackHeightPx / 2f
+                }
+                val cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
 
                 // 完整胶囊轨道裁剪路径
                 val trackPath = Path().apply {
@@ -265,8 +280,8 @@ fun EchoPillSlider(
                 modifier = Modifier
                     .offset { IntOffset(thumbLeft, thumbTop) }
                     .size(thumbSize)
-                    .shadow(elevation = EchoTokens.Elevation.raised(isDark).elevation, shape = CircleShape, ambientColor = EchoTokens.Elevation.raised(isDark).ambient, spotColor = EchoTokens.Elevation.raised(isDark).spot)
-                    .clip(CircleShape)
+                    .shadow(elevation = EchoTokens.Elevation.raised(isDark).elevation, shape = thumbShape, ambientColor = EchoTokens.Elevation.raised(isDark).ambient, spotColor = EchoTokens.Elevation.raised(isDark).spot)
+                    .clip(thumbShape)
                     .background(MaterialTheme.colorScheme.onPrimary)
             )
         }

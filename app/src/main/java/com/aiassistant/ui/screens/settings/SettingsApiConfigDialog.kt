@@ -1582,7 +1582,7 @@ private fun ModelCustomSettingCard(
     isDragActive: Boolean = false
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape = SettingsInnerShape
     val glass = echoGlassPalette()
 
     val currentSettings = customSettings ?: run {

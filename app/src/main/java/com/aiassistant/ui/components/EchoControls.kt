@@ -98,7 +98,7 @@ fun EchoPrimaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.echoThemeHardShadow(),
+        modifier = modifier.echoThemeHardShadow(shape = shape),
         enabled = enabled,
         shape = shape,
         contentPadding = contentPadding,
@@ -125,7 +125,7 @@ fun EchoGlassButton(
     val glass = echoGlassPalette()
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.echoThemeHardShadow(),
+        modifier = modifier.echoThemeHardShadow(shape = shape),
         enabled = enabled,
         shape = shape,
         contentPadding = contentPadding,

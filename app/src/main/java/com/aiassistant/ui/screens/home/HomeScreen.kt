@@ -68,6 +68,15 @@ import com.aiassistant.domain.model.Folder
 import com.aiassistant.utils.BackupManager
 import android.widget.Toast
 import com.aiassistant.ui.components.CardEmphasis
+import com.aiassistant.ui.components.EchoGlassControlShape
+import com.aiassistant.ui.components.EchoGlassIconButtonShape
+import com.aiassistant.ui.components.EchoGlassInputShape
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
+import com.aiassistant.ui.components.echoThemeHardShadow
+import com.aiassistant.ui.theme.EchoThemedWordmark
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 import com.aiassistant.ui.components.echoContentInset
 import com.aiassistant.ui.components.EchoGlassCard
 import com.aiassistant.ui.components.EchoGlassDialog
@@ -759,13 +768,7 @@ fun HomeDashboardHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                EchoWordmark()
-                Text(if (workbench) "会话工作台" else "会话",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            EchoThemedWordmark(workbench = workbench, modifier = Modifier.weight(1f))
             Box {
                 IconButton(onClick = { showMoreMenu = true }) {
                     Icon(Icons.Default.MoreHoriz, contentDescription = "更多会话工具")
@@ -860,29 +863,6 @@ private fun NewConversationGlassButton(
 }
 
 @Composable
-private fun EchoWordmark(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "ECHO",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold,
-                letterSpacing = 4.sp // 字距参数（非字号），品牌字标需要，场景特殊保留
-            ),
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-        )
-    }
-}
-
-@Composable
 private fun StatsIconButton(
     hazeState: dev.chrisbanes.haze.HazeState,
     onClick: () -> Unit,
@@ -891,19 +871,21 @@ private fun StatsIconButton(
     val glass = echoGlassPalette()
     val buttonTint = glass.control
     val glassBlue = MaterialTheme.colorScheme.primary
+    val iconBtnShape = EchoGlassIconButtonShape
+    val borderWidth = if (LocalEchoThemeStyle.current.strongOutline) 1.4.dp else 0.8.dp
     Surface(
         modifier = modifier,
-        shape = CircleShape,
+        shape = iconBtnShape,
         color = buttonTint,
         contentColor = glassBlue,
-        border = BorderStroke(0.8.dp, glass.outline),
+        border = BorderStroke(borderWidth, glass.outline),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .echoShapeClick(CircleShape, onClick = onClick),
+                .echoShapeClick(iconBtnShape, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -945,19 +927,21 @@ private fun GlassHomeIconButton(
     val glass = echoGlassPalette()
     val buttonTint = glass.control
     val glassBlue = MaterialTheme.colorScheme.primary
+    val iconBtnShape = EchoGlassIconButtonShape
+    val borderWidth = if (LocalEchoThemeStyle.current.strongOutline) 1.4.dp else 0.8.dp
     Surface(
         modifier = modifier,
-        shape = CircleShape,
+        shape = iconBtnShape,
         color = buttonTint,
         contentColor = glassBlue,
-        border = BorderStroke(0.8.dp, glass.outline),
+        border = BorderStroke(borderWidth, glass.outline),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .echoShapeClick(CircleShape, onClick = onClick),
+                .echoShapeClick(iconBtnShape, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -989,13 +973,16 @@ private fun HomeSearchRow(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        val searchShape = EchoGlassInputShape
+        val themeStyle = LocalEchoThemeStyle.current
         Surface(
             modifier = Modifier
                 .weight(1f)
-                .height(46.dp),
-            shape = EchoTokens.Radius.shapeInput,
+                .height(46.dp)
+                .echoThemeHardShadow(shape = searchShape),
+            shape = searchShape,
             color = searchTint,
-            border = BorderStroke(0.8.dp, glass.outline),
+            border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 0.8.dp, glass.outline),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp
         ) {
@@ -1072,7 +1059,8 @@ private fun BatchSelectionBar(
     onHideSelected: () -> Unit,
     onDeleteSelected: () -> Unit
 ) {
-    val barShape = RoundedCornerShape(24.dp)
+    val barShape = EchoGlassPagePanelShape
+    val actionShape = EchoGlassControlShape
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1113,21 +1101,21 @@ private fun BatchSelectionBar(
             ) {
                 FilledTonalButton(
                     onClick = onPinSelected,
-                    shape = RoundedCornerShape(999.dp),
+                    shape = actionShape,
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     Text("置顶", maxLines = 1)
                 }
                 FilledTonalButton(
                     onClick = onUnpinSelected,
-                    shape = RoundedCornerShape(999.dp),
+                    shape = actionShape,
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     Text("取消置顶", maxLines = 1)
                 }
                 FilledTonalButton(
                     onClick = onMoveSelected,
-                    shape = RoundedCornerShape(999.dp),
+                    shape = actionShape,
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     Text(moveActionText, maxLines = 1)
@@ -1137,7 +1125,7 @@ private fun BatchSelectionBar(
             FilledTonalButton(
                 onClick = onHideSelected,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(999.dp)
+                shape = actionShape
             ) {
                 Icon(
                     Icons.Default.VisibilityOff,
@@ -1151,7 +1139,7 @@ private fun BatchSelectionBar(
             FilledTonalButton(
                 onClick = onDeleteSelected,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(999.dp),
+                shape = actionShape,
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -1228,7 +1216,7 @@ private fun PinnedSectionHeader(
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
-    val headerShape = RoundedCornerShape(18.dp)
+    val headerShape = EchoGlassPagePanelShape
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1276,7 +1264,8 @@ fun HomeMetric(
     onClick: (() -> Unit)? = null,
     icon: (@Composable () -> Unit)? = null
 ) {
-    val metricShape = RoundedCornerShape(20.dp)
+    val metricShape = EchoGlassPagePanelShape
+    val themeStyle = LocalEchoThemeStyle.current
     val clickableModifier = if (onClick != null) {
         modifier.echoShapeClick(metricShape, onClick = onClick)
     } else {
@@ -1284,10 +1273,17 @@ fun HomeMetric(
     }
 
     Surface(
-        modifier = clickableModifier.height(64.dp),
+        modifier = clickableModifier
+            .height(64.dp)
+            .echoThemeHardShadow(shape = metricShape)
+            .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
         shape = metricShape,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(
+            if (themeStyle.strongOutline) 1.5.dp else 1.dp,
+            if (themeStyle.strongOutline) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant
+        )
     ) {
         Column(
             modifier = Modifier
@@ -1463,7 +1459,7 @@ private fun HomeGlassChip(
     readableBackdrop: Color,
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
-    val chipShape = RoundedCornerShape(999.dp)
+    val chipShape = EchoGlassControlShape
     val glass = echoGlassPalette()
     val tint = if (selected) {
         glass.controlSelected
@@ -1475,6 +1471,7 @@ private fun HomeGlassChip(
         fallbackSurface = readableBackdrop
     )
     val chipContentColor = if (selected) MaterialTheme.colorScheme.primary else defaultContentColor
+    val strong = LocalEchoThemeStyle.current.strongOutline
     Surface(
         modifier = Modifier
             .height(38.dp)
@@ -1482,7 +1479,7 @@ private fun HomeGlassChip(
         shape = chipShape,
         color = tint,
         contentColor = chipContentColor,
-        border = BorderStroke(if (selected) 1.2.dp else 0.8.dp, if (selected) glass.outlineSelected else glass.outline),
+        border = BorderStroke(if (selected || strong) 1.4.dp else 0.8.dp, if (selected) glass.outlineSelected else glass.outline),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
@@ -1643,7 +1640,7 @@ fun ConversationCard(
     var showRenameDialog by remember { mutableStateOf(false) }
 
     val glass = com.aiassistant.ui.components.echoGlassPalette()
-    val cardShape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeLg
+    val cardShape = EchoGlassPagePanelShape
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val cardTint = if (selected) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDark) 0.92f else 0.96f)
@@ -1696,8 +1693,9 @@ fun ConversationCard(
                 ) {
                     Text(
                         text = conversation.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.SansSerif,
-                            fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -1962,7 +1960,7 @@ fun MoveToFolderDialog(
                     modifier = Modifier.heightIn(max = 360.dp)
                 ) {
                     item {
-                        val unfiledShape = RoundedCornerShape(16.dp)
+                        val unfiledShape = EchoGlassSubPanelShape
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1988,7 +1986,7 @@ fun MoveToFolderDialog(
                     }
 
                     items(folders) { folder ->
-                        val folderRowShape = RoundedCornerShape(16.dp)
+                        val folderRowShape = EchoGlassSubPanelShape
                         val folderColors = EchoFolderColors.pastelPalette
                         val color = folderColors.getOrElse(folder.color - 1) {
                             MaterialTheme.colorScheme.primary
@@ -2359,7 +2357,7 @@ fun NewChatDialog(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = EchoGlassSubPanelShape,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
                 ) {
                     Row(

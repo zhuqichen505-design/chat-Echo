@@ -83,7 +83,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -119,6 +121,11 @@ import com.aiassistant.ui.components.EchoModelMark
 import com.aiassistant.ui.components.EchoModelMarkState
 import com.aiassistant.ui.components.EchoSelectionIndicator
 import com.aiassistant.ui.components.EchoGlassDropdownMenu
+import com.aiassistant.ui.components.EchoGlassControlShape
+import com.aiassistant.ui.components.EchoGlassIconButtonShape
+import com.aiassistant.ui.components.EchoGlassInputShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
+import com.aiassistant.ui.components.echoThemeHardShadow
 import com.aiassistant.ui.components.echoFilterChipBorder
 import com.aiassistant.ui.components.echoFilterChipColors
 import com.aiassistant.ui.components.rememberSmoothReorderState
@@ -135,6 +142,8 @@ import com.aiassistant.ui.components.readableTextColorFor
 import com.aiassistant.ui.components.rememberReadableBackdropColors
 import com.aiassistant.ui.components.rememberEchoHazeState
 import com.aiassistant.ui.components.rememberLazyListControlsVisible
+import com.aiassistant.ui.theme.EchoThemeStyle
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
 import com.aiassistant.utils.FileUtils
@@ -251,7 +260,7 @@ fun ChatInputBar(
     }
     val effectiveMinHeight = customInputHeightDp?.dp ?: 42.dp
     val effectiveMaxHeight = if (customInputHeightDp != null) 360.dp else 112.dp
-    val inputShape = EchoTokens.Radius.shapeInput
+    val inputShape = EchoGlassInputShape
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
     }
@@ -318,27 +327,30 @@ fun ChatInputBar(
                     )
                     val bottomHaloColor = if (isGenerating) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     val bottomSurfaceBorderColor = if (isGenerating) MaterialTheme.colorScheme.error.copy(alpha = 0.85f) else glass.outlineSelected
+                    val restoreBtnShape = EchoGlassIconButtonShape
                     Box(
                         modifier = Modifier.size(34.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Canvas(modifier = Modifier.matchParentSize()) {
                             val strokeWidth = 1.2.dp.toPx()
-                            val baseRadius = (size.minDimension - strokeWidth) / 2f
-                            val currentRadius = baseRadius * bottomPulseScale
-                            drawCircle(
-                                color = bottomHaloColor.copy(alpha = bottomPulseAlpha),
-                                radius = currentRadius,
-                                center = center,
-                                style = Stroke(width = strokeWidth)
-                            )
+                            val outline = restoreBtnShape.createOutline(size, layoutDirection, this)
+                            withTransform({
+                                scale(bottomPulseScale, bottomPulseScale, pivot = center)
+                            }) {
+                                drawOutline(
+                                    outline = outline,
+                                    color = bottomHaloColor.copy(alpha = bottomPulseAlpha),
+                                    style = Stroke(width = strokeWidth)
+                                )
+                            }
                         }
                         Surface(
                             onClick = { onBarsHiddenChange(false) },
-                            shape = CircleShape,
+                            shape = restoreBtnShape,
                             color = if (isGenerating) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             contentColor = if (isGenerating) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
-                            border = BorderStroke(1.2.dp, bottomSurfaceBorderColor),
+                            border = BorderStroke(if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.2.dp, bottomSurfaceBorderColor),
                             modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -365,7 +377,7 @@ fun ChatInputBar(
                     shape = inputShape,
                     color = Color.Transparent,
                     contentColor = inputTextColor,
-            border = BorderStroke(1.dp, glass.outline),
+            border = null,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp
         ) {
@@ -556,7 +568,7 @@ fun ChatInputBar(
                         attachmentStatus?.let { status ->
                             item {
                                 Surface(
-                                    shape = RoundedCornerShape(999.dp),
+                                    shape = EchoGlassControlShape,
                                     color = glass.control,
                                     contentColor = inputTextColor,
                                     tonalElevation = 0.dp,
@@ -583,15 +595,17 @@ fun ChatInputBar(
                         }
                     }
 
+                    val actionBtnShape = EchoGlassIconButtonShape
+                    val actionBtnBorderWidth = if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.2.dp
                     Box {
                         Surface(
-                            shape = CircleShape,
+                            shape = actionBtnShape,
                             color = glass.control,
                             contentColor = MaterialTheme.colorScheme.primary,
-                            border = BorderStroke(1.2.dp, glass.outlineSelected),
+                            border = BorderStroke(actionBtnBorderWidth, glass.outlineSelected),
                             modifier = Modifier
                                 .size(36.dp)
-                                .echoShapeClick(CircleShape, enabled = !isProcessingAttachments, onClick = { showToolMenu = true })
+                                .echoShapeClick(actionBtnShape, enabled = !isProcessingAttachments, onClick = { showToolMenu = true })
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Icon(Icons.Default.Add, contentDescription = "添加内容", modifier = Modifier.size(18.dp))
@@ -695,14 +709,14 @@ fun ChatInputBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
-                            shape = CircleShape,
+                            shape = actionBtnShape,
                             color = sendContainerColor,
                             contentColor = sendContentColor,
-                            border = BorderStroke(1.2.dp, sendBorderColor),
+                            border = BorderStroke(actionBtnBorderWidth, sendBorderColor),
                             modifier = Modifier
                                 .size(36.dp)
                                 .echoShapeClick(
-                                    CircleShape,
+                                    actionBtnShape,
                                     enabled = if (isGenerating) true else canSend,
                                     onClick = {
                                         // v2.7.4 需求 4：发送后清除输入框焦点，软键盘随之收起
@@ -742,14 +756,14 @@ fun ChatInputBar(
 
                         if (isGenerating && canSend) {
                             Surface(
-                                shape = CircleShape,
+                                shape = actionBtnShape,
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                                border = BorderStroke(actionBtnBorderWidth, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
                                 modifier = Modifier
                                     .size(36.dp)
                                     .echoShapeClick(
-                                        CircleShape,
+                                        actionBtnShape,
                                         enabled = true,
                                         onClick = {
                                             // v2.7.4 需求 4：排队发送同样清除焦点收起键盘
@@ -777,7 +791,9 @@ fun ChatInputBar(
                 // （v2.7.4 移除 28dp 右留白后文字顶到手柄下），点输入框右端常误触手柄导致输入框
                 // 被展开；24dp 恰好完整覆盖可见弧线（弧线圆心距右缘 22dp、半径 17dp），拖拽不受影响
                 val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                val cornerRadiusDp = 22f
+                val themeStyle = LocalEchoThemeStyle.current
+                val handleStyle = inputResizeHandleStyleFor(themeStyle)
+                val cornerRadiusDp = inputOuterCornerRadius(themeStyle)
                 val handleBoxSize = 24.dp
                 val outlineColor = MaterialTheme.colorScheme.outline
                 val arcColor = if (isDark) {
@@ -825,20 +841,87 @@ fun ChatInputBar(
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val strokeWidth = 2.0.dp.toPx()
-                        val cornerR = cornerRadiusDp.dp.toPx()
-                        val arcR = (cornerR - 5.dp.toPx()).coerceAtLeast(8.dp.toPx())
-                        // 圆心位于右上角向左 cornerR，向下 cornerR
-                        val centerX = size.width - cornerR
-                        val centerY = cornerR
-                        drawArc(
-                            color = arcColor,
-                            startAngle = 270f,
-                            sweepAngle = 90f,
-                            useCenter = false,
-                            topLeft = androidx.compose.ui.geometry.Offset(centerX - arcR, centerY - arcR),
-                            size = androidx.compose.ui.geometry.Size(arcR * 2, arcR * 2),
-                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                        )
+                        when (handleStyle) {
+                            InputResizeHandleStyle.Arc -> {
+                                val cornerR = cornerRadiusDp.toPx()
+                                val arcR = (cornerR - 5.dp.toPx()).coerceAtLeast(6.dp.toPx())
+                                // 圆心位于右上角向左 cornerR，向下 cornerR
+                                val centerX = size.width - cornerR
+                                val centerY = cornerR
+                                drawArc(
+                                    color = arcColor,
+                                    startAngle = 270f,
+                                    sweepAngle = 90f,
+                                    useCenter = false,
+                                    topLeft = androidx.compose.ui.geometry.Offset(centerX - arcR, centerY - arcR),
+                                    size = androidx.compose.ui.geometry.Size(arcR * 2, arcR * 2),
+                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                                )
+                            }
+                            InputResizeHandleStyle.RightAngle -> {
+                                val inset = 5.dp.toPx()
+                                val arm = 10.dp.toPx()
+                                val path = androidx.compose.ui.graphics.Path().apply {
+                                    moveTo(size.width - inset - arm, inset)
+                                    lineTo(size.width - inset, inset)
+                                    lineTo(size.width - inset, inset + arm)
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = arcColor,
+                                    style = Stroke(
+                                        width = strokeWidth,
+                                        cap = StrokeCap.Square,
+                                        join = androidx.compose.ui.graphics.StrokeJoin.Miter
+                                    )
+                                )
+                            }
+                            InputResizeHandleStyle.RoundedAngle -> {
+                                val inset = 4.5.dp.toPx()
+                                val innerR = (cornerRadiusDp.toPx() - 4.dp.toPx()).coerceAtLeast(2.dp.toPx())
+                                val arm = 6.dp.toPx()
+                                val right = size.width - inset
+                                val top = inset
+                                val path = androidx.compose.ui.graphics.Path().apply {
+                                    moveTo(right - innerR - arm, top)
+                                    lineTo(right - innerR, top)
+                                    arcTo(
+                                        rect = androidx.compose.ui.geometry.Rect(right - innerR * 2f, top, right, top + innerR * 2f),
+                                        startAngleDegrees = 270f,
+                                        sweepAngleDegrees = 90f,
+                                        forceMoveTo = false
+                                    )
+                                    lineTo(right, top + innerR + arm)
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = arcColor,
+                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                                )
+                            }
+                            InputResizeHandleStyle.CutBevel -> {
+                                val inset = 4.5.dp.toPx()
+                                val cut = (cornerRadiusDp.toPx() * 0.72f).coerceIn(4.dp.toPx(), 10.dp.toPx())
+                                val stub = 4.dp.toPx()
+                                val right = size.width - inset
+                                val top = inset
+                                val path = androidx.compose.ui.graphics.Path().apply {
+                                    moveTo(right - cut - stub, top)
+                                    lineTo(right - cut, top)
+                                    lineTo(right, top + cut)
+                                    lineTo(right, top + cut + stub)
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = arcColor,
+                                    style = Stroke(
+                                        width = strokeWidth,
+                                        cap = StrokeCap.Square,
+                                        join = androidx.compose.ui.graphics.StrokeJoin.Miter
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -935,9 +1018,9 @@ internal fun QuotedTextPreviewCard(
     val glass = echoGlassPalette()
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = EchoGlassSubPanelShape,
         color = glass.control.copy(alpha = 0.65f),
-        border = BorderStroke(1.dp, glass.outlineSelected.copy(alpha = 0.45f))
+        border = BorderStroke(if (LocalEchoThemeStyle.current.strongOutline) 1.4.dp else 1.dp, glass.outlineSelected.copy(alpha = 0.45f))
     ) {
         Row(
             modifier = Modifier
@@ -1036,7 +1119,6 @@ internal fun ReasoningEffortPopupCard(
             .fillMaxWidth()
             .heightIn(max = 220.dp)
             .padding(bottom = 8.dp),
-        shape = RoundedCornerShape(18.dp),
         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         borderColor = currentLevel.primaryColor.copy(alpha = 0.42f),
         elevation = 2.dp
@@ -1308,8 +1390,9 @@ internal fun InputPillButton(
     borderColor: Color? = null,
     matchSearchSize: Boolean = false
 ) {
-    val pillShape = RoundedCornerShape(999.dp)
+    val pillShape = EchoGlassControlShape
     val glass = echoGlassPalette()
+    val strong = LocalEchoThemeStyle.current.strongOutline
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelLarge
     val referenceSize = textMeasurer.measure("智能搜索", labelStyle).size
@@ -1336,7 +1419,7 @@ internal fun InputPillButton(
         shape = pillShape,
         color = resolvedContainerColor,
         contentColor = resolvedContentColor,
-        border = BorderStroke(if (selected) 1.3.dp else 1.dp, borderColor ?: if (selected) glass.outlineSelected else glass.outline)
+        border = BorderStroke(if (selected || strong) 1.4.dp else 1.dp, borderColor ?: if (selected) glass.outlineSelected else glass.outline)
     ) {
         Row(
             modifier = Modifier
@@ -1424,8 +1507,8 @@ fun AttachmentPreview(
         colors = CardDefaults.cardColors(
             containerColor = attachmentTint
         ),
-        border = BorderStroke(1.dp, glass.outline),
-        shape = RoundedCornerShape(8.dp)
+        border = BorderStroke(if (LocalEchoThemeStyle.current.strongOutline) 1.4.dp else 1.dp, glass.outline),
+        shape = EchoGlassSubPanelShape
     ) {
         Row(
             modifier = Modifier.padding(8.dp),
@@ -1534,7 +1617,7 @@ fun EmptyChatPlaceholder(
             if (!scenarioTitle.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = EchoGlassControlShape,
                     color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
                 ) {
                     Text(
@@ -1559,7 +1642,7 @@ fun EmptyChatPlaceholder(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                shape = RoundedCornerShape(20.dp),
+                shape = EchoGlassControlShape,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
             ) {
                 Icon(
@@ -1575,10 +1658,14 @@ fun EmptyChatPlaceholder(
                 )
             }
         } else {
+            val placeholderShape = EchoGlassIconButtonShape
+            val placeholderStyle = LocalEchoThemeStyle.current
             Surface(
-                shape = CircleShape,
+                shape = placeholderShape,
                 color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                border = if (placeholderStyle.strongOutline) BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline) else null,
+                modifier = Modifier.echoThemeHardShadow(offset = 3.dp, shape = placeholderShape)
             ) {
                 Icon(
                     Icons.Default.ChatBubbleOutline,
@@ -1604,3 +1691,15 @@ fun EmptyChatPlaceholder(
         }
     }
 }
+
+internal enum class InputResizeHandleStyle { Arc, RoundedAngle, RightAngle, CutBevel }
+
+internal fun inputResizeHandleStyleFor(style: EchoThemeStyle): InputResizeHandleStyle = when {
+    style.cutCorners -> InputResizeHandleStyle.CutBevel
+    style.flatSurfaces && style.panelCornerRadius <= 4.dp -> InputResizeHandleStyle.RightAngle
+    style.flatSurfaces && style.panelCornerRadius < 12.dp -> InputResizeHandleStyle.RoundedAngle
+    else -> InputResizeHandleStyle.Arc
+}
+
+internal fun inputOuterCornerRadius(style: EchoThemeStyle): Dp =
+    if (style.flatSurfaces) style.panelCornerRadius else 22.dp

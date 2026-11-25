@@ -45,7 +45,11 @@ import androidx.compose.foundation.text.BasicTextField
 import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.ui.theme.EchoPaperMaterial
 import com.aiassistant.ui.theme.EchoFrameOrnament
+import com.aiassistant.ui.theme.EchoMessageMetaStyle
+import com.aiassistant.ui.theme.EchoThemedDivider
 import com.aiassistant.ui.theme.echoThemeFrameOrnament
+import com.aiassistant.ui.theme.formatThemedDuration
+import com.aiassistant.ui.theme.formatThemedMessageClock
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -149,7 +153,10 @@ import com.aiassistant.ui.components.echoFilterChipElevation
 import com.aiassistant.ui.components.echoGlassPalette
 import com.aiassistant.ui.components.echoSegmentedButtonBorder
 import com.aiassistant.ui.components.echoSegmentedButtonColors
+import com.aiassistant.ui.components.EchoGlassControlShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 import com.aiassistant.ui.components.echoShapeClick
+import com.aiassistant.ui.components.echoThemeHardShadow
 import com.aiassistant.ui.components.echoHazePanel
 import com.aiassistant.ui.components.echoHazeSource
 import com.aiassistant.ui.components.readableTextColorFor
@@ -515,24 +522,48 @@ internal fun MessageBubble(
     )
     val themeStyle = LocalEchoThemeStyle.current
     val bubbleCornerRadius = when {
+        themeStyle.frameOrnament == EchoFrameOrnament.SkyHorizon -> if (isUser) 22.dp else 20.dp
         themeStyle.frameOrnament == EchoFrameOrnament.CeramicRim -> 20.dp
         themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> 2.dp
         themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> 10.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.IndexTab -> if (isUser) 6.dp else 4.dp
         themeStyle.frameOrnament == EchoFrameOrnament.CropMarks -> 2.dp
         themeStyle.frameOrnament == EchoFrameOrnament.ReelPerforation -> if (isUser) 9.dp else 7.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.VoyageCompass -> if (isUser) 12.dp else 10.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.SwissRule -> 4.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.DeckleSpine -> if (isUser) 6.dp else 4.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.LetterSlip -> if (isUser) 8.dp else 6.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.FolioMargin -> 4.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.SonarReticle -> if (isUser) 10.dp else 8.dp
+        themeStyle.frameOrnament == EchoFrameOrnament.BauhausBlock -> if (isUser) 3.dp else 2.dp
         themeStyle.cutCorners -> if (isUser) 10.dp else 8.dp
         themeStyle.hardShadow -> if (isUser) 3.dp else 2.dp
         themeStyle.paperMaterial != EchoPaperMaterial.None -> if (isUser) 5.dp else 3.dp
         else -> 18.dp
     }
     val bubbleShape = when {
+        themeStyle.frameOrnament == EchoFrameOrnament.SkyHorizon ->
+            if (isUser) RoundedCornerShape(22.dp, 8.dp, 22.dp, 22.dp) else RoundedCornerShape(8.dp, 20.dp, 20.dp, 20.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.CeramicRim ->
             if (isUser) RoundedCornerShape(20.dp, 6.dp, 20.dp, 20.dp) else RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> RoundedCornerShape(2.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.LacquerDoubleFrame -> RoundedCornerShape(10.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.IndexTab -> RoundedCornerShape(if (isUser) 6.dp else 4.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.CropMarks -> RoundedCornerShape(2.dp)
         themeStyle.frameOrnament == EchoFrameOrnament.ReelPerforation ->
             RoundedCornerShape(if (isUser) 9.dp else 7.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.VoyageCompass ->
+            RoundedCornerShape(if (isUser) 12.dp else 10.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.SwissRule -> RoundedCornerShape(4.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.DeckleSpine ->
+            RoundedCornerShape(if (isUser) 6.dp else 4.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.LetterSlip ->
+            RoundedCornerShape(if (isUser) 8.dp else 6.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.FolioMargin -> RoundedCornerShape(4.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.SonarReticle ->
+            CutCornerShape(if (isUser) 10.dp else 8.dp)
+        themeStyle.frameOrnament == EchoFrameOrnament.BauhausBlock ->
+            RoundedCornerShape(if (isUser) 3.dp else 2.dp)
         themeStyle.cutCorners -> CutCornerShape(if (isUser) 10.dp else 8.dp)
         themeStyle.hardShadow -> RoundedCornerShape(if (isUser) 3.dp else 2.dp)
         themeStyle.paperMaterial != EchoPaperMaterial.None ->
@@ -738,11 +769,40 @@ internal fun MessageBubble(
                 modifier = if (immersiveUserMessage) {
                     Modifier.fillMaxWidth().padding(start = 14.dp, top = 8.dp, end = 4.dp, bottom = 8.dp)
                 } else if (isUser) {
-                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    Modifier.padding(
+                        start = 14.dp,
+                        top = if (themeStyle.frameOrnament == EchoFrameOrnament.ReelPerforation ||
+                            themeStyle.frameOrnament == EchoFrameOrnament.IndexTab
+                        ) 13.dp else 10.dp,
+                        end = 14.dp,
+                        bottom = 10.dp
+                    )
                 } else {
+                    val marginalia = themeStyle.messageMetaStyle == EchoMessageMetaStyle.Marginalia
+                    val marginColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                        .then(
+                            if (marginalia) Modifier.drawBehind {
+                                drawLine(
+                                    color = marginColor,
+                                    start = Offset(2.dp.toPx(), 4.dp.toPx()),
+                                    end = Offset(2.dp.toPx(), size.height - 4.dp.toPx()),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                drawCircle(
+                                    color = marginColor.copy(alpha = 0.72f),
+                                    radius = 1.4.dp.toPx(),
+                                    center = Offset(2.dp.toPx(), 5.5.dp.toPx())
+                                )
+                            } else Modifier
+                        )
+                        .padding(
+                            start = if (marginalia) 10.dp else 4.dp,
+                            top = 4.dp,
+                            end = 4.dp,
+                            bottom = 4.dp
+                        )
                 }
             ) {
                 if (displayContent.isNotBlank()) {
@@ -752,7 +812,7 @@ internal fun MessageBubble(
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 var isQuoteExpanded by remember { mutableStateOf(false) }
                                 Surface(
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = com.aiassistant.ui.components.EchoGlassSubPanelShape,
                                     color = contentColor.copy(alpha = 0.09f),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -901,19 +961,44 @@ internal fun MessageBubble(
                             }
                         } else {
                         Surface(
-                            modifier = Modifier.echoThemeFrameOrnament(
-                                cornerRadius = bubbleCornerRadius,
-                                compact = true,
-                                isUserBubble = true
-                            ),
+                            modifier = Modifier
+                                .echoThemeHardShadow(offset = 3.dp, shape = bubbleShape)
+                                .echoThemeFrameOrnament(
+                                    cornerRadius = bubbleCornerRadius,
+                                    compact = true,
+                                    isUserBubble = true
+                                )
+                                .then(
+                                    if (!themeStyle.flatSurfaces) Modifier.drawWithContent {
+                                        drawContent()
+                                        if (size.width > 42.dp.toPx()) {
+                                            drawLine(
+                                                color = Color.White.copy(alpha = 0.24f),
+                                                start = Offset(18.dp.toPx(), 1.dp.toPx()),
+                                                end = Offset(size.width * 0.55f, 1.dp.toPx()),
+                                                strokeWidth = 1.dp.toPx()
+                                            )
+                                        }
+                                    } else Modifier
+                                ),
                             color = bubbleColor,
                             contentColor = textColor,
                             shape = bubbleShape,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             border = BorderStroke(
-                                width = if (themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets) 1.dp else 0.8.dp,
-                                color = glass.outlineSelected.copy(alpha = if (themeStyle.frameOrnament != EchoFrameOrnament.None) 0.45f else 0.35f)
+                                width = when {
+                                    themeStyle.strongOutline -> 1.5.dp
+                                    themeStyle.frameOrnament == EchoFrameOrnament.BlueprintBrackets -> 1.dp
+                                    else -> 0.8.dp
+                                },
+                                color = (if (themeStyle.strongOutline) glass.outline else glass.outlineSelected).copy(
+                                    alpha = when {
+                                        themeStyle.strongOutline -> 0.78f
+                                        themeStyle.frameOrnament != EchoFrameOrnament.None -> 0.45f
+                                        else -> 0.35f
+                                    }
+                                )
                             )
                         ) {
                             MessageContent(textColor)
@@ -1056,14 +1141,13 @@ internal fun MessageBubble(
                     // 携带重试原因的等待胶囊即使文案较短也处于多行态，必须给出收起/展开键
                     val showStatusToggle = hasDetailedExpandableContent || isWaitingWithReason
                     val canExpandStatus = showStatusToggle || isStatusExpanded
-                    val capsuleShape = RoundedCornerShape(16.dp)
+                    val capsuleShape = com.aiassistant.ui.components.EchoGlassCompactPanelShape
                     val maxLinesCount = when {
                         isStatusError -> 4
                         isWaitingWithReason -> 3
                         else -> 16
                     }
                     val capsuleTextStyle = MaterialTheme.typography.labelMedium.copy(
-                        fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.SemiBold,
                         lineHeightStyle = LineHeightStyle(
                             alignment = LineHeightStyle.Alignment.Center,
@@ -1143,7 +1227,7 @@ internal fun MessageBubble(
                         contentColor = if (isStatusError) MaterialTheme.colorScheme.error else thinkingHeaderColor,
                         shape = capsuleShape,
                         border = BorderStroke(
-                            1.dp,
+                            if (themeStyle.strongOutline) 1.5.dp else 1.dp,
                             if (isStatusError) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else glass.outlineSelected.copy(alpha = 0.72f)
                         )
                     ) {
@@ -1410,7 +1494,7 @@ internal fun MessageBubble(
                     var isLiveErrorsExpanded by remember(message.id) { mutableStateOf(true) }
                     // v2.8.34：折叠外观与上方思考/状态胶囊统一——16dp 圆角、errorContainer 底、
                     // 1dp 描边、12/7 内边距、16dp 图标与同一字体；宽度也随内容收缩，展开时才占满可用宽度。
-                    val liveErrorsShape = RoundedCornerShape(16.dp)
+                    val liveErrorsShape = com.aiassistant.ui.components.EchoGlassCompactPanelShape
                     Surface(
                         modifier = Modifier
                             .padding(top = 4.dp)
@@ -1423,7 +1507,10 @@ internal fun MessageBubble(
                         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f),
                         contentColor = MaterialTheme.colorScheme.error,
                         shape = liveErrorsShape,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                        border = BorderStroke(
+                            if (themeStyle.strongOutline) 1.5.dp else 1.dp,
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        )
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
                             Row(
@@ -1439,7 +1526,6 @@ internal fun MessageBubble(
                                 Text(
                                     text = "连接异常 · 实时明细（${liveKeyErrors.size} 次尝试失败）",
                                     style = MaterialTheme.typography.labelMedium.copy(
-                                        fontFamily = FontFamily.SansSerif,
                                         fontWeight = FontWeight.SemiBold
                                     ),
                                     color = MaterialTheme.colorScheme.error,
@@ -1490,8 +1576,11 @@ internal fun MessageBubble(
                                 },
                             color = glass.controlSelected.copy(alpha = 0.6f),
                             contentColor = thinkingContentColor,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, glass.outlineSelected.copy(alpha = 0.5f))
+                            shape = com.aiassistant.ui.components.EchoGlassCompactPanelShape,
+                            border = BorderStroke(
+                                if (themeStyle.strongOutline) 1.5.dp else 1.dp,
+                                glass.outlineSelected.copy(alpha = 0.5f)
+                            )
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Row(
@@ -1513,13 +1602,13 @@ internal fun MessageBubble(
                                         if (hasTranslation) {
                                             Row(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clip(com.aiassistant.ui.components.EchoGlassControlShape)
                                                     .background(glass.control.copy(alpha = 0.7f))
                                                     .padding(2.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                                             ) {
                                                 Surface(
-                                                    shape = RoundedCornerShape(6.dp),
+                                                    shape = com.aiassistant.ui.components.EchoGlassControlShape,
                                                     color = if (showTranslated) MaterialTheme.colorScheme.primary else Color.Transparent,
                                                     modifier = Modifier.clickable { showTranslated = true }
                                                 ) {
@@ -1532,7 +1621,7 @@ internal fun MessageBubble(
                                                     )
                                                 }
                                                 Surface(
-                                                    shape = RoundedCornerShape(6.dp),
+                                                    shape = com.aiassistant.ui.components.EchoGlassControlShape,
                                                     color = if (!showTranslated) MaterialTheme.colorScheme.primary else Color.Transparent,
                                                     modifier = Modifier.clickable { showTranslated = false }
                                                 ) {
@@ -1655,9 +1744,9 @@ internal fun MessageBubble(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
-                                shape = RoundedCornerShape(16.dp),
+                                shape = com.aiassistant.ui.components.EchoGlassCompactPanelShape,
                                 color = errorSemantic.container.copy(alpha = if (isDark) 0.38f else 0.22f),
-                                border = BorderStroke(1.2.dp, errorSemantic.border.copy(alpha = if (isDark) 0.55f else 0.70f))
+                                border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 1.2.dp, errorSemantic.border.copy(alpha = if (isDark) 0.55f else 0.70f))
                             ) {
                                 Column(
                                     modifier = Modifier
@@ -1747,11 +1836,10 @@ internal fun MessageBubble(
                         } else {
                             Color.Black.copy(alpha = 0.12f)
                         }
-                        HorizontalDivider(
+                        EchoThemedDivider(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 2.dp, bottom = 4.dp),
-                            thickness = 1.dp,
+                                .padding(top = 4.dp, bottom = 6.dp),
                             color = dividerColor
                         )
                     }
@@ -1789,18 +1877,28 @@ internal fun MessageFooter(
     val thinkingTokensInThinkingBubble = thinkingBubbleVisible && message.role == "assistant" &&
         (!message.thinkingContent.isNullOrBlank() || message.thinkingTokens > 0)
     val responseTimeInThinkingBubble = thinkingTokensInThinkingBubble
+    val themeStyle = LocalEchoThemeStyle.current
+    val metaStyle = themeStyle.messageMetaStyle
+    val isCinemaSubtitle = metaStyle == EchoMessageMetaStyle.TimecodeSubtitle
+    val isTelemetryChip = metaStyle == EchoMessageMetaStyle.Telemetry
 
     Row(
         // v2.7.7 需求 3：顶部间距 5dp→3dp，收窄回复内容/动画与底部时间戳之间的距离
         modifier = modifier.padding(top = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左侧元数据：时间戳、Token 等支持水平横向滚动
+        // 左侧元数据：时间戳、Token 等支持水平横向滚动；放映室套用字幕条，声呐/蓝图套用遥测微框
+        val metaRowContent: @Composable () -> Unit = {
         Row(
             modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(rememberScrollState())
-                .padding(end = 6.dp),
+                .then(
+                    when {
+                        isCinemaSubtitle -> Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        isTelemetryChip -> Modifier.padding(horizontal = 6.dp, vertical = 1.5.dp)
+                        else -> Modifier
+                    }
+                )
+                .horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (endAlignMetadata) Arrangement.End else Arrangement.Start
         ) {
@@ -1818,13 +1916,13 @@ internal fun MessageFooter(
             }
 
             MessageMetaText(
-                text = formatMessageClock(message.createdAt),
+                text = formatThemedMessageClock(message.createdAt, metaStyle),
                 color = backdropContentColor.copy(alpha = 0.84f)
             )
 
             if (message.responseTime > 0 && !responseTimeInThinkingBubble) {
                 MessageMetaText(
-                    text = formatTime(message.responseTime),
+                    text = formatThemedDuration(message.responseTime, metaStyle),
                     color = backdropContentColor.copy(alpha = 0.84f)
                 )
             }
@@ -1856,6 +1954,34 @@ internal fun MessageFooter(
                     text = "思考: ${message.thinkingTokens} tokens",
                     color = MaterialTheme.colorScheme.primary
                 )
+            }
+        }
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 6.dp),
+            contentAlignment = if (endAlignMetadata) Alignment.CenterEnd else Alignment.CenterStart
+        ) {
+            if (isCinemaSubtitle) {
+                Surface(
+                    shape = EchoGlassControlShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f),
+                    border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.38f))
+                ) {
+                    metaRowContent()
+                }
+            } else if (isTelemetryChip) {
+                Surface(
+                    shape = if (themeStyle.cutCorners) CutCornerShape(4.dp) else RoundedCornerShape(3.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.48f),
+                    border = BorderStroke(0.7.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.32f))
+                ) {
+                    metaRowContent()
+                }
+            } else {
+                metaRowContent()
             }
         }
 
@@ -2264,7 +2390,10 @@ fun AttachmentChip(attachment: Attachment) {
             containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
             contentColor = MaterialTheme.colorScheme.primary
         ),
-        shape = RoundedCornerShape(8.dp)
+        shape = EchoGlassControlShape,
+        border = if (LocalEchoThemeStyle.current.strongOutline) {
+            BorderStroke(1.2.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
+        } else null
     ) {
         Row(
             modifier = Modifier.padding(8.dp),
@@ -2299,7 +2428,10 @@ internal fun AttachmentGroupBubble(
         modifier = modifier,
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
         contentColor = MaterialTheme.colorScheme.primary,
-        shape = RoundedCornerShape(12.dp)
+        shape = EchoGlassSubPanelShape,
+        border = if (LocalEchoThemeStyle.current.strongOutline) {
+            BorderStroke(1.4.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
+        } else null
     ) {
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),

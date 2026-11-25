@@ -1,21 +1,33 @@
 package com.aiassistant.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aiassistant.ui.theme.EchoHeaderStyle
+import com.aiassistant.ui.theme.EchoThemedDivider
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 
 /**
  * Echo 分区标题 (EchoSectionHeader)
@@ -41,9 +53,91 @@ fun EchoSectionHeader(
                 bottom = EchoTokens.Spacing.sm
             )
     ) {
+        val headerStyle = LocalEchoThemeStyle.current.headerStyle
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
+            when (headerStyle) {
+                EchoHeaderStyle.BauhausBar, EchoHeaderStyle.SwissEditorial -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .size(width = 4.dp, height = 14.dp)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
+                EchoHeaderStyle.BlueprintSpec, EchoHeaderStyle.TelemetryHud -> {
+                    Text(
+                        text = if (headerStyle == EchoHeaderStyle.BlueprintSpec) "// " else ":: ",
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoHeaderStyle.FolioChapter, EchoHeaderStyle.NewspaperMasthead, EchoHeaderStyle.CatalogueBar -> {
+                    Text(
+                        text = if (headerStyle == EchoHeaderStyle.FolioChapter) "§ " else "▪ ",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoHeaderStyle.CinemaSlate -> {
+                    Text(
+                        text = "▸ ",
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                EchoHeaderStyle.NauticalLog -> {
+                    Text(
+                        text = "◇ ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                EchoHeaderStyle.CeladonSeal -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(12.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.72f), RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary))
+                    }
+                }
+                EchoHeaderStyle.LacquerPlaque -> {
+                    Text(
+                        text = "◆ ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                EchoHeaderStyle.BookPlate -> {
+                    Text(
+                        text = "— ",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                EchoHeaderStyle.VerseSlip -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(width = 2.dp, height = 13.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f))
+                    )
+                }
+                EchoHeaderStyle.AiryHorizon -> {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 7.dp)
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondary)
+                    )
+                }
+                EchoHeaderStyle.Default -> Unit
+            }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall.copy(
@@ -70,8 +164,8 @@ fun EchoSectionHeader(
 
         if (showDivider) {
             Spacer(modifier = Modifier.height(EchoTokens.Spacing.sm))
-            androidx.compose.material3.HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            EchoThemedDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
             )
         }
     }

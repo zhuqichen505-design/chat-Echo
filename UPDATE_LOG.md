@@ -1,5 +1,38 @@
 # 维护记录
 
+## 2026-11-25 · 发布 Echo 2.9.3（全量 15 套主题细节工艺升级与全局 UI 形态一致性）
+
+版本由 2.9.2/237 递增至 2.9.3/238（仅更新 `app/build.gradle.kts`）。本次按用户要求将昨日晴空/索引优化、全量 15 套主题非换色结构升级与全局 UI 几何一致性完善合并发布；同时纳入工作区清理的 5 个早期冗余根目录资源/旧脚本删除记录（`APPlogo.png`、`build_apk.bat`、`build_apk.sh`、`logo.jpg`、`logo.png`）。Room v37 / 20 个实体、请求协议、消息及备份格式不变。
+
+改动：
+1. **全部 15 套主题风格化骨架、底纹与字体排版**：
+   - `EchoThemeStyle` 新增 `DeckleEdge` 底纹、`HorizonFade`/`VersePause`/`RadarPulse`/`CeramicWave`/`GiltDoubleRule` 分隔线、`AiryHorizon`/`NauticalHeading`/`CatalogHeading`/`VerseHeading`/`FolioChapter`/`TelemetryHud`/`CeladonSeal`/`LacquerPlaque` Markdown 标题样式及 `SwissStamp`/`Colophon`/`VerseNote`/`GeometricTag`/`SealMark`/`PlaqueStamp`/`PressDateline` 元数据样式；全部 14 套非默认主题具备互异的 `(frameOrnament, headerStyle)` 组合。
+   - `EchoPaperTexture` 新增确定性 `NauticalVellum` 纹理并将 `paperBrushCache` 扩至 24；细化 `IndexCatalogue`、`Folio` 双栏红批注、`SonarGrid` 雷达同心环、`BlueprintDraft` 双轴标尺、`NewsRegister` 三栏线、`FilmScanline` 画幅线、`LacquerFrame` 回纹折角、`NauticalChart` 双环八向罗盘、`SwissGrid` 模块准星、`LetterColumns` 天地眉线、`BauhausGeometry` 三原色圆环与 `DeckleEdge` 毛边折影，以及 10 种卡片/气泡框体工艺。
+   - `Theme.kt` 将 `SCREENING` 浅色改造为银盐胶片印样灰 + 影院绒红 + 琥珀金（匹配冷银盐颗粒 `0x505660`），`MONO` 浅色拉开背景与卡片灰阶；`Type.kt` 补齐 `NIGHT_VOYAGE`、`MONO`、`BAUHAUS` 及纸本小字字距；`EchoThemeChrome.kt` 提供主题化 `EchoThemedDivider`、`EchoThemedWordmark` 与 13 种消息时钟格式化。
+2. **全局 UI 形态一致性与微控件联动（未改动输入框输入逻辑）**：
+   - `EchoHaze.kt` 新增 `EchoGlassInputShape`/`EchoGlassSubPanelShape`/`EchoGlassCompactPanelShape`/`EchoGlassIconButtonShape` 及 `ornamentCornerRadiusFor`，`echoThemeHardShadow` 改为按控件真实 `Shape` 轮廓投影。
+   - 统一 `EchoGlassCard`、`EchoControls`、`EchoBadge`、`EchoSwitch`、`EchoPillSlider`、`EchoSectionHeader`、`EchoAppShell`、`SideAnchorNavigator`、`SyntaxHighlighter`、`MarkdownTableBlock`、`MarkdownText`、首页卡片与指标卡、设置页/历史页/统计页顶栏与二级面板、对话页顶栏/横幅/审阅卡片/弹窗/消息气泡/附件与空白占位图框的形态与描边规范，去除硬编码 `SansSerif` 与圆角；`SettingsAppearanceTab` 预设列表色块同步展示切角/方角/圆角/硬阴影缩略态。
+   - `ChatInputComponents` 新增 `InputResizeHandleStyle` 与 `inputResizeHandleStyleFor`，右上角拖拽手柄随主题外框切换圆弧、圆角折线、直角或切角折线；`EchoNativeTextField.kt` 及输入/焦点/IME/手势逻辑保持零改动。
+
+涉及文件：`EchoThemeStyle.kt`、`EchoThemeChrome.kt`、`EchoPaperTexture.kt`、`Theme.kt`、`Type.kt`、`EchoHaze.kt`、`EchoGlassCard.kt`、`EchoControls.kt`、`EchoBadge.kt`、`EchoSwitch.kt`、`EchoPillSlider.kt`、`EchoSectionHeader.kt`、`EchoAppShell.kt`、`SideAnchorNavigator.kt`、`MarkdownText.kt`、`SyntaxHighlighter.kt`、`MarkdownTableBlock.kt`、`HomeScreen.kt`、`HomePresentationComponents.kt`、`HistoryScreen.kt`、`StatsScreen.kt`、`SettingsScreen.kt`、`SettingsAppearanceTab.kt`、`SettingsFavoritesTab.kt`、`SettingsWebSearchTab.kt`、`SettingsApiConfigDialog.kt`、`ChatScreen.kt`、`ChatPendingReviewPanels.kt`、`ChatContextComponents.kt`、`ChatInputComponents.kt`、`ChatMessageComponents.kt`、`app/build.gradle.kts`，测试 `RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`。
+
+验证：冻结验收 `20261125-163209-030` 脚本 / Gradle 退出 0，639.65 秒；96 套件 / 1,139 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon` 退出 0，270.427 秒（4 分 30 秒）；排他复制为本机发布目录 `Echo-v2.9.3.apk`（247 → 248 文件、246 → 247 APK，历史包保留）。
+
+APK 元数据与审计：`Echo-v2.9.3.apk` 25,689,227 字节，SHA-256 `6f8ca93b3229259d06ab9918d6ee4a1b7e88a3d2a01b79735e197b61bb248e3c`；`com.aiassistant`、2.9.3/238、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目且条目名集合与 2.9.2 一致，5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 与 186 张位图均与 2.9.2 一致；DEX 7,472,496 字节，字符串 32,698 条（+189 / -51），新增可读中文 18 条均为本版外观文案、刊头标识与版本号，隐私扫描新增命中 0。未连接真机，全 15 套主题在真机浅深模式及输入手柄视觉联动待人工验收。
+
+## 2026-11-24 · 晴空 / 索引主题细节优化（未发版）
+
+用户要求优化「晴空」「索引」两套主题，使其不再只是换色。源码仍为 2.9.2/237，Room v37 / 20 个实体、请求协议、消息与备份格式不变；未递增版本、未构建 APK、未提交或发布。
+
+改动：
+1. **晴空**：保留既有浅深蓝白色板，新增 `SkyMist` 轻薄纹理、`SkyCurrents` 页面气流曲线、`SkyHorizon` 地平线细线与光点；面板 / 控件 / 弹窗改为 24 / 16 / 28dp 宽圆角，用户气泡使用独立 22dp 方向圆角；标题改用较轻字重与舒展字距，正文行高调整为 27 / 23 / 18sp，Markdown 普通段落左对齐、无缩进并增加上下留白。
+2. **索引**：保留既有纸色与赭红色板，新增 `IndexStock` 横向卡纸纹、`IndexCatalogue` 页缘目录签、`IndexTab` 卡片挂签与编码细线；面板 / 控件 / 弹窗改为 6 / 4 / 8dp 小圆角并启用清晰描边，用户气泡使用 6 / 4dp 卡片圆角；标题使用衬线字体、标签使用等宽字体，正文行高调整为 25 / 22 / 18sp，Markdown 普通段落两端对齐、无缩进并采用紧凑段距。
+3. 两套材质与工艺经 `EchoGlassCard`、`EchoHaze`、共享弹窗 / 菜单、聊天气泡及 Markdown 现有令牌链路生效；外观设置说明同步更新，不改交互与持久化键。
+
+涉及文件：`EchoThemeStyle.kt`、`Type.kt`、`EchoPaperTexture.kt`、`ChatMessageComponents.kt`、`MarkdownText.kt`、`SettingsAppearanceTab.kt`；测试更新 `UiPolishRegressionTest.kt` 与 `RetryPreferencesTest.kt`，新增一套主题令牌 / 字体 / 段落 / 纹理回归，并将五种材质的浅深确定性、透明度与像素差异纳入真实 Native Graphics 检查。
+
+验证：定向测试首轮 90 项中发现 `SkyMist` 透明色阶不足，增强细微颗粒层次后复跑 90 项全部通过；冻结验收 `20261124-215442-195` 脚本 / Gradle 退出 0，522.44 秒；96 套件 / 1,135 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。未连接真机，两套主题的曲线 / 挂签密度、纹理强弱、字体与气泡观感待人工视觉验收。
+
 ## 2026-11-24 · 发布 Echo 2.9.2（时间线与设定独立勾选 / 依据变更确认 + 晨刊 / 放映室两套新主题）
 
 版本由 2.9.1/236 递增至 2.9.2/237（仅更新 `app/build.gradle.kts`）。按用户明确要求，本次安装包包含此前工作区未提交的时间线 / 记忆提取改动，并与两套新主题一起验收、提交与发布。Room v37 / 20 个实体、API 地址、请求协议、消息格式与备份格式均不变。

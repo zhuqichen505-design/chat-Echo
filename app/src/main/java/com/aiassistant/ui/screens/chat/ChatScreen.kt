@@ -71,6 +71,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalUriHandler
 import com.aiassistant.ui.components.EchoGlassPagePanelShape
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
+import com.aiassistant.ui.components.EchoGlassInputShape
+import com.aiassistant.ui.components.EchoGlassIconButtonShape
+import com.aiassistant.ui.components.EchoGlassControlShape
+import com.aiassistant.ui.components.echoThemeHardShadow
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 import com.aiassistant.ui.components.EchoTextToolbar
 import com.aiassistant.ui.components.EchoTextToolbarHost
 import androidx.compose.ui.layout.onSizeChanged
@@ -80,7 +87,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -791,7 +800,7 @@ fun ChatScreen(
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp, vertical = 4.dp),
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
-                                shape = EchoTokens.Radius.shapeMd
+                                shape = EchoGlassPagePanelShape
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1390,7 +1399,7 @@ fun ChatScreen(
             }
 
             // 2. 顶部悬浮工具栏与错误提示：悬浮在最顶层，直接复用输入框相同 Surface + echoHazePanel 结构，无边缘包裹，半透明透字
-            val toolbarShape = RoundedCornerShape(22.dp)
+            val toolbarShape = EchoGlassInputShape
             val glass = echoGlassPalette()
             val toolbarTint = glass.input
             val toolbarContentColor = readableTextColorFor(
@@ -1431,6 +1440,7 @@ fun ChatScreen(
                             label = "topPulseAlpha"
                         )
                         val topPulseColor = MaterialTheme.colorScheme.primary
+                        val topRestoreShape = EchoGlassIconButtonShape
                         Box(
                             modifier = Modifier
                                 .padding(start = 2.dp, top = 2.dp)
@@ -1439,21 +1449,23 @@ fun ChatScreen(
                         ) {
                             Canvas(modifier = Modifier.matchParentSize()) {
                                 val strokeWidth = 1.2.dp.toPx()
-                                val baseRadius = (size.minDimension - strokeWidth) / 2f
-                                val currentRadius = baseRadius * topPulseScale
-                                drawCircle(
-                                    color = topPulseColor.copy(alpha = topPulseAlpha),
-                                    radius = currentRadius,
-                                    center = center,
-                                    style = Stroke(width = strokeWidth)
-                                )
+                                val outline = topRestoreShape.createOutline(size, layoutDirection, this)
+                                withTransform({
+                                    scale(topPulseScale, topPulseScale, pivot = center)
+                                }) {
+                                    drawOutline(
+                                        outline = outline,
+                                        color = topPulseColor.copy(alpha = topPulseAlpha),
+                                        style = Stroke(width = strokeWidth)
+                                    )
+                                }
                             }
                             Surface(
                                 onClick = { isBarsHidden = false },
-                                shape = CircleShape,
+                                shape = topRestoreShape,
                                 color = glass.control,
                                 contentColor = MaterialTheme.colorScheme.primary,
-                                border = BorderStroke(1.2.dp, glass.outlineSelected),
+                                border = BorderStroke(if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.2.dp, glass.outlineSelected),
                                 modifier = Modifier.size(40.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -1479,7 +1491,7 @@ fun ChatScreen(
                             shape = toolbarShape,
                             color = Color.Transparent,
                             contentColor = toolbarContentColor,
-                            border = BorderStroke(1.dp, glass.outline),
+                            border = null,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp
                         ) {
@@ -1561,6 +1573,7 @@ fun ChatScreen(
                     val tone = activeNotice?.tone ?: SettingApplyNoticeTone.Info
                     val showInspect = activeNotice?.showInspectAction == true
                     val bannerShape = EchoGlassPagePanelShape
+                    val themeStyle = LocalEchoThemeStyle.current
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     val semantic = rememberEchoSemanticColors()
                     val statusGroup = when (tone) {
@@ -1573,11 +1586,14 @@ fun ChatScreen(
                     val bannerContentColor = statusGroup.onContainer
 
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .echoThemeHardShadow(shape = bannerShape)
+                            .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
                         shape = bannerShape,
                         color = tintColor,
                         contentColor = bannerContentColor,
-                        border = BorderStroke(1.dp, borderColor),
+                        border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 1.dp, borderColor),
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp
                     ) {
@@ -1636,7 +1652,8 @@ fun ChatScreen(
                 }
 
                 TransientChatBanner(bannerKey = "error", message = error) { errorMsg ->
-                    val errorShape = RoundedCornerShape(22.dp)
+                    val errorShape = EchoGlassPagePanelShape
+                    val themeStyle = LocalEchoThemeStyle.current
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     val errorSemantic = rememberEchoSemanticColors().error
                     val errorTint = errorSemantic.container.copy(alpha = if (isDark) 0.88f else 0.92f)
@@ -1644,11 +1661,14 @@ fun ChatScreen(
                     val errorContentColor = errorSemantic.onContainer
 
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .echoThemeHardShadow(shape = errorShape)
+                            .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
                         shape = errorShape,
                         color = errorTint,
                         contentColor = errorContentColor,
-                        border = BorderStroke(1.dp, errorBorder),
+                        border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 1.dp, errorBorder),
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp
                     ) {
@@ -1687,7 +1707,8 @@ fun ChatScreen(
                 TransientChatBanner(bannerKey = "context_status", message = contextUsage.statusMessage) { statusMsg ->
                     val isWarning = statusMsg.startsWith("⚠️")
                     val isSuccess = statusMsg.startsWith("✅")
-                    val infoShape = RoundedCornerShape(22.dp)
+                    val infoShape = EchoGlassPagePanelShape
+                    val themeStyle = LocalEchoThemeStyle.current
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     val semantic = rememberEchoSemanticColors()
                     val statusGroup = when {
@@ -1700,11 +1721,14 @@ fun ChatScreen(
                     val bannerContentColor = statusGroup.onContainer
 
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .echoThemeHardShadow(shape = infoShape)
+                            .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
                         shape = infoShape,
                         color = tintColor,
                         contentColor = bannerContentColor,
-                        border = BorderStroke(1.dp, borderColor),
+                        border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 1.dp, borderColor),
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp
                     ) {
@@ -2112,7 +2136,6 @@ fun ChatScreen(
         val editScope = rememberCoroutineScope()
         EchoGlassDialog(
             onDismissRequest = { editingAssistantMessage = null },
-            shape = EchoTokens.Radius.shapeXl,
             title = {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2182,7 +2205,7 @@ fun ChatScreen(
                             viewModel.updateMessageContent(msg.id, editingAssistantContent.text)
                             editingAssistantMessage = null
                         },
-                        shape = RoundedCornerShape(999.dp)
+                        shape = EchoGlassControlShape
                     ) {
                         Text("保存修改", maxLines = 1)
                     }
@@ -2195,7 +2218,6 @@ fun ChatScreen(
     if (editingUserMessage != null) {
         EchoGlassDialog(
             onDismissRequest = { editingUserMessage = null },
-            shape = EchoTokens.Radius.shapeXl,
             title = {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2645,9 +2667,12 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = EchoGlassSubPanelShape,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        border = BorderStroke(
+                            if (LocalEchoThemeStyle.current.strongOutline) 1.5.dp else 0.8.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                        ),
                         modifier = Modifier.fillMaxWidth().combinedClickable(
                             onClick = {},
                             onLongClickLabel = "重命名分支",

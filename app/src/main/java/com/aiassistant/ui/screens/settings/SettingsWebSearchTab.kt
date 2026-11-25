@@ -211,7 +211,7 @@ fun WebSearchTab(
 
                 if (searchEngine == SearchEngineType.EXA) {
                     Surface(
-                        shape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeMd,
+                        shape = SettingsInnerShape,
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
                     ) {
@@ -506,7 +506,7 @@ fun WebSearchTab(
                     val healthAppName = remember { toolHub.healthDataManager.getHealthAppName() }
 
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = SettingsInnerShape,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
@@ -759,7 +759,7 @@ fun WebSearchTab(
                     }
                     weatherTestResult?.let { result ->
                         Surface(
-                            shape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeSm,
+                            shape = SettingsInnerShape,
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                         ) {
@@ -791,7 +791,7 @@ fun WebSearchTab(
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = com.aiassistant.ui.theme.EchoTokens.Radius.shapeMd,
+                shape = SettingsInnerShape,
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
             ) {

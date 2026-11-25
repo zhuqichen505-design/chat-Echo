@@ -60,7 +60,7 @@ fun EchoBadge(
 
     Box(
         modifier = modifier
-            .clip(EchoTokens.Radius.shapePill)
+            .clip(EchoGlassControlShape)
             .background(backgroundColor)
             .padding(
                 horizontal = EchoTokens.Spacing.sm,
@@ -81,7 +81,7 @@ fun EchoBadge(
             }
             Text(
                 text = text,
-                style = EchoTokens.Type.badgeLabel,
+                style = MaterialTheme.typography.labelMedium,
                 color = contentColor
             )
         }

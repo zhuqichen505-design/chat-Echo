@@ -18,7 +18,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aiassistant.domain.model.Conversation
 import com.aiassistant.domain.model.RoleplaySession
+import com.aiassistant.ui.components.EchoGlassPagePanelShape
 import com.aiassistant.ui.components.echoShapeCombinedClick
+import com.aiassistant.ui.components.echoThemeHardShadow
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
+import com.aiassistant.ui.theme.echoThemeFrameOrnament
 
 internal data class RecentHomeStory(val conversation: Conversation, val session: RoleplaySession)
 
@@ -79,27 +83,43 @@ private fun HomeNewChatAction(
     onNewChat: () -> Unit,
     onConfigureChat: () -> Unit
 ) {
+    val themeStyle = LocalEchoThemeStyle.current
+    val actionShape = EchoGlassPagePanelShape
+    val strokeWidth = if (themeStyle.strongOutline) 1.5.dp else 1.dp
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Surface(
             modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                .echoThemeHardShadow(offset = 3.dp, shape = actionShape)
                 .echoShapeCombinedClick(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = actionShape,
                     onClick = onNewChat,
                     onLongClick = onConfigureChat,
                     onLongClickLabel = "配置新对话"
-                ),
-            shape = MaterialTheme.shapes.medium,
+                )
+                .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
+            shape = actionShape,
             color = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            border = if (themeStyle.strongOutline) BorderStroke(strokeWidth, MaterialTheme.colorScheme.outline) else null
         ) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("新对话", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Icon(Icons.Default.Add, contentDescription = null)
             }
         }
-        OutlinedIconButton(onClick = onConfigureChat, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium,
+        OutlinedIconButton(
+            onClick = onConfigureChat,
+            modifier = Modifier
+                .size(48.dp)
+                .echoThemeHardShadow(offset = 3.dp, shape = actionShape),
+            shape = actionShape,
+            border = BorderStroke(
+                strokeWidth,
+                if (themeStyle.strongOutline) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant
+            ),
             colors = IconButtonDefaults.outlinedIconButtonColors(containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface)) {
+                contentColor = MaterialTheme.colorScheme.onSurface)
+        ) {
             Icon(Icons.Default.Tune, contentDescription = "选择模型与新对话设置", modifier = Modifier.size(20.dp))
         }
     }
@@ -113,10 +133,19 @@ private fun HomeStorySpotlight(
     onOpenStudio: () -> Unit
 ) {
     val conversation = story?.conversation
+    val themeStyle = LocalEchoThemeStyle.current
+    val spotlightShape = EchoGlassPagePanelShape
     Surface(
         onClick = { conversation?.let { onContinueStory(it.id) } ?: onOpenStudio() },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .echoThemeHardShadow(shape = spotlightShape)
+            .echoThemeFrameOrnament(cornerRadius = themeStyle.panelCornerRadius, compact = true),
+        shape = spotlightShape,
+        border = BorderStroke(
+            if (themeStyle.strongOutline) 1.6.dp else 1.dp,
+            if (themeStyle.strongOutline) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant
+        ),
         color = if (prominent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
         contentColor = if (prominent) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     ) {
