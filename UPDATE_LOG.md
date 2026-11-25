@@ -20,6 +20,8 @@
 
 APK 元数据与审计：`Echo-v2.9.3.apk` 25,689,227 字节，SHA-256 `6f8ca93b3229259d06ab9918d6ee4a1b7e88a3d2a01b79735e197b61bb248e3c`；`com.aiassistant`、2.9.3/238、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上版一致（Android Debug 非正式生产签名）；450 条目且条目名集合与 2.9.2 一致，5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 与 186 张位图均与 2.9.2 一致；DEX 7,472,496 字节，字符串 32,698 条（+189 / -51），新增可读中文 18 条均为本版外观文案、刊头标识与版本号，隐私扫描新增命中 0。未连接真机，全 15 套主题在真机浅深模式及输入手柄视觉联动待人工验收。
 
+发布核验：版本提交 `f954ff572b86135983a2d6629d9400ff794f3824` 与 annotated 标签 `v2.9.3`（对象 `da3cde140a46cbccf19bf0ce567731c11624b290`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.9.3 Release 为 Latest，唯一附件 `Echo-v2.9.3.apk` 的平台 digest（`sha256:6f8ca93b3229259d06ab9918d6ee4a1b7e88a3d2a01b79735e197b61bb248e3c`）、独立下载 SHA-256 与大小（25,689,227 字节）均与本机一致。按仅保留最新版策略已删除远端旧 v2.9.2 Release 与标签；本机 `v2.9.2` 标签已按 `47b081deb8aeef2a65e5b32e2a123ccf75d2e8db` 重新创建（`cfe3c7b67618713168867840a1c86423cf66a4d3`，仅本机、未推送），全部历史 APK 保留（248 文件 / 247 APK）。
+
 ## 2026-11-24 · 晴空 / 索引主题细节优化（未发版）
 
 用户要求优化「晴空」「索引」两套主题，使其不再只是换色。源码仍为 2.9.2/237，Room v37 / 20 个实体、请求协议、消息与备份格式不变；未递增版本、未构建 APK、未提交或发布。
