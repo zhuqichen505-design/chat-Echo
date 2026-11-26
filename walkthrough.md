@@ -1,5 +1,20 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-26 · 2.9.4 创作阅读页与字体扩展、UI/主题规范建档及 API 配置界面/拖拽优化
+
+版本 2.9.4/239；Room v37 / 20 个实体不变。本次发布包含三项功能与体验更新：
+- **创作阅读页与正文字体扩展**：`EchoStoryReadingStyle` 扩充至 6 项（沉浸叙事、纯净直排、双栏对照、书页典籍、紧凑速览、剧本分镜），`EchoStoryFont` 扩充至 8 项（内置思源、现代无衬线、打字机等宽、跟随系统、经典宋体、精印书宋、轻盈细黑、随笔手写），统一经 `StoryReadingComponents` / `MarkdownText` / `ChatScreen` / `ChatMessageComponents` 控制段间距、缩进、对齐与用户消息样式，设置页新增实时预览卡。
+- **UI 与主题设计规范建档**：新增 `UI_THEME_DESIGN_SPEC.md`，完整记录全 15 套主题架构、令牌、13 组 WCAG AA ≥ 4.5:1 双模式对比度检查、共享组件与拖拽规范及后续自动同步更新规则。
+- **API 配置界面与 Key 拖拽修复**：管理卡片去除 `OPENAI` 字样；顶部「新对话默认 API」改为默认收起的下拉列表选择器，选择未启用项时弹窗二次确认「设为默认并启用」；编辑页顶部新增「连接 / 密钥 / 模型 / 其他」四分区快跳与滚动高亮联动，底部「其他」收纳头像与多 Key 轮询，默认/已配置模型前置，Key 去除 `(停用)`、移位箭头改左右横排；修复 `SmoothReorderState` 仅单卡抬升、不等高槽位计算、松手让位回弹与手柄缩放补偿，排队消息补充稳定 `key(msg.id)`。
+
+冻结验收 `20261126-164421-224`：脚本 / Gradle 退出 0，1981.789 秒；96 套件 / 1,147 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，1989.602 秒。`Echo-v2.9.4.apk` 25,705,611 字节，SHA-256 `1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`；`com.aiassistant`、2.9.4/239、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：450 条目且条目名集合与 2.9.3 一致，解压校验通过；仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 哈希一致（`d78af33ccd39de600f7eaf69ce830f27c2de8e84189af3682c2e4d46a7325a7e`），181 张位图全部一致；DEX 7,491,580 字节，字符串 32,786 条（唯一 32,780 条，较 2.9.3 +150 / -68），新增可读中文 51 条均为本版阅读排版/字体文案、API 配置界面提示与版本号，隐私扫描新增命中 0。排他复制到本机发布目录（248 → 249 文件，247 → 248 APK），全部历史包保留。
+
+设备边界：未连接真机；新增创作阅读页排版与 8 种字体实际渲染、API 配置列表展开/停用确认弹窗、编辑页四分区快跳与 Key 拖拽排序手感，待人工实机复验。
+
 ## 2026-11-25 · 2.9.3 全量 15 套主题细节工艺升级与全局 UI 形态一致性
 
 版本 2.9.3/238；Room v37 / 20 个实体不变。本次发布汇总昨日晴空/索引优化、全量 15 套主题结构化细节改造与全局 UI 形态一致性完善：

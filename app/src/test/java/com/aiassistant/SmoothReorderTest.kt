@@ -6,6 +6,11 @@ import com.aiassistant.ui.components.reorderSlotOffset
 import com.aiassistant.ui.components.slotTravelDistance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -164,19 +169,84 @@ class SmoothReorderTest {
     @Test
     fun testSlotOffsetsAndTravel() {
         val heights = listOf(100f, 120f, 140f)
-        // 向下让位：k1 上移 k0 的高度，k2 上移 k1 的高度
+        // 向下让位：k1 与 k2 各自上移被拖拽项 k0 的高度（100f）
         assertEquals(-100f, reorderSlotOffset(1, 0, 2, heights), 0.001f)
-        assertEquals(-120f, reorderSlotOffset(2, 0, 2, heights), 0.001f)
+        assertEquals(-100f, reorderSlotOffset(2, 0, 2, heights), 0.001f)
         // 向上让位：k1 下移 k2 的高度
         assertEquals(140f, reorderSlotOffset(1, 2, 1, heights), 0.001f)
         assertEquals(0f, reorderSlotOffset(0, 2, 1, heights), 0.001f)
-        // 跨槽位移 = 途经槽位高度之和
-        assertEquals(220f, slotTravelDistance(0, 2, heights), 0.001f)
+        // 跨槽位移 = 途经兄弟槽位高度之和
+        assertEquals(260f, slotTravelDistance(0, 2, heights), 0.001f)
         assertEquals(-220f, slotTravelDistance(2, 0, heights), 0.001f)
         assertEquals(0f, slotTravelDistance(1, 1, heights), 0.001f)
         // 间距参与让位与跨槽补偿
         assertEquals(-108f, reorderSlotOffset(1, 0, 1, listOf(100f, 100f), itemSpacing = 8f), 0.001f)
         assertEquals(216f, slotTravelDistance(0, 2, listOf(100f, 100f, 100f), itemSpacing = 8f), 0.001f)
+    }
+
+    @Test
+    fun testOnlyActiveItemReceivesLift() {
+        val state = SmoothReorderState(testScope)
+        val keys = listOf("a", "b", "c")
+        state.onDragStart(keys, "b")
+
+        assertEquals(1f, state.getItemLift("b"), 0.001f)
+        assertEquals(0f, state.getItemLift("a"), 0.001f)
+        assertEquals(0f, state.getItemLift("c"), 0.001f)
+
+        state.onDragFinish(keys) { _, _ -> }
+        assertEquals(0f, state.getItemLift("b"), 0.001f)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun testOnDragFinishSynchronouslyCompensatesDisplacedItems() = runTest {
+        val deferredClock = object : androidx.compose.runtime.MonotonicFrameClock {
+            override suspend fun <R> withFrameNanos(onFrame: (frameTimeNanos: Long) -> R): R {
+                delay(16)
+                return onFrame(testScheduler.currentTime * 1_000_000L)
+            }
+        }
+        val controlledScope = CoroutineScope(backgroundScope.coroutineContext + deferredClock)
+        val state = SmoothReorderState(controlledScope)
+        val keys = listOf("k0", "k1", "k2")
+        state.setItemSpacing(10f)
+        state.setItemHeight("k0", 100f)
+        state.setItemHeight("k1", 140f)
+        state.setItemHeight("k2", 180f)
+
+        state.onDragStart(keys, "k0")
+        state.onDragDelta(deltaY = 140f, keys = keys)
+        runCurrent()
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(1, state.targetIndex)
+        assertEquals(-110f, state.getItemOffsetY("k1"), 0.001f)
+
+        var moved: Pair<Int, Int>? = null
+        state.onDragFinish(keys) { from, to -> moved = from to to }
+        // 松手瞬间已同步抵消 k1 的让位偏移，不产生双倍跳动
+        assertEquals(0 to 1, moved)
+        assertEquals(0f, state.getItemOffsetY("k1"), 0.001f)
+        assertEquals(-10f, state.getItemOffsetY("k0"), 0.001f)
+
+        advanceTimeBy(300)
+        runCurrent()
+        assertNull(state.draggingKey)
+        assertEquals(0f, state.getItemOffsetY("k0"), 0.001f)
+    }
+
+    @Test
+    fun testOnAnimateSwapAccountsForSpacingAndUnequalHeights() {
+        val state = SmoothReorderState(testScope)
+        state.setItemSpacing(10f)
+        state.setItemHeight("k0", 80f)
+        state.setItemHeight("k1", 120f)
+
+        state.onAnimateSwap(fromKey = "k0", toKey = "k1", fromIndex = 0, toIndex = 1)
+        assertEquals(0f, state.getItemOffsetY("k0"), 0.001f)
+        assertEquals(0f, state.getItemOffsetY("k1"), 0.001f)
     }
 
     @Test

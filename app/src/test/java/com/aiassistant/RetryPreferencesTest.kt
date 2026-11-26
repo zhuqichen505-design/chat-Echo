@@ -870,6 +870,36 @@ class RetryPreferencesTest {
         assertFalse(recreated.getSettings().autoNameEnabled)
     }
 
+    @Test fun allStoryReadingStylesAndFontsPersistAndFallbackSafely() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("personalization_settings", 0)
+        prefs.edit().clear().commit()
+        val manager = PersonalizationManager(context)
+
+        assertEquals(6, EchoStoryReadingStyle.values.size)
+        assertEquals(8, com.aiassistant.utils.EchoStoryFont.values.size)
+
+        for (style in EchoStoryReadingStyle.values) {
+            for (font in com.aiassistant.utils.EchoStoryFont.values) {
+                assertTrue(manager.saveSettings(manager.getSettings().copy(
+                    storyReadingStyle = style,
+                    storyFont = font
+                )))
+                val restored = PersonalizationManager(context).getSettings()
+                assertEquals(style, restored.storyReadingStyle)
+                assertEquals(font, restored.storyFont)
+            }
+        }
+
+        assertTrue(manager.saveSettings(manager.getSettings().copy(
+            storyReadingStyle = "unknown_reader_style",
+            storyFont = "unknown_story_font"
+        )))
+        val fallback = PersonalizationManager(context).getSettings()
+        assertEquals(EchoStoryReadingStyle.IMMERSIVE, fallback.storyReadingStyle)
+        assertEquals(com.aiassistant.utils.EchoStoryFont.LITERARY, fallback.storyFont)
+    }
+
     @Test fun retryCountsClampWithoutChangingOtherCategories() {
         val manager = PersonalizationManager(RuntimeEnvironment.getApplication())
         manager.saveRetryRule(RetryErrorType.SERVER, RetryRule(true, 500))

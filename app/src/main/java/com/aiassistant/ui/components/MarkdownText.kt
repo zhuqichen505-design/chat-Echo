@@ -709,19 +709,26 @@ private fun MarkdownContent(
                                 mergedLines.append("\n").append(lines[index])
                                 index++
                             }
+                            val storyStyle = com.aiassistant.ui.screens.chat.LocalEchoStoryReadingStyle.current
+                            val paperMaterial = LocalEchoThemeStyle.current.paperMaterial
+                            val baseVerticalPad = when (paperMaterial) {
+                                EchoPaperMaterial.Cotton -> 5.dp
+                                EchoPaperMaterial.SkyMist, EchoPaperMaterial.Celadon -> 4.dp
+                                EchoPaperMaterial.Lacquer, EchoPaperMaterial.NauticalVellum -> 3.dp
+                                EchoPaperMaterial.IndexStock -> 1.dp
+                                else -> 2.dp
+                            }
+                            val resolvedVerticalPad = when (storyStyle?.let { com.aiassistant.utils.EchoStoryReadingStyle.sanitize(it) }) {
+                                com.aiassistant.utils.EchoStoryReadingStyle.COMPACT -> 1.dp
+                                com.aiassistant.utils.EchoStoryReadingStyle.BOOK -> maxOf(baseVerticalPad, 5.dp)
+                                com.aiassistant.utils.EchoStoryReadingStyle.SCRIPT -> maxOf(baseVerticalPad, 3.dp)
+                                else -> baseVerticalPad
+                            }
                             InlineMarkdownText(
                                 text = parseInlineMarkdown(mergedLines.toString()),
-                                style = paperParagraphStyle(MaterialTheme.typography.bodyLarge, LocalEchoThemeStyle.current.paperMaterial),
+                                style = resolveParagraphStyle(MaterialTheme.typography.bodyLarge, paperMaterial, storyStyle),
                                 color = color,
-                                modifier = Modifier.padding(
-                                    vertical = when (LocalEchoThemeStyle.current.paperMaterial) {
-                                        EchoPaperMaterial.Cotton -> 5.dp
-                                        EchoPaperMaterial.SkyMist, EchoPaperMaterial.Celadon -> 4.dp
-                                        EchoPaperMaterial.Lacquer, EchoPaperMaterial.NauticalVellum -> 3.dp
-                                        EchoPaperMaterial.IndexStock -> 1.dp
-                                        else -> 2.dp
-                                    }
-                                ),
+                                modifier = Modifier.padding(vertical = resolvedVerticalPad),
                                 onCitationClick = onCitationClick,
                                 endCursorColor = if (index >= lines.size) endCursorColor else null,
                                 endCursorFading = endCursorFading
@@ -776,6 +783,32 @@ internal fun paperParagraphStyle(style: TextStyle, material: EchoPaperMaterial):
     EchoPaperMaterial.IndexStock -> style.copy(textAlign = TextAlign.Justify, textIndent = TextIndent.None)
     EchoPaperMaterial.NauticalVellum -> style.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
     EchoPaperMaterial.None -> style
+}
+
+/** 融合主题纸质段落处理与创作阅读页排版预设，阅读页缩进与紧凑态优先生效。 */
+internal fun resolveParagraphStyle(
+    baseStyle: TextStyle,
+    paperMaterial: EchoPaperMaterial,
+    storyReadingStyle: String?
+): TextStyle {
+    val themed = paperParagraphStyle(baseStyle, paperMaterial)
+    if (storyReadingStyle == null) return themed
+    val metrics = com.aiassistant.ui.screens.chat.storyReadingMetricsFor(storyReadingStyle)
+    return when {
+        com.aiassistant.utils.EchoStoryReadingStyle.sanitize(storyReadingStyle) ==
+            com.aiassistant.utils.EchoStoryReadingStyle.COMPACT ->
+            themed.copy(textAlign = TextAlign.Start, textIndent = TextIndent.None)
+        metrics.justifyParagraphs || metrics.paragraphIndentEm > 0f ->
+            themed.copy(
+                textAlign = if (metrics.justifyParagraphs) TextAlign.Justify else themed.textAlign,
+                textIndent = if (metrics.paragraphIndentEm > 0f) {
+                    TextIndent(firstLine = metrics.paragraphIndentEm.em)
+                } else {
+                    themed.textIndent
+                }
+            )
+        else -> themed
+    }
 }
 
 /**

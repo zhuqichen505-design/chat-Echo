@@ -117,7 +117,8 @@ internal fun ApiKeyRotationSettingsSection(
     canResetHealth: Boolean,
     resettingHealth: Boolean,
     resetFeedback: Pair<Boolean, String>?,
-    onResetHealth: () -> Unit
+    onResetHealth: () -> Unit,
+    embeddedInCard: Boolean = false
 ) {
     var expanded by rememberSaveable(scopeKey) { mutableStateOf(false) }
     val settings = draft.settings
@@ -128,13 +129,11 @@ internal fun ApiKeyRotationSettingsSection(
             Triple(ApiKeyRotationSettings.ORDERED, "列表顺序优先", "以手动排序为基础，冷却和失败降权仍优先生效。")
         )
     }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val innerContent: @Composable () -> Unit = {
+        Column(
+            modifier = if (embeddedInCard) Modifier.fillMaxWidth() else Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             RotationToggleRow(
                 title = "启用多 Key 轮询",
                 description = if (settings.enabled) "按下方策略选择 Key；关闭后固定使用列表中第一个已启用的 Key。"
@@ -277,6 +276,18 @@ internal fun ApiKeyRotationSettingsSection(
                     }
                 }
             }
+        }
+    }
+    if (embeddedInCard) {
+        innerContent()
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        ) {
+            innerContent()
         }
     }
 }

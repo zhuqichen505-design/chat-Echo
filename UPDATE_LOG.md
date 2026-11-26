@@ -1,5 +1,26 @@
 # 维护记录
 
+## 2026-11-26 · 发布 Echo 2.9.4（创作阅读页与字体扩展、UI/主题规范建档、API 配置界面及拖拽动画优化）
+
+版本由 2.9.3/238 递增至 2.9.4/239（仅更新 `app/build.gradle.kts`）。将本轮完成的阅读页/字体扩展、`UI_THEME_DESIGN_SPEC.md` 建档与 API 配置界面/拖拽排序优化合并验收并构建发布。Room v37 / 20 个实体、请求协议、消息及备份格式不变。
+
+改动：
+1. **创作阅读页与创作正文字体扩展**：
+   - `PersonalizationManager`：`EchoStoryReadingStyle` 由 3 项扩充至 6 项（保留 `IMMERSIVE`/`PLAIN`/`SPLIT`，新增 `BOOK` 书页典籍、`COMPACT` 紧凑速览、`SCRIPT` 剧本分镜）；`EchoStoryFont` 由 3 项扩充至 8 项（保留 `LITERARY`/`CLEAR`/`TYPEWRITER`，新增 `SYSTEM` 跟随系统、`SYSTEM_SERIF` 经典宋体、`PRINT_BOOK` 精印书宋、`ELEGANT_LIGHT` 轻盈细黑、`CALLIGRAPHY` 随笔手写）；未知值安全回退默认值。
+   - `StoryReadingComponents` / `MarkdownText` / `ChatScreen` / `ChatMessageComponents` / `SettingsAppearanceTab`：新增 `storyReadingMetricsFor`、`readingFontSpec` 与 `LocalEchoStoryReadingStyle`，覆盖行高倍率、段间距、消息列表间距、首行缩进/两端对齐、用户消息无框样式（细引线/书签双竖线/剧本分镜横线）与字体字重/字距调节；外观设置「创作阅读页」与「创作正文字体」区块补齐全部选项、当前说明及实时排版预览卡。
+2. **UI 与主题设计流程及规范文档**：
+   - 新建 `UI_THEME_DESIGN_SPEC.md`：依据仓库实际源码整理设计令牌（`EchoTokens` / `EchoMotion`）、13 组 WCAG AA ≥ 4.5:1 双模式对比度红线、11 维主题架构与 15 套主题矩阵、共享组件与拖拽规范、5 阶段变更 SOP 及强制自动更新机制；同步在工作区 `AGENTS.md` §5、`WORKFLOW_GUIDELINES.md` 与 `PROJECT.md` 登记指向与同步检查项。
+3. **API 配置列表、编辑页排版与拖拽排序修复**：
+   - `SettingsScreen`（`ApiConfigTab` / `ApiConfigCard`）：删除配置卡片中的 `OPENAI` 等协议字样；将「新对话默认 API」改为默认收起的列表选择器（点击展开所有已配置 API，选择未启用配置时弹出 `EchoConfirmDialog` 提示「设为默认并启用」；卡片星标设默认复用同一判定 `resolveDefaultApiSelectionAction`）。
+   - `SmoothReorderState` / `ChatMessageComponents`：修复拖拽期间非选中卡片联动放大/投影（新增按 key 判定 `getItemLift(key)`）、修复松手时非拖拽让位项双倍跳动回弹、修正不等高卡片的 `reorderSlotOffset` / `slotTravelDistance` / `onAnimateSwap` 公式、并行播放落座与抬升回落动画、手柄按住即消费防父滚动抢占并补偿缩放位移；排队消息补齐 `key(msg.id)`。
+   - `SettingsApiConfigDialog` / `SettingsApiKeyRotation`：重构编辑页顶部常驻四分区快跳栏（`连接` / `密钥` / `模型` / `其他`）及滚动高亮联动（`apiConfigSectionIndices` / `resolveActiveApiConfigSection`）；引入稳定 `EditableApiKeyItem` 与基于 `item.id` 的显隐集合；Key 列表改独立 10dp 间距容器，去除标签 `(停用)` 字样、上下移动箭头改为左右横排；默认模型与已配置模型合并前置，拉取模型置后；模型对话头像与多 Key 轮询策略（新增 `embeddedInCard` 模式消除双层边框）统一归入底部「其他」分区。
+
+涉及文件：`PersonalizationManager.kt`、`StoryReadingComponents.kt`、`MarkdownText.kt`、`ChatScreen.kt`、`ChatMessageComponents.kt`、`SettingsAppearanceTab.kt`、`SettingsScreen.kt`、`SmoothReorderState.kt`、`SettingsApiConfigDialog.kt`、`SettingsApiKeyRotation.kt`、`app/build.gradle.kts`，新增 `UI_THEME_DESIGN_SPEC.md`，测试更新 `SmoothReorderTest.kt`、`RetryPreferencesTest.kt`、`UiPolishRegressionTest.kt`（套件 96 不变，总测试 1,139 → 1,147）。
+
+验证：冻结验收 `20261126-164421-224` 脚本 / Gradle 退出 0，1981.789 秒；96 套件 / 1,147 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon` 退出 0，1989.602 秒；排他复制为本机发布目录 `Echo-v2.9.4.apk`（248 → 249 文件、247 → 248 APK，全部历史包保留）。
+
+APK 元数据与审计：`Echo-v2.9.4.apk` 25,705,611 字节，SHA-256 `1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`；`com.aiassistant`、2.9.4/239、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；450 条目且条目名集合与 2.9.3 一致，仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc`（`d78af33ccd39de600f7eaf69ce830f27c2de8e84189af3682c2e4d46a7325a7e`）与 181 张位图均与 2.9.3 一致；DEX 7,491,580 字节，字符串 32,786 条（唯一 32,780 条，较 2.9.3 +150 / -68），新增可读中文 51 条均为本版阅读排版/字体文案、API 配置界面交互与版本号，隐私扫描新增命中 0。未连接真机，新增阅读排版/字体视觉、API 配置交互及 Key 拖拽手感待人工验收。
+
 ## 2026-11-25 · 发布 Echo 2.9.3（全量 15 套主题细节工艺升级与全局 UI 形态一致性）
 
 版本由 2.9.2/237 递增至 2.9.3/238（仅更新 `app/build.gradle.kts`）。本次按用户要求将昨日晴空/索引优化、全量 15 套主题非换色结构升级与全局 UI 几何一致性完善合并发布；同时纳入工作区清理的 5 个早期冗余根目录资源/旧脚本删除记录（`APPlogo.png`、`build_apk.bat`、`build_apk.sh`、`logo.jpg`、`logo.png`）。Room v37 / 20 个实体、请求协议、消息及备份格式不变。

@@ -55,6 +55,7 @@ import com.aiassistant.domain.model.ApiConfig
 import com.aiassistant.domain.model.NamedApiKey
 import com.aiassistant.domain.model.ModelCapabilityEngine
 import com.aiassistant.domain.model.ModelCustomSettings
+import com.aiassistant.ui.components.EchoGlassSubPanelShape
 import com.aiassistant.ui.components.EchoScaffold
 import com.aiassistant.ui.components.EchoSwitch
 import com.aiassistant.ui.components.EchoSwitchSize
@@ -67,6 +68,7 @@ import com.aiassistant.ui.components.rememberSmoothReorderState
 import com.aiassistant.ui.components.reorderItem
 import com.aiassistant.ui.components.reorderDragHandle
 import com.aiassistant.ui.theme.EchoTokens
+import com.aiassistant.ui.theme.LocalEchoThemeStyle
 import com.aiassistant.utils.AvatarManager
 import com.aiassistant.utils.BackgroundImageManager
 import com.google.gson.Gson
@@ -123,11 +125,83 @@ internal fun apiModelDiscoveryEntries(
         .map { ApiModelDiscoveryEntry(it, it in configured, it !in fetchedSet) }
 }
 
+internal enum class ApiConfigSection(val key: String, val label: String, val index: Int) {
+    CONNECTION("api_section_connection", "连接", 1),
+    KEYS("api_section_keys", "密钥", 2),
+    MODELS("api_section_models", "模型", 3),
+    OTHER("api_section_other", "其他", 4)
+}
+
+internal fun apiConfigSectionIndices(
+    discoveredCount: Int,
+    showDiscoveryEmpty: Boolean
+): Map<ApiConfigSection, Int> {
+    val safeCount = discoveredCount.coerceAtLeast(0)
+    val otherIndex = 7 + safeCount + if (showDiscoveryEmpty) 1 else 0
+    return mapOf(
+        ApiConfigSection.CONNECTION to 0,
+        ApiConfigSection.KEYS to 2,
+        ApiConfigSection.MODELS to 4,
+        ApiConfigSection.OTHER to otherIndex
+    )
+}
+
+internal fun resolveActiveApiConfigSection(
+    firstVisibleIndex: Int,
+    canScrollForward: Boolean,
+    sectionIndices: Map<ApiConfigSection, Int>
+): ApiConfigSection {
+    if (!canScrollForward && firstVisibleIndex > 0) return ApiConfigSection.OTHER
+    return ApiConfigSection.entries
+        .filter { (sectionIndices[it] ?: Int.MAX_VALUE) <= firstVisibleIndex }
+        .maxByOrNull { sectionIndices[it] ?: 0 }
+        ?: ApiConfigSection.CONNECTION
+}
+
+internal data class EditableApiKeyItem(
+    val id: String = UUID.randomUUID().toString(),
+    val namedKey: NamedApiKey = NamedApiKey()
+)
+
+internal fun moveApiKeyItem(
+    items: List<EditableApiKeyItem>,
+    fromIndex: Int,
+    toIndex: Int
+): List<EditableApiKeyItem> {
+    if (fromIndex !in items.indices || toIndex !in items.indices || fromIndex == toIndex) return items
+    return items.toMutableList().apply {
+        val moved = removeAt(fromIndex)
+        add(toIndex, moved)
+    }
+}
+
+internal fun swapApiKeyItems(
+    items: List<EditableApiKeyItem>,
+    indexA: Int,
+    indexB: Int
+): List<EditableApiKeyItem> {
+    if (indexA !in items.indices || indexB !in items.indices || indexA == indexB) return items
+    return items.toMutableList().apply {
+        val tmp = this[indexA]
+        this[indexA] = this[indexB]
+        this[indexB] = tmp
+    }
+}
+
+internal fun removeApiKeyItem(
+    items: List<EditableApiKeyItem>,
+    index: Int
+): List<EditableApiKeyItem> {
+    if (index !in items.indices) return items
+    return items.toMutableList().apply { removeAt(index) }
+        .ifEmpty { listOf(EditableApiKeyItem()) }
+}
+
 /**
- * 单页三段式的分区标题（连接 / 密钥 / 模型）。
+ * 单页四段式的分区标题（连接 / 密钥 / 模型 / 其他）。
  *
- * 三段在同一 LazyColumn 里按顺序连续排布，标题只做层级标识与当前摘要，
- * 不再用 Tab 把同一张表单切成三个互不可见的页面。
+ * 四段在同一 LazyColumn 里按顺序连续排布，标题只做层级标识与当前摘要，
+ * 配合顶部快速跳转栏实现即点即达。
  */
 @Composable
 private fun ApiConfigSectionHeader(
@@ -138,7 +212,7 @@ private fun ApiConfigSectionHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = EchoTokens.Spacing.md)
+            .padding(top = EchoTokens.Spacing.sm)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -169,6 +243,56 @@ private fun ApiConfigSectionHeader(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp, start = 2.dp)
         )
+    }
+}
+
+@Composable
+private fun ApiConfigSectionNavBar(
+    activeSection: ApiConfigSection,
+    onSelectSection: (ApiConfigSection) -> Unit
+) {
+    val glass = echoGlassPalette()
+    val themeStyle = LocalEchoThemeStyle.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = EchoGlassSubPanelShape,
+        color = glass.panel,
+        border = BorderStroke(if (themeStyle.strongOutline) 1.6.dp else 0.8.dp, glass.outline)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(EchoTokens.Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.xs)
+        ) {
+            ApiConfigSection.entries.forEach { section ->
+                val selected = section == activeSection
+                Surface(
+                    onClick = { onSelectSection(section) },
+                    shape = EchoGlassSubPanelShape,
+                    color = if (selected) glass.controlSelected else Color.Transparent,
+                    border = if (selected) BorderStroke(1.dp, glass.outlineSelected) else null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = EchoTokens.TouchTarget.compact)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = section.label,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else glass.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -291,24 +415,19 @@ private fun ApiConfigEditorContent(
     var provider by remember { mutableStateOf(config?.provider ?: "") }
     var baseUrl by remember { mutableStateOf(config?.baseUrl ?: "") }
     var apiKey by remember { mutableStateOf(config?.apiKey ?: "") }
-    var namedKeyList by remember {
+    var editableKeys by remember {
         val initialList = if (!config?.apiKey.isNullOrBlank()) {
             AiRepository.parseNamedApiKeys(config!!.apiKey)
         } else emptyList()
-        mutableStateOf(initialList.ifEmpty { listOf(NamedApiKey()) })
+        mutableStateOf((initialList.ifEmpty { listOf(NamedApiKey()) }).map { EditableApiKeyItem(namedKey = it) })
     }
-    val keyIds = remember {
-        mutableStateListOf<String>().apply {
-            repeat(namedKeyList.size.coerceAtLeast(1)) {
-                add(java.util.UUID.randomUUID().toString())
-            }
-        }
+    var visibleKeyIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val applyEditableKeys: (List<EditableApiKeyItem>) -> Unit = { updated ->
+        editableKeys = updated
+        apiKey = AiRepository.formatNamedApiKeys(updated.map { it.namedKey })
     }
     val keyReorderState = rememberSmoothReorderState()
     val modelReorderState = rememberSmoothReorderState()
-    var keyVisibilityList by remember {
-        mutableStateOf(List(16) { false })
-    }
     var apiType by remember { mutableStateOf(config?.apiType ?: "openai") }
     val rotationManager = AiAssistantApp.instance.personalizationManager.apiKeyRotationManager
     val rotationAddress = remember(baseUrl, apiType) { runCatching { ApiEndpointHelper.normalizeBaseUrl(baseUrl, apiType) } }
@@ -402,11 +521,8 @@ private fun ApiConfigEditorContent(
             repository.getDecryptedConfig(config.id)?.let { decrypted ->
                 apiKey = decrypted.apiKey
                 val parsed = AiRepository.parseNamedApiKeys(decrypted.apiKey)
-                namedKeyList = parsed.ifEmpty { listOf(NamedApiKey()) }
-                keyIds.clear()
-                repeat(namedKeyList.size) {
-                    keyIds.add(java.util.UUID.randomUUID().toString())
-                }
+                editableKeys = (parsed.ifEmpty { listOf(NamedApiKey()) }).map { EditableApiKeyItem(namedKey = it) }
+                visibleKeyIds = emptySet()
             }
             val selectedModels = repository.getSelectedModels(config.id).first()
             if (selectedModels.isNotEmpty()) {
@@ -529,9 +645,25 @@ private fun ApiConfigEditorContent(
 
     // 全屏页沿用设置页的壁纸、纸纹与悬浮玻璃顶栏，避免“弹窗放大”感。
     val pageBackgroundBitmap = remember(context) { BackgroundImageManager.getHomeBackgroundBitmap(context) }
+    val showDiscoveryEmpty = keyModels != null && discoveredModels.isEmpty()
+    val sectionIndices = remember(discoveredModels.size, showDiscoveryEmpty) {
+        apiConfigSectionIndices(discoveredModels.size, showDiscoveryEmpty)
+    }
+    var pendingJumpSection by remember { mutableStateOf<ApiConfigSection?>(null) }
+    val scrollActiveSection by remember(sectionIndices) {
+        derivedStateOf {
+            resolveActiveApiConfigSection(
+                firstVisibleIndex = pageListState.firstVisibleItemIndex,
+                canScrollForward = pageListState.canScrollForward,
+                sectionIndices = sectionIndices
+            )
+        }
+    }
+    val activeSection = pendingJumpSection ?: scrollActiveSection
+
     EchoScaffold(
         title = if (config == null) "添加 API 配置" else "编辑 API 配置",
-        subtitle = "连接、密钥与模型",
+        subtitle = "连接、密钥、模型与其他",
         backgroundBitmap = pageBackgroundBitmap,
         navigationIcon = {
             IconButton(onClick = { if (!isSaving) onBack() }) {
@@ -556,793 +688,578 @@ private fun ApiConfigEditorContent(
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.sm)
         ) {
-                LazyColumn(
-                    state = pageListState,
-                    verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.cardGap),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(
-                        top = EchoTokens.Spacing.xs,
-                        bottom = EchoTokens.Spacing.sectionGap
+            ApiConfigSectionNavBar(
+                activeSection = activeSection,
+                onSelectSection = { section ->
+                    val targetIndex = sectionIndices[section] ?: 0
+                    pendingJumpSection = section
+                    scope.launch {
+                        try {
+                            pageListState.animateScrollToItem(targetIndex)
+                        } finally {
+                            pendingJumpSection = null
+                        }
+                    }
+                }
+            )
+            LazyColumn(
+                state = pageListState,
+                verticalArrangement = Arrangement.spacedBy(EchoTokens.Spacing.cardGap),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(
+                    top = EchoTokens.Spacing.xs,
+                    bottom = EchoTokens.Spacing.sectionGap
+                )
+            ) {
+                // ========== 1. 连接 ==========
+                item(key = ApiConfigSection.CONNECTION.key) {
+                    ApiConfigSectionHeader(
+                        index = ApiConfigSection.CONNECTION.index,
+                        title = ApiConfigSection.CONNECTION.label,
+                        summary = "启用状态、接口类型与服务地址"
                     )
-                ) {
-                    item(key = "api_section_connection") {
-                        ApiConfigSectionHeader(
-                            index = 1,
-                            title = "连接",
-                            summary = "接口地址、协议与外观"
-                        )
-                    }
-                    item {
-                        SettingsGlassCard {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("启用此 API 配置", style = MaterialTheme.typography.titleSmall)
-                                    Text(
-                                        if (isConfigEnabled) "已开启：允许使用此 API 并显示在模型选择列表中" else "已关闭：停用此 API 且模型不出现在选择列表中",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                EchoSwitch(
-                                    checked = isConfigEnabled,
-                                    onCheckedChange = { isConfigEnabled = it },
-                                    size = EchoSwitchSize.Standard // §4.1 迁移表：弹窗主开关用标准尺寸
-                                )
-                            }
-                        }
-                    }
-
-                    item {
-                        SettingsGlassCard {
-                            Text("接口预设与协议", style = MaterialTheme.typography.titleMedium)
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                }
+                item(key = "api_connection_card") {
+                    SettingsGlassCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("启用此 API 配置", style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    "快速预设",
-                                    style = MaterialTheme.typography.titleSmall,
+                                    if (isConfigEnabled) "已开启：允许使用此配置并在模型列表展示" else "已关闭：停用此配置且不在模型列表展示",
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    presets.forEach { (key, value) ->
-                                        AssistChip(
-                                            onClick = {
-                                                provider = value.third
-                                                baseUrl = value.first
-                                                modelName = value.second
-                                                if (name.isBlank()) name = value.third
-                                                apiType = if (key == "anthropic") "anthropic" else "openai"
-                                            },
-                                            label = { Text(value.third, style = MaterialTheme.typography.labelSmall) }
-                                        )
-                                    }
-                                }
                             }
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    "API 类型",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    val openAiSelected = apiType == "openai"
-                                    FilterChip(
-                                        selected = openAiSelected,
-                                        onClick = { apiType = "openai" },
-                                        colors = echoFilterChipColors(),
-                                        border = echoFilterChipBorder(openAiSelected),
-                                        elevation = echoFilterChipElevation(),
-                                        label = { Text("OpenAI") }
-                                    )
-                                    val anthropicSelected = apiType == "anthropic"
-                                    FilterChip(
-                                        selected = anthropicSelected,
-                                        onClick = { apiType = "anthropic" },
-                                        colors = echoFilterChipColors(),
-                                        border = echoFilterChipBorder(anthropicSelected),
-                                        elevation = echoFilterChipElevation(),
-                                        label = { Text("Anthropic") }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    item {
-                        SettingsGlassCard {
-                            Text("连接信息", style = MaterialTheme.typography.titleMedium)
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                val fontScale = LocalDensity.current.fontScale
-                                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        maxItemsInEachRow = if (maxWidth < (360 * fontScale).dp) 1 else 2
-                                    ) {
-                                        SettingsInputField(
-                                            title = "配置名称",
-                                            value = name,
-                                            onValueChange = { name = it },
-                                            placeholder = "如：官方 OpenAI",
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        SettingsInputField(
-                                            title = "提供商",
-                                            value = provider,
-                                            onValueChange = { provider = it },
-                                            placeholder = "OpenAI / DeepSeek",
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                                SettingsInputField(
-                                    title = "Base URL",
-                                    value = baseUrl,
-                                    onValueChange = { baseUrl = it },
-                                    placeholder = "https://api.example.com/v1"
-                                )
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                            ApiModelAvatarSection(
-                                currentBitmap = currentApiAvatarBitmap,
-                                hasPendingAvatar = selectedApiAvatarUri != null || pendingAvatarBitmap != null,
-                                clearAvatar = clearApiAvatar,
-                                onPickAvatar = { apiAvatarPicker.launch("image/*") },
-                                onClearAvatar = {
-                                    selectedApiAvatarUri = null
-                                    pendingAvatarBitmap = null
-                                    clearApiAvatar = true
-                                    avatarRevision++
-                                }
+                            EchoSwitch(
+                                checked = isConfigEnabled,
+                                onCheckedChange = { isConfigEnabled = it },
+                                size = EchoSwitchSize.Standard
                             )
                         }
-                    }
 
-                    item(key = "api_section_keys") {
-                        ApiConfigSectionHeader(
-                            index = 2,
-                            title = "密钥",
-                            summary = buildString {
-                                append("已录入 ${namedKeyList.count { it.key.isNotBlank() }} 个密钥")
-                                append(if (rotationDraft.settings.enabled) " · 多 Key 轮询已开启" else " · 多 Key 轮询已关闭")
-                            }
-                        )
-                    }
-                    item {
-                        val validKeysCount = namedKeyList.count { it.key.isNotBlank() }
-                        SettingsGlassCard {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                        Text("接口预设与协议", style = MaterialTheme.typography.titleMedium)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "快速预设",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(
-                                    text = "API Key 密钥列表",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                if (validKeysCount > 0) {
-                                    Surface(
-                                        shape = RoundedCornerShape(999.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                                    ) {
-                                        Text(
-                                            text = when {
-                                                !rotationDraft.settings.enabled -> "已录入 $validKeysCount 个密钥 · 轮询已关闭"
-                                                validKeysCount > 1 -> "已录入 $validKeysCount 个密钥 · 轮询已开启"
-                                                else -> "已录入 1 个密钥"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
-                                    }
+                                presets.forEach { (key, value) ->
+                                    AssistChip(
+                                        onClick = {
+                                            provider = value.third
+                                            baseUrl = value.first
+                                            modelName = value.second
+                                            if (name.isBlank()) name = value.third
+                                            apiType = if (key == "anthropic") "anthropic" else "openai"
+                                        },
+                                        label = { Text(value.third, style = MaterialTheme.typography.labelSmall) }
+                                    )
                                 }
                             }
-
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = if (rotationDraft.settings.enabled)
-                                    "可为每个 Key 设置名称或备注，拖动调整基础顺序。调用时结合下方轮询、失败降权和冷却策略选择 Key。"
-                                    else "轮询已关闭：调用时固定使用列表中第一个已启用的 Key。可拖动调整顺序，或停用不想使用的 Key；点击“保存”后生效。",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                "API 类型",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                val openAiSelected = apiType == "openai"
+                                FilterChip(
+                                    selected = openAiSelected,
+                                    onClick = { apiType = "openai" },
+                                    colors = echoFilterChipColors(),
+                                    border = echoFilterChipBorder(openAiSelected),
+                                    elevation = echoFilterChipElevation(),
+                                    label = { Text("OpenAI") }
+                                )
+                                val anthropicSelected = apiType == "anthropic"
+                                FilterChip(
+                                    selected = anthropicSelected,
+                                    onClick = { apiType = "anthropic" },
+                                    colors = echoFilterChipColors(),
+                                    border = echoFilterChipBorder(anthropicSelected),
+                                    elevation = echoFilterChipElevation(),
+                                    label = { Text("Anthropic") }
+                                )
+                            }
+                        }
 
-                            namedKeyList.forEachIndexed { index, currentKey ->
-                                val isVisible = keyVisibilityList.getOrElse(index) { false }
-                                val isKeyEnabled = currentKey.isEnabled
-                                val keyLabel = if (isKeyEnabled) "Key ${index + 1}" else "Key ${index + 1} (停用)"
-                                val itemId = keyIds.getOrElse(index) { "key_$index" }
-                                val isActive = keyReorderState.isItemActive(itemId)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
-                                Surface(
-                                    shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isKeyEnabled) 0.25f else 0.12f),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        if (isKeyEnabled) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 3.dp)
-                                        .alpha(if (isKeyEnabled) 1f else 0.65f)
-                                        .reorderItem(
-                                            keyReorderState,
-                                            itemId,
-                                            shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                            // 密钥卡片上下各 3dp 内边距，列表项间距为 6dp
-                                            spacingPx = with(LocalDensity.current) { 6.dp.toPx() }
-                                        )
+                        Text("连接信息", style = MaterialTheme.typography.titleMedium)
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            val fontScale = LocalDensity.current.fontScale
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    maxItemsInEachRow = if (maxWidth < (360 * fontScale).dp) 1 else 2
                                 ) {
-                                    Column(
+                                    SettingsInputField(
+                                        title = "配置名称",
+                                        value = name,
+                                        onValueChange = { name = it },
+                                        placeholder = "如：主用节点",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    SettingsInputField(
+                                        title = "提供商",
+                                        value = provider,
+                                        onValueChange = { provider = it },
+                                        placeholder = "OpenAI / DeepSeek",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            SettingsInputField(
+                                title = "Base URL",
+                                value = baseUrl,
+                                onValueChange = { baseUrl = it },
+                                placeholder = "https://api.example.com/v1"
+                            )
+                        }
+                    }
+                }
+
+                // ========== 2. 密钥 ==========
+                val validKeysCount = editableKeys.count { it.namedKey.key.isNotBlank() }
+                item(key = ApiConfigSection.KEYS.key) {
+                    ApiConfigSectionHeader(
+                        index = ApiConfigSection.KEYS.index,
+                        title = ApiConfigSection.KEYS.label,
+                        summary = "已录入 $validKeysCount 个密钥 · 拖动左侧手柄或点按箭头排序"
+                    )
+                }
+                item(key = "api_keys_card") {
+                    val keySpacingPx = with(LocalDensity.current) { 10.dp.toPx() }
+                    SettingsGlassCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "API Key 列表",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            if (validKeysCount > 0) {
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                ) {
+                                    val enabledCount = editableKeys.count { it.namedKey.key.isNotBlank() && it.namedKey.isEnabled }
+                                    Text(
+                                        text = if (enabledCount < validKeysCount) "$enabledCount/$validKeysCount 启用" else "$validKeysCount 个可用",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = if (rotationDraft.settings.enabled)
+                                "已开启多 Key 轮询（可在“其他”调整策略）。每个输入框填写一个 Key，支持拖动或箭头调整基础顺序。"
+                            else "轮询已关闭：调用时固定使用列表中第一个已启用的 Key。如需多 Key 轮询，请在底部“其他”中开启。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            editableKeys.forEachIndexed { index, item ->
+                                key(item.id) {
+                                    val currentKey = item.namedKey
+                                    val isVisible = item.id in visibleKeyIds
+                                    val isKeyEnabled = currentKey.isEnabled
+                                    val isActive = keyReorderState.isItemActive(item.id)
+
+                                    Surface(
+                                        shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isKeyEnabled) 0.28f else 0.14f),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                            else if (isKeyEnabled) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                                        ),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            .alpha(if (isKeyEnabled) 1f else 0.65f)
+                                            .reorderItem(
+                                                keyReorderState,
+                                                item.id,
+                                                shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                                spacingPx = keySpacingPx
+                                            )
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            if (namedKeyList.size > 1) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(28.dp)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
-                                                        .reorderDragHandle(
-                                                            state = keyReorderState,
-                                                            key = { itemId },
-                                                            keys = { keyIds.toList() },
-                                                            onMove = { fromIdx, toIdx ->
-                                                                if (fromIdx in namedKeyList.indices && toIdx in namedKeyList.indices && fromIdx != toIdx) {
-                                                                    val updated = namedKeyList.toMutableList()
-                                                                    val movedKey = updated.removeAt(fromIdx)
-                                                                    updated.add(toIdx, movedKey)
-                                                                    namedKeyList = updated
-                                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-
-                                                                    if (fromIdx < keyIds.size && toIdx < keyIds.size) {
-                                                                        val movedId = keyIds.removeAt(fromIdx)
-                                                                        keyIds.add(toIdx, movedId)
-                                                                    }
-
-                                                                    val nextVis = keyVisibilityList.toMutableList()
-                                                                    if (fromIdx < nextVis.size && toIdx < nextVis.size) {
-                                                                        val movedVisible = nextVis.removeAt(fromIdx)
-                                                                        nextVis.add(toIdx, movedVisible)
-                                                                        keyVisibilityList = nextVis
-                                                                    }
-                                                                }
-                                                            }
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.DragIndicator,
-                                                        contentDescription = "按住上下拖动调整优先级",
-                                                        tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            Surface(
-                                                shape = RoundedCornerShape(5.dp),
-                                                color = if (!isKeyEnabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                                                    else if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                                border = BorderStroke(
-                                                    0.8.dp,
-                                                    if (!isKeyEnabled) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                                    else if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                                )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
-                                                Text(
-                                                    text = keyLabel,
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                    color = if (!isKeyEnabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                                        else if (index == 0) MaterialTheme.colorScheme.primary
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                                )
-                                            }
-
-                                            BasicTextField(
-                                                value = currentKey.name,
-                                                onValueChange = { newName ->
-                                                    val updated = namedKeyList.toMutableList()
-                                                    updated[index] = currentKey.copy(name = newName)
-                                                    namedKeyList = updated
-                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-                                                },
-                                                singleLine = true,
-                                                textStyle = MaterialTheme.typography.bodySmall.copy(
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    fontWeight = FontWeight.Normal),
-                                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                                decorationBox = { innerTextField ->
+                                                if (editableKeys.size > 1) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .fillMaxWidth()
+                                                            .size(28.dp)
                                                             .clip(RoundedCornerShape(6.dp))
-                                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
-                                                            .border(
-                                                                BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                                                                RoundedCornerShape(6.dp)
-                                                            )
-                                                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                                                        contentAlignment = Alignment.CenterStart
+                                                            .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
+                                                            .reorderDragHandle(
+                                                                state = keyReorderState,
+                                                                key = { item.id },
+                                                                keys = { editableKeys.map { it.id } },
+                                                                onMove = { fromIdx, toIdx ->
+                                                                    applyEditableKeys(moveApiKeyItem(editableKeys, fromIdx, toIdx))
+                                                                }
+                                                            ),
+                                                        contentAlignment = Alignment.Center
                                                     ) {
-                                                        if (currentKey.name.isEmpty()) {
-                                                            Text(
-                                                                text = "备注名称 (可选)",
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                                        Icon(
+                                                            imageVector = Icons.Default.DragIndicator,
+                                                            contentDescription = "按住上下拖动调整优先级",
+                                                            tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(5.dp),
+                                                    color = if (!isKeyEnabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                                    else if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                    border = BorderStroke(
+                                                        0.8.dp,
+                                                        if (!isKeyEnabled) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                                        else if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                                    )
+                                                ) {
+                                                    Text(
+                                                        text = "Key ${index + 1}",
+                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                        color = if (!isKeyEnabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                                        else if (index == 0) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    )
+                                                }
+
+                                                BasicTextField(
+                                                    value = currentKey.name,
+                                                    onValueChange = { newName ->
+                                                        val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                        if (currentIdx >= 0) {
+                                                            val updated = editableKeys.toMutableList()
+                                                            updated[currentIdx] = updated[currentIdx].copy(
+                                                                namedKey = updated[currentIdx].namedKey.copy(name = newName)
+                                                            )
+                                                            applyEditableKeys(updated)
+                                                        }
+                                                    },
+                                                    singleLine = true,
+                                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        fontWeight = FontWeight.Normal
+                                                    ),
+                                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                                    decorationBox = { innerTextField ->
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                                                                .border(
+                                                                    BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                                                    RoundedCornerShape(6.dp)
+                                                                )
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                            contentAlignment = Alignment.CenterStart
+                                                        ) {
+                                                            if (currentKey.name.isEmpty()) {
+                                                                Text(
+                                                                    text = "备注 (可选)",
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                                                )
+                                                            }
+                                                            innerTextField()
+                                                        }
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                EchoSwitch(
+                                                    checked = isKeyEnabled,
+                                                    onCheckedChange = { checked ->
+                                                        val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                        if (currentIdx >= 0) {
+                                                            val updated = editableKeys.toMutableList()
+                                                            updated[currentIdx] = updated[currentIdx].copy(
+                                                                namedKey = updated[currentIdx].namedKey.copy(isEnabled = checked)
+                                                            )
+                                                            applyEditableKeys(updated)
+                                                        }
+                                                    }
+                                                )
+
+                                                if (editableKeys.size > 1) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = {
+                                                                val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                                if (currentIdx > 0) {
+                                                                    val targetId = editableKeys[currentIdx - 1].id
+                                                                    keyReorderState.onAnimateSwap(item.id, targetId, currentIdx, currentIdx - 1)
+                                                                    applyEditableKeys(swapApiKeyItems(editableKeys, currentIdx, currentIdx - 1))
+                                                                }
+                                                            },
+                                                            enabled = index > 0,
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.ArrowUpward,
+                                                                contentDescription = "提升优先级",
+                                                                tint = if (index > 0) MaterialTheme.colorScheme.primary
+                                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                                                                modifier = Modifier.size(15.dp)
                                                             )
                                                         }
-                                                        innerTextField()
+                                                        IconButton(
+                                                            onClick = {
+                                                                val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                                if (currentIdx in 0 until editableKeys.lastIndex) {
+                                                                    val targetId = editableKeys[currentIdx + 1].id
+                                                                    keyReorderState.onAnimateSwap(item.id, targetId, currentIdx, currentIdx + 1)
+                                                                    applyEditableKeys(swapApiKeyItems(editableKeys, currentIdx, currentIdx + 1))
+                                                                }
+                                                            },
+                                                            enabled = index < editableKeys.lastIndex,
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.ArrowDownward,
+                                                                contentDescription = "降低优先级",
+                                                                tint = if (index < editableKeys.lastIndex) MaterialTheme.colorScheme.primary
+                                                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                                                                modifier = Modifier.size(15.dp)
+                                                            )
+                                                        }
+                                                        IconButton(
+                                                            onClick = {
+                                                                val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                                if (currentIdx >= 0) {
+                                                                    visibleKeyIds = visibleKeyIds - item.id
+                                                                    applyEditableKeys(removeApiKeyItem(editableKeys, currentIdx))
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Close,
+                                                                contentDescription = "删除此密钥",
+                                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                                modifier = Modifier.size(15.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            OutlinedTextField(
+                                                value = currentKey.key,
+                                                onValueChange = { newVal ->
+                                                    val currentIdx = editableKeys.indexOfFirst { it.id == item.id }
+                                                    if (currentIdx < 0) return@OutlinedTextField
+                                                    val parsed = AiRepository.parseNamedApiKeys(newVal)
+                                                    val updated = editableKeys.toMutableList()
+                                                    if (parsed.size > 1) {
+                                                        updated.removeAt(currentIdx)
+                                                        updated.addAll(currentIdx, parsed.map { EditableApiKeyItem(namedKey = it) })
+                                                    } else if (parsed.size == 1 && (parsed[0].name.isNotBlank() || parsed[0].key != newVal.trim())) {
+                                                        val existingName = updated[currentIdx].namedKey.name.ifBlank { parsed[0].name }
+                                                        updated[currentIdx] = updated[currentIdx].copy(
+                                                            namedKey = NamedApiKey(
+                                                                name = existingName,
+                                                                key = parsed[0].key,
+                                                                isEnabled = updated[currentIdx].namedKey.isEnabled
+                                                            )
+                                                        )
+                                                    } else {
+                                                        updated[currentIdx] = updated[currentIdx].copy(
+                                                            namedKey = updated[currentIdx].namedKey.copy(key = newVal.trim())
+                                                        )
+                                                    }
+                                                    applyEditableKeys(updated)
+                                                },
+                                                placeholder = { Text("填写密钥 (sk-...)", style = MaterialTheme.typography.bodyMedium) },
+                                                visualTransformation = if (isVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                                textStyle = MaterialTheme.typography.bodyMedium,
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                                    focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
+                                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f)
+                                                ),
+                                                trailingIcon = {
+                                                    IconButton(
+                                                        onClick = {
+                                                            visibleKeyIds = if (isVisible) visibleKeyIds - item.id else visibleKeyIds + item.id
+                                                        },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (isVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                            contentDescription = if (isVisible) "隐藏密钥" else "显示密钥",
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
                                                     }
                                                 },
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier.fillMaxWidth()
                                             )
-
-                                            EchoSwitch(
-                                                checked = isKeyEnabled,
-                                                onCheckedChange = { checked ->
-                                                    val updated = namedKeyList.toMutableList()
-                                                    updated[index] = currentKey.copy(isEnabled = checked)
-                                                    namedKeyList = updated
-                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-                                                }
-                                            )
-
-                                            if (namedKeyList.size > 1) {
-                                                // 上下移仍保留，作为拖拽之外的可访问排序方式；竖排只占 26dp 宽。
-                                                Column(verticalArrangement = Arrangement.Center) {
-                                                    IconButton(
-                                                        onClick = {
-                                                            if (index > 0) {
-                                                                val fromKey = keyIds.getOrElse(index) { "key_$index" }
-                                                                val toKey = keyIds.getOrElse(index - 1) { "key_${index - 1}" }
-                                                                keyReorderState.onAnimateSwap(fromKey, toKey, index, index - 1)
-
-                                                                val updated = namedKeyList.toMutableList()
-                                                                val temp = updated[index]
-                                                                updated[index] = updated[index - 1]
-                                                                updated[index - 1] = temp
-                                                                namedKeyList = updated
-                                                                apiKey = AiRepository.formatNamedApiKeys(updated)
-
-                                                                if (index < keyIds.size && index - 1 < keyIds.size) {
-                                                                    val tempId = keyIds[index]
-                                                                    keyIds[index - 1] = keyIds[index].also { keyIds[index] = keyIds[index - 1] }
-                                                                }
-
-                                                                val nextVis = keyVisibilityList.toMutableList()
-                                                                if (index < nextVis.size && index - 1 < nextVis.size) {
-                                                                    val tempV = nextVis[index]
-                                                                    nextVis[index] = nextVis[index - 1]
-                                                                    nextVis[index - 1] = tempV
-                                                                    keyVisibilityList = nextVis
-                                                                }
-                                                            }
-                                                        },
-                                                        enabled = index > 0,
-                                                        modifier = Modifier.size(26.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.ArrowUpward,
-                                                            contentDescription = "提升优先级",
-                                                            tint = if (index > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                    }
-                                                    IconButton(
-                                                        onClick = {
-                                                            if (index < namedKeyList.size - 1) {
-                                                                val fromKey = keyIds.getOrElse(index) { "key_$index" }
-                                                                val toKey = keyIds.getOrElse(index + 1) { "key_${index + 1}" }
-                                                                keyReorderState.onAnimateSwap(fromKey, toKey, index, index + 1)
-
-                                                                val updated = namedKeyList.toMutableList()
-                                                                val temp = updated[index]
-                                                                updated[index] = updated[index + 1]
-                                                                updated[index + 1] = temp
-                                                                namedKeyList = updated
-                                                                apiKey = AiRepository.formatNamedApiKeys(updated)
-
-                                                                if (index < keyIds.size && index + 1 < keyIds.size) {
-                                                                    val tempId = keyIds[index]
-                                                                    keyIds[index + 1] = keyIds[index].also { keyIds[index] = keyIds[index + 1] }
-                                                                }
-
-                                                                val nextVis = keyVisibilityList.toMutableList()
-                                                                if (index < nextVis.size && index + 1 < nextVis.size) {
-                                                                    val tempV = nextVis[index]
-                                                                    nextVis[index] = nextVis[index + 1]
-                                                                    nextVis[index + 1] = tempV
-                                                                    keyVisibilityList = nextVis
-                                                                }
-                                                            }
-                                                        },
-                                                        enabled = index < namedKeyList.size - 1,
-                                                        modifier = Modifier.size(26.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.ArrowDownward,
-                                                            contentDescription = "降低优先级",
-                                                            tint = if (index < namedKeyList.size - 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                    }
-                                                }
-                                                IconButton(
-                                                    onClick = {
-                                                        val updated = namedKeyList.toMutableList()
-                                                        updated.removeAt(index)
-                                                        namedKeyList = updated.ifEmpty { listOf(NamedApiKey()) }
-                                                        if (index < keyIds.size) keyIds.removeAt(index)
-                                                        if (keyIds.isEmpty()) keyIds.add(java.util.UUID.randomUUID().toString())
-                                                        apiKey = AiRepository.formatNamedApiKeys(namedKeyList)
-                                                    },
-                                                    modifier = Modifier.size(26.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Close,
-                                                        contentDescription = "删除此密钥",
-                                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                        modifier = Modifier.size(15.dp)
-                                                    )
-                                                }
-                                            }
                                         }
-
-                                        OutlinedTextField(
-                                            value = currentKey.key,
-                                            onValueChange = { newVal ->
-                                                val parsed = AiRepository.parseNamedApiKeys(newVal)
-                                                if (parsed.size > 1) {
-                                                    val updated = namedKeyList.toMutableList()
-                                                    updated.removeAt(index)
-                                                    updated.addAll(index, parsed)
-                                                    namedKeyList = updated
-                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-                                                    if (index < keyIds.size) keyIds.removeAt(index)
-                                                    repeat(parsed.size) { offset ->
-                                                        keyIds.add(index + offset, java.util.UUID.randomUUID().toString())
-                                                    }
-                                                } else if (parsed.size == 1 && (parsed[0].name.isNotBlank() || parsed[0].key != newVal.trim())) {
-                                                    val updated = namedKeyList.toMutableList()
-                                                    val existingName = currentKey.name.ifBlank { parsed[0].name }
-                                                    updated[index] = NamedApiKey(name = existingName, key = parsed[0].key)
-                                                    namedKeyList = updated
-                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-                                                } else {
-                                                    val updated = namedKeyList.toMutableList()
-                                                    updated[index] = currentKey.copy(key = newVal.trim())
-                                                    namedKeyList = updated
-                                                    apiKey = AiRepository.formatNamedApiKeys(updated)
-                                                }
-                                            },
-                                            placeholder = { Text("填写密钥 (sk-...)", style = MaterialTheme.typography.bodyMedium) },
-                                            visualTransformation = if (isVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                            singleLine = true,
-                                            shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                            textStyle = MaterialTheme.typography.bodyMedium,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
-                                                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f)
-                                            ),
-                                            trailingIcon = {
-                                                IconButton(
-                                                    onClick = {
-                                                        val nextVis = keyVisibilityList.toMutableList()
-                                                        while (nextVis.size <= index) nextVis.add(false)
-                                                        nextVis[index] = !isVisible
-                                                        keyVisibilityList = nextVis
-                                                    },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                                        contentDescription = if (isVisible) "隐藏密钥" else "显示密钥",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
                                     }
                                 }
                             }
+                        }
 
-                            // "+ 添加 Key" 按钮
-                            OutlinedButton(
-                                onClick = {
-                                    namedKeyList = namedKeyList + NamedApiKey()
-                                    keyIds.add(java.util.UUID.randomUUID().toString())
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                contentPadding = PaddingValues(vertical = 6.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("添加独立 Key 输入框 (Key ${namedKeyList.size + 1})", style = MaterialTheme.typography.labelMedium)
-                            }
+                        OutlinedButton(
+                            onClick = {
+                                applyEditableKeys(editableKeys + EditableApiKeyItem())
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(EchoTokens.Radius.md),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("添加独立密钥 (Key ${editableKeys.size + 1})", style = MaterialTheme.typography.labelMedium)
+                        }
 
-                            Text(
-                                text = "每个输入框填写一个独立 Key，多行或逗号分隔的密钥会自动拆分。下方可开启或关闭多 Key 轮询。" +
-                                    if (rotationDraft.settings.enabled) "开启轮询时，是否允许失败后切换备用 Key 由“模型失败与重试”中的备用 Key 总开关控制。"
-                                    else "关闭轮询后，失败不会切换其他 Key；单个 Key 的错误重试次数仍在“模型失败与重试”中设置。",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 2.dp, top = 2.dp)
+                        Text(
+                            text = "多行或逗号分隔的密钥粘贴后会自动拆分为独立条目。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // ========== 3. 模型 ==========
+                item(key = ApiConfigSection.MODELS.key) {
+                    ApiConfigSectionHeader(
+                        index = ApiConfigSection.MODELS.index,
+                        title = ApiConfigSection.MODELS.label,
+                        summary = "默认模型、已配置清单与接口拉取（已添加 ${availableModels.size} 个）"
+                    )
+                }
+                item(key = "api_default_and_configured_models") {
+                    val modelSpacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+                    SettingsGlassCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SettingsInputField(
+                                title = "默认模型",
+                                value = modelName,
+                                onValueChange = { modelName = it },
+                                placeholder = "例如: deepseek-v4-pro / gpt-6-astra"
                             )
-                        }
-                    }
-                    item {
-                        ApiKeyRotationSettingsSection(
-                            scopeKey = rotationScopeKey,
-                            draft = rotationDraft,
-                            onDraftChange = { rotationDraft = it },
-                            enabled = !isSaving && loadedRotationSettings.isSuccess,
-                            canResetHealth = rotationAddress.isSuccess,
-                            resettingHealth = resettingKeyHealth,
-                            resetFeedback = keyHealthResetFeedback,
-                            onResetHealth = {
-                                val targetBaseUrl = baseUrl
-                                val targetApiType = apiType
-                                resettingKeyHealth = true
-                                keyHealthResetFeedback = null
-                                scope.launch {
-                                    val success = withContext(Dispatchers.IO) {
-                                        runCatching { rotationManager.resetHealth(targetBaseUrl, targetApiType) }.getOrDefault(false)
-                                    }
-                                    keyHealthResetFeedback = success to if (success) "已清除该地址的 Key 健康记录。" else "重置失败，请重试。"
-                                    resettingKeyHealth = false
-                                }
-                            }
-                        )
-                    }
-
-                    item(key = "api_section_models") {
-                        ApiConfigSectionHeader(
-                            index = 3,
-                            title = "模型",
-                            summary = "默认模型、模型清单与能力设置（已添加 ${availableModels.size} 个）"
-                        )
-                    }
-                    item {
-                        SettingsGlassCard {
-                            Text("默认模型", style = MaterialTheme.typography.titleMedium)
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                SettingsInputField(
-                                    title = "此 API 的默认模型",
-                                    value = modelName,
-                                    onValueChange = { modelName = it },
-                                    placeholder = "例如: deepseek-v4-pro / gpt-6-astra"
-                                )
-                                Text(
-                                    text = "新对话会先使用标记为“新对话默认API”的配置，再使用这里设置的默认模型。",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    item(key = "model_discovery_header") {
-                        SettingsGlassCard {
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = keyModels?.let { "从 Key 读取的模型 (${it.size})" } ?: "从 Key 读取模型",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                val unadded = keyModels.orEmpty().filter { it !in configuredModelNames }
-                                if (unadded.isNotEmpty()) {
-                                    TextButton(
-                                        onClick = {
-                                            availableModels = cleanModelNames(availableModels + unadded)
-                                            enabledModelNames = enabledModelNames + unadded
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("一键添加全部 (${unadded.size})", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val requestedUrl = baseUrl
-                                    val requestedKey = apiKey
-                                    val requestedType = apiType
-                                    scope.launch {
-                                        isLoadingModels = true
-                                        keyModelFetchFailed = false
-                                        // 清除旧成功快照，读取失败时不沿用旧清单判断失效。
-                                        keyModels = null
-                                        try {
-                                            val result = repository.fetchAvailableModelsDirect(requestedUrl, requestedKey, requestedType)
-                                            if (baseUrl == requestedUrl && apiKey == requestedKey && apiType == requestedType) {
-                                                result.onSuccess { models ->
-                                                    val cleaned = cleanModelNames(models)
-                                                    keyModels = cleaned
-                                                    val updated = modelCustomSettings.toMutableMap()
-                                                    cleaned.forEach { model ->
-                                                        if (!updated.containsKey(model)) {
-                                                            val eval = ModelCapabilityEngine.evaluateModel(model)
-                                                            updated[model] = ModelCustomSettings(
-                                                                contextWindowTokens = eval.contextWindowTokens,
-                                                                supportsTools = eval.supportsTools,
-                                                                supportsVision = eval.supportsVision,
-                                                                supportsThinking = eval.supportsReasoning,
-                                                                supportsWebSearch = true
-                                                            )
-                                                        }
-                                                    }
-                                                    modelCustomSettings = updated
-                                                    if (modelName.isBlank() && cleaned.isNotEmpty()) modelName = cleaned.first()
-                                                }.onFailure { keyModelFetchFailed = true }
-                                            }
-                                        } finally {
-                                            isLoadingModels = false
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && !isLoadingModels && !isSaving
-                            ) {
-                                if (isLoadingModels) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (keyModels == null) "点击从 API Key 读取模型列表" else "重新读取 Key 模型列表")
-                            }
-                            if (keyModelFetchFailed) {
-                                Text(
-                                    "读取失败，请检查地址、Key 和网络后重试；已有模型不会被判为失效。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                            if (keyModels != null) {
-                                val missingCount = apiModelDiscoveryEntries(configuredModelNames, keyModels).count { it.isUnavailable }
-                                if (missingCount > 0) {
-                                    Text(
-                                        "可能已失效的已添加模型 ($missingCount) 已置顶。本次列表未返回这些模型，手动模型也可能不在接口清单中；可移除或保留继续使用。",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                OutlinedTextField(
-                                    value = keyModelSearchQuery,
-                                    onValueChange = { keyModelSearchQuery = it },
-                                    placeholder = { Text("搜索已添加及本次读取的模型…", style = MaterialTheme.typography.bodySmall) },
-                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                    trailingIcon = if (keyModelSearchQuery.isNotBlank()) {
-                                        {
-                                            IconButton(onClick = { keyModelSearchQuery = "" }) {
-                                                Icon(Icons.Default.Clear, contentDescription = "清除模型搜索", modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                    } else null,
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                    textStyle = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-                    items(discoveredModels, key = { "discovered_model:${it.model}" }) { entry ->
-                        ApiDiscoveredModelRow(
-                            entry = entry,
-                            enabled = !isSaving,
-                            onRemove = { removeConfiguredModel(entry.model) },
-                            onAdd = {
-                                availableModels = cleanModelNames(availableModels + entry.model)
-                                enabledModelNames = enabledModelNames + entry.model
-                                if (modelName.isBlank()) modelName = entry.model
-                            }
-                        )
-                    }
-                    if (keyModels != null && discoveredModels.isEmpty()) {
-                        item(key = "model_discovery_empty") {
                             Text(
-                                if (keyModelSearchQuery.isBlank()) "本次未返回可添加的模型。" else "没有匹配的模型，试试其他关键词。",
-                                style = MaterialTheme.typography.bodySmall,
+                                text = "新对话选中此 API 时默认优先使用该模型；可从下方列表点选切换。",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                    item {
-                        SettingsGlassCard {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (availableModels.size > 1) {
-                                Text(
-                                    text = if (modelSearchQuery.isBlank()) {
-                                        "提示：按住模型左侧手柄上下拖动，可调整模型在列表中的顺序。"
-                                    } else {
-                                        "搜索过滤时暂不可拖动排序，清空搜索后可调整顺序。"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                                )
-                            }
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isConfiguredModelsExpanded = !isConfiguredModelsExpanded }
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().clickable { isConfiguredModelsExpanded = !isConfiguredModelsExpanded }
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "已配置模型 (${availableModels.size})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { isConfiguredModelsExpanded = !isConfiguredModelsExpanded },
+                                    modifier = Modifier.size(28.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.Tune,
-                                        contentDescription = null,
+                                        imageVector = if (isConfiguredModelsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = if (isConfiguredModelsExpanded) "收起已配置模型" else "展开已配置模型",
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "已配置模型 (${availableModels.size})",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = { isConfiguredModelsExpanded = !isConfiguredModelsExpanded },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isConfiguredModelsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                            contentDescription = if (isConfiguredModelsExpanded) "收起已配置模型" else "展开已配置模型",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
                                 }
-                                if (availableModels.isNotEmpty() && isConfiguredModelsExpanded) {
-                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        TextButton(
-                                            onClick = { enabledModelNames = availableModels.toSet() },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("全选", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        TextButton(
-                                            onClick = { enabledModelNames = emptySet() },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("清空启用", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        TextButton(
-                                            onClick = { modelCustomSettings = emptyMap() },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("重置配置", style = MaterialTheme.typography.labelSmall)
-                                        }
+                            }
+
+                            if (availableModels.isNotEmpty() && isConfiguredModelsExpanded) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    TextButton(
+                                        onClick = { enabledModelNames = availableModels.toSet() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("全选", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    TextButton(
+                                        onClick = { enabledModelNames = emptySet() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("清空启用", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    TextButton(
+                                        onClick = { modelCustomSettings = emptyMap() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("重置能力", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
 
-                            // 手动输入并添加自定义模型 (紧凑型设计，大幅降低空间占用)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1419,13 +1336,24 @@ private fun ApiConfigEditorContent(
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                                         ) {
                                             Text(
-                                                text = "暂无已配置的模型。请点击下方“从Key中获取模型列表”或手动输入添加。",
+                                                text = "暂无已配置模型。可在上方手动添加，或通过下方按钮从接口拉取。",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(12.dp)
                                             )
                                         }
                                     } else {
+                                        if (availableModels.size > 1) {
+                                            Text(
+                                                text = if (modelSearchQuery.isBlank()) {
+                                                    "按住模型左侧手柄上下拖动可调整展示顺序。"
+                                                } else {
+                                                    "搜索过滤时暂不可拖动排序，清空搜索后可调整顺序。"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                         if (availableModels.size > 5) {
                                             OutlinedTextField(
                                                 value = modelSearchQuery,
@@ -1447,44 +1375,48 @@ private fun ApiConfigEditorContent(
                                         }
 
                                         val modelsToShow = if (canReorderModels) availableModels else filteredModels
-                                        modelsToShow.forEach { model ->
-                                            val modelItemId = model
-                                            val isModelDragActive = canReorderModels && modelReorderState.isItemActive(modelItemId)
-                                            ModelCustomSettingCard(
-                                                model = model,
-                                                checked = enabledModelNames.contains(model),
-                                                selected = modelName == model,
-                                                capability = modelCapabilities[model] ?: "auto",
-                                                customSettings = modelCustomSettings[model],
-                                                reorderState = if (canReorderModels) modelReorderState else null,
-                                                reorderKey = modelItemId,
-                                                reorderKeys = { availableModels.toList() },
-                                                onReorderMove = { fromIdx, toIdx ->
-                                                    if (fromIdx in availableModels.indices && toIdx in availableModels.indices && fromIdx != toIdx) {
-                                                        val updated = availableModels.toMutableList()
-                                                        val movedModel = updated.removeAt(fromIdx)
-                                                        updated.add(toIdx, movedModel)
-                                                        availableModels = updated
-                                                    }
-                                                },
-                                                isDragActive = isModelDragActive,
-                                                onCheckedChange = { isChecked ->
-                                                    enabledModelNames = if (isChecked) enabledModelNames + model else enabledModelNames - model
-                                                },
-                                                onSelectAsDefault = {
-                                                    modelName = model
-                                                    enabledModelNames = enabledModelNames + model
-                                                },
-                                                onRemove = {
-                                                    removeConfiguredModel(model)
-                                                },
-                                                onResetCustomSettings = {
-                                                    modelCustomSettings = modelCustomSettings - model
-                                                },
-                                                onCustomSettingsChange = { newSettings ->
-                                                    modelCustomSettings = modelCustomSettings + (model to newSettings)
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            modelsToShow.forEach { model ->
+                                                key(model) {
+                                                    val isModelDragActive = canReorderModels && modelReorderState.isItemActive(model)
+                                                    ModelCustomSettingCard(
+                                                        model = model,
+                                                        checked = enabledModelNames.contains(model),
+                                                        selected = modelName == model,
+                                                        capability = modelCapabilities[model] ?: "auto",
+                                                        customSettings = modelCustomSettings[model],
+                                                        reorderState = if (canReorderModels) modelReorderState else null,
+                                                        reorderKey = model,
+                                                        reorderKeys = { availableModels.toList() },
+                                                        reorderSpacingPx = modelSpacingPx,
+                                                        onReorderMove = { fromIdx, toIdx ->
+                                                            if (fromIdx in availableModels.indices && toIdx in availableModels.indices && fromIdx != toIdx) {
+                                                                val updated = availableModels.toMutableList()
+                                                                val movedModel = updated.removeAt(fromIdx)
+                                                                updated.add(toIdx, movedModel)
+                                                                availableModels = updated
+                                                            }
+                                                        },
+                                                        isDragActive = isModelDragActive,
+                                                        onCheckedChange = { isChecked ->
+                                                            enabledModelNames = if (isChecked) enabledModelNames + model else enabledModelNames - model
+                                                        },
+                                                        onSelectAsDefault = {
+                                                            modelName = model
+                                                            enabledModelNames = enabledModelNames + model
+                                                        },
+                                                        onRemove = {
+                                                            removeConfiguredModel(model)
+                                                        },
+                                                        onResetCustomSettings = {
+                                                            modelCustomSettings = modelCustomSettings - model
+                                                        },
+                                                        onCustomSettingsChange = { newSettings ->
+                                                            modelCustomSettings = modelCustomSettings + (model to newSettings)
+                                                        }
+                                                    )
                                                 }
-                                            )
+                                            }
                                         }
                                     }
                                 }
@@ -1517,33 +1449,215 @@ private fun ApiConfigEditorContent(
                                     }
                                 }
                             }
-                            }
                         }
                     }
                 }
-                if (rotationDraft.validationMessage != null) {
-                    Text(
-                        text = "轮询设置有无效数字，请到“密钥”分区修正后保存：${rotationDraft.validationMessage}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+
+                item(key = "model_discovery_header") {
+                    SettingsGlassCard {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = keyModels?.let { "从 Key 读取的模型 (${it.size})" } ?: "从 Key 读取模型",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            val unadded = keyModels.orEmpty().filter { it !in configuredModelNames }
+                            if (unadded.isNotEmpty()) {
+                                TextButton(
+                                    onClick = {
+                                        availableModels = cleanModelNames(availableModels + unadded)
+                                        enabledModelNames = enabledModelNames + unadded
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("一键添加全部 (${unadded.size})", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val requestedUrl = baseUrl
+                                val requestedKey = apiKey
+                                val requestedType = apiType
+                                scope.launch {
+                                    isLoadingModels = true
+                                    keyModelFetchFailed = false
+                                    keyModels = null
+                                    try {
+                                        val result = repository.fetchAvailableModelsDirect(requestedUrl, requestedKey, requestedType)
+                                        if (baseUrl == requestedUrl && apiKey == requestedKey && apiType == requestedType) {
+                                            result.onSuccess { models ->
+                                                val cleaned = cleanModelNames(models)
+                                                keyModels = cleaned
+                                                val updated = modelCustomSettings.toMutableMap()
+                                                cleaned.forEach { model ->
+                                                    if (!updated.containsKey(model)) {
+                                                        val eval = ModelCapabilityEngine.evaluateModel(model)
+                                                        updated[model] = ModelCustomSettings(
+                                                            contextWindowTokens = eval.contextWindowTokens,
+                                                            supportsTools = eval.supportsTools,
+                                                            supportsVision = eval.supportsVision,
+                                                            supportsThinking = eval.supportsReasoning,
+                                                            supportsWebSearch = true
+                                                        )
+                                                    }
+                                                }
+                                                modelCustomSettings = updated
+                                                if (modelName.isBlank() && cleaned.isNotEmpty()) modelName = cleaned.first()
+                                            }.onFailure { keyModelFetchFailed = true }
+                                        }
+                                    } finally {
+                                        isLoadingModels = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && !isLoadingModels && !isSaving
+                        ) {
+                            if (isLoadingModels) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (keyModels == null) "点击从 API Key 读取模型列表" else "重新读取 Key 模型列表")
+                        }
+                        if (keyModelFetchFailed) {
+                            Text(
+                                "读取失败，请检查地址、Key 和网络后重试；已有模型不会被判为失效。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        if (keyModels != null) {
+                            val missingCount = apiModelDiscoveryEntries(configuredModelNames, keyModels).count { it.isUnavailable }
+                            if (missingCount > 0) {
+                                Text(
+                                    "可能已失效的已添加模型 ($missingCount) 已置顶。本次列表未返回这些模型，手动模型也可能不在接口清单中；可移除或保留继续使用。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedTextField(
+                                value = keyModelSearchQuery,
+                                onValueChange = { keyModelSearchQuery = it },
+                                placeholder = { Text("搜索已添加及本次读取的模型…", style = MaterialTheme.typography.bodySmall) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                trailingIcon = if (keyModelSearchQuery.isNotBlank()) {
+                                    {
+                                        IconButton(onClick = { keyModelSearchQuery = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "清除模型搜索", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                } else null,
+                                singleLine = true,
+                                shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+                items(discoveredModels, key = { "discovered_model:${it.model}" }) { entry ->
+                    ApiDiscoveredModelRow(
+                        entry = entry,
+                        enabled = !isSaving,
+                        onRemove = { removeConfiguredModel(entry.model) },
+                        onAdd = {
+                            availableModels = cleanModelNames(availableModels + entry.model)
+                            enabledModelNames = enabledModelNames + entry.model
+                            if (modelName.isBlank()) modelName = entry.model
+                        }
                     )
                 }
-                if (baseUrl.isNotBlank() && rotationAddress.isFailure) {
-                    Text(
-                        text = rotationAddress.exceptionOrNull()?.message ?: "请填写有效的 API 地址。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+                if (showDiscoveryEmpty) {
+                    item(key = "model_discovery_empty") {
+                        Text(
+                            if (keyModelSearchQuery.isBlank()) "本次未返回可添加的模型。" else "没有匹配的模型，试试其他关键词。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // ========== 4. 其他 ==========
+                item(key = ApiConfigSection.OTHER.key) {
+                    ApiConfigSectionHeader(
+                        index = ApiConfigSection.OTHER.index,
+                        title = ApiConfigSection.OTHER.label,
+                        summary = "模型对话头像与多 Key 轮询策略"
                     )
                 }
-                if (rotationAddress.isSuccess && loadedRotationSettings.isFailure) {
-                    Text(
-                        text = "轮询设置读取失败，请重新打开此 API 配置后重试。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                item(key = "api_other_avatar_card") {
+                    SettingsGlassCard {
+                        ApiModelAvatarSection(
+                            currentBitmap = currentApiAvatarBitmap,
+                            hasPendingAvatar = selectedApiAvatarUri != null || pendingAvatarBitmap != null,
+                            clearAvatar = clearApiAvatar,
+                            onPickAvatar = { apiAvatarPicker.launch("image/*") },
+                            onClearAvatar = {
+                                selectedApiAvatarUri = null
+                                pendingAvatarBitmap = null
+                                clearApiAvatar = true
+                                avatarRevision++
+                            }
+                        )
+                    }
+                }
+                item(key = "api_other_rotation_card") {
+                    SettingsGlassCard {
+                        ApiKeyRotationSettingsSection(
+                            scopeKey = rotationScopeKey,
+                            draft = rotationDraft,
+                            onDraftChange = { rotationDraft = it },
+                            enabled = !isSaving && loadedRotationSettings.isSuccess,
+                            canResetHealth = rotationAddress.isSuccess,
+                            resettingHealth = resettingKeyHealth,
+                            resetFeedback = keyHealthResetFeedback,
+                            embeddedInCard = true,
+                            onResetHealth = {
+                                val targetBaseUrl = baseUrl
+                                val targetApiType = apiType
+                                resettingKeyHealth = true
+                                keyHealthResetFeedback = null
+                                scope.launch {
+                                    val success = withContext(Dispatchers.IO) {
+                                        runCatching { rotationManager.resetHealth(targetBaseUrl, targetApiType) }.getOrDefault(false)
+                                    }
+                                    keyHealthResetFeedback = success to if (success) "已清除该地址的 Key 健康记录。" else "重置失败，请重试。"
+                                    resettingKeyHealth = false
+                                }
+                            }
+                        )
+                    }
                 }
             }
+            if (rotationDraft.validationMessage != null) {
+                Text(
+                    text = "轮询设置有无效数字，请到“其他”分区修正后保存：${rotationDraft.validationMessage}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (baseUrl.isNotBlank() && rotationAddress.isFailure) {
+                Text(
+                    text = rotationAddress.exceptionOrNull()?.message ?: "请填写有效的 API 地址。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (rotationAddress.isSuccess && loadedRotationSettings.isFailure) {
+                Text(
+                    text = "轮询设置读取失败，请重新打开此 API 配置后重试。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
+    }
 
     pendingCropAvatarUri?.let { cropUri ->
         ImageCropEditDialog(
@@ -1578,6 +1692,7 @@ private fun ModelCustomSettingCard(
     reorderState: com.aiassistant.ui.components.SmoothReorderState? = null,
     reorderKey: Any = model,
     reorderKeys: () -> List<Any> = { listOf(model) },
+    reorderSpacingPx: Float = 0f,
     onReorderMove: (Int, Int) -> Unit = { _, _ -> },
     isDragActive: Boolean = false
 ) {
@@ -1596,16 +1711,13 @@ private fun ModelCustomSettingCard(
         )
     }
 
-    val baseModifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 3.dp)
+    val baseModifier = Modifier.fillMaxWidth()
     val dragModifier = if (reorderState != null) {
         baseModifier.reorderItem(
             reorderState,
             reorderKey,
             shape = cardShape,
-            // 模型卡片上下各 3dp 内边距，列表项间距为 6dp
-            spacingPx = with(LocalDensity.current) { 6.dp.toPx() }
+            spacingPx = reorderSpacingPx
         )
     } else {
         baseModifier

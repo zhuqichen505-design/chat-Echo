@@ -7,12 +7,147 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontWeight
 import com.aiassistant.R
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.unit.sp
 import com.aiassistant.utils.EchoStoryFont
 import com.aiassistant.utils.EchoStoryReadingStyle
+
+internal enum class StoryUserMessageStyle {
+    Bubble,
+    QuoteLine,
+    BookIndent,
+    ScriptCue
+}
+
+internal data class StoryReadingMetrics(
+    val lineMultiplier: Float,
+    val paragraphIndentEm: Float,
+    val justifyParagraphs: Boolean,
+    val paragraphVerticalPaddingDp: Float,
+    val messageSpacingDp: Float,
+    val horizontalExtraPaddingDp: Float,
+    val userStyle: StoryUserMessageStyle
+)
+
+internal fun storyReadingMetricsFor(style: String?): StoryReadingMetrics {
+    if (style == null) {
+        return StoryReadingMetrics(
+            lineMultiplier = 1.65f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 2f,
+            messageSpacingDp = 14f,
+            horizontalExtraPaddingDp = 0f,
+            userStyle = StoryUserMessageStyle.Bubble
+        )
+    }
+    return when (EchoStoryReadingStyle.sanitize(style)) {
+        EchoStoryReadingStyle.IMMERSIVE -> StoryReadingMetrics(
+            lineMultiplier = 1.95f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 2f,
+            messageSpacingDp = 14f,
+            horizontalExtraPaddingDp = 0f,
+            userStyle = StoryUserMessageStyle.QuoteLine
+        )
+        EchoStoryReadingStyle.PLAIN, EchoStoryReadingStyle.SPLIT -> StoryReadingMetrics(
+            lineMultiplier = 1.65f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 2f,
+            messageSpacingDp = 14f,
+            horizontalExtraPaddingDp = 0f,
+            userStyle = StoryUserMessageStyle.Bubble
+        )
+        EchoStoryReadingStyle.BOOK -> StoryReadingMetrics(
+            lineMultiplier = 1.85f,
+            paragraphIndentEm = 2.0f,
+            justifyParagraphs = true,
+            paragraphVerticalPaddingDp = 5f,
+            messageSpacingDp = 16f,
+            horizontalExtraPaddingDp = 6f,
+            userStyle = StoryUserMessageStyle.BookIndent
+        )
+        EchoStoryReadingStyle.COMPACT -> StoryReadingMetrics(
+            lineMultiplier = 1.48f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 1f,
+            messageSpacingDp = 8f,
+            horizontalExtraPaddingDp = 0f,
+            userStyle = StoryUserMessageStyle.Bubble
+        )
+        EchoStoryReadingStyle.SCRIPT -> StoryReadingMetrics(
+            lineMultiplier = 1.72f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 3f,
+            messageSpacingDp = 16f,
+            horizontalExtraPaddingDp = 4f,
+            userStyle = StoryUserMessageStyle.ScriptCue
+        )
+        else -> StoryReadingMetrics(
+            lineMultiplier = 1.95f,
+            paragraphIndentEm = 0f,
+            justifyParagraphs = false,
+            paragraphVerticalPaddingDp = 2f,
+            messageSpacingDp = 14f,
+            horizontalExtraPaddingDp = 0f,
+            userStyle = StoryUserMessageStyle.QuoteLine
+        )
+    }
+}
+
+internal data class StoryFontSpec(
+    val family: FontFamily,
+    val weight: FontWeight? = null,
+    val letterSpacingBonusSp: Float = 0f
+)
+
+internal fun readingFontSpec(font: String): StoryFontSpec = when (EchoStoryFont.sanitize(font)) {
+    EchoStoryFont.TYPEWRITER -> StoryFontSpec(FontFamily.Monospace)
+    EchoStoryFont.CLEAR -> StoryFontSpec(FontFamily.SansSerif)
+    EchoStoryFont.SYSTEM -> StoryFontSpec(FontFamily.Default)
+    EchoStoryFont.SYSTEM_SERIF -> StoryFontSpec(FontFamily.Serif, letterSpacingBonusSp = 0.15f)
+    EchoStoryFont.PRINT_BOOK -> StoryFontSpec(EchoLiteraryFont, weight = FontWeight.Medium, letterSpacingBonusSp = 0.45f)
+    EchoStoryFont.ELEGANT_LIGHT -> StoryFontSpec(FontFamily.SansSerif, weight = FontWeight.Light, letterSpacingBonusSp = 0.35f)
+    EchoStoryFont.CALLIGRAPHY -> StoryFontSpec(FontFamily.Cursive, letterSpacingBonusSp = 0.4f)
+    else -> StoryFontSpec(EchoLiteraryFont)
+}
+
+internal fun readingFontFamily(font: String): FontFamily = readingFontSpec(font).family
+
+internal val LocalEchoStoryReadingStyle = compositionLocalOf<String?> { null }
+
+private fun applyStoryTextStyle(
+    base: TextStyle,
+    spec: StoryFontSpec?,
+    lineMultiplier: Float?,
+    applyWeightAndSpacing: Boolean
+): TextStyle {
+    val resolvedFamily = spec?.family ?: base.fontFamily
+    val resolvedLineHeight = if (lineMultiplier != null) base.fontSize * lineMultiplier else base.lineHeight
+    val resolvedWeight = if (applyWeightAndSpacing && spec?.weight != null) spec.weight else base.fontWeight
+    val resolvedLetterSpacing = if (applyWeightAndSpacing && spec != null && spec.letterSpacingBonusSp != 0f) {
+        val currentSp = if (base.letterSpacing.isSpecified) base.letterSpacing.value else 0f
+        (currentSp + spec.letterSpacingBonusSp).sp
+    } else {
+        base.letterSpacing
+    }
+    return base.copy(
+        fontFamily = resolvedFamily,
+        fontWeight = resolvedWeight,
+        lineHeight = resolvedLineHeight,
+        letterSpacing = resolvedLetterSpacing
+    )
+}
 
 /** 正文阅读设置。排版和字体可独立选择作用范围，操作控件不继承此层。 */
 @Composable
@@ -22,39 +157,25 @@ internal fun StoryReadingTypography(
     content: @Composable () -> Unit
 ) {
     if (style == null && font == null) {
-        content()
+        CompositionLocalProvider(LocalEchoStoryReadingStyle provides null, content = content)
         return
     }
     val typography = MaterialTheme.typography
-    val immersive = style == EchoStoryReadingStyle.IMMERSIVE
-    val family = font?.let(::readingFontFamily)
-    val lineMultiplier = if (immersive) 1.95f else 1.65f
-    MaterialTheme(
-        typography = typography.copy(
-            bodyLarge = typography.bodyLarge.copy(
-                fontFamily = family ?: typography.bodyLarge.fontFamily,
-                lineHeight = if (style == null) typography.bodyLarge.lineHeight else typography.bodyLarge.fontSize * lineMultiplier
+    val spec = font?.let(::readingFontSpec)
+    val lineMultiplier = if (style == null) null else storyReadingMetricsFor(style).lineMultiplier
+    CompositionLocalProvider(LocalEchoStoryReadingStyle provides style) {
+        MaterialTheme(
+            typography = typography.copy(
+                bodyLarge = applyStoryTextStyle(typography.bodyLarge, spec, lineMultiplier, applyWeightAndSpacing = true),
+                bodyMedium = applyStoryTextStyle(typography.bodyMedium, spec, lineMultiplier, applyWeightAndSpacing = true),
+                bodySmall = applyStoryTextStyle(typography.bodySmall, spec, lineMultiplier, applyWeightAndSpacing = true),
+                titleLarge = applyStoryTextStyle(typography.titleLarge, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+                titleMedium = applyStoryTextStyle(typography.titleMedium, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+                titleSmall = applyStoryTextStyle(typography.titleSmall, spec, lineMultiplier = null, applyWeightAndSpacing = false)
             ),
-            bodyMedium = typography.bodyMedium.copy(
-                fontFamily = family ?: typography.bodyMedium.fontFamily,
-                lineHeight = if (style == null) typography.bodyMedium.lineHeight else typography.bodyMedium.fontSize * lineMultiplier
-            ),
-            bodySmall = typography.bodySmall.copy(
-                fontFamily = family ?: typography.bodySmall.fontFamily,
-                lineHeight = if (style == null) typography.bodySmall.lineHeight else typography.bodySmall.fontSize * lineMultiplier
-            ),
-            titleLarge = typography.titleLarge.copy(fontFamily = family ?: typography.titleLarge.fontFamily),
-            titleMedium = typography.titleMedium.copy(fontFamily = family ?: typography.titleMedium.fontFamily),
-            titleSmall = typography.titleSmall.copy(fontFamily = family ?: typography.titleSmall.fontFamily)
-        ),
-        content = content
-    )
-}
-
-internal fun readingFontFamily(font: String): FontFamily = when (EchoStoryFont.sanitize(font)) {
-    EchoStoryFont.TYPEWRITER -> FontFamily.Monospace
-    EchoStoryFont.CLEAR -> FontFamily.SansSerif
-    else -> EchoLiteraryFont
+            content = content
+        )
+    }
 }
 
 internal val EchoLiteraryFont = FontFamily(Font(R.font.echo_literary_regular))

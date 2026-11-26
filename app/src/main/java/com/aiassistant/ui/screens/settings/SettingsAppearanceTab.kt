@@ -594,29 +594,49 @@ fun AppearanceTab(
                 Text("创作阅读页", style = MaterialTheme.typography.titleMedium)
                 Text("独立选择故事正文排版。分栏上下文在宽屏并排显示，窄屏折叠为资料面板。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val readingStyleOptions = listOf(
+                    Triple(EchoStoryReadingStyle.IMMERSIVE, "沉浸叙事", "宽松行距，对话改为左侧细引线"),
+                    Triple(EchoStoryReadingStyle.PLAIN, "简洁正文", "平衡行距，保留清晰气泡对比"),
+                    Triple(EchoStoryReadingStyle.SPLIT, "分栏上下文", "正文旁随行展示设定与时间线资料"),
+                    Triple(EchoStoryReadingStyle.BOOK, "书页典籍", "首行缩进两端对齐，典籍书签风格"),
+                    Triple(EchoStoryReadingStyle.COMPACT, "紧凑速览", "收紧行距与段落留白，一屏多览"),
+                    Triple(EchoStoryReadingStyle.SCRIPT, "剧本分镜", "行动与对白横线分镜，台词脉络分明")
+                )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(EchoStoryReadingStyle.IMMERSIVE to "沉浸叙事", EchoStoryReadingStyle.PLAIN to "简洁正文",
-                        EchoStoryReadingStyle.SPLIT to "分栏上下文").forEach { (value, label) ->
+                    readingStyleOptions.forEach { (value, label, _) ->
                         FilterChip(selected = settings.storyReadingStyle == value,
                             onClick = { saveVisualPreference("创作阅读页已切换为$label") { it.copy(storyReadingStyle = value) } },
                             label = { Text(label) }, colors = echoFilterChipColors(),
                             border = echoFilterChipBorder(settings.storyReadingStyle == value))
                     }
                 }
-                HomeLayoutSwitch("阅读排版也用于普通对话", "普通对话可使用沉浸、简洁或分栏布局。", settings.applyReadingStyleToChats) { enabled ->
+                readingStyleOptions.firstOrNull { it.first == settings.storyReadingStyle }?.let { (_, label, desc) ->
+                    Text(
+                        "$label：$desc",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                HomeLayoutSwitch("阅读排版也用于普通对话", "普通对话可使用沉浸、书页、剧本等排版布局。", settings.applyReadingStyleToChats) { enabled ->
                     saveVisualPreference("普通对话阅读排版已更新") { it.copy(applyReadingStyleToChats = enabled) }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("创作正文字体", style = MaterialTheme.typography.titleSmall)
                 Text("可单独选择是否应用于普通对话；设置与操作按钮保持界面字体。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val storyFontOptions = listOf(
+                    Triple(EchoStoryFont.LITERARY, "沉浸衬线", "内置思源宋体，适合长篇小说与文学叙事"),
+                    Triple(EchoStoryFont.CLEAR, "清晰无衬线", "现代无衬线字体，久读清爽不累眼"),
+                    Triple(EchoStoryFont.TYPEWRITER, "稿纸等宽", "打字机等宽字形，适合剧本草稿与技术叙事"),
+                    Triple(EchoStoryFont.SYSTEM, "跟随系统", "使用设备系统默认字体，与整机一致"),
+                    Triple(EchoStoryFont.SYSTEM_SERIF, "经典宋体", "调用系统衬线字体，古典报刊书卷韵味"),
+                    Triple(EchoStoryFont.PRINT_BOOK, "精印书宋", "适中字重与宽松字距，呈现出版级精装排版"),
+                    Triple(EchoStoryFont.ELEGANT_LIGHT, "轻盈细黑", "轻量级无衬线与舒展字距，通透轻盈"),
+                    Triple(EchoStoryFont.CALLIGRAPHY, "随笔手写", "手札随笔风格（中文依系统字体回退适配）")
+                )
                 FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(
-                        EchoStoryFont.LITERARY to "沉浸衬线",
-                        EchoStoryFont.CLEAR to "清晰无衬线",
-                        EchoStoryFont.TYPEWRITER to "稿纸等宽"
-                    ).forEach { (value, label) ->
+                    storyFontOptions.forEach { (value, label, _) ->
                         FilterChip(
                             selected = settings.storyFont == value,
                             onClick = { saveVisualPreference("创作正文字体已切换为$label") { it.copy(storyFont = value) } },
@@ -624,6 +644,51 @@ fun AppearanceTab(
                             colors = echoFilterChipColors(),
                             border = echoFilterChipBorder(settings.storyFont == value)
                         )
+                    }
+                }
+                storyFontOptions.firstOrNull { it.first == settings.storyFont }?.let { (_, label, desc) ->
+                    Text(
+                        "$label：$desc",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = SettingsInnerShape,
+                    color = glass.control,
+                    border = BorderStroke(1.dp, glass.outline)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "创作正文与排版预览",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        com.aiassistant.ui.screens.chat.StoryReadingTypography(
+                            style = settings.storyReadingStyle,
+                            font = settings.storyFont
+                        ) {
+                            val previewMetrics = com.aiassistant.ui.screens.chat.storyReadingMetricsFor(settings.storyReadingStyle)
+                            val previewStyle = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = chatFontSize.sp,
+                                lineHeight = chatFontSize.sp * previewMetrics.lineMultiplier,
+                                textAlign = if (previewMetrics.justifyParagraphs) androidx.compose.ui.text.style.TextAlign.Justify else androidx.compose.ui.text.style.TextAlign.Start,
+                                textIndent = if (previewMetrics.paragraphIndentEm > 0f) {
+                                    androidx.compose.ui.text.style.TextIndent(firstLine = androidx.compose.ui.unit.TextUnit(previewMetrics.paragraphIndentEm, androidx.compose.ui.unit.TextUnitType.Em))
+                                } else {
+                                    androidx.compose.ui.text.style.TextIndent.None
+                                }
+                            )
+                            Text(
+                                text = "夜雨落在石板街上，远处的钟楼敲响了三下。Echo quietly turned the page, watching the ink settle into warm paper.",
+                                style = previewStyle,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
                 HomeLayoutSwitch("正文字体也用于普通对话", "同时用于消息正文与展开的思考内容。", settings.applyReadingFontToChats) { enabled ->
@@ -837,11 +902,15 @@ fun AppearanceTab(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(4.dp))
+                        val previewFontSpec = if (settings.applyReadingFontToChats) {
+                            com.aiassistant.ui.screens.chat.readingFontSpec(settings.storyFont)
+                        } else null
                         Text(
                             "你好！我是 Echo 智能助手，这是一段用于预览对话与排版字体大小的示例文本。",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = chatFontSize.sp,
-                                fontFamily = if (settings.applyReadingFontToChats) com.aiassistant.ui.screens.chat.readingFontFamily(settings.storyFont) else MaterialTheme.typography.bodyLarge.fontFamily
+                                fontFamily = previewFontSpec?.family ?: MaterialTheme.typography.bodyLarge.fontFamily,
+                                fontWeight = previewFontSpec?.weight ?: MaterialTheme.typography.bodyMedium.fontWeight
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )

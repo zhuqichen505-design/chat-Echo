@@ -44,8 +44,11 @@ object EchoStoryReadingStyle {
     const val IMMERSIVE = "immersive"
     const val PLAIN = "plain"
     const val SPLIT = "split"
+    const val BOOK = "book"
+    const val COMPACT = "compact"
+    const val SCRIPT = "script"
 
-    val values = listOf(IMMERSIVE, PLAIN, SPLIT)
+    val values = listOf(IMMERSIVE, PLAIN, SPLIT, BOOK, COMPACT, SCRIPT)
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: IMMERSIVE
 }
@@ -55,8 +58,16 @@ object EchoStoryFont {
     const val LITERARY = "literary"
     const val CLEAR = "clear"
     const val TYPEWRITER = "typewriter"
+    const val SYSTEM = "system"
+    const val SYSTEM_SERIF = "system_serif"
+    const val PRINT_BOOK = "print_book"
+    const val ELEGANT_LIGHT = "elegant_light"
+    const val CALLIGRAPHY = "calligraphy"
 
-    val values = listOf(LITERARY, CLEAR, TYPEWRITER)
+    val values = listOf(
+        LITERARY, CLEAR, TYPEWRITER,
+        SYSTEM, SYSTEM_SERIF, PRINT_BOOK, ELEGANT_LIGHT, CALLIGRAPHY
+    )
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: LITERARY
 }

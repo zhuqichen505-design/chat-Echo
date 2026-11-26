@@ -988,6 +988,18 @@ fun SettingsMenuItem(
     }
 }
 
+internal enum class DefaultApiSelectionAction {
+    NoOp,
+    SetDefaultDirectly,
+    PromptEnableAndSetDefault
+}
+
+internal fun resolveDefaultApiSelectionAction(config: ApiConfig): DefaultApiSelectionAction = when {
+    !config.isEnabled -> DefaultApiSelectionAction.PromptEnableAndSetDefault
+    config.isDefault -> DefaultApiSelectionAction.NoOp
+    else -> DefaultApiSelectionAction.SetDefaultDirectly
+}
+
 @Composable
 fun ApiConfigTab(
     hazeState: dev.chrisbanes.haze.HazeState,
@@ -999,11 +1011,28 @@ fun ApiConfigTab(
     val scope = rememberCoroutineScope()
     val configsFromDb by repository.getAllApiConfigs().collectAsState(initial = emptyList())
     var localConfigs by remember { mutableStateOf<List<ApiConfig>>(emptyList()) }
+    var isDefaultPickerExpanded by rememberSaveable { mutableStateOf(false) }
+    var pendingEnableDefaultConfig by remember { mutableStateOf<ApiConfig?>(null) }
     val providerReorderState = rememberSmoothReorderState()
     val providerItemSpacingPx = with(LocalDensity.current) { 8.dp.toPx() }
     LaunchedEffect(configsFromDb, providerReorderState) {
         // 拖拽期间不使用数据库回流结果覆盖本地顺序，避免列表在手势中重排。
         if (!providerReorderState.isDragging || localConfigs.isEmpty()) localConfigs = configsFromDb
+    }
+
+    val handleSetDefaultRequest: (ApiConfig) -> Unit = { target ->
+        when (resolveDefaultApiSelectionAction(target)) {
+            DefaultApiSelectionAction.NoOp -> isDefaultPickerExpanded = false
+            DefaultApiSelectionAction.SetDefaultDirectly -> {
+                isDefaultPickerExpanded = false
+                scope.launch {
+                    repository.setDefaultConfig(target.id)
+                }
+            }
+            DefaultApiSelectionAction.PromptEnableAndSetDefault -> {
+                pendingEnableDefaultConfig = target
+            }
+        }
     }
 
     LazyColumn(
@@ -1013,9 +1042,16 @@ fun ApiConfigTab(
     ) {
         item {
             val defaultConfig = localConfigs.firstOrNull { it.isDefault } ?: localConfigs.firstOrNull()
+            val glass = echoGlassPalette()
             SettingsGlassCard(hazeState = hazeState) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(SettingsInnerShape)
+                        .clickable(enabled = localConfigs.isNotEmpty()) {
+                            isDefaultPickerExpanded = !isDefaultPickerExpanded
+                        }
+                        .padding(vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -1025,45 +1061,105 @@ fun ApiConfigTab(
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("新对话默认 API", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("新对话默认 API", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            if (defaultConfig != null && !defaultConfig.isEnabled) {
+                                EchoBadge(text = "已停用", type = EchoBadgeType.Neutral)
+                            }
+                        }
                         Text(
-                            text = if (defaultConfig != null) "当前默认：${defaultConfig.name} (${defaultConfig.provider})" else "尚未设置默认 API 配置",
+                            text = if (defaultConfig != null) {
+                                val modelLabel = com.aiassistant.domain.model.ModelDisplayName.format(defaultConfig.modelName)
+                                if (modelLabel.isNotBlank()) "当前默认：${defaultConfig.name} · $modelLabel"
+                                else "当前默认：${defaultConfig.name}"
+                            } else {
+                                "尚未设置默认 API 配置"
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (localConfigs.isNotEmpty()) {
+                        Icon(
+                            imageVector = if (isDefaultPickerExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (isDefaultPickerExpanded) "收起默认 API 列表" else "展开默认 API 列表",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
-                if (localConfigs.isNotEmpty()) {
-                    Text(
-                        "点击直接切换新对话默认生效的服务商：",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                AnimatedVisibility(
+                    visible = isDefaultPickerExpanded && localConfigs.isNotEmpty(),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        HorizontalDivider(color = glass.outline.copy(alpha = 0.35f))
                         localConfigs.forEach { cfg ->
-                            FilterChip(
-                                selected = cfg.isDefault,
-                                onClick = {
-                                    scope.launch {
-                                        repository.setDefaultConfig(cfg.id)
+                            val isCurrentDefault = cfg.isDefault
+                            val itemAlpha = if (cfg.isEnabled) 1f else 0.62f
+                            Surface(
+                                onClick = { handleSetDefaultRequest(cfg) },
+                                shape = SettingsInnerShape,
+                                color = if (isCurrentDefault) glass.controlSelected.copy(alpha = 0.55f)
+                                else glass.control.copy(alpha = 0.55f),
+                                border = BorderStroke(
+                                    width = if (isCurrentDefault) 1.2.dp else 0.8.dp,
+                                    color = if (isCurrentDefault) glass.outlineSelected else glass.outline.copy(alpha = 0.45f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .alpha(itemAlpha)
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = cfg.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isCurrentDefault) FontWeight.Bold else FontWeight.Medium,
+                                            color = glass.textPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        val detailText = listOfNotNull(
+                                            cfg.provider.takeIf { it.isNotBlank() },
+                                            com.aiassistant.domain.model.ModelDisplayName.format(cfg.modelName).takeIf { it.isNotBlank() }
+                                        ).joinToString(" · ")
+                                        if (detailText.isNotBlank()) {
+                                            Text(
+                                                text = detailText,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = glass.textSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
-                                },
-                                label = {
-                                    Text(
-                                        text = if (cfg.isDefault) "${cfg.name} (默认)" else cfg.name,
-                                        fontWeight = if (cfg.isDefault) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                leadingIcon = if (cfg.isDefault) {
-                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                } else null,
-                                colors = echoFilterChipColors(),
-                                border = echoFilterChipBorder(cfg.isDefault)
-                            )
+                                    if (!cfg.isEnabled) {
+                                        EchoBadge(text = "未启用", type = EchoBadgeType.Neutral)
+                                    }
+                                    if (isCurrentDefault) {
+                                        EchoBadge(text = "默认", type = EchoBadgeType.Primary, icon = Icons.Default.Check)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1145,9 +1241,7 @@ fun ApiConfigTab(
                     }
                 },
                 onSetDefault = {
-                    scope.launch {
-                        repository.setDefaultConfig(config.id)
-                    }
+                    handleSetDefaultRequest(config)
                 },
                 onToggleEnabled = { enabled ->
                     scope.launch {
@@ -1167,6 +1261,23 @@ fun ApiConfigTab(
                 Text("添加API配置")
             }
         }
+    }
+
+    pendingEnableDefaultConfig?.let { target ->
+        EchoConfirmDialog(
+            title = "设为默认并启用",
+            text = "「${target.name}」当前未启用。是否将其设为新对话默认 API 并同时启用？",
+            confirmText = "设为默认并启用",
+            onConfirm = {
+                pendingEnableDefaultConfig = null
+                isDefaultPickerExpanded = false
+                scope.launch {
+                    repository.setApiConfigEnabled(target.id, true)
+                    repository.setDefaultConfig(target.id)
+                }
+            },
+            onDismiss = { pendingEnableDefaultConfig = null }
+        )
     }
 }
 
@@ -1226,36 +1337,35 @@ fun ApiConfigCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 第二行：提供商 + 模型 + API类型 + 操作按钮（EchoIconButton compact 右对齐，§5.1）
+            // 第二行：提供商 + 模型 + 操作按钮（EchoIconButton compact 右对齐，§5.1）
             Row(
                 modifier = Modifier.fillMaxWidth().alpha(contentAlpha),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val formattedModel = com.aiassistant.domain.model.ModelDisplayName.format(config.modelName)
+                if (config.provider.isNotBlank()) {
+                    Text(
+                        text = config.provider,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                if (config.provider.isNotBlank() && formattedModel.isNotBlank()) {
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
-                    text = config.provider,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-                Text(
-                    text = "·",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = com.aiassistant.domain.model.ModelDisplayName.format(config.modelName),
+                    text = formattedModel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = config.apiType.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
                 )
 
                 // 操作行：编辑 / 设默认 / 删除（36dp compact，右对齐）

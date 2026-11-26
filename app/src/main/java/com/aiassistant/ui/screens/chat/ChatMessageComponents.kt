@@ -507,7 +507,9 @@ internal fun MessageBubble(
     val personalizationSettings = rememberChatPersonalizationSettings()
     val readingStyle = personalizationSettings.storyReadingStyle.takeIf { isStory || personalizationSettings.applyReadingStyleToChats }
     val readingFont = personalizationSettings.storyFont.takeIf { isStory || personalizationSettings.applyReadingFontToChats }
-    val immersiveUserMessage = isUser && readingStyle == EchoStoryReadingStyle.IMMERSIVE
+    val readingMetrics = storyReadingMetricsFor(readingStyle)
+    val userPresentationStyle = if (isUser) readingMetrics.userStyle else StoryUserMessageStyle.Bubble
+    val borderlessUserMessage = isUser && userPresentationStyle != StoryUserMessageStyle.Bubble
     val showThinkingBubbles = personalizationSettings.showThinkingBubbles
     val resolvedReadableBackdrop = readableBackdrop.takeOrElse {
         MaterialTheme.colorScheme.background
@@ -515,7 +517,7 @@ internal fun MessageBubble(
     val glass = echoGlassPalette()
     val userBubbleTint = glass.userBubble
     val bubbleColor = if (isUser) glass.userBubble else glass.assistantBubble
-    val textBackground = if (isUser && !immersiveUserMessage) bubbleColor else resolvedReadableBackdrop
+    val textBackground = if (isUser && !borderlessUserMessage) bubbleColor else resolvedReadableBackdrop
     val textColor = readableTextColorFor(
         background = textBackground,
         fallbackSurface = resolvedReadableBackdrop
@@ -766,8 +768,8 @@ internal fun MessageBubble(
         StoryReadingTypography(readingStyle, readingFont) {
         SelectionContainer {
             Column(
-                modifier = if (immersiveUserMessage) {
-                    Modifier.fillMaxWidth().padding(start = 14.dp, top = 8.dp, end = 4.dp, bottom = 8.dp)
+                modifier = if (borderlessUserMessage) {
+                    Modifier.fillMaxWidth().padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp)
                 } else if (isUser) {
                     Modifier.padding(
                         start = 14.dp,
@@ -780,6 +782,7 @@ internal fun MessageBubble(
                 } else {
                     val marginalia = themeStyle.messageMetaStyle == EchoMessageMetaStyle.Marginalia
                     val marginColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
+                    val extraHPad = readingMetrics.horizontalExtraPaddingDp.dp
                     Modifier
                         .fillMaxWidth()
                         .then(
@@ -798,9 +801,9 @@ internal fun MessageBubble(
                             } else Modifier
                         )
                         .padding(
-                            start = if (marginalia) 10.dp else 4.dp,
+                            start = (if (marginalia) 10.dp else 4.dp) + extraHPad,
                             top = 4.dp,
-                            end = 4.dp,
+                            end = 4.dp + extraHPad,
                             bottom = 4.dp
                         )
                 }
@@ -925,21 +928,21 @@ internal fun MessageBubble(
                 alpha = if (message.isExcluded) 0.52f else 1f
             }
     ) {
-        val bubbleMaxWidth = if (immersiveUserMessage) maxWidth.coerceAtMost(720.dp)
+        val bubbleMaxWidth = if (borderlessUserMessage) maxWidth.coerceAtMost(720.dp)
             else (maxWidth - 52.dp).coerceAtLeast(160.dp).coerceAtMost(360.dp)
 
         if (isUser) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (immersiveUserMessage) Arrangement.Start else Arrangement.End,
+                horizontalArrangement = if (borderlessUserMessage) Arrangement.Start else Arrangement.End,
                 verticalAlignment = Alignment.Top
             ) {
                 Column(
                     modifier = Modifier.widthIn(max = bubbleMaxWidth).then(
-                        if (immersiveUserMessage) Modifier.fillMaxWidth().padding(start = 22.dp, top = 8.dp, bottom = 8.dp)
+                        if (borderlessUserMessage) Modifier.fillMaxWidth().padding(start = 22.dp, top = 8.dp, bottom = 8.dp)
                         else Modifier
                     ),
-                    horizontalAlignment = if (immersiveUserMessage) Alignment.Start else Alignment.End
+                    horizontalAlignment = if (borderlessUserMessage) Alignment.Start else Alignment.End
                 ) {
                     if (attachments.isNotEmpty()) {
                         AttachmentGroupBubble(
@@ -951,15 +954,65 @@ internal fun MessageBubble(
                     }
 
                     if (message.content.isNotBlank() || isGenerating) {
-                        if (immersiveUserMessage) {
-                            val quoteLineColor = MaterialTheme.colorScheme.primary
-                            Box(Modifier.fillMaxWidth().drawBehind {
-                                val stroke = 1.dp.toPx()
-                                drawLine(quoteLineColor, Offset(stroke / 2, 0f), Offset(stroke / 2, size.height), stroke)
-                            }) {
-                                MessageContent(textColor)
+                        when (userPresentationStyle) {
+                            StoryUserMessageStyle.QuoteLine -> {
+                                val quoteLineColor = MaterialTheme.colorScheme.primary
+                                Box(Modifier.fillMaxWidth().drawBehind {
+                                    val stroke = 1.dp.toPx()
+                                    drawLine(quoteLineColor, Offset(stroke / 2, 0f), Offset(stroke / 2, size.height), stroke)
+                                }) {
+                                    MessageContent(textColor)
+                                }
                             }
-                        } else {
+                            StoryUserMessageStyle.BookIndent -> {
+                                val primaryLine = MaterialTheme.colorScheme.primary
+                                val secondaryLine = MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f))
+                                        .drawBehind {
+                                            drawLine(primaryLine, Offset(1.dp.toPx(), 0f), Offset(1.dp.toPx(), size.height), 1.5.dp.toPx())
+                                            drawLine(secondaryLine, Offset(4.dp.toPx(), 4.dp.toPx()), Offset(4.dp.toPx(), size.height - 4.dp.toPx()), 0.6.dp.toPx())
+                                        }
+                                ) {
+                                    MessageContent(textColor)
+                                }
+                            }
+                            StoryUserMessageStyle.ScriptCue -> {
+                                val cueColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .drawBehind {
+                                            val stroke = 0.8.dp.toPx()
+                                            drawLine(cueColor, Offset(0f, 0f), Offset(size.width, 0f), stroke)
+                                            drawLine(cueColor, Offset(0f, size.height), Offset(size.width, size.height), stroke)
+                                        }
+                                        .padding(top = 6.dp, bottom = 2.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(start = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary)
+                                        )
+                                        Text(
+                                            text = "行动 / 对白",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    MessageContent(textColor)
+                                }
+                            }
+                            StoryUserMessageStyle.Bubble -> {
                         Surface(
                             modifier = Modifier
                                 .echoThemeHardShadow(offset = 3.dp, shape = bubbleShape)
@@ -1003,6 +1056,7 @@ internal fun MessageBubble(
                         ) {
                             MessageContent(textColor)
                         }
+                            }
                         }
                     }
 
@@ -1023,15 +1077,15 @@ internal fun MessageBubble(
                         onToggleExclude = onToggleExclude?.let { cb -> { cb(message) } },
                         isFavorite = isFavorite,
                         onToggleFavorite = onToggleFavorite,
-                        endAlignMetadata = !immersiveUserMessage,
+                        endAlignMetadata = !borderlessUserMessage,
                         modifier = Modifier
                             .widthIn(max = bubbleMaxWidth)
                             .fillMaxWidth()
-                            .then(if (immersiveUserMessage) Modifier.padding(start = 14.dp) else Modifier)
+                            .then(if (borderlessUserMessage) Modifier.padding(start = 14.dp) else Modifier)
                     )
                 }
 
-                if (!immersiveUserMessage) {
+                if (!borderlessUserMessage) {
                     Spacer(modifier = Modifier.width(8.dp))
                     ChatAvatar(isUser = true)
                 }
@@ -3048,6 +3102,7 @@ internal fun MessageQueueCard(
 
             // 队列列表项
             queue.forEach { msg ->
+                key(msg.id) {
                 val isActive = queueReorderState.isItemActive(msg.id)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -3132,6 +3187,7 @@ internal fun MessageQueueCard(
                             }
                         }
                     }
+                }
                 }
             }
         }

@@ -95,6 +95,9 @@ class SmoothReorderState(
     /** 抬升量 0f~1f，用于平滑驱动缩放与阴影 */
     fun getItemLift(): Float = liftAnim.value
 
+    /** 仅当前正在拖拽或落座归位中的条目获得抬升量，避免联动其他卡片。 */
+    fun getItemLift(key: Any): Float = if (draggingKey == key) liftAnim.value else 0f
+
     /** 指定 key 的视觉垂直位移；被拖拽条目跟随手指，其余条目为让位偏移 */
     fun getItemOffsetY(key: Any): Float {
         if (draggingKey == key) {
@@ -188,25 +191,65 @@ class SmoothReorderState(
         val heights = keys.map { getItemHeight(it) }
         val target = targetIndex.coerceIn(0, (keys.size - 1).coerceAtLeast(0))
         val travel = slotTravelDistance(currentIndex, target, heights, itemSpacingPx)
+        val movedCrossedOffsets = if (target != currentIndex) {
+            val draggedHeight = heights[currentIndex]
+            buildMap {
+                if (target > currentIndex) {
+                    for (idx in (currentIndex + 1)..target) {
+                        put(keys[idx], -(draggedHeight + itemSpacingPx))
+                    }
+                } else {
+                    for (idx in target until currentIndex) {
+                        put(keys[idx], draggedHeight + itemSpacingPx)
+                    }
+                }
+            }
+        } else {
+            emptyMap()
+        }
         if (target != currentIndex) {
             onMove(currentIndex, target)
+        }
+        // 在列表重排生效的同时抵消被跨过条目的真实布局位移，避免让位项出现双倍跳动回弹。
+        movedCrossedOffsets.forEach { (itemKey, layoutDelta) ->
+            itemOffsetJobs.remove(itemKey)?.cancel()
+            itemOffsetTargets.remove(itemKey)
+            val compensated = (itemOffsets[itemKey] ?: 0f) - layoutDelta
+            if (kotlin.math.abs(compensated) < 0.5f) {
+                itemOffsets.remove(itemKey)
+            } else {
+                itemOffsets[itemKey] = compensated
+            }
         }
         isReleasing = true
         // 同步写入补偿值：列表重排后的第一帧就落在手指所在位置，随后平滑归位。
         releaseOffset.floatValue = dragOffsetY - travel
+        liftJob?.cancel()
         releaseJob?.cancel()
         val generation = dragGeneration
         releaseJob = coroutineScope.launch {
             keys.forEach { itemKey ->
-                if (itemKey != key) animateItemOffset(itemKey, 0f)
+                if (itemKey != key && ((itemOffsets[itemKey] ?: 0f) != 0f || itemOffsetJobs[itemKey]?.isActive == true)) {
+                    animateItemOffset(itemKey, 0f)
+                }
             }
-            animate(
-                initialValue = releaseOffset.floatValue,
-                targetValue = 0f,
-                animationSpec = tween(durationMillis = SETTLE_DURATION_MS, easing = FastOutSlowInEasing)
-            ) { value, _ ->
-                releaseOffset.floatValue = value
+            val settleJob = launch {
+                animate(
+                    initialValue = releaseOffset.floatValue,
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = SETTLE_DURATION_MS, easing = FastOutSlowInEasing)
+                ) { value, _ ->
+                    releaseOffset.floatValue = value
+                }
             }
+            val lowerJob = launch {
+                liftAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = LIFT_DURATION_MS, easing = FastOutSlowInEasing)
+                )
+            }
+            settleJob.join()
+            lowerJob.join()
             if (generation != dragGeneration) return@launch
             draggingKey = null
             draggingStartIndex = -1
@@ -215,12 +258,6 @@ class SmoothReorderState(
             releaseOffset.floatValue = 0f
             isReleasing = false
             resetItemOffsets()
-            liftJob = coroutineScope.launch {
-                liftAnim.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = LIFT_DURATION_MS, easing = FastOutSlowInEasing)
-                )
-            }
         }
     }
 
@@ -234,10 +271,11 @@ class SmoothReorderState(
         fromIndex: Int,
         toIndex: Int
     ) {
-        val itemHeight = getItemHeight(fromKey)
         val direction = if (toIndex > fromIndex) 1f else -1f
-        animateTransientOffset(fromKey, -direction * itemHeight)
-        animateTransientOffset(toKey, direction * itemHeight)
+        val fromTravel = getItemHeight(toKey) + itemSpacingPx
+        val toTravel = getItemHeight(fromKey) + itemSpacingPx
+        animateTransientOffset(fromKey, -direction * fromTravel)
+        animateTransientOffset(toKey, direction * toTravel)
     }
 
     private fun animateItemOffset(key: Any, target: Float) {
@@ -285,16 +323,27 @@ class SmoothReorderState(
     private fun finishWithoutMove() {
         isReleasing = true
         releaseOffset.floatValue = dragOffsetY
+        liftJob?.cancel()
         releaseJob?.cancel()
         val generation = dragGeneration
         releaseJob = coroutineScope.launch {
-            animate(
-                initialValue = dragOffsetY,
-                targetValue = 0f,
-                animationSpec = tween(durationMillis = SETTLE_DURATION_MS, easing = FastOutSlowInEasing)
-            ) { value, _ ->
-                releaseOffset.floatValue = value
+            val settleJob = launch {
+                animate(
+                    initialValue = dragOffsetY,
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = SETTLE_DURATION_MS, easing = FastOutSlowInEasing)
+                ) { value, _ ->
+                    releaseOffset.floatValue = value
+                }
             }
+            val lowerJob = launch {
+                liftAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = LIFT_DURATION_MS, easing = FastOutSlowInEasing)
+                )
+            }
+            settleJob.join()
+            lowerJob.join()
             if (generation != dragGeneration) return@launch
             draggingKey = null
             draggingStartIndex = -1
@@ -303,12 +352,6 @@ class SmoothReorderState(
             releaseOffset.floatValue = 0f
             isReleasing = false
             resetItemOffsets()
-            liftJob = coroutineScope.launch {
-                liftAnim.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = LIFT_DURATION_MS, easing = FastOutSlowInEasing)
-                )
-            }
         }
     }
 
@@ -363,8 +406,8 @@ internal fun computeReorderTargetIndex(
 
 /**
  * 非拖拽条目为了让位而产生的视觉位移：
- * - 向下移动时，起点之后到目标之间的条目整体上移一格（位移取上方槽位高度）；
- * - 向上移动时，目标之后到起点之前的条目整体下移一格（位移取下方槽位高度）。
+ * - 向下移动时，起点之后到目标之间的条目整体上移被拖拽条目的高度（含间距）；
+ * - 向上移动时，目标之后到起点之前的条目整体下移被拖拽条目的高度（含间距）。
  */
 internal fun reorderSlotOffset(
     index: Int,
@@ -373,19 +416,20 @@ internal fun reorderSlotOffset(
     heights: List<Float>,
     itemSpacing: Float = 0f
 ): Float {
-    if (index == startIndex || index !in heights.indices) return 0f
+    if (index == startIndex || index !in heights.indices || startIndex !in heights.indices) return 0f
+    val draggedHeight = heights[startIndex]
     return when {
         targetIndex > startIndex && index in (startIndex + 1)..targetIndex ->
-            -(heights[index - 1] + itemSpacing)
+            -(draggedHeight + itemSpacing)
         targetIndex < startIndex && index in targetIndex until startIndex ->
-            heights[index + 1] + itemSpacing
+            draggedHeight + itemSpacing
         else -> 0f
     }
 }
 
 /**
  * 条目从 startIndex 槽位移动到 targetIndex 槽位时，布局顶点的位移：
- * 向下为正，向上为负。
+ * 向下为正（跨越所有途经兄弟项高度之和），向上为负。
  */
 internal fun slotTravelDistance(
     startIndex: Int,
@@ -398,7 +442,7 @@ internal fun slotTravelDistance(
     }
     val steps = kotlin.math.abs(targetIndex - startIndex)
     return if (targetIndex > startIndex) {
-        heights.subList(startIndex, targetIndex).sum() + itemSpacing * steps
+        heights.subList(startIndex + 1, targetIndex + 1).sum() + itemSpacing * steps
     } else {
         -(heights.subList(targetIndex, startIndex).sum() + itemSpacing * steps)
     }
@@ -433,8 +477,8 @@ fun Modifier.reorderItem(
     .graphicsLayer {
         translationY = state.getItemOffsetY(key)
         this.shape = shape
-        // lift 0→1 平滑驱动，拖起与放下都连续过渡
-        val lift = state.getItemLift()
+        // 仅当前拖拽/归位条目获得抬升缩放与阴影，避免连带放大其他卡片
+        val lift = state.getItemLift(key)
         val scale = 1f + 0.018f * lift
         scaleX = scale
         scaleY = scale
@@ -465,6 +509,7 @@ fun Modifier.reorderDragHandle(
             val itemKey = latestKey()
             val currentKeys = latestKeys()
             if (itemKey !in currentKeys) return@awaitEachGesture
+            down.consume()
             state.onDragStart(currentKeys, itemKey)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             var hasConsumedMove = false
@@ -474,7 +519,7 @@ fun Modifier.reorderDragHandle(
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!change.pressed) break
 
-                val deltaY = change.position.y - change.previousPosition.y
+                val deltaY = (change.position.y - change.previousPosition.y) * (1f + 0.018f * state.getItemLift(itemKey))
                 if (kotlin.math.abs(deltaY) > 0.5f || hasConsumedMove) {
                     change.consume()
                     hasConsumedMove = true

@@ -1014,6 +1014,10 @@ fun ChatScreen(
             ) {
                 var compactContextHeight by remember { mutableIntStateOf(0) }
                 val compactContextPadding = with(LocalDensity.current) { compactContextHeight.toDp() } + 16.dp
+                val activeReadingStyle = appearanceSettings.storyReadingStyle.takeIf {
+                    uiState.isRoleplay || appearanceSettings.applyReadingStyleToChats
+                }
+                val activeReadingMetrics = storyReadingMetricsFor(activeReadingStyle)
                 // 消息列表 (全屏延伸，向上滚动时平滑穿透悬浮工具栏和报错弹窗，被毛玻璃实时模糊)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(end = storyContextInset),
@@ -1027,7 +1031,7 @@ fun ChatScreen(
                             if (showStoryContext && !showContextBesideText) compactContextPadding else 0.dp,
                         bottom = listBottomPadding
                     ),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(activeReadingMetrics.messageSpacingDp.dp)
                 ) {
                     // 空状态
                     if (displayMessages.isEmpty() && currentResponse.isEmpty() && currentThinking.isEmpty()) {

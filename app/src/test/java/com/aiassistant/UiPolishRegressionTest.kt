@@ -2121,6 +2121,97 @@ class UiPolishRegressionTest {
             }
         }
     }
+
+    @Test fun storyReadingMetricsAndFontSpecsDistinguishAllVariants() {
+        val metrics = com.aiassistant.utils.EchoStoryReadingStyle.values.associateWith {
+            com.aiassistant.ui.screens.chat.storyReadingMetricsFor(it)
+        }
+        assertEquals(6, metrics.size)
+        assertEquals(1.95f, metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.IMMERSIVE).lineMultiplier, 0.001f)
+        assertEquals(com.aiassistant.ui.screens.chat.StoryUserMessageStyle.QuoteLine,
+            metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.IMMERSIVE).userStyle)
+        assertEquals(com.aiassistant.ui.screens.chat.StoryUserMessageStyle.BookIndent,
+            metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.BOOK).userStyle)
+        assertEquals(2.0f, metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.BOOK).paragraphIndentEm, 0.001f)
+        assertTrue(metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.BOOK).justifyParagraphs)
+        assertEquals(8f, metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.COMPACT).messageSpacingDp, 0.001f)
+        assertEquals(com.aiassistant.ui.screens.chat.StoryUserMessageStyle.ScriptCue,
+            metrics.getValue(com.aiassistant.utils.EchoStoryReadingStyle.SCRIPT).userStyle)
+
+        val specs = com.aiassistant.utils.EchoStoryFont.values.associateWith {
+            com.aiassistant.ui.screens.chat.readingFontSpec(it)
+        }
+        assertEquals(8, specs.size)
+        assertEquals(androidx.compose.ui.text.font.FontFamily.Default,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.SYSTEM).family)
+        assertEquals(androidx.compose.ui.text.font.FontFamily.Serif,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.SYSTEM_SERIF).family)
+        assertEquals(androidx.compose.ui.text.font.FontWeight.Medium,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.PRINT_BOOK).weight)
+        assertEquals(androidx.compose.ui.text.font.FontWeight.Light,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.ELEGANT_LIGHT).weight)
+        assertEquals(androidx.compose.ui.text.font.FontFamily.Cursive,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.CALLIGRAPHY).family)
+    }
+
+    @Test fun defaultApiSelectionActionPromptsOnlyWhenDisabled() {
+        fun cfg(enabled: Boolean, default: Boolean) = com.aiassistant.domain.model.ApiConfig(
+            id = 1L, name = "Synthetic", provider = "Synthetic", baseUrl = "https://api.example.test/v1",
+            apiKey = "sk-test", modelName = "synthetic-model", isEnabled = enabled, isDefault = default
+        )
+        assertEquals(com.aiassistant.ui.screens.settings.DefaultApiSelectionAction.NoOp,
+            com.aiassistant.ui.screens.settings.resolveDefaultApiSelectionAction(cfg(enabled = true, default = true)))
+        assertEquals(com.aiassistant.ui.screens.settings.DefaultApiSelectionAction.SetDefaultDirectly,
+            com.aiassistant.ui.screens.settings.resolveDefaultApiSelectionAction(cfg(enabled = true, default = false)))
+        assertEquals(com.aiassistant.ui.screens.settings.DefaultApiSelectionAction.PromptEnableAndSetDefault,
+            com.aiassistant.ui.screens.settings.resolveDefaultApiSelectionAction(cfg(enabled = false, default = false)))
+        assertEquals(com.aiassistant.ui.screens.settings.DefaultApiSelectionAction.PromptEnableAndSetDefault,
+            com.aiassistant.ui.screens.settings.resolveDefaultApiSelectionAction(cfg(enabled = false, default = true)))
+    }
+
+    @Test fun apiConfigSectionIndicesAndScrollHighlightTrackAllFourSections() {
+        val emptyIndices = com.aiassistant.ui.screens.settings.apiConfigSectionIndices(
+            discoveredCount = 0, showDiscoveryEmpty = false
+        )
+        assertEquals(0, emptyIndices.getValue(com.aiassistant.ui.screens.settings.ApiConfigSection.CONNECTION))
+        assertEquals(2, emptyIndices.getValue(com.aiassistant.ui.screens.settings.ApiConfigSection.KEYS))
+        assertEquals(4, emptyIndices.getValue(com.aiassistant.ui.screens.settings.ApiConfigSection.MODELS))
+        assertEquals(7, emptyIndices.getValue(com.aiassistant.ui.screens.settings.ApiConfigSection.OTHER))
+
+        val loadedIndices = com.aiassistant.ui.screens.settings.apiConfigSectionIndices(
+            discoveredCount = 5, showDiscoveryEmpty = false
+        )
+        assertEquals(12, loadedIndices.getValue(com.aiassistant.ui.screens.settings.ApiConfigSection.OTHER))
+
+        assertEquals(com.aiassistant.ui.screens.settings.ApiConfigSection.CONNECTION,
+            com.aiassistant.ui.screens.settings.resolveActiveApiConfigSection(0, canScrollForward = false, loadedIndices))
+        assertEquals(com.aiassistant.ui.screens.settings.ApiConfigSection.KEYS,
+            com.aiassistant.ui.screens.settings.resolveActiveApiConfigSection(3, canScrollForward = true, loadedIndices))
+        assertEquals(com.aiassistant.ui.screens.settings.ApiConfigSection.MODELS,
+            com.aiassistant.ui.screens.settings.resolveActiveApiConfigSection(6, canScrollForward = true, loadedIndices))
+        assertEquals(com.aiassistant.ui.screens.settings.ApiConfigSection.OTHER,
+            com.aiassistant.ui.screens.settings.resolveActiveApiConfigSection(5, canScrollForward = false, loadedIndices))
+    }
+
+    @Test fun editableApiKeyItemsMoveSwapAndRemovePreserveOrderAndIds() {
+        val k1 = com.aiassistant.ui.screens.settings.EditableApiKeyItem("id-1", com.aiassistant.domain.model.NamedApiKey("主用", "sk-1", true))
+        val k2 = com.aiassistant.ui.screens.settings.EditableApiKeyItem("id-2", com.aiassistant.domain.model.NamedApiKey("备用", "sk-2", false))
+        val k3 = com.aiassistant.ui.screens.settings.EditableApiKeyItem("id-3", com.aiassistant.domain.model.NamedApiKey("三号", "sk-3", true))
+        val list = listOf(k1, k2, k3)
+
+        val moved = com.aiassistant.ui.screens.settings.moveApiKeyItem(list, 0, 2)
+        assertEquals(listOf("id-2", "id-3", "id-1"), moved.map { it.id })
+
+        val swapped = com.aiassistant.ui.screens.settings.swapApiKeyItems(moved, 1, 2)
+        assertEquals(listOf("id-2", "id-1", "id-3"), swapped.map { it.id })
+
+        val removed = com.aiassistant.ui.screens.settings.removeApiKeyItem(swapped, 0)
+        assertEquals(listOf("id-1", "id-3"), removed.map { it.id })
+
+        val emptied = com.aiassistant.ui.screens.settings.removeApiKeyItem(listOf(k1), 0)
+        assertEquals(1, emptied.size)
+        assertEquals("", emptied.first().namedKey.key)
+    }
 }
 
 private fun assertReviewAdjacentToInput(bounds: Map<String, Rect>) {
