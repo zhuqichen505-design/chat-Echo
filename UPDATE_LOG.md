@@ -23,6 +23,8 @@
 
 APK 元数据与审计：`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；`com.aiassistant`、2.9.5/240、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（较 2.9.4 新增 4 个内置开源字体文件，0 删除，6 项变化，解压 CRC 全通过）；`resources.arsc` SHA-256 `bc0069723665f44398ac53c85ef7d23ecbe71f5e9198e2d48a101dd040b303a6`（因新增 4 项字体资源更新），186 张位图与 2.9.4 一致；DEX 7,530,324 字节，字符串 32,912 条（唯一 32,906 条，较 2.9.4 +210 / -84），新增 37 条可读中文均为本版缓存开关/提示、预览与版本号，隐私扫描新增命中 0。未连接真机，真实上游网关缓存命中率、5 款中文字体渲染观感、纯色背景及交互手势待人工验收。
 
+发布核验：版本提交 `39d6869465104614f081aed0524dfac4bfc108ef` 与 annotated 标签 `v2.9.5`（对象 `84bb52311b4a520e9a782eef8f7bb4af1c778f90`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.9.5 Release 为 Latest，唯一附件 `Echo-v2.9.5.apk` 的平台 digest（`sha256:a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`）、独立下载 SHA-256 与大小（45,655,059 字节）均与本机一致。按仅保留最新版策略已删除远端旧 v2.9.4 Release 与远端标签；本机 `v2.9.4` 标签（`a6e5ffa20bf92fbf5ceaf1f5ae1ca0dce786aa02`，仅本机、未推送）与全部历史 APK 保留（250 文件 / 249 APK）。
+
 ## 2026-11-26 · 对话全内容搜索、提问列表底部空白修复、API 配置页/编辑页重构、首页搜索返回、创作字体内置与预览增强及纯色背景调校（未发版）
 
 用户明确提出 10 项需求。源码版本仍为 2.9.4/239，Room v37 / 20 个实体、请求协议、消息及备份格式不变；未递增版本、未构建 APK、未提交或发布。
