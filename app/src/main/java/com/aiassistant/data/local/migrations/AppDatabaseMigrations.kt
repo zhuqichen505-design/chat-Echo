@@ -542,6 +542,86 @@ object AppDatabaseMigrations {
             }
         }
 
+        /**
+         * M1/M2/M3 长期记忆与分段容错压缩升级：
+         * 1. memory_items 扩展分类、重要度、置顶、软归档演进链、关联图谱与访问热度，并将旧 global 范围统一归一为 user；
+         * 2. 新增 conversation_summary_chunks 分段压缩与长篇创作剧情记忆块表；
+         * 3. 新增 vector_embeddings 可选语义向量索引派生缓存表。
+         */
+        val MIGRATION_37_38 = object : Migration(37, 38) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "memory_items", "category", "TEXT NOT NULL DEFAULT 'FACT'")
+                addColumnIfMissing(db, "memory_items", "importance", "INTEGER NOT NULL DEFAULT 3")
+                addColumnIfMissing(db, "memory_items", "isPinned", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(db, "memory_items", "archivedAt", "INTEGER")
+                addColumnIfMissing(db, "memory_items", "supersededById", "INTEGER")
+                addColumnIfMissing(db, "memory_items", "relatedIdsJson", "TEXT")
+                addColumnIfMissing(db, "memory_items", "accessCount", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(db, "memory_items", "lastAccessedAt", "INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_category` ON `memory_items` (`category`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_archivedAt` ON `memory_items` (`archivedAt`)")
+                // 旧版 global 统一归一为 user，避免历史条目占配额却被过滤
+                db.execSQL("UPDATE `memory_items` SET `scope` = 'user' WHERE `scope` = 'global'")
+                // 为既有存量记忆回填初始分类与重要度
+                db.execSQL("""
+                    UPDATE `memory_items`
+                    SET `category` = CASE
+                        WHEN `content` LIKE '%禁止%' OR `content` LIKE '%严禁%' OR `content` LIKE '%不要%' OR `content` LIKE '%必须%' OR `content` LIKE '%禁忌%' OR `content` LIKE '%约束%' OR `content` LIKE '%规则%' THEN 'INSTRUCTION'
+                        WHEN `content` LIKE '%语气%' OR `content` LIKE '%风格%' OR `content` LIKE '%简短%' OR `content` LIKE '%口吻%' OR `content` LIKE '%回答方式%' THEN 'VOICE'
+                        WHEN `content` LIKE '%叫我%' OR `content` LIKE '%称呼%' OR `content` LIKE '%身份%' OR `content` LIKE '%职业%' OR `content` LIKE '%住在%' OR `content` LIKE '%常住%' OR `content` LIKE '%我是%' THEN 'IDENTITY'
+                        WHEN `content` LIKE '%偏好%' OR `content` LIKE '%喜欢%' OR `content` LIKE '%习惯%' OR `content` LIKE '%常用%' OR `content` LIKE '%主力%' THEN 'PREFERENCE'
+                        WHEN `content` LIKE '%项目%' OR `content` LIKE '%目标%' OR `content` LIKE '%计划%' OR `content` LIKE '%正在开发%' THEN 'PROJECT'
+                        ELSE 'FACT'
+                    END,
+                    `importance` = CASE
+                        WHEN `content` LIKE '%禁止%' OR `content` LIKE '%严禁%' OR `content` LIKE '%必须%' OR `content` LIKE '%禁忌%' OR `content` LIKE '%约束%' THEN 5
+                        WHEN `content` LIKE '%叫我%' OR `content` LIKE '%称呼%' OR `content` LIKE '%身份%' OR `content` LIKE '%职业%' OR `content` LIKE '%住在%' OR `content` LIKE '%常住%' OR `content` LIKE '%我是%' OR `content` LIKE '%偏好%' OR `content` LIKE '%语气%' THEN 4
+                        ELSE 3
+                    END
+                """.trimIndent())
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `conversation_summary_chunks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `chunkIndex` INTEGER NOT NULL,
+                        `startMessageId` INTEGER NOT NULL,
+                        `endMessageId` INTEGER NOT NULL,
+                        `messageCount` INTEGER NOT NULL,
+                        `summaryText` TEXT NOT NULL,
+                        `keywords` TEXT,
+                        `timeRangeTag` TEXT,
+                        `isPinned` INTEGER NOT NULL,
+                        `sourceKind` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `tokenCount` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_conversation_summary_chunks_conversationId` ON `conversation_summary_chunks` (`conversationId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_conversation_summary_chunks_conversationId_chunkIndex` ON `conversation_summary_chunks` (`conversationId`, `chunkIndex`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_conversation_summary_chunks_endMessageId` ON `conversation_summary_chunks` (`endMessageId`)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `vector_embeddings` (
+                        `targetType` TEXT NOT NULL,
+                        `targetId` INTEGER NOT NULL,
+                        `conversationId` INTEGER,
+                        `contentHash` TEXT NOT NULL,
+                        `embeddingSpaceId` TEXT NOT NULL,
+                        `dimension` INTEGER NOT NULL,
+                        `vectorBlob` BLOB NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`targetType`, `targetId`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_vector_embeddings_targetType_embeddingSpaceId` ON `vector_embeddings` (`targetType`, `embeddingSpaceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_vector_embeddings_conversationId` ON `vector_embeddings` (`conversationId`)")
+            }
+        }
+
         val LEGACY_REPAIR_MIGRATIONS: Array<Migration> = ((1..22)
             .map { startVersion ->
                 object : Migration(startVersion, 23) {
@@ -549,7 +629,7 @@ object AppDatabaseMigrations {
                         repairSchema(database)
                     }
                 }
-            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35 + MIGRATION_35_36 + MIGRATION_36_37).toTypedArray()
+            } + MIGRATION_17_18 + MIGRATION_18_19 + MIGRATION_19_20 + MIGRATION_20_21 + MIGRATION_21_22 + MIGRATION_22_23 + MIGRATION_23_24 + MIGRATION_24_25 + MIGRATION_25_26 + MIGRATION_26_27 + MIGRATION_27_28 + MIGRATION_28_29 + MIGRATION_29_30 + MIGRATION_30_31 + MIGRATION_31_32 + MIGRATION_32_33 + MIGRATION_33_34 + MIGRATION_34_35 + MIGRATION_35_36 + MIGRATION_36_37 + MIGRATION_37_38).toTypedArray()
 
         private fun repairSchema(database: SupportSQLiteDatabase) {
             database.execSQL("PRAGMA foreign_keys=OFF;")

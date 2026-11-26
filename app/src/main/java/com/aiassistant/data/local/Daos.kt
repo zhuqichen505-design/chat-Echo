@@ -424,36 +424,64 @@ interface MemoryDao {
     @Query("""
         SELECT * FROM memory_items
         WHERE isEnabled = 1
+          AND archivedAt IS NULL
           AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId))
           AND (
               scope IN ('user', 'global')
               OR conversationId = :conversationId
               OR (scope = 'conversation' AND conversationId = :conversationId)
           )
-        ORDER BY updatedAt DESC
+        ORDER BY isPinned DESC, updatedAt DESC
         LIMIT :limit
     """)
     suspend fun getCandidateMemories(conversationId: Long, limit: Int = 80): List<MemoryItem>
 
-    @Query("SELECT * FROM memory_items ORDER BY isEnabled DESC, updatedAt DESC")
+    /** 无 80 条硬截断：读取全部有效（未归档且启用）的跨会话长期记忆，供本地 BM25 / 混合引擎全量检索。 */
+    @Query("""
+        SELECT * FROM memory_items
+        WHERE scope IN ('user', 'global')
+          AND isEnabled = 1
+          AND archivedAt IS NULL
+          AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId))
+        ORDER BY isPinned DESC, importance DESC, createdAt ASC, id ASC
+    """)
+    suspend fun getAllActiveGlobalMemories(): List<MemoryItem>
+
+    /** 无 80 条硬截断：读取当前会话全部有效（未归档且启用）的专属设定。 */
+    @Query("""
+        SELECT * FROM memory_items
+        WHERE scope = 'conversation'
+          AND conversationId = :conversationId
+          AND isEnabled = 1
+          AND archivedAt IS NULL
+          AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId))
+        ORDER BY isPinned DESC, createdAt ASC, id ASC
+    """)
+    suspend fun getAllActiveConversationMemories(conversationId: Long): List<MemoryItem>
+
+    @Query("SELECT * FROM memory_items WHERE archivedAt IS NULL ORDER BY isPinned DESC, isEnabled DESC, updatedAt DESC")
     fun getAllMemories(): Flow<List<MemoryItem>>
 
     @Query("""
         SELECT * FROM memory_items
-        WHERE content LIKE '%' || :query || '%'
-           OR keywords LIKE '%' || :query || '%'
-           OR scope LIKE '%' || :query || '%'
-        ORDER BY isEnabled DESC, updatedAt DESC
+        WHERE archivedAt IS NULL
+          AND (
+              content LIKE '%' || :query || '%'
+              OR keywords LIKE '%' || :query || '%'
+              OR scope LIKE '%' || :query || '%'
+              OR category LIKE '%' || :query || '%'
+          )
+        ORDER BY isPinned DESC, isEnabled DESC, updatedAt DESC
     """)
     fun searchMemories(query: String): Flow<List<MemoryItem>>
 
     @Query("SELECT * FROM memory_items WHERE id = :id")
     suspend fun getMemoryById(id: Long): MemoryItem?
 
-    @Query("SELECT * FROM memory_items WHERE sourceMessageId = :sourceMessageId LIMIT 1")
+    @Query("SELECT * FROM memory_items WHERE sourceMessageId = :sourceMessageId AND archivedAt IS NULL LIMIT 1")
     suspend fun getBySourceMessage(sourceMessageId: Long): MemoryItem?
 
-    @Query("SELECT * FROM memory_items WHERE scope = :scope AND content = :content LIMIT 1")
+    @Query("SELECT * FROM memory_items WHERE scope = :scope AND content = :content AND archivedAt IS NULL LIMIT 1")
     suspend fun getByScopeAndContent(scope: String, content: String): MemoryItem?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -477,32 +505,52 @@ interface MemoryDao {
     @Query("UPDATE memory_items SET isEnabled = :isEnabled, updatedAt = :timestamp WHERE id = :id")
     suspend fun setMemoryEnabled(id: Long, isEnabled: Boolean, timestamp: Long = System.currentTimeMillis())
 
+    @Query("UPDATE memory_items SET isPinned = :isPinned, updatedAt = :timestamp WHERE id = :id")
+    suspend fun setMemoryPinned(id: Long, isPinned: Boolean, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE memory_items SET archivedAt = :timestamp, supersededById = :supersededById, isEnabled = 0, updatedAt = :timestamp WHERE id = :id")
+    suspend fun archiveMemory(id: Long, supersededById: Long? = null, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE memory_items SET archivedAt = NULL, supersededById = NULL, isEnabled = 1, updatedAt = :timestamp WHERE id = :id")
+    suspend fun restoreArchivedMemory(id: Long, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE memory_items SET accessCount = accessCount + 1, lastAccessedAt = :timestamp WHERE id IN (:ids)")
+    suspend fun recordMemoryAccess(ids: List<Long>, timestamp: Long = System.currentTimeMillis())
+
     @Query("UPDATE memory_items SET isEnabled = 0, updatedAt = :timestamp WHERE id = :id")
     suspend fun disableMemory(id: Long, timestamp: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId ORDER BY isEnabled DESC, updatedAt DESC")
+    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId AND archivedAt IS NULL ORDER BY isPinned DESC, isEnabled DESC, updatedAt DESC")
     fun getConversationMemoriesFlow(conversationId: Long): Flow<List<MemoryItem>>
 
-    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId ORDER BY isEnabled DESC, updatedAt DESC")
+    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId AND archivedAt IS NULL ORDER BY isPinned DESC, isEnabled DESC, updatedAt DESC")
     suspend fun getConversationMemories(conversationId: Long): List<MemoryItem>
 
-    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isEnabled DESC, updatedAt DESC")
+    @Query("SELECT * FROM memory_items WHERE conversationId = :conversationId AND archivedAt IS NULL AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isPinned DESC, isEnabled DESC, updatedAt DESC")
     suspend fun getContextConversationMemories(conversationId: Long): List<MemoryItem>
 
     @Query("DELETE FROM memory_items WHERE conversationId = :conversationId")
     suspend fun deleteConversationMemories(conversationId: Long)
 
-    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') ORDER BY isEnabled DESC, updatedAt DESC")
+    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') AND archivedAt IS NULL ORDER BY isPinned DESC, isEnabled DESC, importance DESC, updatedAt DESC")
     fun getGlobalMemoriesFlow(): Flow<List<MemoryItem>>
 
-    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isEnabled DESC, updatedAt DESC")
+    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') AND archivedAt IS NOT NULL ORDER BY archivedAt DESC")
+    fun getArchivedGlobalMemoriesFlow(): Flow<List<MemoryItem>>
+
+    @Query("SELECT * FROM memory_items WHERE scope IN ('user', 'global') AND archivedAt IS NULL AND (sourceMessageId IS NULL OR EXISTS (SELECT 1 FROM messages WHERE messages.id = memory_items.sourceMessageId)) ORDER BY isPinned DESC, isEnabled DESC, importance DESC, updatedAt DESC")
     suspend fun getContextGlobalMemories(): List<MemoryItem>
 
     @Query("""
         SELECT * FROM memory_items
         WHERE scope IN ('user', 'global')
-          AND (content LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%')
-        ORDER BY isEnabled DESC, updatedAt DESC
+          AND archivedAt IS NULL
+          AND (
+              content LIKE '%' || :query || '%'
+              OR keywords LIKE '%' || :query || '%'
+              OR category LIKE '%' || :query || '%'
+          )
+        ORDER BY isPinned DESC, isEnabled DESC, importance DESC, updatedAt DESC
     """)
     fun searchGlobalMemories(query: String): Flow<List<MemoryItem>>
 

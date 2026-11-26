@@ -18,6 +18,12 @@ interface AiApiService {
         @Header("Authorization") authorization: String
     ): Call<ModelsResponse>
 
+    @POST("embeddings")
+    fun createEmbeddings(
+        @Header("Authorization") authorization: String,
+        @Body request: EmbeddingRequest
+    ): Call<EmbeddingResponse>
+
     // ============ Anthropic 格式 ============
 
     @POST("messages")

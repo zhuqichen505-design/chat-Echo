@@ -415,8 +415,7 @@ class RoleplayRepository(
         // 5. 长期事实不参与时间推断；正式时间线与会话记忆在聊天请求链中由 AiRepository 统一注入，避免重复。
         val pinnedFacts = roleplayMemoryDao.getPinnedFacts(sessionId).map { it.content }
         val sessionMemories = if (includeSessionMemories) {
-            memoryDao?.getCandidateMemories(session.conversationId)
-                ?.filter { it.isEnabled && it.scope == "conversation" }
+            memoryDao?.getAllActiveConversationMemories(session.conversationId)
                 ?.map { it.content } ?: emptyList()
         } else {
             emptyList()
@@ -447,18 +446,18 @@ class RoleplayRepository(
             }
         }
 
-        // 跨会话长期背景参考 (若明确开启，按相关性匹配注入)
+        // 跨会话长期背景参考 (若明确开启，通过 M1 混合引擎按相关性精准召回，不再受 80 条截断)
         if (session.enableExternalMemory && memoryDao != null) {
             val effectiveQuery = (queryText ?: userMessage).orEmpty()
-            val scanText = (if (effectiveQuery.isNotBlank()) effectiveQuery else session.currentPlotSummary).lowercase()
-            val candidates = memoryDao.getCandidateMemories(session.conversationId).filter { it.isEnabled && it.scope == "user" }
+            val scanText = if (effectiveQuery.isNotBlank()) effectiveQuery else session.currentPlotSummary
+            val candidates = memoryDao.getAllActiveGlobalMemories()
             if (candidates.isNotEmpty()) {
                 val matched = if (scanText.isNotBlank()) {
-                    candidates.filter { mem ->
-                        val keys = mem.keywords?.split(",") ?: emptyList()
-                        keys.any { k -> k.isNotBlank() && scanText.contains(k.lowercase()) } ||
-                        scanText.contains(mem.content.take(12).lowercase())
-                    }.ifEmpty { candidates.take(5) }
+                    com.aiassistant.utils.LongTermMemoryEngine.rankMemories(
+                        query = scanText,
+                        candidates = candidates,
+                        maxResults = 6
+                    ).map { it.memory }.ifEmpty { candidates.filter { it.isPinned }.take(4) }
                 } else {
                     candidates.take(5)
                 }

@@ -4,11 +4,13 @@
 
 Echo 是 Android 原生多模型 API 客户端，支持对话、角色扮演、长上下文和本地备份。
 
-**当前源码版本**：v2.9.5（versionCode 240，已发布）
+**当前源码版本**：v2.9.6（versionCode 241，待推送核验）
 
-**数据库版本**：37（20 个实体），本版无迁移。
+**数据库版本**：38（22 个实体），显式迁移 `MIGRATION_37_38`，schema 导出至 `38.json`。
 
-**当前版本（2026-11-26，2.9.5/240）**：① 提示词前缀缓存全面改造——新增 `PromptCacheHelper`、`AnthropicCacheControl`、OpenAI/OpenRouter 粘性路由字段（`prompt_cache_key` / `session_id` / `cache_control` / `X-Session-ID`）与设置页开关/TTL（5m/1h），Anthropic 落地三断点（方向规划四断点）滑动缓存，重构三区前缀稳定性（静态 `system` Zone 1 + 只追加历史 Zone 2 + 关键词世界书/跨会话记忆/单轮 `replyDirection` 后置至当前轮尾注 Zone 3），取消 `<session_memory>` 每轮按提问重排并采用确定性 `<session_timeline>` 窗口 + 预算溢出 80% 阶梯滞后截断，新增内存级 `PromptCacheSnapshot` 未命中归因诊断。② 4 项关联隔离与配置修复——`RoleplayViewModel` 新建故事写入 `roleplay`/`story` 标签、`RoleplayRepository`/`ChatViewModel` 消除会话记忆重复注入、`AiRepository` 向 `EchoToolHub` 透传 `isRoleplay`、`SettingsApiConfigDialog` 编辑保存保留未修改高级参数。③ 10 项交互与视觉优化——对话全内容搜索（含思考）与右侧列表底部空白修复、API 配置页悬浮下拉 `EchoAnchoredDropdownPopup`/顶部添加/去星星/读取模型前置折叠、首页返回先退多选/搜索态、创作字体默认系统并内置 4 款开源中文字体与实时缩微预览卡、14 款纯色背景色值重调。Room v37 / 20 个实体、消息与备份格式不变。冻结验收 `20261126-225459-447` 脚本 / Gradle 退出 0，582.7 秒；97 套件 / 1,161 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，472.517 秒；`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；v2 签名通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（+4 个内置开源字体文件）、186 张位图一致，DEX 7,530,324 字节、唯一字符串 32,906 条（+210 / -84），隐私扫描新增命中 0。发布目录排他复制 249 → 250 文件（248 → 249 APK），全部历史包保留。未连接真机，真实网关缓存命中表现、字体/纯色观感及交互手感待人工验收。
+**当前版本（2026-11-27，2.9.6/241）**：① M1 长期记忆全链路升级——新增 `LongTermMemoryEngine`（统一中英 2/3-gram + BM25 + 实体权重 + 分类衰减 + ACT-R 访问热度 + 1-hop 关联扩散 + MMR 去重），修复 `AdvancedMemoryEngine` 中文分词缺陷并取消 `LIMIT 80` 截断；Room 升级至 v38（22 实体，`MIGRATION_37_38`），为 `memory_items` 新增分类/重要度/置顶/冲突软归档演化链并把旧 `global` 归一为 `user`；接入本地门控过滤器、SmartAdd JSON（`ADD/MERGE/CONFLICT/SKIP`）仲裁、冲突软归档一键恢复及 `auto`/`review` 写入模式解耦，记忆预算随上下文窗口动态扩展至最高 8,000 tokens。② M2 可选 Embedding 语义向量检索（默认关闭）——新增 `SemanticEmbeddingEngine`、`AiApiService.createEmbeddings`、`RetrofitClient.getEmbeddingService` 与 `vector_embeddings` 表，支持独立绑定 OpenAI 兼容 `/embeddings` 接口与模型、`embeddingSpaceId` 空间防混维、分批建索及 RRF ($k=60$) 融合；关闭或无嵌入模型时无缝退回 M1 全流程。③ 设定/时间线防遗忘近端锚点——保持 Zone 1 静态系统前缀字节不变以保留 KV 缓存命中，在 Zone 3 注入场景相关 `<active_continuity_anchor>` 强化设定与时间线遵守。④ 分批持久化断点续传、敏感内容三阶隔离、超额分段压缩与 M3 剧情分块记忆——压缩默认增量续压（单设从头重建）并每批落盘 `conversation_summary_chunks`、实时汇报批次进度；角色扮演/故事模式启用中立客观档案体提示词与细粒度分批，遇安全拒答按「二分拆批隔离 → 辅助模型接力 → 脱敏结构化本地占位摘要」降级且不计入 Key 冷却；解除上下文超额压缩死锁；≥4 段分块自动启用 HypaV3 四桶召回，对话管理面板支持星标置顶伏笔。便携备份同步支持 v38 字段/分块并兼容导入旧版 v37 备份。冻结验收 `20261127-012816-661` 脚本 / Gradle 退出 0，510.29 秒；98 套件 / 1,177 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，302.558 秒；`Echo-v2.9.6.apk` 45,720,799 字节，SHA-256 `7f8452d6aa384d9408aa5bd833c7c962ae80816be234ebe6b9aae43b809d4c7c`；v2 签名通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（0 新增 / 0 删除 / 6 项变更，CRC 全通过）、186 张位图与 2.9.5 一致，DEX 7,701,416 字节、唯一字符串 33,397 条（+610 / -119），隐私扫描新增命中 0。发布目录排他复制 250 → 251 文件（249 → 250 APK），全部历史包保留。未连接真机，v37→v38 覆盖升级、真实 Embedding 网关与长对话压缩表现待人工验收。
+
+**上一发布版本（2026-11-26，2.9.5/240）**：① 提示词前缀缓存全面改造——新增 `PromptCacheHelper`、`AnthropicCacheControl`、OpenAI/OpenRouter 粘性路由字段（`prompt_cache_key` / `session_id` / `cache_control` / `X-Session-ID`）与设置页开关/TTL（5m/1h），Anthropic 落地三断点（方向规划四断点）滑动缓存，重构三区前缀稳定性（静态 `system` Zone 1 + 只追加历史 Zone 2 + 关键词世界书/跨会话记忆/单轮 `replyDirection` 后置至当前轮尾注 Zone 3），取消 `<session_memory>` 每轮按提问重排并采用确定性 `<session_timeline>` 窗口 + 预算溢出 80% 阶梯滞后截断，新增内存级 `PromptCacheSnapshot` 未命中归因诊断。② 4 项关联隔离与配置修复——`RoleplayViewModel` 新建故事写入 `roleplay`/`story` 标签、`RoleplayRepository`/`ChatViewModel` 消除会话记忆重复注入、`AiRepository` 向 `EchoToolHub` 透传 `isRoleplay`、`SettingsApiConfigDialog` 编辑保存保留未修改高级参数。③ 10 项交互与视觉优化——对话全内容搜索（含思考）与右侧列表底部空白修复、API 配置页悬浮下拉 `EchoAnchoredDropdownPopup`/顶部添加/去星星/读取模型前置折叠、首页返回先退多选/搜索态、创作字体默认系统并内置 4 款开源中文字体与实时缩微预览卡、14 款纯色背景色值重调。Room v37 / 20 个实体、消息与备份格式不变。冻结验收 `20261126-225459-447` 脚本 / Gradle 退出 0，582.7 秒；97 套件 / 1,161 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，472.517 秒；`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；v2 签名通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（+4 个内置开源字体文件）、186 张位图一致，DEX 7,530,324 字节、唯一字符串 32,906 条（+210 / -84），隐私扫描新增命中 0。发布目录排他复制 249 → 250 文件（248 → 249 APK），全部历史包保留。未连接真机，真实网关缓存命中表现、字体/纯色观感及交互手感待人工验收。
 
 发布核验：版本提交 `39d6869` 与 annotated 标签 `v2.9.5`（对象 `84bb523`）已推送并核验远端 main / peeled 标签一致；Echo 2.9.5 Release 为 Latest，唯一 APK 附件的平台 digest、独立下载 SHA-256 与大小（45,655,059 字节）均与本机一致，正文与 `release-notes/latest.md` 同步；按仅保留最新版策略已删除远端旧 v2.9.4 Release 与标签，本机 `v2.9.4` 标签（`a6e5ffa`）与全部历史 APK 保留。
 
@@ -259,7 +261,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC、DEX / 资源与已知私人标
 
 ---
 
-## 数据库结构（v37，实体清单以 `data/local/AppDatabase.kt` 为准）
+## 数据库结构（v38，实体清单以 `data/local/AppDatabase.kt` 为准）
 
 | 实体（表） | 说明 |
 |------|------|
@@ -269,7 +271,9 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC、DEX / 资源与已知私人标
 | ApiUsageStat | 使用统计；请求用途、Token 来源、完成状态与首段等待 |
 | EnvironmentVariable | 环境变量（加密存储） |
 | PromptTemplate | 提示词模板 |
-| MemoryItem | 全局与会话专属记忆设定 |
+| MemoryItem | 全局与会话专属记忆设定（含 category/importance/isPinned/archivedAt/supersededById/relatedIdsJson/accessCount/lastAccessedAt） |
+| ConversationSummaryChunk | 长篇剧情分块摘要与压缩断点（conversation_summary_chunks，含置顶伏笔与来源标记） |
+| VectorEmbeddingEntity | 可选 M2 语义向量缓存（vector_embeddings，按 embeddingSpaceId 隔离，不入 JSON 备份） |
 | ConversationBranch / SelectedModel | 会话分支 / 模型选择与排序 |
 | CharacterProfile / CharacterTag / CharacterTagCrossRef | 角色卡 / 角色标签及关联 |
 | RoleplayScenario / RoleplaySession / RoleplayMemory | 角色扮演场景 / 会话 / 记忆 |
@@ -277,7 +281,7 @@ APK 隐私核查通过：446 个 ZIP 条目 CRC、DEX / 资源与已知私人标
 | TimelineNode | 剧情时间线 |
 | BackupIdentity | 跨设备实体稳定身份（backup_identities） |
 
-迁移链至 `MIGRATION_36_37`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 37。v35→v36 增加 `conversations.enableTimeline` nullable 列，旧会话按默认开启处理；v36→v37 增加会话 `enableInputInjection`（默认 0）/`inputInjectionTrigger` 与消息 `modelContent`/`injectionTargetMessageId` nullable 列。迁移保留旧数据，新功能默认关闭，迁移与备份回归列入本轮验收。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
+迁移链至 `MIGRATION_37_38`（`data/local/migrations/AppDatabaseMigrations.kt`）；Room schema 导出至 38。v37→v38 为 `memory_items` 补充 8 列与 2 索引（历史 `global` 归一为 `user` 并回填分类/重要度），并新增 `conversation_summary_chunks` 与 `vector_embeddings` 两表；迁移保留旧数据，可选 Embedding 默认关闭，迁移与备份回归列入本轮验收。修改实体必须 version+1 并新增 Migration，禁止 destructive migration。
 
 ---
 

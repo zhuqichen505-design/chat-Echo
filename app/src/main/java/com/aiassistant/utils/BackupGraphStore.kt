@@ -80,8 +80,10 @@ object BackupGraphStore {
 
     val tables = listOf("folders", "api_configs", "character_profiles", "roleplay_scenarios", "character_tags",
         "world_books", "world_book_entries", "conversations", "messages", "roleplay_sessions", "roleplay_memories",
-        "memory_items", "timeline_nodes", "conversation_branches", "selected_models", "environment_variables",
-        "prompt_templates", "api_usage_stats", "character_tag_cross_ref")
+        "memory_items", "timeline_nodes", "conversation_summary_chunks", "conversation_branches", "selected_models",
+        "environment_variables", "prompt_templates", "api_usage_stats", "character_tag_cross_ref")
+
+    private val optionalRestoreTables = setOf("conversation_summary_chunks")
 
     private val references = mapOf(
         "folders" to mapOf("parentId" to "folders"),
@@ -90,8 +92,9 @@ object BackupGraphStore {
         "world_book_entries" to mapOf("bookId" to "world_books"),
         "roleplay_sessions" to mapOf("conversationId" to "conversations", "characterId" to "character_profiles", "scenarioId" to "roleplay_scenarios"),
         "roleplay_memories" to mapOf("sessionId" to "roleplay_sessions", "sourceMessageId" to "messages"),
-        "memory_items" to mapOf("conversationId" to "conversations", "sourceMessageId" to "messages"),
+        "memory_items" to mapOf("conversationId" to "conversations", "sourceMessageId" to "messages", "supersededById" to "memory_items"),
         "timeline_nodes" to mapOf("conversationId" to "conversations"),
+        "conversation_summary_chunks" to mapOf("conversationId" to "conversations", "startMessageId" to "messages", "endMessageId" to "messages"),
         "conversation_branches" to mapOf("parentConversationId" to "conversations", "childConversationId" to "conversations", "branchMessageId" to "messages"),
         "selected_models" to mapOf("apiConfigId" to "api_configs"),
         "api_usage_stats" to mapOf("apiConfigId" to "api_configs"),
@@ -118,7 +121,7 @@ object BackupGraphStore {
         else {
             selected.getValue("conversations").addAll(all.getValue("conversations").filter { id(it) == conversationId })
             require(selected.getValue("conversations").isNotEmpty()) { "对话不存在" }
-            listOf("messages", "memory_items", "timeline_nodes", "roleplay_sessions").forEach { table ->
+            listOf("messages", "memory_items", "timeline_nodes", "conversation_summary_chunks", "roleplay_sessions").forEach { table ->
                 selected.getValue(table).addAll(all.getValue(table).filter { id(it, "conversationId") == conversationId })
             }
             val sessions = selected.getValue("roleplay_sessions").mapNotNull { id(it) }.toSet()
@@ -216,7 +219,10 @@ object BackupGraphStore {
         require(snapshot.get("formatVersion")?.asInt == 2 && snapshot.get("complete")?.asBoolean == true) { "备份不是完整快照" }
         val content = requireNotNull(snapshot.getAsJsonObject("tables"))
         val rows = tables.associateWith { table ->
-            requireNotNull(content.getAsJsonArray(table)) { "备份缺少 $table" }.map { it.asJsonObject }
+            val arr = content.getAsJsonArray(table)
+            if (arr != null) arr.map { it.asJsonObject }
+            else if (table in optionalRestoreTables) emptyList()
+            else error("备份缺少 $table")
         }
         val state = RestoreState(database, encryptKey, cancelRequest).apply {
             legacy = snapshot.get("legacy")?.asBoolean == true
@@ -481,6 +487,16 @@ object BackupGraphStore {
             if (!item.has("modelContent")) item.add("modelContent", com.google.gson.JsonNull.INSTANCE)
             if (!item.has("injectionTargetMessageId")) item.add("injectionTargetMessageId", com.google.gson.JsonNull.INSTANCE)
         }
+        if (table == "memory_items") {
+            if (!item.has("category")) item.addProperty("category", "FACT")
+            if (!item.has("importance")) item.addProperty("importance", 3)
+            if (!item.has("isPinned")) item.addProperty("isPinned", false)
+            if (!item.has("archivedAt")) item.add("archivedAt", com.google.gson.JsonNull.INSTANCE)
+            if (!item.has("supersededById")) item.add("supersededById", com.google.gson.JsonNull.INSTANCE)
+            if (!item.has("relatedIdsJson")) item.add("relatedIdsJson", com.google.gson.JsonNull.INSTANCE)
+            if (!item.has("accessCount")) item.addProperty("accessCount", 0)
+            if (!item.has("lastAccessedAt")) item.add("lastAccessedAt", com.google.gson.JsonNull.INSTANCE)
+        }
         val local = id(item)?.let { state.idMap(table).getValue(it) }
         if (local != null) item.addProperty("id", local)
         fun mapped(target: String, old: Long?): Long? = old?.let { state.idMap(target)[it] }
@@ -493,13 +509,19 @@ object BackupGraphStore {
                 replacement = db.query("SELECT id FROM api_configs WHERE isEnabled=1 ORDER BY isDefault DESC LIMIT 1").use { if (it.moveToFirst()) it.getLong(0) else null }
                 require(replacement != null) { "请先配置可用的 API，再导入旧备份" }
             }
-            if (old != null && replacement == null && !state.legacy && field !in setOf("sourceMessageId", "summaryUpdatedMessageId")) {
+            val bestEffortRef = field in setOf("sourceMessageId", "summaryUpdatedMessageId", "supersededById", "startMessageId", "endMessageId")
+            if (old != null && replacement == null && !state.legacy && !bestEffortRef) {
                 if (!state.tolerant) error("备份关联缺失：$table.$field")
                 // These columns carry no foreign key, so a device can hold references to rows deleted earlier.
                 state.details += "$table.$field"
                 if (field in notNull) dropRow = true else state.clearedRefs++
             }
-            if (replacement == null) item.add(field, com.google.gson.JsonNull.INSTANCE) else item.addProperty(field, replacement)
+            if (replacement == null) {
+                if (field in notNull && bestEffortRef) item.addProperty(field, 0L)
+                else item.add(field, com.google.gson.JsonNull.INSTANCE)
+            } else {
+                item.addProperty(field, replacement)
+            }
         }
         if (dropRow) {
             state.skippedRows++
@@ -553,7 +575,7 @@ object BackupGraphStore {
         val db = state.db
         val conversationIds = state.conversationIds
         // Remove target-only owned rows after incoming rows exist. Reused IDs keep external references stable.
-        listOf("messages", "memory_items", "timeline_nodes", "roleplay_sessions").forEach { table ->
+        listOf("messages", "memory_items", "timeline_nodes", "conversation_summary_chunks", "roleplay_sessions").forEach { table ->
             val keep = state.idMap(table).values.toSet()
             conversationIds.forEach { conversation ->
                 val stale = db.query("SELECT id FROM `$table` WHERE conversationId=?", arrayOf(conversation)).use { cursor -> buildList { while(cursor.moveToNext()) if (cursor.getLong(0) !in keep) add(cursor.getLong(0)) } }

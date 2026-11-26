@@ -189,12 +189,66 @@ fun PromptsMemoryTab(
         }
     }
 
-    // 跨会话长期记忆管理状态（仅维护全局偏好，彻底与对话专属偏好解耦独立，需求 3）
+    // 跨会话长期记忆管理状态（仅维护全局偏好，彻底与对话专属偏好解耦独立）
     var isMemoriesExpanded by remember { mutableStateOf(false) }
+    var isArchivedExpanded by remember { mutableStateOf(false) }
     var memorySearchQuery by remember { mutableStateOf("") }
+    var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     val globalMemories by remember(memorySearchQuery) {
         if (memorySearchQuery.isBlank()) repository.getGlobalMemories() else repository.searchGlobalMemories(memorySearchQuery.trim())
     }.collectAsState(initial = emptyList())
+    val filteredGlobalMemories = remember(globalMemories, selectedCategoryFilter) {
+        if (selectedCategoryFilter == null) globalMemories
+        else globalMemories.filter { com.aiassistant.utils.EchoMemoryCategory.fromKey(it.category).key == selectedCategoryFilter }
+    }
+    val archivedGlobalMemories by repository.getArchivedGlobalMemories().collectAsState(initial = emptyList())
+
+    // M2 可选 Embedding 语义向量检索状态
+    val allApiConfigs by repository.getAllApiConfigs().collectAsState(initial = emptyList())
+    val embeddingEligibleConfigs = remember(allApiConfigs) {
+        allApiConfigs.filter { it.isEnabled && it.apiType != "anthropic" }
+    }
+    var embeddingEnabled by remember(settings) { mutableStateOf(settings.embeddingEnabled) }
+    var embeddingApiConfigId by remember(settings) { mutableStateOf(settings.embeddingApiConfigId) }
+    var embeddingModel by remember(settings) { mutableStateOf(settings.embeddingModel) }
+    var showEmbeddingConfigDropdown by remember { mutableStateOf(false) }
+    var isBuildingEmbeddings by remember { mutableStateOf(false) }
+    var embeddingStatusText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(embeddingEnabled, embeddingApiConfigId, embeddingModel, globalMemories.size) {
+        embeddingStatusText = runCatching { repository.getEmbeddingIndexStats().message }.getOrNull()
+    }
+
+    // M1/M3/容错压缩高级选项状态
+    var memoryWriteMode by remember(settings) { mutableStateOf(settings.memoryWriteMode) }
+    var enableSettingContinuityAnchor by remember(settings) { mutableStateOf(settings.enableSettingContinuityAnchor) }
+    var enablePlotChunkRecall by remember(settings) { mutableStateOf(settings.enablePlotChunkRecall) }
+    var sensitiveCompressionMode by remember(settings) { mutableStateOf(settings.sensitiveCompressionMode) }
+    var useAuxiliaryModelForCompression by remember(settings) { mutableStateOf(settings.useAuxiliaryModelForCompression) }
+
+    fun saveAdvancedMemorySettings(
+        newWriteMode: String = memoryWriteMode,
+        newEmbeddingEnabled: Boolean = embeddingEnabled,
+        newEmbeddingConfigId: Long = embeddingApiConfigId,
+        newEmbeddingModel: String = embeddingModel,
+        newContinuityAnchor: Boolean = enableSettingContinuityAnchor,
+        newPlotChunkRecall: Boolean = enablePlotChunkRecall,
+        newSensitiveMode: String = sensitiveCompressionMode,
+        newUseAuxCompression: Boolean = useAuxiliaryModelForCompression
+    ) {
+        manager.saveSettings(
+            manager.getSettings().copy(
+                memoryWriteMode = newWriteMode,
+                embeddingEnabled = newEmbeddingEnabled,
+                embeddingApiConfigId = newEmbeddingConfigId,
+                embeddingModel = newEmbeddingModel.trim(),
+                enableSettingContinuityAnchor = newContinuityAnchor,
+                enablePlotChunkRecall = newPlotChunkRecall,
+                sensitiveCompressionMode = newSensitiveMode,
+                useAuxiliaryModelForCompression = newUseAuxCompression
+            )
+        )
+        settings = manager.getSettings()
+    }
 
     var memoryToEdit by remember { mutableStateOf<MemoryItem?>(null) }
     var isAddingMemory by remember { mutableStateOf(false) }
@@ -500,6 +554,38 @@ fun PromptsMemoryTab(
                     if (autoMemoryEnabled) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
+                        // M1 写入交互模式切换
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("新记忆入库方式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val isAuto = memoryWriteMode == com.aiassistant.utils.EchoMemoryWriteMode.AUTO
+                                FilterChip(
+                                    selected = isAuto,
+                                    onClick = {
+                                        memoryWriteMode = com.aiassistant.utils.EchoMemoryWriteMode.AUTO
+                                        saveAdvancedMemorySettings(newWriteMode = memoryWriteMode)
+                                        savedMessage = "已切换为静默自动入库（冲突旧记忆自动软归档可恢复）"
+                                    },
+                                    label = { Text("静默自动入库（冲突可回溯）") },
+                                    colors = echoFilterChipColors(),
+                                    border = echoFilterChipBorder(isAuto)
+                                )
+                                FilterChip(
+                                    selected = !isAuto,
+                                    onClick = {
+                                        memoryWriteMode = com.aiassistant.utils.EchoMemoryWriteMode.REVIEW
+                                        saveAdvancedMemorySettings(newWriteMode = memoryWriteMode)
+                                        savedMessage = "已切换为审阅确认后入库"
+                                    },
+                                    label = { Text("审阅确认后入库") },
+                                    colors = echoFilterChipColors(),
+                                    border = echoFilterChipBorder(!isAuto)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -525,6 +611,19 @@ fun PromptsMemoryTab(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
+                                if (archivedGlobalMemories.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "归档 ${archivedGlobalMemories.size}",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
+                                }
                             }
 
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -549,7 +648,7 @@ fun PromptsMemoryTab(
                                 OutlinedTextField(
                                     value = memorySearchQuery,
                                     onValueChange = { memorySearchQuery = it },
-                                    placeholder = { Text("搜索全局偏好内容或关键词...") },
+                                    placeholder = { Text("搜索全局偏好内容、分类或关键词...") },
                                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                     trailingIcon = {
                                         if (memorySearchQuery.isNotBlank()) {
@@ -563,7 +662,31 @@ fun PromptsMemoryTab(
                                     shape = RoundedCornerShape(999.dp)
                                 )
 
-                                if (globalMemories.isEmpty()) {
+                                // 分类筛选 Chips
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = selectedCategoryFilter == null,
+                                        onClick = { selectedCategoryFilter = null },
+                                        label = { Text("全部") },
+                                        colors = echoFilterChipColors(),
+                                        border = echoFilterChipBorder(selectedCategoryFilter == null)
+                                    )
+                                    com.aiassistant.utils.EchoMemoryCategory.entries.forEach { cat ->
+                                        val selected = selectedCategoryFilter == cat.key
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { selectedCategoryFilter = if (selected) null else cat.key },
+                                            label = { Text(cat.displayName) },
+                                            colors = echoFilterChipColors(),
+                                            border = echoFilterChipBorder(selected)
+                                        )
+                                    }
+                                }
+
+                                if (filteredGlobalMemories.isEmpty()) {
                                     Surface(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = SettingsInnerShape,
@@ -581,7 +704,7 @@ fun PromptsMemoryTab(
                                             )
                                             Spacer(modifier = Modifier.height(6.dp))
                                             Text(
-                                                if (memorySearchQuery.isBlank()) "暂无全局偏好条目\n当与 AI 对话提及个人习惯或点击右上角「+」时将在此处列出。"
+                                                if (memorySearchQuery.isBlank() && selectedCategoryFilter == null) "暂无全局偏好条目\n当与 AI 对话提及个人习惯或点击右上角「+」时将在此处列出。"
                                                 else "没有搜索到符合条件的全局偏好条目",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -594,12 +717,17 @@ fun PromptsMemoryTab(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        globalMemories.forEach { memory ->
+                                        filteredGlobalMemories.forEach { memory ->
                                             MemoryItemCard(
                                                 memory = memory,
                                                 onToggleEnabled = { enabled ->
                                                     coroutineScope.launch {
                                                         repository.saveMemory(memory.copy(isEnabled = enabled, updatedAt = System.currentTimeMillis()))
+                                                    }
+                                                },
+                                                onTogglePin = { pinned ->
+                                                    coroutineScope.launch {
+                                                        repository.setMemoryPinned(memory.id, pinned)
                                                     }
                                                 },
                                                 onEdit = { memoryToEdit = memory },
@@ -623,8 +751,267 @@ fun PromptsMemoryTab(
                                         }
                                     }
                                 }
+
+                                // 软归档历史演进记录（冲突被替换的旧记忆，支持一键恢复）
+                                if (archivedGlobalMemories.isNotEmpty()) {
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .echoShapeClick(SettingsInnerShape) { isArchivedExpanded = !isArchivedExpanded }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "冲突归档历史（${archivedGlobalMemories.size} 条，可一键恢复）",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                        Icon(
+                                            if (isArchivedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    AnimatedVisibility(visible = isArchivedExpanded) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            archivedGlobalMemories.forEach { archived ->
+                                                MemoryItemCard(
+                                                    memory = archived,
+                                                    onToggleEnabled = {},
+                                                    onEdit = {},
+                                                    onDelete = {
+                                                        coroutineScope.launch { repository.deleteMemory(archived) }
+                                                    },
+                                                    onRestore = {
+                                                        coroutineScope.launch {
+                                                            repository.restoreArchivedMemory(archived.id)
+                                                            savedMessage = "已恢复归档记忆"
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
+                    }
+                }
+            }
+
+            // 5b. 语义向量检索（M2 Embedding 增强 · 可选开关）
+            item {
+                SettingsGlassCard(hazeState = hazeState) {
+                    EchoSettingRow(
+                        title = "语义向量检索（Embedding · 可选）",
+                        subtitle = "关闭或无嵌入模型时自动使用零费用本地混合检索（BM25+中文分词），全流程正常可用；开启后可增强跨词语义联想。",
+                        icon = Icons.Default.Hub,
+                        contentPaddingHorizontal = 0.dp
+                    ) {
+                        EchoSwitch(
+                            checked = embeddingEnabled,
+                            onCheckedChange = { enabled ->
+                                embeddingEnabled = enabled
+                                saveAdvancedMemorySettings(newEmbeddingEnabled = enabled)
+                                savedMessage = if (enabled) "已开启语义向量检索增强" else "已关闭语义向量检索（回退零费用本地混合检索）"
+                            }
+                        )
+                    }
+
+                    if (embeddingEnabled) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            val selectedConfig = embeddingEligibleConfigs.firstOrNull { it.id == embeddingApiConfigId }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = { showEmbeddingConfigDropdown = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = SettingsInnerShape
+                                ) {
+                                    Text(
+                                        text = selectedConfig?.let { "嵌入渠道：${it.name}（${it.provider}）" } ?: "选择支持 /embeddings 的 OpenAI 兼容 API 配置",
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                }
+                                EchoGlassDropdownMenu(
+                                    expanded = showEmbeddingConfigDropdown,
+                                    onDismissRequest = { showEmbeddingConfigDropdown = false }
+                                ) {
+                                    if (embeddingEligibleConfigs.isEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("暂无已启用的 OpenAI 兼容 API 配置") },
+                                            onClick = { showEmbeddingConfigDropdown = false }
+                                        )
+                                    } else {
+                                        embeddingEligibleConfigs.forEach { cfg ->
+                                            DropdownMenuItem(
+                                                text = { Text("${cfg.name}（${cfg.provider}）") },
+                                                onClick = {
+                                                    embeddingApiConfigId = cfg.id
+                                                    showEmbeddingConfigDropdown = false
+                                                    saveAdvancedMemorySettings(newEmbeddingConfigId = cfg.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = embeddingModel,
+                                onValueChange = {
+                                    embeddingModel = it
+                                    saveAdvancedMemorySettings(newEmbeddingModel = it)
+                                },
+                                label = { Text("嵌入模型名称") },
+                                placeholder = { Text("例如：BAAI/bge-m3 或 text-embedding-3-small") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = SettingsInnerShape
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf("BAAI/bge-m3", "text-embedding-3-small", "text-embedding-v3", "gemini-embedding-001").forEach { preset ->
+                                    val selected = embeddingModel.trim().equals(preset, ignoreCase = true)
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            embeddingModel = preset
+                                            saveAdvancedMemorySettings(newEmbeddingModel = preset)
+                                        },
+                                        label = { Text(preset, style = MaterialTheme.typography.labelSmall) },
+                                        colors = echoFilterChipColors(),
+                                        border = echoFilterChipBorder(selected)
+                                    )
+                                }
+                            }
+
+                            embeddingStatusText?.let { status ->
+                                Text(
+                                    text = status,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                FilledTonalButton(
+                                    enabled = !isBuildingEmbeddings && embeddingApiConfigId > 0L && embeddingModel.isNotBlank(),
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            isBuildingEmbeddings = true
+                                            embeddingStatusText = "正在测试嵌入模型并构建向量索引..."
+                                            val result = repository.rebuildGlobalMemoryEmbeddings { done, total ->
+                                                embeddingStatusText = "正在构建向量索引：$done / $total..."
+                                            }
+                                            isBuildingEmbeddings = false
+                                            result.onSuccess { stats ->
+                                                embeddingStatusText = stats.message
+                                                savedMessage = "向量索引已就绪（${stats.dimension} 维）"
+                                            }.onFailure { err ->
+                                                embeddingStatusText = err.message ?: "向量索引构建失败"
+                                                savedMessage = err.message ?: "向量索引构建失败，聊天仍将自动使用本地检索"
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Text(if (isBuildingEmbeddings) "正在建索..." else "测试并构建向量索引")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5c. 设定防遗忘与分段容错压缩（M3 与长篇创作增强）
+            item {
+                SettingsGlassCard(hazeState = hazeState) {
+                    EchoSettingRow(
+                        title = "近端设定与时空锚点强化",
+                        subtitle = "在贴近当前轮次的位置补充高相关已确认设定与故事时间锚点，显著降低长对话遗忘设定的概率，且不破坏前缀缓存。",
+                        icon = Icons.Default.BookmarkAdded,
+                        contentPaddingHorizontal = 0.dp
+                    ) {
+                        EchoSwitch(
+                            checked = enableSettingContinuityAnchor,
+                            onCheckedChange = { enabled ->
+                                enableSettingContinuityAnchor = enabled
+                                saveAdvancedMemorySettings(newContinuityAnchor = enabled)
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    EchoSettingRow(
+                        title = "长篇剧情块按需召回（M3）",
+                        subtitle = "星标伏笔与近期段落常驻前文，远古剧情块按当前场景自动召回并按原始时间顺序注入。",
+                        icon = Icons.Default.AutoAwesomeMotion,
+                        contentPaddingHorizontal = 0.dp
+                    ) {
+                        EchoSwitch(
+                            checked = enablePlotChunkRecall,
+                            onCheckedChange = { enabled ->
+                                enablePlotChunkRecall = enabled
+                                saveAdvancedMemorySettings(newPlotChunkRecall = enabled)
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("上下文压缩敏感内容隔离策略", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "角色扮演/小说压缩遇敏感内容审核时，自动二分隔离问题句并保护已完成的全部批次进度。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ROLEPLAY_AUTO to "创作自动容错（推荐）",
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ALWAYS to "所有对话均启用",
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.OFF to "严格模式（不降级）"
+                            ).forEach { (mode, label) ->
+                                val selected = sensitiveCompressionMode == mode
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        sensitiveCompressionMode = mode
+                                        saveAdvancedMemorySettings(newSensitiveMode = mode)
+                                    },
+                                    label = { Text(label) },
+                                    colors = echoFilterChipColors(),
+                                    border = echoFilterChipBorder(selected)
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    EchoSettingRow(
+                        title = "优先使用辅助模型执行上下文压缩",
+                        subtitle = "若已在「辅助模型」中配置了更快速或限制更少的模型，开启后上下文分批压缩将优先使用该模型。",
+                        icon = Icons.Default.Speed,
+                        contentPaddingHorizontal = 0.dp
+                    ) {
+                        EchoSwitch(
+                            checked = useAuxiliaryModelForCompression,
+                            onCheckedChange = { enabled ->
+                                useAuxiliaryModelForCompression = enabled
+                                saveAdvancedMemorySettings(newUseAuxCompression = enabled)
+                            }
+                        )
                     }
                 }
             }
@@ -1034,24 +1421,31 @@ fun PromptsMemoryTab(
                 isAddingMemory = false
                 memoryToEdit = null
             },
-            onConfirm = { content, _, keywords ->
+            onConfirm = { _, _, _ -> },
+            onConfirmWithMetadata = { content, _, keywords, category, importance, isPinned ->
                 coroutineScope.launch {
                     val original = memoryToEdit
                     val target = original?.copy(
-                        content = content,
+                        content = content.trim(),
                         scope = "user",
-                        keywords = keywords,
+                        keywords = keywords.trim().ifBlank { null },
+                        category = category,
+                        importance = importance.coerceIn(1, 5),
+                        isPinned = isPinned,
                         sourceMessageId = original.sourceMessageId.takeIf { original.content == content },
                         updatedAt = System.currentTimeMillis()
                     ) ?: MemoryItem(
-                        content = content,
+                        content = content.trim(),
                         scope = "user",
-                        keywords = keywords
+                        keywords = keywords.trim().ifBlank { null },
+                        category = category,
+                        importance = importance.coerceIn(1, 5),
+                        isPinned = isPinned
                     )
                     repository.saveMemory(target)
                     isAddingMemory = false
                     memoryToEdit = null
-                    savedMessage = "全局偏好已保存"
+                    savedMessage = "全局长期记忆已保存"
                 }
             }
         )

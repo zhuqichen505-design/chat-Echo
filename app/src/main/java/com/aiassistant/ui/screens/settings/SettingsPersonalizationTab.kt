@@ -117,13 +117,17 @@ fun MemoryItemCard(
     memory: MemoryItem,
     onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onTogglePin: ((Boolean) -> Unit)? = null,
+    onRestore: (() -> Unit)? = null
 ) {
     val glass = echoGlassPalette()
-    val scopeLabel = when (memory.scope) {
-        "user", "global" -> "全局偏好"
-        "conversation" -> "会话专属"
-        else -> memory.scope
+    val categoryInfo = remember(memory.category) { com.aiassistant.utils.EchoMemoryCategory.fromKey(memory.category) }
+    val isArchived = memory.archivedAt != null
+    val scopeLabel = when {
+        isArchived -> "历史归档"
+        memory.scope == "conversation" -> "会话专属"
+        else -> categoryInfo.displayName
     }
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val timeText = remember(memory.updatedAt) { dateFormat.format(Date(memory.updatedAt)) }
@@ -131,9 +135,12 @@ fun MemoryItemCard(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = SettingsInnerShape,
-        color = if (memory.isEnabled) glass.control else glass.control.copy(alpha = 0.4f),
-        contentColor = if (memory.isEnabled) glass.textPrimary else glass.textPrimary.copy(alpha = 0.5f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, glass.outline)
+        color = if (memory.isEnabled && !isArchived) glass.control else glass.control.copy(alpha = 0.4f),
+        contentColor = if (memory.isEnabled && !isArchived) glass.textPrimary else glass.textPrimary.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (memory.isPinned && !isArchived) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else glass.outline
+        )
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -145,35 +152,76 @@ fun MemoryItemCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(4.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    color = if (isArchived) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.16f)
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                 ) {
                     Text(
                         text = scopeLabel,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (isArchived) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                     )
+                }
+
+                if (!isArchived && memory.isPinned) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "置顶",
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = timeText,
+                    text = "$timeText · 重要度 ${memory.importance.coerceIn(1, 5)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                IconButton(
-                    onClick = onEdit,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "编辑记忆",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                if (isArchived && onRestore != null) {
+                    TextButton(
+                        onClick = onRestore,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text("恢复", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                if (!isArchived && onTogglePin != null) {
+                    IconButton(
+                        onClick = { onTogglePin(!memory.isPinned) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            if (memory.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = if (memory.isPinned) "取消置顶" else "置顶常驻",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (memory.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (!isArchived) {
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "编辑记忆",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 IconButton(
@@ -188,17 +236,19 @@ fun MemoryItemCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
-                EchoSwitch(
-                    checked = memory.isEnabled,
-                    onCheckedChange = onToggleEnabled
-                )
+                if (!isArchived) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    EchoSwitch(
+                        checked = memory.isEnabled,
+                        onCheckedChange = onToggleEnabled
+                    )
+                }
             }
 
             Text(
                 text = memory.content,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (memory.isEnabled) glass.textPrimary else glass.textPrimary.copy(alpha = 0.6f)
+                color = if (memory.isEnabled && !isArchived) glass.textPrimary else glass.textPrimary.copy(alpha = 0.6f)
             )
 
             if (!memory.keywords.isNullOrBlank()) {
@@ -750,11 +800,15 @@ fun MemoryEditDialog(
     hazeState: dev.chrisbanes.haze.HazeState,
     memory: MemoryItem?,
     onDismiss: () -> Unit,
-    onConfirm: (content: String, scope: String, keywords: String) -> Unit
+    onConfirm: (content: String, scope: String, keywords: String) -> Unit,
+    onConfirmWithMetadata: ((content: String, scope: String, keywords: String, category: String, importance: Int, isPinned: Boolean) -> Unit)? = null
 ) {
     var content by remember { mutableStateOf(memory?.content.orEmpty()) }
     var scope by remember { mutableStateOf(memory?.scope ?: "user") }
     var keywords by remember { mutableStateOf(memory?.keywords.orEmpty()) }
+    var category by remember { mutableStateOf(memory?.category ?: com.aiassistant.utils.EchoMemoryCategory.PREFERENCE.key) }
+    var importance by remember { mutableIntStateOf((memory?.importance ?: 3).coerceIn(1, 5)) }
+    var isPinned by remember { mutableStateOf(memory?.isPinned ?: false) }
 
     val isUserScope = scope == "user" || scope == "global"
     val isConvScope = scope == "conversation"
@@ -766,6 +820,7 @@ fun MemoryEditDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -776,31 +831,82 @@ fun MemoryEditDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 100.dp),
-                    placeholder = { Text("例如：用户习惯用 Kotlin 编写 Android 应用...") },
+                    placeholder = { Text("例如：习惯用 Kotlin 编写 Android 应用...") },
                     minLines = 3,
                     maxLines = 8,
                     shape = SettingsInnerShape
                 )
 
-                Text("作用域范围", style = MaterialTheme.typography.titleSmall)
+                Text("记忆分类（行为约束/语气/身份常驻前文，不破缓存）", style = MaterialTheme.typography.titleSmall)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    com.aiassistant.utils.EchoMemoryCategory.entries.forEach { cat ->
+                        val selected = category == cat.key
+                        FilterChip(
+                            selected = selected,
+                            onClick = { category = cat.key },
+                            label = { Text(cat.displayName) },
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(selected)
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    FilterChip(
-                        selected = isUserScope,
-                        onClick = { scope = "user" },
-                        label = { Text("全局偏好 (user)") },
-                        colors = echoFilterChipColors(),
-                        border = echoFilterChipBorder(isUserScope)
-                    )
-                    FilterChip(
-                        selected = isConvScope,
-                        onClick = { scope = "conversation" },
-                        label = { Text("会话专属 (conversation)") },
-                        colors = echoFilterChipColors(),
-                        border = echoFilterChipBorder(isConvScope)
-                    )
+                    Text("重要度（1~5）", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        (1..5).forEach { level ->
+                            val selected = importance == level
+                            FilterChip(
+                                selected = selected,
+                                onClick = { importance = level },
+                                label = { Text("$level") },
+                                colors = echoFilterChipColors(),
+                                border = echoFilterChipBorder(selected)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("置顶常驻", style = MaterialTheme.typography.titleSmall)
+                        Text("置顶记忆跳过时间衰减，始终稳定驻留前文缓存区", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    EchoSwitch(checked = isPinned, onCheckedChange = { isPinned = it })
+                }
+
+                if (onConfirmWithMetadata == null) {
+                    Text("作用域范围", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = isUserScope,
+                            onClick = { scope = "user" },
+                            label = { Text("全局偏好 (user)") },
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(isUserScope)
+                        )
+                        FilterChip(
+                            selected = isConvScope,
+                            onClick = { scope = "conversation" },
+                            label = { Text("会话专属 (conversation)") },
+                            colors = echoFilterChipColors(),
+                            border = echoFilterChipBorder(isConvScope)
+                        )
+                    }
                 }
 
                 Text("关联关键词 (可选)", style = MaterialTheme.typography.titleSmall)
@@ -816,7 +922,13 @@ fun MemoryEditDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(content, scope, keywords) },
+                onClick = {
+                    if (onConfirmWithMetadata != null) {
+                        onConfirmWithMetadata(content, scope, keywords, category, importance, isPinned)
+                    } else {
+                        onConfirm(content, scope, keywords)
+                    }
+                },
                 enabled = content.isNotBlank()
             ) {
                 Text("保存")

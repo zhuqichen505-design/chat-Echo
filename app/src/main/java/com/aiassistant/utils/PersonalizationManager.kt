@@ -93,6 +93,27 @@ object EchoPromptCacheTtl {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: FIVE_MINUTES
 }
 
+/** 全局长期记忆写入交互策略：自动落库（可撤销归档）或审阅确认后入库。 */
+object EchoMemoryWriteMode {
+    const val AUTO = "auto"
+    const val REVIEW = "review"
+
+    val values = listOf(AUTO, REVIEW)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: AUTO
+}
+
+/** 分段压缩遇到安全过滤/敏感内容拒答时的隔离容错策略。 */
+object EchoSensitiveCompressionMode {
+    const val ROLEPLAY_AUTO = "roleplay_auto" // 创作/角色扮演自动启用敏感二分隔离与本地摘录兜底，普通会话保持严格校验
+    const val ALWAYS = "always"               // 所有对话均启用敏感二分隔离与本地摘录兜底
+    const val OFF = "off"                     // 关闭隔离降级，所有拒答均直接报错暂停
+
+    val values = listOf(ROLEPLAY_AUTO, ALWAYS, OFF)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: ROLEPLAY_AUTO
+}
+
 /** 关闭模型头像后的身份标识，与正文末尾的流式动画独立。 */
 object EchoModelMarkStyle {
     const val CONCENTRIC = "concentric"
@@ -160,7 +181,16 @@ data class PersonalizationSettings(
     val autoCompressionTierEnabled: Boolean = false,
     val autoCompressionThresholdL2: Float = 0.75f,
     val autoCompressionThresholdL3: Float = 0.85f,
-    val autoCompressionThresholdL4: Float = 0.95f
+    val autoCompressionThresholdL4: Float = 0.95f,
+    // M1/M2/M3 长期记忆与容错分段压缩配置
+    val memoryWriteMode: String = EchoMemoryWriteMode.AUTO,
+    val embeddingEnabled: Boolean = false,
+    val embeddingApiConfigId: Long = 0L,
+    val embeddingModel: String = "",
+    val enableSettingContinuityAnchor: Boolean = true,
+    val enablePlotChunkRecall: Boolean = true,
+    val sensitiveCompressionMode: String = EchoSensitiveCompressionMode.ROLEPLAY_AUTO,
+    val useAuxiliaryModelForCompression: Boolean = false
 )
 
 class PersonalizationManager(private val context: Context) {
@@ -293,7 +323,17 @@ class PersonalizationManager(private val context: Context) {
             autoCompressionTierEnabled = prefs.getBoolean(KEY_AUTO_COMPRESSION_TIER_ENABLED, false),
             autoCompressionThresholdL2 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L2, 0.75f),
             autoCompressionThresholdL3 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L3, 0.85f),
-            autoCompressionThresholdL4 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L4, 0.95f)
+            autoCompressionThresholdL4 = prefs.getFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L4, 0.95f),
+            memoryWriteMode = EchoMemoryWriteMode.sanitize(prefs.getString(KEY_MEMORY_WRITE_MODE, EchoMemoryWriteMode.AUTO)),
+            embeddingEnabled = prefs.getBoolean(KEY_EMBEDDING_ENABLED, false),
+            embeddingApiConfigId = prefs.getLong(KEY_EMBEDDING_API_CONFIG_ID, 0L),
+            embeddingModel = prefs.getString(KEY_EMBEDDING_MODEL, "").orEmpty(),
+            enableSettingContinuityAnchor = prefs.getBoolean(KEY_ENABLE_SETTING_CONTINUITY_ANCHOR, true),
+            enablePlotChunkRecall = prefs.getBoolean(KEY_ENABLE_PLOT_CHUNK_RECALL, true),
+            sensitiveCompressionMode = EchoSensitiveCompressionMode.sanitize(
+                prefs.getString(KEY_SENSITIVE_COMPRESSION_MODE, EchoSensitiveCompressionMode.ROLEPLAY_AUTO)
+            ),
+            useAuxiliaryModelForCompression = prefs.getBoolean(KEY_USE_AUXILIARY_FOR_COMPRESSION, false)
         )
     }
 
@@ -344,6 +384,14 @@ class PersonalizationManager(private val context: Context) {
             .putFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L2, settings.autoCompressionThresholdL2)
             .putFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L3, settings.autoCompressionThresholdL3)
             .putFloat(KEY_AUTO_COMPRESSION_THRESHOLD_L4, settings.autoCompressionThresholdL4)
+            .putString(KEY_MEMORY_WRITE_MODE, EchoMemoryWriteMode.sanitize(settings.memoryWriteMode))
+            .putBoolean(KEY_EMBEDDING_ENABLED, settings.embeddingEnabled)
+            .putLong(KEY_EMBEDDING_API_CONFIG_ID, settings.embeddingApiConfigId)
+            .putString(KEY_EMBEDDING_MODEL, settings.embeddingModel.trim())
+            .putBoolean(KEY_ENABLE_SETTING_CONTINUITY_ANCHOR, settings.enableSettingContinuityAnchor)
+            .putBoolean(KEY_ENABLE_PLOT_CHUNK_RECALL, settings.enablePlotChunkRecall)
+            .putString(KEY_SENSITIVE_COMPRESSION_MODE, EchoSensitiveCompressionMode.sanitize(settings.sensitiveCompressionMode))
+            .putBoolean(KEY_USE_AUXILIARY_FOR_COMPRESSION, settings.useAuxiliaryModelForCompression)
             .commit()
     }
 
@@ -444,6 +492,14 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_PROMPT_CACHING_ENABLED = "prompt_caching_enabled"
         private const val KEY_PROMPT_CACHE_TTL = "prompt_cache_ttl"
         private const val KEY_IGNORE_CONTEXT_FALLBACK_PREFIX = "ignore_context_fallback_conv_"
+        private const val KEY_MEMORY_WRITE_MODE = "memory_write_mode"
+        private const val KEY_EMBEDDING_ENABLED = "embedding_enabled"
+        private const val KEY_EMBEDDING_API_CONFIG_ID = "embedding_api_config_id"
+        private const val KEY_EMBEDDING_MODEL = "embedding_model"
+        private const val KEY_ENABLE_SETTING_CONTINUITY_ANCHOR = "enable_setting_continuity_anchor"
+        private const val KEY_ENABLE_PLOT_CHUNK_RECALL = "enable_plot_chunk_recall"
+        private const val KEY_SENSITIVE_COMPRESSION_MODE = "sensitive_compression_mode"
+        private const val KEY_USE_AUXILIARY_FOR_COMPRESSION = "use_auxiliary_for_compression"
 
         const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 120
         const val MIN_CONNECTION_TIMEOUT_SECONDS = 30

@@ -1,5 +1,21 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-27 · 2.9.6 长期记忆（M1/M2/M3）重构、设定近端防遗忘锚点与分批容错/超额压缩
+
+版本 2.9.6/241；Room 由 v37（20 个实体）显式升级至 **v38（22 个实体，`MIGRATION_37_38`，导出 `38.json`）**。本次发布落地四大块能力：
+- **M1 长期记忆全链路升级**：新增 `LongTermMemoryEngine`（中英 2/3-gram + BM25 + 实体权重 + 分类衰减 + ACT-R 访问热度 + 1-hop 关联图 + MMR 去重），修复 `AdvancedMemoryEngine` 中文分词缺陷与 `LIMIT 80` 截断；`memory_items` 扩展分类/重要度/置顶/冲突软归档演化链（旧 `global` 归一 `user`），新增本地门控过滤器、SmartAdd JSON（`ADD/MERGE/CONFLICT/SKIP`）仲裁、软归档一键恢复及 `auto`/`review` 写入模式切换；动态放大记忆预算至最高 8,000 tokens 并消除超预算崩溃。
+- **M2 可选 Embedding 语义向量检索（默认关闭）**：新增 `SemanticEmbeddingEngine`、`AiApiService.createEmbeddings`、`RetrofitClient.getEmbeddingService` 与 `vector_embeddings` 表；支持独立配置 OpenAI 兼容 `/embeddings` 接口与模型、`embeddingSpaceId` 空间防混维、分批建索与 RRF ($k=60$) 融合；关闭或无嵌入模型时无缝退回 M1 全流程。
+- **设定/时间线防遗忘近端锚点**：维持 Zone 1 静态系统前缀逐字节不变以保留 KV 前缀缓存命中，在 Zone 3 临近当前输入注入场景相关 `<active_continuity_anchor>` 强化设定与时间线遵守。
+- **分批持久化断点续传、敏感内容三阶隔离、超额分段压缩与 M3 剧情分块记忆**：默认增量续压（另设从头重建），每批落盘 `conversation_summary_chunks` 并实时回调批次进度；角色扮演/故事模式启用中立客观档案体提示词与细粒度分批，遇安全拒答按「二分隔离 → 辅助模型接力 → 脱敏结构化本地连续性占位摘要」降级且不计入 Key 冷却；放开上下文超额分段压缩入口；积累 ≥4 段分块自动启用 HypaV3 四桶召回，对话管理面板支持星标置顶伏笔；便携备份支持 v38 字段/分块并向下兼容旧版 v37 备份。
+
+冻结验收 `20261127-012816-661`：脚本 / Gradle 退出 0，510.29 秒；98 套件 / 1,177 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，302.558 秒（5 分 03 秒）。`Echo-v2.9.6.apk` 45,720,799 字节，SHA-256 `7f8452d6aa384d9408aa5bd833c7c962ae80816be234ebe6b9aae43b809d4c7c`；`com.aiassistant`、2.9.6/241、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：454 条目（0 新增 / 0 删除 / 6 项变更，解压 CRC 全通过）；`resources.arsc` SHA-256 `a497e8c43318f32928cb0edc461b6b65e929fb34038c54c7c24698ff78f4c0c2`，186 张位图与 2.9.5 全部一致；DEX 7,701,416 字节（+171,092 字节），字符串 33,403 条（唯一 33,397 条，较 2.9.5 +610 / -119），新增 236 条可读中文均为本版长期记忆/向量/分块/容错压缩文案与提示，隐私扫描新增命中 0。排他复制到本机发布目录（250 → 251 文件，249 → 250 APK），全部历史包保留。
+
+设备边界：未连接真机；v37→v38 真机覆盖升级、真实 Embedding 网关建索与检索、长篇角色扮演设定遵循度及敏感/超额分段压缩体验待人工实机复验。
+
 ## 2026-11-26 · 2.9.5 提示词前缀缓存改造、4 项隔离/配置修复及 10 项交互与视觉优化
 
 版本 2.9.5/240；Room v37 / 20 个实体不变。本次发布汇总三大块内容：

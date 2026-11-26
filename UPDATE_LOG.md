@@ -1,5 +1,32 @@
 # 维护记录
 
+## 2026-11-27 · 发布 Echo 2.9.6（M1/M2/M3 长期记忆重构、设定近端防遗忘锚点与分批容错/超额压缩）
+
+版本由 2.9.5/240 递增至 2.9.6/241（仅更新 `app/build.gradle.kts`）；Room 由 v37（20 实体）显式升级至 **v38（22 实体）**，经 `MIGRATION_37_38` 保留全部历史数据并导出 `app/schemas/com.aiassistant.data.local.AppDatabase/38.json`。
+
+改动：
+1. **Room v38 持久化与便携备份兼容**：
+   - `Models.kt` 扩展 `MemoryItem`（`category`、`importance`、`isPinned`、`archivedAt`、`supersededById`、`relatedIdsJson`、`accessCount`、`lastAccessedAt` + 2 索引），新增 `ConversationSummaryChunk`（`conversation_summary_chunks`，外键 CASCADE）与 `VectorEmbeddingEntity`（`vector_embeddings`，复合主键）及 OpenAI 兼容 Embedding 请求/响应 DTO；`PendingMemoryCandidate` 新增 `importance`、`relatedIdsJson`、`alreadySavedMemoryId`。
+   - 新增 `MemoryExtraDaos.kt`（`SummaryChunkDao`、`VectorEmbeddingDao`）；`Daos.kt` 过滤 `archivedAt IS NULL` 并提供非截断全量读取、归档恢复、置顶与访问计数方法；`AppDatabase.kt` 与 `AppDatabaseMigrations.kt` 落地 `MIGRATION_37_38`（旧版 `global` 归一为 `user` 并回填分类/重要度）并纳入 `LEGACY_REPAIR_MIGRATIONS`；`BackupGraphStore.kt` 支持 v38 字段与剧情分块导入导出（排除派生向量缓存）并兼容导入旧版 v37 备份。
+2. **M1 长期记忆全链路升级**：
+   - 新增 `LongTermMemoryEngine.kt`：实现中英 2/3-gram + 英文分词器、BM25、实体加权、分类衰减、ACT-R 访问热度、1-hop 关联图扩展与 MMR ($\lambda=0.75$) 多样性去重；修复 `AdvancedMemoryEngine.calculateHybridScore` 中文分词缺陷与 `RoleplayRepository` 的 80 条硬截断。
+   - 接入本地 Gatekeeper 拦截闲聊/一次性任务、SmartAdd JSON（`ADD/MERGE/CONFLICT/SKIP`）冲突仲裁与软归档演化、以及 `auto`（默认静默保存 + 轻提示）与 `review`（手动审核）写入模式解耦；动态放大记忆总预算（大窗口最高至 8,000 tokens）并消除超预算断言崩溃。
+3. **M2 可选语义向量检索（Embedding · 默认关闭）**：
+   - 新增 `SemanticEmbeddingEngine.kt`、`AiApiService.createEmbeddings` 与短超时 `RetrofitClient.getEmbeddingService`；实现 Tavo 风格 `embeddingSpaceId` 空间防混维、Token 感知分批索引（≤16 条 / ≤6,000 tokens）及与 BM25 的 RRF ($k=60$) 融合；关闭、未配置或异常时 100% 无缝降级回 M1 全流程。
+4. **设定/时间线近端连续性锚点（保持 Zone 1 前缀缓存稳定）**：
+   - 在 `AiRepository.buildSplitMemoryBlocks` 中维持 Zone 1 静态系统前缀逐字节不变，并在 Zone 3 临近当前用户消息注入 `<active_continuity_anchor>`，精准召回当前场景相关设定约束与最新时间线锚点。
+5. **分批持久化断点续传、敏感内容三阶隔离、超额分段压缩与 M3 剧情分块记忆**：
+   - `ChatViewModel` 修复默认全量重压问题，改为增量续压并单设「从头重建」；`AiRepository.ensureRollingSummary` 每批落盘 `ConversationSummaryChunk` 并前推 `summaryUpdatedMessageId` 水位线，支持中断续压与实时批次进度回调。
+   - 角色扮演/故事模式启用中立客观档案体提示词与细粒度分批（4,800 tok / 18 条）；遇安全拒答按「二分拆批隔离 → 辅助模型接力 → 脱敏结构化本地连续性占位摘要」三阶降级，不向后续批次回传触发敏感词且不计入 Key 冷却；`compressConversationContext` 与 `ChatContextComponents` 解除上下文已超额时的压缩死锁。
+   - 积累 ≥4 段分块且启用 M3 时按 HypaV3 四桶策略组装（置顶伏笔 + 最近连续块入 Zone 1，远期召回块入 Zone 3 按时序重排）。
+6. **设置与对话管理界面及回归测试**：
+   - `PersonalizationManager`、`SettingsPromptsMemoryTab`、`SettingsPersonalizationTab`、`ChatContextComponents`、`ChatScreen` 新增分类筛选、置顶、软归档一键恢复、写入模式切换、可选 Embedding 配置/建索卡片、近端锚点/M3/敏感隔离/辅助模型压缩开关及剧情分块星标置顶预览卡。
+   - 新增 `LongTermMemoryAndResilientCompressionTest.kt`（12 项端到端测试），扩充 `BackupGraphStoreTest.kt`（v37→v38 迁移与备份回归）并适配 `RoleplayModelsTest.kt`（总测试 97 → 98 套件、1,161 → 1,177 项）。
+
+验证：冻结验收 `20261127-012816-661` 脚本 / Gradle 退出 0，510.29 秒；98 套件 / 1,177 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon` 退出 0，302.558 秒（5 分 03 秒）；排他复制为本机发布目录 `Echo-v2.9.6.apk`（250 → 251 文件、249 → 250 APK，历史包全部保留）。
+
+APK 元数据与审计：`Echo-v2.9.6.apk` 45,720,799 字节，SHA-256 `7f8452d6aa384d9408aa5bd833c7c962ae80816be234ebe6b9aae43b809d4c7c`；`com.aiassistant`、2.9.6/241、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（0 新增 / 0 删除 / 6 项变更，解压 CRC 全通过）；`resources.arsc` SHA-256 `a497e8c43318f32928cb0edc461b6b65e929fb34038c54c7c24698ff78f4c0c2`，186 张位图与 2.9.5 一致；DEX 7,701,416 字节（+171,092 字节），字符串 33,403 条（唯一 33,397 条，较 2.9.5 +610 / -119），新增 236 条可读中文均为本版长期记忆/向量/分块/压缩文案与提示，隐私扫描新增命中 0。未连接真机，真机 v37→v38 覆盖升级、真实 Embedding 网关及角色扮演长对话压缩表现待人工验收。
+
 ## 2026-11-26 · 发布 Echo 2.9.5（提示词前缀缓存改造、4 项隔离/配置修复及 10 项交互与视觉优化）
 
 版本由 2.9.4/239 递增至 2.9.5/240（仅更新 `app/build.gradle.kts`）。将工作区已完成验收的 10 项交互与视觉优化连同本轮提示词前缀缓存改造及 4 项关联修复合并冻结验收、构建并发布。Room v37 / 20 个实体、消息与备份格式不变。

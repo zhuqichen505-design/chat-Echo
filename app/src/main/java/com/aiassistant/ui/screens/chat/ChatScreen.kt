@@ -2286,6 +2286,7 @@ fun ChatScreen(
     }
 
     if (showContextUsageDialog) {
+        val summaryChunks by viewModel.summaryChunks.collectAsState()
         ContextUsageDialog(
             hazeState = hazeState,
             state = contextUsage,
@@ -2296,13 +2297,17 @@ fun ChatScreen(
             onCompress = { viewModel.compressContextNow() },
             onCancelOperation = { viewModel.cancelContextOperation() },
             onGenerateRollingSummary = { viewModel.generateRollingSummaryNow() },
+            onRebuildRollingSummary = { viewModel.rebuildRollingSummaryFromScratch() },
             onEditRollingSummary = { showRollingSummaryDialog = true },
             onSelectCompressionTier = { tier, rounds, percent ->
                 viewModel.setCompressionTier(tier, rounds, percent)
             },
             onPreviewCompressionSettings = { rounds, percent ->
                 viewModel.previewCompressionSettings(rounds, percent)
-            }
+            },
+            summaryChunks = summaryChunks,
+            onToggleChunkPinned = { chunk -> viewModel.toggleSummaryChunkPinned(chunk) },
+            onDeleteChunk = { chunk -> viewModel.deleteSummaryChunk(chunk) }
         )
     }
 

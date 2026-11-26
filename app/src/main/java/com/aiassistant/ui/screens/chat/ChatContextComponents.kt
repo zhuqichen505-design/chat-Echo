@@ -392,9 +392,13 @@ internal fun ContextUsageDialog(
     onCompress: () -> Unit,
     onCancelOperation: () -> Unit = {},
     onGenerateRollingSummary: () -> Unit = {},
+    onRebuildRollingSummary: (() -> Unit)? = null,
     onEditRollingSummary: (() -> Unit)? = null,
     onSelectCompressionTier: ((com.aiassistant.domain.model.CompressionTier, Int, Int) -> Unit)? = null,
-    onPreviewCompressionSettings: ((Int, Int) -> Unit)? = null
+    onPreviewCompressionSettings: ((Int, Int) -> Unit)? = null,
+    summaryChunks: List<com.aiassistant.domain.model.ConversationSummaryChunk> = emptyList(),
+    onToggleChunkPinned: ((com.aiassistant.domain.model.ConversationSummaryChunk) -> Unit)? = null,
+    onDeleteChunk: ((com.aiassistant.domain.model.ConversationSummaryChunk) -> Unit)? = null
 ) {
     val usage = state.usage
     val busy = state.isCompressing || state.isGeneratingSummary
@@ -483,11 +487,22 @@ internal fun ContextUsageDialog(
                             usage = usage,
                             state = state,
                             onGenerateRollingSummary = onGenerateRollingSummary,
+                            onRebuildRollingSummary = onRebuildRollingSummary,
                             onEditRollingSummary = onEditRollingSummary,
                             onCompress = { if (hasPendingChange) applySelection() else onCompress() },
                             selectedTier = selection?.tier ?: usage.compressionTier,
                             hasPendingChange = hasPendingChange
                         )
+                    }
+                    if (summaryChunks.isNotEmpty()) {
+                        item {
+                            SummaryChunksPreviewCard(
+                                chunks = summaryChunks,
+                                busy = busy,
+                                onTogglePinned = onToggleChunkPinned,
+                                onDeleteChunk = onDeleteChunk
+                            )
+                        }
                     }
                     item {
                         ContextUsageDetails(
@@ -546,6 +561,7 @@ internal fun ContextOptimizationActions(
     usage: ConversationContextUsage,
     state: ContextUsageUiState,
     onGenerateRollingSummary: () -> Unit,
+    onRebuildRollingSummary: (() -> Unit)? = null,
     onEditRollingSummary: (() -> Unit)?,
     onCompress: () -> Unit,
     selectedTier: com.aiassistant.domain.model.CompressionTier = usage.compressionTier,
@@ -554,20 +570,97 @@ internal fun ContextOptimizationActions(
     val busy = state.isCompressing || state.isGeneratingSummary
     val usesDirectTruncation = selectedTier == com.aiassistant.domain.model.CompressionTier.LT
     val summaryDisabled = usesDirectTruncation || usage.compressionTier == com.aiassistant.domain.model.CompressionTier.LT
+    val personalizationManager = remember { com.aiassistant.AiAssistantApp.instance.personalizationManager }
+    var pSettings by remember { mutableStateOf(personalizationManager.getSettings()) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("历史摘要", style = MaterialTheme.typography.titleSmall)
+                Text("历史摘要与分批断点", style = MaterialTheme.typography.titleSmall)
                 Text(if (summaryDisabled) "直接截断档不会发送历史摘要。已保存摘要仍可审阅；切回摘要档后可重新使用或更新。"
                     else if (usage.hasRollingSummary) "已保存 · ${formatTokenCount(usage.summaryTokens)} tokens · 覆盖至消息 #${usage.compressedThroughMessageId}"
-                    else "尚未生成。摘要用于承接早期事实、决定与未完成事项。",
+                    else "尚未生成。摘要按批次逐段保存，中途出错不丢失已完成进度，上下文超额时也可分段压缩。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("摘要可能遗漏细节，可随时审阅和修订。编辑或删除原文会使旧摘要失效；时间线与会话设定需在对应页面单独确认。",
+                Text("点击「增量更新」会直接从上次断点续压，省时省额度；仅需推倒重来时再点「从头重建」。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     if (onEditRollingSummary != null) TextButton(onClick = onEditRollingSummary, enabled = !busy) { Text("审阅 / 编辑") }
+                    if (onRebuildRollingSummary != null && usage.hasRollingSummary && !summaryDisabled) {
+                        TextButton(onClick = onRebuildRollingSummary, enabled = !busy) { Text("从头重建") }
+                    }
                     FilledTonalButton(onClick = onGenerateRollingSummary, enabled = !busy && !summaryDisabled) {
-                        Text(if (summaryDisabled) "本档不生成摘要" else if (state.isGeneratingSummary) "正在更新…" else "更新摘要")
+                        Text(if (summaryDisabled) "本档不生成摘要" else if (state.isGeneratingSummary) "正在更新…" else "增量更新")
+                    }
+                }
+            }
+        }
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("分段容错与防遗忘选项", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("敏感内容二分隔离容错", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = when (pSettings.sensitiveCompressionMode) {
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ALWAYS -> "所有对话遇审核拦截均自动二分隔离并局部安全摘录"
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.OFF -> "严格模式：遇审核拦截直接暂停报错"
+                                else -> "创作/角色扮演自动容错（推荐），普通对话保持严格"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            val next = when (pSettings.sensitiveCompressionMode) {
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ROLEPLAY_AUTO -> com.aiassistant.utils.EchoSensitiveCompressionMode.ALWAYS
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ALWAYS -> com.aiassistant.utils.EchoSensitiveCompressionMode.OFF
+                                else -> com.aiassistant.utils.EchoSensitiveCompressionMode.ROLEPLAY_AUTO
+                            }
+                            val updated = pSettings.copy(sensitiveCompressionMode = next)
+                            personalizationManager.saveSettings(updated)
+                            pSettings = updated
+                        }
+                    ) {
+                        Text(
+                            when (pSettings.sensitiveCompressionMode) {
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.ALWAYS -> "全部容错"
+                                com.aiassistant.utils.EchoSensitiveCompressionMode.OFF -> "严格关闭"
+                                else -> "创作自动"
+                            }
+                        )
+                    }
+                }
+                if (pSettings.auxiliaryMemoryEnabled && pSettings.auxiliaryMemoryApiConfigId > 0L) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("优先使用辅助模型压缩", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "用辅助模型分批整理上下文，提速且减少主模型审核拦截",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        com.aiassistant.ui.components.EchoSwitch(
+                            checked = pSettings.useAuxiliaryModelForCompression,
+                            onCheckedChange = { enabled ->
+                                val updated = pSettings.copy(useAuxiliaryModelForCompression = enabled)
+                                personalizationManager.saveSettings(updated)
+                                pSettings = updated
+                            }
+                        )
                     }
                 }
             }
@@ -580,28 +673,127 @@ internal fun ContextOptimizationActions(
                 Text(if (usesDirectTruncation)
                     "按所选比例从最早完整对话轮次开始截断，至少保留最近 1 轮和置顶轮次。被截断的早期对话原文及历史摘要不会交给模型，模型可能因此忘记先前剧情与事实。"
                     else if (appliesRollingTier && !hasPendingChange)
-                    "将应用滚动摘要档，保留最近 8 轮完整原文和置顶轮次，连续总结更早内容。摘要成功且原文未变化后才更新覆盖范围。"
-                    else "按所选档位连续总结较早原文，保留对应的完整对话轮次和置顶内容。摘要成功且原文未变化后才更新覆盖范围；失败时保留原文和原摘要。",
+                    "将应用滚动摘要档，保留最近 8 轮完整原文和置顶轮次，分批增量总结更早内容；每完成一批立即保存断点，上下文超额时也可安全压缩。"
+                    else "按所选档位分批增量总结较早原文，保留对应的完整对话轮次和置顶内容；已完成批次自动保存断点，重试时直接续压。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (usesDirectTruncation)
                     "确认后立即用于后续请求，不调用摘要模型，也不删除本机聊天。可切回其他档位恢复读取早期原文；已启用的记忆、时间线和世界书保持原设置，仍会与置顶内容、系统设定及本轮输入一起占用预算。"
-                    else "此操作会调用模型。聊天记录始终保存在本机；超长的本轮输入或置顶内容仍需手动缩短。",
+                    else "此操作会调用模型。聊天记录始终保存在本机；分段块支持星标置顶核心伏笔，并在长篇对话中自动按需召回。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(
                     onClick = onCompress,
-                    enabled = !busy && (hasPendingChange || !usesDirectTruncation && (usage.canCompress || state.canRetryCompression)),
+                    enabled = !busy && (hasPendingChange || !usesDirectTruncation && (usage.canCompress || state.canRetryCompression || usage.usagePercent >= 0.99f)),
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(when {
-                        state.isCompressing -> "正在应用…"
+                        state.isCompressing -> "正在分批压缩…"
                         usesDirectTruncation && hasPendingChange -> "确认截断并生效"
                         usesDirectTruncation -> "已按所选比例生效"
-                        state.canRetryCompression && !hasPendingChange -> "重试压缩"
+                        state.canRetryCompression && !hasPendingChange -> "从断点继续压缩"
                         hasPendingChange -> "应用所选策略"
-                        !usage.canCompress -> "暂无待压缩历史"
+                        !usage.canCompress && usage.usagePercent < 0.99f -> "暂无待压缩历史"
                         appliesRollingTier -> "应用滚动摘要并压缩"
-                        else -> "压缩较早对话"
+                        else -> "分批压缩较早对话"
                     })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryChunksPreviewCard(
+    chunks: List<com.aiassistant.domain.model.ConversationSummaryChunk>,
+    busy: Boolean,
+    onTogglePinned: ((com.aiassistant.domain.model.ConversationSummaryChunk) -> Unit)?,
+    onDeleteChunk: ((com.aiassistant.domain.model.ConversationSummaryChunk) -> Unit)?
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("分段剧情记忆块（${chunks.size} 段）", style = MaterialTheme.typography.titleSmall)
+                    val pinnedCount = chunks.count { it.isPinned }
+                    val fallbackCount = chunks.count { it.sourceKind == "LOCAL_FALLBACK" }
+                    Text(
+                        buildString {
+                            append("星标伏笔 $pinnedCount 段常驻前文；其余早期段落按本轮剧情自动召回")
+                            if (fallbackCount > 0) append(" · 含 $fallbackCount 段本地安全摘录")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (expanded) {
+                chunks.forEach { chunk ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "第 ${chunk.chunkIndex + 1} 段 · ${chunk.messageCount} 条" +
+                                        if (chunk.sourceKind == "LOCAL_FALLBACK") " · 安全摘录" else "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (chunk.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (onTogglePinned != null) {
+                                    IconButton(
+                                        enabled = !busy,
+                                        onClick = { onTogglePinned(chunk) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (chunk.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                            contentDescription = if (chunk.isPinned) "取消星标伏笔" else "标为核心伏笔（常驻前文）",
+                                            tint = if (chunk.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                if (onDeleteChunk != null) {
+                                    IconButton(
+                                        enabled = !busy,
+                                        onClick = { onDeleteChunk(chunk) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "删除此分段",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = chunk.summaryText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
         }

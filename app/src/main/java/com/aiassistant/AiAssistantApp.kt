@@ -93,7 +93,9 @@ class AiAssistantApp : Application() {
                 tavilySearchManager = tavilySearchManager,
                 echoToolHub = echoToolHub,
                 worldBookDao = database.worldBookDao(),
-                timelineNodeDao = database.timelineNodeDao()
+                timelineNodeDao = database.timelineNodeDao(),
+                summaryChunkDao = database.summaryChunkDao(),
+                vectorEmbeddingDao = database.vectorEmbeddingDao()
             )
             roleplayRepository = com.aiassistant.data.repository.RoleplayRepository(
                 characterProfileDao = database.characterProfileDao(),

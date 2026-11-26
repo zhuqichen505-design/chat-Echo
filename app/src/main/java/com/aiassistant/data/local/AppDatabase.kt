@@ -29,9 +29,11 @@ import com.aiassistant.domain.model.*
         WorldBook::class,
         WorldBookEntry::class,
         TimelineNode::class,
-        BackupIdentity::class
+        BackupIdentity::class,
+        ConversationSummaryChunk::class,
+        VectorEmbeddingEntity::class
     ],
-    version = 37,
+    version = 38,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,6 +54,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun characterTagDao(): CharacterTagDao
     abstract fun worldBookDao(): WorldBookDao
     abstract fun timelineNodeDao(): TimelineNodeDao
+    abstract fun summaryChunkDao(): SummaryChunkDao
+    abstract fun vectorEmbeddingDao(): VectorEmbeddingDao
 
     companion object {
         @Volatile
@@ -72,6 +76,7 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_31_32: Migration get() = AppDatabaseMigrations.MIGRATION_31_32
         val MIGRATION_35_36: Migration get() = AppDatabaseMigrations.MIGRATION_35_36
         val MIGRATION_36_37: Migration get() = AppDatabaseMigrations.MIGRATION_36_37
+        val MIGRATION_37_38: Migration get() = AppDatabaseMigrations.MIGRATION_37_38
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {

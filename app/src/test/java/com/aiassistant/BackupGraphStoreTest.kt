@@ -239,10 +239,10 @@ class BackupGraphStoreTest {
             sql.version = 32
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_32_33, AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37, AppDatabaseMigrations.MIGRATION_37_38).allowMainThreadQueries().build()
         try {
             assertEquals("retained", upgraded.messageDao().getMessagesList(id).single().content)
-            assertEquals(37, upgraded.openHelper.readableDatabase.version)
+            assertEquals(38, upgraded.openHelper.readableDatabase.version)
             upgraded.openHelper.readableDatabase.query("SELECT COUNT(*) FROM backup_identities").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
@@ -281,11 +281,11 @@ class BackupGraphStoreTest {
             sql.version = 33
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_33_34, AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37, AppDatabaseMigrations.MIGRATION_37_38).allowMainThreadQueries().build()
         try {
             val conv = upgraded.conversationDao().getConversationById(1)!!
             assertEquals("retained", conv.title); assertFalse(conv.enableReplyDirections); assertEquals(2, conv.replyDirectionCount)
-            assertEquals(37, upgraded.openHelper.readableDatabase.version)
+            assertEquals(38, upgraded.openHelper.readableDatabase.version)
             assertEquals("old message", upgraded.messageDao().getMessagesList(1).single().content)
             assertNull(upgraded.messageDao().getMessagesList(1).single().replyDirection)
         } finally { upgraded.close(); context.deleteDatabase(name) }
@@ -307,7 +307,7 @@ class BackupGraphStoreTest {
             sql.version = 34
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_34_35, AppDatabaseMigrations.MIGRATION_35_36, AppDatabaseMigrations.MIGRATION_36_37, AppDatabaseMigrations.MIGRATION_37_38).allowMainThreadQueries().build()
         try {
             val stat = upgraded.usageStatDao().getStatsListByTimeRange(0, 200).single()
             assertEquals(125, stat.totalTokens)
@@ -316,7 +316,7 @@ class BackupGraphStoreTest {
             assertEquals("legacy", stat.requestKind)
             assertEquals("legacy", stat.completionStatus)
             assertEquals(0L, stat.firstTokenTimeMs)
-            assertEquals(37, upgraded.openHelper.readableDatabase.version)
+            assertEquals(38, upgraded.openHelper.readableDatabase.version)
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 
@@ -370,7 +370,7 @@ class BackupGraphStoreTest {
             sql.version = 36
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_36_37).allowMainThreadQueries().build()
+            .addMigrations(AppDatabaseMigrations.MIGRATION_36_37, AppDatabaseMigrations.MIGRATION_37_38).allowMainThreadQueries().build()
         try {
             val conv = upgraded.conversationDao().getConversationById(1)!!
             assertFalse(conv.enableInputInjection)
@@ -382,8 +382,92 @@ class BackupGraphStoreTest {
             assertEquals("retained display", message.content)
             assertNull(message.modelContent)
             assertNull(message.injectionTargetMessageId)
-            assertEquals(37, upgraded.openHelper.readableDatabase.version)
+            assertEquals(38, upgraded.openHelper.readableDatabase.version)
         } finally { upgraded.close(); context.deleteDatabase(name) }
+    }
+
+    @Test fun memoryMigrationFromV37ValidatesSchema() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "m37.db"
+        val dbFile = context.getDatabasePath(name)
+        dbFile.parentFile?.mkdirs()
+        val schema = com.google.gson.JsonParser.parseString(java.io.File("schemas/com.aiassistant.data.local.AppDatabase/37.json").readText()).asJsonObject.getAsJsonObject("database")
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { sql ->
+            schema.getAsJsonArray("entities").forEach { entity ->
+                val obj = entity.asJsonObject
+                val table = obj.get("tableName").asString
+                sql.execSQL(obj.get("createSql").asString.replace("\${TABLE_NAME}", table))
+                obj.getAsJsonArray("indices")?.forEach { index -> sql.execSQL(index.asJsonObject.get("createSql").asString.replace("\${TABLE_NAME}", table)) }
+            }
+            schema.getAsJsonArray("setupQueries").forEach { sql.execSQL(it.asString) }
+            sql.execSQL("INSERT INTO memory_items(id,scope,conversationId,content,keywords,sourceMessageId,confidence,isEnabled,createdAt,updatedAt) VALUES(1,'global',NULL,'严禁使用敬语称呼我',NULL,NULL,0.9,1,100,100)")
+            sql.execSQL("INSERT INTO memory_items(id,scope,conversationId,content,keywords,sourceMessageId,confidence,isEnabled,createdAt,updatedAt) VALUES(2,'user',NULL,'常住在杭州西湖区',NULL,NULL,0.8,1,100,100)")
+            sql.version = 37
+        }
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
+            .addMigrations(AppDatabaseMigrations.MIGRATION_37_38).allowMainThreadQueries().build()
+        try {
+            assertEquals(38, upgraded.openHelper.readableDatabase.version)
+            val memories = upgraded.memoryDao().getAllActiveGlobalMemories()
+            assertEquals(2, memories.size)
+            val m1 = memories.first { it.id == 1L }
+            val m2 = memories.first { it.id == 2L }
+            assertEquals("旧版 global 必须归一为 user", "user", m1.scope)
+            assertEquals("INSTRUCTION", m1.category)
+            assertEquals(5, m1.importance)
+            assertEquals("IDENTITY", m2.category)
+            assertEquals(4, m2.importance)
+            assertTrue(upgraded.summaryChunkDao().getChunksList(1L).isEmpty())
+            assertTrue(upgraded.vectorEmbeddingDao().getByTypeAndSpace("memory", "none").isEmpty())
+        } finally { upgraded.close(); context.deleteDatabase(name) }
+    }
+
+    @Test fun portableBackupPreservesV38MemoryFieldsSummaryChunksAndRestoresLegacyV37Snapshots() = runBlocking {
+        database().use { source -> database().use { target ->
+            val convId = seed(source, "v38-portable")
+            val m1 = source.messageDao().insertMessage(Message(conversationId = convId, role = "user", content = "开场白"))
+            val m2 = source.messageDao().insertMessage(Message(conversationId = convId, role = "assistant", content = "回应"))
+            val memId = source.memoryDao().insertMemory(MemoryItem(
+                scope = "user", content = "对海鲜过敏", category = "IDENTITY", importance = 5, isPinned = true,
+                accessCount = 3, lastAccessedAt = 999L
+            ))
+            source.memoryDao().insertMemory(MemoryItem(
+                scope = "user", content = "旧过敏记录", category = "IDENTITY", isEnabled = false,
+                archivedAt = 888L, supersededById = memId
+            ))
+            source.summaryChunkDao().insertChunk(ConversationSummaryChunk(
+                conversationId = convId, chunkIndex = 0, startMessageId = m1, endMessageId = m2,
+                messageCount = 2, summaryText = "第一段合成剧情", isPinned = true, sourceKind = "MODEL_NEUTRAL"
+            ))
+
+            val snapshot = BackupGraphStore.export(source, null, { it })
+            BackupGraphStore.restore(target, snapshot, { it }, {})
+            val restoredActive = target.memoryDao().getAllActiveGlobalMemories().single()
+            assertEquals("IDENTITY", restoredActive.category)
+            assertEquals(5, restoredActive.importance)
+            assertTrue(restoredActive.isPinned)
+            assertEquals(3, restoredActive.accessCount)
+            val restoredChunk = target.summaryChunkDao().getChunksList(
+                target.conversationDao().getAllConversations().first().single().id
+            ).single()
+            assertEquals("第一段合成剧情", restoredChunk.summaryText)
+            assertTrue(restoredChunk.isPinned)
+            assertEquals("MODEL_NEUTRAL", restoredChunk.sourceKind)
+
+            // 模拟旧版 v37 备份（缺少 conversation_summary_chunks 表与新 memory_items 字段），仍须无缝导入
+            val legacySnapshot = snapshot.deepCopy()
+            legacySnapshot.getAsJsonObject("tables").remove("conversation_summary_chunks")
+            legacySnapshot.getAsJsonObject("tables").getAsJsonArray("memory_items").forEach { el ->
+                val obj = el.asJsonObject
+                listOf("category", "importance", "isPinned", "archivedAt", "supersededById", "relatedIdsJson", "accessCount", "lastAccessedAt").forEach {
+                    obj.remove(it)
+                }
+            }
+            database().use { targetLegacy ->
+                BackupGraphStore.restore(targetLegacy, legacySnapshot, { it }, {})
+                assertTrue(targetLegacy.memoryDao().getAllActiveGlobalMemories().isNotEmpty())
+            }
+        } }
     }
 
     @Test fun inputInjectionPortableBackupRemapsTargetAndRetainsDisplayAndModelBodies() = runBlocking {

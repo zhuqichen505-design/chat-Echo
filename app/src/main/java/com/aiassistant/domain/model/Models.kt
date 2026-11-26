@@ -248,7 +248,9 @@ data class PromptTemplate(
     indices = [
         Index(value = ["scope", "conversationId"]),
         Index(value = ["sourceMessageId"]),
-        Index(value = ["updatedAt"])
+        Index(value = ["updatedAt"]),
+        Index(value = ["category"]),
+        Index(value = ["archivedAt"])
     ]
 )
 data class MemoryItem(
@@ -262,8 +264,97 @@ data class MemoryItem(
     val confidence: Float = 0.6f,
     val isEnabled: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val category: String = "FACT",          // IDENTITY / VOICE / INSTRUCTION / PREFERENCE / PROJECT / FACT
+    val importance: Int = 3,                // 1..5
+    val isPinned: Boolean = false,
+    val archivedAt: Long? = null,           // 软归档时间戳（冲突演进后保留历史可恢复）
+    val supersededById: Long? = null,       // 取代本条记忆的新记忆 ID
+    val relatedIdsJson: String? = null,     // 轻量关联记忆 ID JSON 数组
+    val accessCount: Int = 0,               // 召回命中次数
+    val lastAccessedAt: Long? = null        // 最近召回命中时间
+)
+
+// 分段上下文压缩块与长篇创作剧情记忆块（绑定真实消息区间，支持断点续传、孤儿清理与 HypaV3 四分召回）
+@Entity(
+    tableName = "conversation_summary_chunks",
+    indices = [
+        Index(value = ["conversationId"]),
+        Index(value = ["conversationId", "chunkIndex"]),
+        Index(value = ["endMessageId"])
+    ],
+    foreignKeys = [
+        ForeignKey(
+            entity = Conversation::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
+data class ConversationSummaryChunk(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val conversationId: Long,
+    val chunkIndex: Int = 0,
+    val startMessageId: Long = 0L,
+    val endMessageId: Long = 0L,
+    val messageCount: Int = 0,
+    val summaryText: String,
+    val keywords: String? = null,
+    val timeRangeTag: String? = null,
+    val isPinned: Boolean = false,          // 星标伏笔/关键剧情块，常驻 Zone 1
+    val sourceKind: String = "MODEL",       // MODEL / MODEL_NEUTRAL / LOCAL_FALLBACK / MANUAL
+    val status: String = "COMPLETED",       // COMPLETED / FALLBACK_ISOLATED
+    val tokenCount: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+// 本地可选语义向量索引（派生缓存表，含 embeddingSpaceId 空间指纹防混算；关闭 Embedding 时完全不写入）
+@Entity(
+    tableName = "vector_embeddings",
+    primaryKeys = ["targetType", "targetId"],
+    indices = [
+        Index(value = ["targetType", "embeddingSpaceId"]),
+        Index(value = ["conversationId"])
+    ]
+)
+data class VectorEmbeddingEntity(
+    val targetType: String,                 // "memory" | "summary_chunk" | "timeline"
+    val targetId: Long,
+    val conversationId: Long? = null,
+    val contentHash: String,
+    val embeddingSpaceId: String,
+    val dimension: Int,
+    val vectorBlob: ByteArray,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is VectorEmbeddingEntity) return false
+        return targetType == other.targetType &&
+            targetId == other.targetId &&
+            conversationId == other.conversationId &&
+            contentHash == other.contentHash &&
+            embeddingSpaceId == other.embeddingSpaceId &&
+            dimension == other.dimension &&
+            vectorBlob.contentEquals(other.vectorBlob) &&
+            updatedAt == other.updatedAt
+    }
+
+    override fun hashCode(): Int {
+        var result = targetType.hashCode()
+        result = 31 * result + targetId.hashCode()
+        result = 31 * result + (conversationId?.hashCode() ?: 0)
+        result = 31 * result + contentHash.hashCode()
+        result = 31 * result + embeddingSpaceId.hashCode()
+        result = 31 * result + dimension
+        result = 31 * result + vectorBlob.contentHashCode()
+        result = 31 * result + updatedAt.hashCode()
+        return result
+    }
+}
 
 // 待用户确认的智能提炼记忆候选
 data class PendingMemoryCandidate(
@@ -273,12 +364,15 @@ data class PendingMemoryCandidate(
     val suggestedScope: String = "user", // "user" (长期记忆) 或 "conversation" (会话记忆)
     val conversationId: Long,
     val sourceMessageId: Long? = null,
-    val category: String = "PREFERENCE",   // "PREFERENCE", "FACT", "PROJECT"
-    val action: String = "ADD",
+    val category: String = "PREFERENCE",   // IDENTITY / VOICE / INSTRUCTION / PREFERENCE / PROJECT / FACT
+    val action: String = "ADD",            // ADD / SUPPLEMENT / REVISE / MERGE / CONFLICT
     val targetMemoryId: Long? = null,
     val previousContent: String? = null,
     val evidence: String = "",
-    val changeReason: String = ""
+    val changeReason: String = "",
+    val importance: Int = 3,
+    val relatedIdsJson: String? = null,
+    val alreadySavedMemoryId: Long? = null
 )
 
 // 时间线独立节点实体
@@ -611,6 +705,29 @@ data class ModelStats(
 // 模型列表响应
 data class ModelsResponse(
     val data: List<ModelInfo>?
+)
+
+// OpenAI 兼容 Embeddings API 请求与响应（M2 可选语义向量增强）
+data class EmbeddingRequest(
+    val model: String,
+    val input: List<String>
+)
+
+data class EmbeddingResponse(
+    val data: List<EmbeddingDataItem>? = null,
+    val model: String? = null,
+    val usage: EmbeddingUsage? = null,
+    val error: ApiError? = null
+)
+
+data class EmbeddingDataItem(
+    val index: Int = 0,
+    val embedding: List<Float>? = null
+)
+
+data class EmbeddingUsage(
+    val prompt_tokens: Int? = null,
+    val total_tokens: Int? = null
 )
 
 data class ModelInfo(

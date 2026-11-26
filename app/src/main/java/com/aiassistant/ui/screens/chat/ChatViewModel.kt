@@ -780,8 +780,32 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         }
     }
 
+    val summaryChunks: StateFlow<List<com.aiassistant.domain.model.ConversationSummaryChunk>> =
+        repository.getConversationSummaryChunksFlow(conversationId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun toggleSummaryChunkPinned(chunk: com.aiassistant.domain.model.ConversationSummaryChunk) {
+        viewModelScope.launch {
+            repository.setSummaryChunkPinned(chunk.id, !chunk.isPinned)
+        }
+    }
+
+    fun updateSummaryChunk(chunk: com.aiassistant.domain.model.ConversationSummaryChunk) {
+        viewModelScope.launch {
+            repository.updateSummaryChunk(chunk)
+            refreshContextUsage()
+        }
+    }
+
+    fun deleteSummaryChunk(chunk: com.aiassistant.domain.model.ConversationSummaryChunk) {
+        viewModelScope.launch {
+            repository.deleteSummaryChunk(chunk)
+            refreshContextUsage()
+        }
+    }
+
     fun compressContextNow(isAuto: Boolean = false) {
-        startContextOperation(updateSummaryOnly = false, isAuto = isAuto)
+        startContextOperation(updateSummaryOnly = false, isAuto = isAuto, rebuildFromScratch = false)
     }
 
     fun clearContextStatusMessage() {
@@ -789,7 +813,11 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
     }
 
     fun generateRollingSummaryNow() {
-        startContextOperation(updateSummaryOnly = true)
+        startContextOperation(updateSummaryOnly = true, rebuildFromScratch = false)
+    }
+
+    fun rebuildRollingSummaryFromScratch() {
+        startContextOperation(updateSummaryOnly = true, rebuildFromScratch = true)
     }
 
     private fun startContextOperation(
@@ -797,7 +825,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
         isAuto: Boolean = false,
         targetTier: CompressionTier? = null,
         recentRounds: Int? = null,
-        customPercent: Int? = null
+        customPercent: Int? = null,
+        rebuildFromScratch: Boolean = false
     ) {
         if (contextOperationJob != null || (targetTier == null && _isGenerating.value)) return
         contextUsageRefreshJob?.cancel()
@@ -851,15 +880,19 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                 operationReady.await()
                 tierSave?.await()
                 val (modelName, maxTokens, contextOverride) = resolveUsageQueryOverrides()
+                val progressReporter: (AiRepository.CompressionProgress) -> Unit = { progress ->
+                    _contextUsage.update { it.copy(statusMessage = progress.detail) }
+                }
                 val usage = when {
                     saveForNextRequest || usesDirectTruncation || targetTier == CompressionTier.L0 || targetTier == CompressionTier.L1 ->
                         repository.getConversationContextUsage(conversationId, modelName, maxTokens, contextOverride,
                             apiConfigIdOverride = _currentModelOption.value?.apiConfigId)
                     updateSummaryOnly -> repository.generateRollingSummaryNow(conversationId, modelName, maxTokens, contextOverride,
-                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId, rebuildSummary = true).getOrThrow()
+                        apiConfigIdOverride = _currentModelOption.value?.apiConfigId, rebuildSummary = rebuildFromScratch,
+                        onProgress = progressReporter).getOrThrow()
                     else -> repository.compressConversationContext(conversationId, modelName, maxTokens, contextOverride,
                         apiConfigIdOverride = _currentModelOption.value?.apiConfigId,
-                        rebuildSummary = !isAuto && targetTier == null).getOrThrow()
+                        rebuildSummary = rebuildFromScratch, onProgress = progressReporter).getOrThrow()
                 }
                 conversation = repository.getConversationById(conversationId) ?: conversation
                 contextUsageRefreshJob?.cancel()
@@ -2183,7 +2216,11 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                     conversationId = if (targetScope == "conversation") candidate.conversationId else null,
                     sourceMessageId = candidate.sourceMessageId,
                     targetMemoryId = candidate.targetMemoryId.takeIf { targetScope == candidate.suggestedScope },
-                    previousContent = candidate.previousContent
+                    previousContent = candidate.previousContent,
+                    category = candidate.category,
+                    importance = candidate.importance,
+                    relatedIdsJson = candidate.relatedIdsJson,
+                    action = candidate.action
                 )
                 _pendingMemoryCandidate.compareAndSet(candidate, null)
                 postSettingApplyNotice(
@@ -2478,8 +2515,18 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         activeModelName = selectedOption.modelName,
                         sessionMemoryEnabled = sessionMemoryEnabled
                     )
-                    if (candidate != null && sessionMemoryEnabled != false) {
-                        _pendingMemoryCandidate.value = candidate
+                    if (candidate != null) {
+                        if (candidate.alreadySavedMemoryId != null) {
+                            // 静默自动入库模式下已落库，给出轻量提示而非重复确认弹窗
+                            val label = if (candidate.suggestedScope == "conversation") "已自动记入会话设定" else "已自动记入长期记忆"
+                            postSettingApplyNotice(
+                                message = "$label：${candidate.distilledContent.take(36)}",
+                                tone = SettingApplyNoticeTone.Success,
+                                showInspectAction = true
+                            )
+                        } else if (sessionMemoryEnabled != false) {
+                            _pendingMemoryCandidate.value = candidate
+                        }
                     }
                 } catch (e: CancellationException) {
                     throw e

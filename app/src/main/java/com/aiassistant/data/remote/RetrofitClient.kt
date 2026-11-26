@@ -122,6 +122,18 @@ object RetrofitClient {
         .callTimeout(SUMMARY_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    // 专用于 M2 可选 Embedding 向量查询：短超时快速降级，绝不拖慢聊天发送
+    val embeddingHttpClient = HttpAccessPolicy.guard(OkHttpClient.Builder())
+        .addInterceptor(noPostReplayInterceptor)
+        .addInterceptor(loggingInterceptor)
+        .retryOnConnectionFailure(true)
+        .connectionPool(sharedConnectionPool)
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(14, TimeUnit.SECONDS)
+        .build()
+
     // 专用于全量时间线提炼、长文本深度分析与设定提炼（设置 600s 充足超时与弹性连接，支持超长篇上下文深度推理）
     val longAnalysisHttpClient = HttpAccessPolicy.guard(OkHttpClient.Builder())
         .addInterceptor(noPostReplayInterceptor)
@@ -146,6 +158,28 @@ object RetrofitClient {
 
     @Volatile
     private var currentSummaryService: AiApiService? = null
+
+    @Volatile
+    private var currentEmbeddingBaseUrl: String = ""
+
+    @Volatile
+    private var currentEmbeddingService: AiApiService? = null
+
+    fun getEmbeddingService(baseUrl: String): AiApiService {
+        val normalizedUrl = normalizeBaseUrl(baseUrl)
+        return synchronized(lock) {
+            if (normalizedUrl != currentEmbeddingBaseUrl || currentEmbeddingService == null) {
+                currentEmbeddingBaseUrl = normalizedUrl
+                val retrofit = Retrofit.Builder()
+                    .baseUrl(normalizedUrl)
+                    .client(embeddingHttpClient)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                currentEmbeddingService = retrofit.create(AiApiService::class.java)
+            }
+            currentEmbeddingService!!
+        }
+    }
 
     fun getService(baseUrl: String): AiApiService {
         val normalizedUrl = normalizeBaseUrl(baseUrl)

@@ -657,9 +657,15 @@ class RoleplayModelsTest {
             })),
             stubDao(com.aiassistant.data.local.CharacterTagDao::class.java, emptyMap()),
             conversationDao = stubDao(com.aiassistant.data.local.ConversationDao::class.java, mapOf("getConversationById" to conversation)),
-            memoryDao = stubDao(com.aiassistant.data.local.MemoryDao::class.java, mapOf("getCandidateMemories" to facts.map {
-                com.aiassistant.domain.model.MemoryItem(scope = "conversation", conversationId = session.conversationId, content = it)
-            }))
+            memoryDao = stubDao(com.aiassistant.data.local.MemoryDao::class.java, mapOf(
+                "getCandidateMemories" to facts.map {
+                    com.aiassistant.domain.model.MemoryItem(scope = "conversation", conversationId = session.conversationId, content = it)
+                },
+                "getAllActiveConversationMemories" to facts.map {
+                    com.aiassistant.domain.model.MemoryItem(scope = "conversation", conversationId = session.conversationId, content = it)
+                },
+                "getAllActiveGlobalMemories" to emptyList<com.aiassistant.domain.model.MemoryItem>()
+            ))
         )
     }
 
