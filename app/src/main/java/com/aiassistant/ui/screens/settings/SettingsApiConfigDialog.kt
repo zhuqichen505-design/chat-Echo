@@ -567,8 +567,27 @@ private fun ApiConfigEditorContent(
                     val enabledModels = (enabledModelNames + modelName)
                         .mapNotNull { cleanModelName(it) }
                         .toSet()
-                    val proposed = ApiConfig(
-                        id = config?.id ?: 0,
+                    // 重试保存时沿用已落库配置，编辑既有配置时完整保留采样/思考/联网/停止词等未在本页修改的参数。
+                    val persisted = if (persistedConfigId > 0L) repository.getApiConfigById(persistedConfigId) else null
+                    val baseConfig = persisted ?: config
+                    val now = System.currentTimeMillis()
+                    val configToSave = (baseConfig ?: ApiConfig(
+                        name = name.ifBlank { provider },
+                        provider = provider,
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                        apiType = apiType,
+                        modelName = cleanedCurrentModel,
+                        maxTokens = 8192,
+                        temperature = 0.95f,
+                        topP = 1.0f,
+                        enableThinking = true,
+                        thinkingEffort = "medium",
+                        enableWebSearch = false,
+                        createdAt = now,
+                        updatedAt = now
+                    )).copy(
+                        id = persistedConfigId,
                         name = name.ifBlank { provider },
                         provider = provider,
                         baseUrl = baseUrl,
@@ -576,23 +595,8 @@ private fun ApiConfigEditorContent(
                         apiType = apiType,
                         modelName = cleanedCurrentModel,
                         availableModels = modelNames.takeIf { it.isNotEmpty() }?.let { gson.toJson(it) },
-                        temperature = 0.95f,
-                        maxTokens = config?.maxTokens ?: 8192,
-                        topP = 1.0f,
-                        enableThinking = true,
-                        thinkingEffort = "medium",
-                        enableWebSearch = false,
                         isEnabled = isConfigEnabled,
-                        isDefault = config?.isDefault ?: false,
-                        createdAt = config?.createdAt ?: System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    // 重试保存时沿用已落库 ID，避免重复新增配置。
-                    val persisted = if (persistedConfigId > 0L) repository.getApiConfigById(persistedConfigId) else null
-                    val configToSave = proposed.copy(
-                        id = persistedConfigId,
-                        isDefault = persisted?.isDefault ?: proposed.isDefault,
-                        createdAt = persisted?.createdAt ?: proposed.createdAt
+                        updatedAt = now
                     )
                     val savedId = repository.saveApiConfig(configToSave)
                     persistedConfigId = savedId
@@ -645,9 +649,12 @@ private fun ApiConfigEditorContent(
 
     // 全屏页沿用设置页的壁纸、纸纹与悬浮玻璃顶栏，避免“弹窗放大”感。
     val pageBackgroundBitmap = remember(context) { BackgroundImageManager.getHomeBackgroundBitmap(context) }
+    var isDiscoveredModelsExpanded by rememberSaveable(config?.id ?: 0L) { mutableStateOf(true) }
     val showDiscoveryEmpty = keyModels != null && discoveredModels.isEmpty()
-    val sectionIndices = remember(discoveredModels.size, showDiscoveryEmpty) {
-        apiConfigSectionIndices(discoveredModels.size, showDiscoveryEmpty)
+    val visibleDiscoveredModels = if (isDiscoveredModelsExpanded) discoveredModels else emptyList()
+    val showDiscoveryEmptyVisible = isDiscoveredModelsExpanded && showDiscoveryEmpty
+    val sectionIndices = remember(visibleDiscoveredModels.size, showDiscoveryEmptyVisible) {
+        apiConfigSectionIndices(visibleDiscoveredModels.size, showDiscoveryEmptyVisible)
     }
     var pendingJumpSection by remember { mutableStateOf<ApiConfigSection?>(null) }
     val scrollActiveSection by remember(sectionIndices) {
@@ -1180,9 +1187,186 @@ private fun ApiConfigEditorContent(
                     ApiConfigSectionHeader(
                         index = ApiConfigSection.MODELS.index,
                         title = ApiConfigSection.MODELS.label,
-                        summary = "默认模型、已配置清单与接口拉取（已添加 ${availableModels.size} 个）"
+                        summary = "从 Key 拉取模型、默认模型与已配置清单（已添加 ${availableModels.size} 个）"
                     )
                 }
+                item(key = "model_discovery_header") {
+                    SettingsGlassCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FlowRow(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = keyModels?.let { "从 Key 读取的模型 (${it.size})" } ?: "从 Key 读取模型",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                val unadded = keyModels.orEmpty().filter { it !in configuredModelNames }
+                                if (unadded.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = {
+                                            availableModels = cleanModelNames(availableModels + unadded)
+                                            enabledModelNames = enabledModelNames + unadded
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("一键添加全部 (${unadded.size})", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                            if (keyModels != null) {
+                                IconButton(
+                                    onClick = { isDiscoveredModelsExpanded = !isDiscoveredModelsExpanded },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isDiscoveredModelsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = if (isDiscoveredModelsExpanded) "收起读取结果" else "展开读取结果",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val requestedUrl = baseUrl
+                                val requestedKey = apiKey
+                                val requestedType = apiType
+                                scope.launch {
+                                    isLoadingModels = true
+                                    keyModelFetchFailed = false
+                                    keyModels = null
+                                    try {
+                                        val result = repository.fetchAvailableModelsDirect(requestedUrl, requestedKey, requestedType)
+                                        if (baseUrl == requestedUrl && apiKey == requestedKey && apiType == requestedType) {
+                                            result.onSuccess { models ->
+                                                val cleaned = cleanModelNames(models)
+                                                keyModels = cleaned
+                                                isDiscoveredModelsExpanded = true
+                                                val updated = modelCustomSettings.toMutableMap()
+                                                cleaned.forEach { model ->
+                                                    if (!updated.containsKey(model)) {
+                                                        val eval = ModelCapabilityEngine.evaluateModel(model)
+                                                        updated[model] = ModelCustomSettings(
+                                                            contextWindowTokens = eval.contextWindowTokens,
+                                                            supportsTools = eval.supportsTools,
+                                                            supportsVision = eval.supportsVision,
+                                                            supportsThinking = eval.supportsReasoning,
+                                                            supportsWebSearch = true
+                                                        )
+                                                    }
+                                                }
+                                                modelCustomSettings = updated
+                                                if (modelName.isBlank() && cleaned.isNotEmpty()) modelName = cleaned.first()
+                                            }.onFailure { keyModelFetchFailed = true }
+                                        }
+                                    } finally {
+                                        isLoadingModels = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && !isLoadingModels && !isSaving
+                        ) {
+                            if (isLoadingModels) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (keyModels == null) "点击从 API Key 读取模型列表" else "重新读取 Key 模型列表")
+                        }
+                        if (keyModelFetchFailed) {
+                            Text(
+                                "读取失败，请检查地址、Key 和网络后重试；已有模型不会被判为失效。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        if (keyModels != null && isDiscoveredModelsExpanded) {
+                            val missingCount = apiModelDiscoveryEntries(configuredModelNames, keyModels).count { it.isUnavailable }
+                            if (missingCount > 0) {
+                                Text(
+                                    "可能已失效的已添加模型 ($missingCount) 已置顶。本次列表未返回这些模型，手动模型也可能不在接口清单中；可移除或保留继续使用。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedTextField(
+                                value = keyModelSearchQuery,
+                                onValueChange = { keyModelSearchQuery = it },
+                                placeholder = { Text("搜索已添加及本次读取的模型…", style = MaterialTheme.typography.bodySmall) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                trailingIcon = if (keyModelSearchQuery.isNotBlank()) {
+                                    {
+                                        IconButton(onClick = { keyModelSearchQuery = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "清除模型搜索", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                } else null,
+                                singleLine = true,
+                                shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else if (keyModels != null && !isDiscoveredModelsExpanded) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isDiscoveredModelsExpanded = true },
+                                shape = RoundedCornerShape(EchoTokens.Radius.md),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
+                                border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "已折叠 (${discoveredModels.size} 个读取条目)，点击展开",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Icon(
+                                        Icons.Default.ExpandMore,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                items(visibleDiscoveredModels, key = { "discovered_model:${it.model}" }) { entry ->
+                    ApiDiscoveredModelRow(
+                        entry = entry,
+                        enabled = !isSaving,
+                        onRemove = { removeConfiguredModel(entry.model) },
+                        onAdd = {
+                            availableModels = cleanModelNames(availableModels + entry.model)
+                            enabledModelNames = enabledModelNames + entry.model
+                            if (modelName.isBlank()) modelName = entry.model
+                        }
+                    )
+                }
+                if (showDiscoveryEmptyVisible) {
+                    item(key = "model_discovery_empty") {
+                        Text(
+                            if (keyModelSearchQuery.isBlank()) "本次未返回可添加的模型。" else "没有匹配的模型，试试其他关键词。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 item(key = "api_default_and_configured_models") {
                     val modelSpacingPx = with(LocalDensity.current) { 8.dp.toPx() }
                     SettingsGlassCard {
@@ -1336,7 +1520,7 @@ private fun ApiConfigEditorContent(
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                                         ) {
                                             Text(
-                                                text = "暂无已配置模型。可在上方手动添加，或通过下方按钮从接口拉取。",
+                                                text = "暂无已配置模型。可在上方从 Key 读取模型，或在此手动添加。",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(12.dp)
@@ -1450,136 +1634,6 @@ private fun ApiConfigEditorContent(
                                 }
                             }
                         }
-                    }
-                }
-
-                item(key = "model_discovery_header") {
-                    SettingsGlassCard {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = keyModels?.let { "从 Key 读取的模型 (${it.size})" } ?: "从 Key 读取模型",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            val unadded = keyModels.orEmpty().filter { it !in configuredModelNames }
-                            if (unadded.isNotEmpty()) {
-                                TextButton(
-                                    onClick = {
-                                        availableModels = cleanModelNames(availableModels + unadded)
-                                        enabledModelNames = enabledModelNames + unadded
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text("一键添加全部 (${unadded.size})", style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                val requestedUrl = baseUrl
-                                val requestedKey = apiKey
-                                val requestedType = apiType
-                                scope.launch {
-                                    isLoadingModels = true
-                                    keyModelFetchFailed = false
-                                    keyModels = null
-                                    try {
-                                        val result = repository.fetchAvailableModelsDirect(requestedUrl, requestedKey, requestedType)
-                                        if (baseUrl == requestedUrl && apiKey == requestedKey && apiType == requestedType) {
-                                            result.onSuccess { models ->
-                                                val cleaned = cleanModelNames(models)
-                                                keyModels = cleaned
-                                                val updated = modelCustomSettings.toMutableMap()
-                                                cleaned.forEach { model ->
-                                                    if (!updated.containsKey(model)) {
-                                                        val eval = ModelCapabilityEngine.evaluateModel(model)
-                                                        updated[model] = ModelCustomSettings(
-                                                            contextWindowTokens = eval.contextWindowTokens,
-                                                            supportsTools = eval.supportsTools,
-                                                            supportsVision = eval.supportsVision,
-                                                            supportsThinking = eval.supportsReasoning,
-                                                            supportsWebSearch = true
-                                                        )
-                                                    }
-                                                }
-                                                modelCustomSettings = updated
-                                                if (modelName.isBlank() && cleaned.isNotEmpty()) modelName = cleaned.first()
-                                            }.onFailure { keyModelFetchFailed = true }
-                                        }
-                                    } finally {
-                                        isLoadingModels = false
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && !isLoadingModels && !isSaving
-                        ) {
-                            if (isLoadingModels) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (keyModels == null) "点击从 API Key 读取模型列表" else "重新读取 Key 模型列表")
-                        }
-                        if (keyModelFetchFailed) {
-                            Text(
-                                "读取失败，请检查地址、Key 和网络后重试；已有模型不会被判为失效。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        if (keyModels != null) {
-                            val missingCount = apiModelDiscoveryEntries(configuredModelNames, keyModels).count { it.isUnavailable }
-                            if (missingCount > 0) {
-                                Text(
-                                    "可能已失效的已添加模型 ($missingCount) 已置顶。本次列表未返回这些模型，手动模型也可能不在接口清单中；可移除或保留继续使用。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            OutlinedTextField(
-                                value = keyModelSearchQuery,
-                                onValueChange = { keyModelSearchQuery = it },
-                                placeholder = { Text("搜索已添加及本次读取的模型…", style = MaterialTheme.typography.bodySmall) },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                trailingIcon = if (keyModelSearchQuery.isNotBlank()) {
-                                    {
-                                        IconButton(onClick = { keyModelSearchQuery = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "清除模型搜索", modifier = Modifier.size(16.dp))
-                                        }
-                                    }
-                                } else null,
-                                singleLine = true,
-                                shape = RoundedCornerShape(EchoTokens.Radius.md),
-                                textStyle = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-                items(discoveredModels, key = { "discovered_model:${it.model}" }) { entry ->
-                    ApiDiscoveredModelRow(
-                        entry = entry,
-                        enabled = !isSaving,
-                        onRemove = { removeConfiguredModel(entry.model) },
-                        onAdd = {
-                            availableModels = cleanModelNames(availableModels + entry.model)
-                            enabledModelNames = enabledModelNames + entry.model
-                            if (modelName.isBlank()) modelName = entry.model
-                        }
-                    )
-                }
-                if (showDiscoveryEmpty) {
-                    item(key = "model_discovery_empty") {
-                        Text(
-                            if (keyModelSearchQuery.isBlank()) "本次未返回可添加的模型。" else "没有匹配的模型，试试其他关键词。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
 

@@ -356,6 +356,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
 
                 val conversation = Conversation(
                     title = title,
+                    tags = "roleplay",
                     enableSessionMemory = true,
                     apiConfigId = apiConfig.id,
                     modelName = apiConfig.modelName,
@@ -450,6 +451,7 @@ class RoleplayViewModel(application: Application) : AndroidViewModel(application
                 val conversation = Conversation(
                     title = titleOverride.trim().ifBlank { title },
                     systemPrompt = writingInstructions.trim().ifBlank { null },
+                    tags = "story",
                     enableSessionMemory = true,
                     apiConfigId = apiConfig.id,
                     modelName = targetModelName,

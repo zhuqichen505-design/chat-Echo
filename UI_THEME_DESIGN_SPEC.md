@@ -91,6 +91,7 @@
 - **语义四元组 (`SemanticColorGroup`)**：`error`、`warning`、`success`、`info` 均包含 `main / container / onContainer / border` 四角色。
 - **单色主题收敛 (`isMonochrome == true`)**：如「墨白」主题，在 `rememberEchoSemanticColors()` 中将 `warning / success / info` 收敛为中性表面色，**仅保留 `error` 红色**以提示需要处理的操作。
 - **自定义壁纸适配**：叠加用户壁纸时，顶部工具栏、消息气泡与文本层必须经 `readableTextColorFor(...)` 与 `rememberReadableBackdropColors(bitmap)` 对背景图采样后计算高对比前景文字色。
+- **内置纯色背景（`BackgroundImageManager.PRESET_SOLID_COLORS`）**：共 14 项（6 浅色粉彩 + 6 深色饱和暗调 + 纯白/纯黑），浅深模式下锁定所选原色不反转；6 款浅色保持可见粉彩色相（饱和度约 13%–21%，不再惨白近似纯白）且相对深色正文维持 ≥ 10:1 对比度；6 款深色彩色保持清晰可辨色相（相对亮度 `0.063–0.079`，不再发黑近似纯黑）且相对白字维持 ≥ 7:1 对比度。
 
 ---
 
@@ -142,7 +143,7 @@ Echo 主题绝非单一换色，而是由 **11 个正交设计维度**共同塑�
 - `EchoGlassCard` 与 `Modifier.echoHazePanel` 根据 `LocalEchoThemeStyle.current.flatSurfaces` 自动分流：
   - `flatSurfaces == false`（经典主题）：启用 Haze 实时模糊、半透明叠色、45° 折射高光与渐变微光描边；
   - `flatSurfaces == true`（14 套风格主题）：转为不透明纸质/实体表面，叠加 `echoThemeHardShadow`、`echoPaperTexture()`、自适应描边（`strongOutline` 时 `1.6.dp`）与 `echoThemeFrameOrnament()`。
-- **下拉菜单防斑块规范**：`EchoGlassDropdownMenu` 必须保持不透明自绘 `Popup`（`surfaceTint` 5% 合成 `surface`），`tonalElevation = 0.dp`、`shadowElevation = 0.dp`，消除半透明菜单透字与黑边。
+- **下拉菜单防斑块与独立浮层规范**：`EchoGlassDropdownMenu` 与 `EchoAnchoredDropdownPopup` 必须保持不透明自绘 `Popup`（`surfaceTint` 5% 合成 `surface`），`tonalElevation = 0.dp`、`shadowElevation = 0.dp`，消除半透明菜单透字与黑边；列表型选择器（如 API 配置页「新对话默认 API」）必须以 `EchoAnchoredDropdownPopup` 独立浮层贴合触发卡片下方展开，**禁止**以页内 `AnimatedVisibility` 挤压并下推页面下方内容。
 
 ### 4.2 全局几何与输入框手柄联动
 - 全局形状令牌：`EchoGlassDialogShape`、`EchoGlassPagePanelShape`、`EchoGlassControlShape`、`EchoGlassInputShape`、`EchoGlassSubPanelShape`、`EchoGlassCompactPanelShape`、`EchoGlassIconButtonShape`。
@@ -168,7 +169,16 @@ Echo 主题绝非单一换色，而是由 **11 个正交设计维度**共同塑�
   - `compact`（紧凑速览）：1.48x 行高，8dp 紧凑消息间距，取消首行缩进
   - `script`（剧本分镜）：1.72x 行高，上下细线分镜提示用户行动/对白
 - **8 种创作正文字体 (`EchoStoryFont`)**：
-  - `literary`（沉浸衬线，内置思源宋体 `echo_literary_regular.ttf`）、`clear`（清晰无衬线）、`typewriter`（稿纸等宽）、`system`（跟随系统）、`system_serif`（经典宋体 `FontFamily.Serif`）、`print_book`（精印书宋，中等字重+0.45sp 字距）、`elegant_light`（轻盈细黑，Light 字重+0.35sp 字距）、`calligraphy`（随笔手写 `FontFamily.Cursive`）。
+  - `system`（**默认字体**，默认选中且为未知值回退项，直接使用手机系统字体 `FontFamily.Default`）
+  - 其余 7 款均绑定内置 SIL OFL 1.1 中文字体资源（`res/font/echo_*.ttf`）并开启 `FontSynthesis.All`，彻底避免国产系统通用字体族缺少中文覆盖而静默退回系统字体：
+    - `literary`（沉浸衬线，思源宋体 `echo_literary_regular.ttf`）
+    - `system_serif`（经典宋体，站酷小薇体 `echo_xiaowei_regular.ttf` + `0.2sp` 字距）
+    - `print_book`（精印书宋，思源宋体 `SemiBold` 合成字重 + `0.55sp` 字距）
+    - `clear`（清晰无衬线，霞鹜新晰黑 `echo_xihei_regular.ttf` `SemiBold` + `0.1sp` 字距）
+    - `elegant_light`（轻盈细黑，霞鹜新晰黑 `Regular` + `0.4sp` 字距）
+    - `typewriter`（稿纸等宽，霞鹜文楷等宽 `echo_typewriter_regular.ttf` + `0.15sp` 字距）
+    - `calligraphy`（随笔手写，龙藏手写体 `echo_calligraphy_regular.ttf` + `0.45sp` 字距）
+  - `StoryReadingTypography` 须同步覆盖 `headline*` / `title*` / `body*` / `labelLarge` 并通过 `LocalTextStyle` 提供 `bodyLarge`，确保 Markdown 标题、正文与用户消息统一继承；外观设置中由 `StoryReadingPreviewCard` 提供真实缩微阅读页预览（含当前排版/字体/行距徽章、分栏资料条、对应样式用户消息与双段叙事正文）。
 
 ### 4.5 拖拽重排组件规范（`SmoothReorderState.kt`）
 - **稳定身份**：必须使用业务稳定 ID（如配置 ID、Key UUID、模型名、消息 ID），严禁使用列表下标作 Key；外部列表容器必须配合 `key(itemId)` 使用。
@@ -207,7 +217,7 @@ Echo 主题绝非单一换色，而是由 **11 个正交设计维度**共同塑�
 ### 阶段 5：自动化验证与人工验收
 1. 在 `app/chat-Echo` 执行全量验证：
    ```powershell
-   pwsh -File scripts/verify.ps1 -GradleUserHome D:/Agent/APP-Echo/app/.gradle-home
+   pwsh -File scripts/verify.ps1
    git diff --check
    ```
 2. 确认关键测试通过：`allPresetThemeTextPairsMeetReadableContrastInBothModes`、`RetryPreferencesTest`、`SmoothReorderTest`、`UiPolishRegressionTest`。
@@ -221,3 +231,4 @@ Echo 主题绝非单一换色，而是由 **11 个正交设计维度**共同塑�
 | 日期 | 变更摘要 | 关联文件 / 基线 |
 |---|---|---|
 | 2026-11-26 | 初始建立 Echo UI 与主题设计流程及规范文档；完整收录 15 套主题矩阵、设计令牌、13 组 WCAG AA 对比度红线、6 种创作阅读页排版、8 种创作正文字体、拖拽重排规范与自动更新触发机制。 | v2.9.3/238 基线 + 本轮阅读/字体/API 配置/拖拽重排优化 |
+| 2026-11-26 | 增补内置 14 款纯色背景粉彩/深色调校红线（§2.3）；新增 `EchoAnchoredDropdownPopup` 独立浮层选择器规范（§4.1）；将创作正文字体默认项改为 `system`（默认字体）并内置 5 款开源中文字体（`echo_literary/xiaowei/xihei/typewriter/calligraphy_regular.ttf`）与真实缩微排版预览卡 `StoryReadingPreviewCard`（§4.4）。 | v2.9.4/239 基线 + 10 项体验与视觉优化（未发版） |

@@ -8,8 +8,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import com.aiassistant.R
 import androidx.compose.ui.unit.dp
@@ -108,18 +109,20 @@ internal fun storyReadingMetricsFor(style: String?): StoryReadingMetrics {
 internal data class StoryFontSpec(
     val family: FontFamily,
     val weight: FontWeight? = null,
-    val letterSpacingBonusSp: Float = 0f
+    val letterSpacingBonusSp: Float = 0f,
+    val usesBundledTypeface: Boolean = false
 )
 
 internal fun readingFontSpec(font: String): StoryFontSpec = when (EchoStoryFont.sanitize(font)) {
-    EchoStoryFont.TYPEWRITER -> StoryFontSpec(FontFamily.Monospace)
-    EchoStoryFont.CLEAR -> StoryFontSpec(FontFamily.SansSerif)
-    EchoStoryFont.SYSTEM -> StoryFontSpec(FontFamily.Default)
-    EchoStoryFont.SYSTEM_SERIF -> StoryFontSpec(FontFamily.Serif, letterSpacingBonusSp = 0.15f)
-    EchoStoryFont.PRINT_BOOK -> StoryFontSpec(EchoLiteraryFont, weight = FontWeight.Medium, letterSpacingBonusSp = 0.45f)
-    EchoStoryFont.ELEGANT_LIGHT -> StoryFontSpec(FontFamily.SansSerif, weight = FontWeight.Light, letterSpacingBonusSp = 0.35f)
-    EchoStoryFont.CALLIGRAPHY -> StoryFontSpec(FontFamily.Cursive, letterSpacingBonusSp = 0.4f)
-    else -> StoryFontSpec(EchoLiteraryFont)
+    EchoStoryFont.SYSTEM -> StoryFontSpec(FontFamily.Default, usesBundledTypeface = false)
+    EchoStoryFont.LITERARY -> StoryFontSpec(EchoLiteraryFont, usesBundledTypeface = true)
+    EchoStoryFont.SYSTEM_SERIF -> StoryFontSpec(EchoXiaoWeiSerifFont, letterSpacingBonusSp = 0.2f, usesBundledTypeface = true)
+    EchoStoryFont.PRINT_BOOK -> StoryFontSpec(EchoLiteraryFont, weight = FontWeight.SemiBold, letterSpacingBonusSp = 0.55f, usesBundledTypeface = true)
+    EchoStoryFont.CLEAR -> StoryFontSpec(EchoXiHeiFont, weight = FontWeight.SemiBold, letterSpacingBonusSp = 0.1f, usesBundledTypeface = true)
+    EchoStoryFont.ELEGANT_LIGHT -> StoryFontSpec(EchoXiHeiFont, weight = FontWeight.Normal, letterSpacingBonusSp = 0.4f, usesBundledTypeface = true)
+    EchoStoryFont.TYPEWRITER -> StoryFontSpec(EchoTypewriterFont, letterSpacingBonusSp = 0.15f, usesBundledTypeface = true)
+    EchoStoryFont.CALLIGRAPHY -> StoryFontSpec(EchoCalligraphyFont, letterSpacingBonusSp = 0.45f, usesBundledTypeface = true)
+    else -> StoryFontSpec(FontFamily.Default, usesBundledTypeface = false)
 }
 
 internal fun readingFontFamily(font: String): FontFamily = readingFontSpec(font).family
@@ -144,6 +147,7 @@ private fun applyStoryTextStyle(
     return base.copy(
         fontFamily = resolvedFamily,
         fontWeight = resolvedWeight,
+        fontSynthesis = FontSynthesis.All,
         lineHeight = resolvedLineHeight,
         letterSpacing = resolvedLetterSpacing
     )
@@ -153,7 +157,7 @@ private fun applyStoryTextStyle(
 @Composable
 internal fun StoryReadingTypography(
     style: String?,
-    font: String? = EchoStoryFont.LITERARY,
+    font: String? = EchoStoryFont.SYSTEM,
     content: @Composable () -> Unit
 ) {
     if (style == null && font == null) {
@@ -163,22 +167,30 @@ internal fun StoryReadingTypography(
     val typography = MaterialTheme.typography
     val spec = font?.let(::readingFontSpec)
     val lineMultiplier = if (style == null) null else storyReadingMetricsFor(style).lineMultiplier
+    val storyTypography = typography.copy(
+        headlineLarge = applyStoryTextStyle(typography.headlineLarge, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        headlineMedium = applyStoryTextStyle(typography.headlineMedium, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        headlineSmall = applyStoryTextStyle(typography.headlineSmall, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        titleLarge = applyStoryTextStyle(typography.titleLarge, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        titleMedium = applyStoryTextStyle(typography.titleMedium, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        titleSmall = applyStoryTextStyle(typography.titleSmall, spec, lineMultiplier = null, applyWeightAndSpacing = false),
+        bodyLarge = applyStoryTextStyle(typography.bodyLarge, spec, lineMultiplier, applyWeightAndSpacing = true),
+        bodyMedium = applyStoryTextStyle(typography.bodyMedium, spec, lineMultiplier, applyWeightAndSpacing = true),
+        bodySmall = applyStoryTextStyle(typography.bodySmall, spec, lineMultiplier, applyWeightAndSpacing = true),
+        labelLarge = applyStoryTextStyle(typography.labelLarge, spec, lineMultiplier = null, applyWeightAndSpacing = false)
+    )
     CompositionLocalProvider(LocalEchoStoryReadingStyle provides style) {
-        MaterialTheme(
-            typography = typography.copy(
-                bodyLarge = applyStoryTextStyle(typography.bodyLarge, spec, lineMultiplier, applyWeightAndSpacing = true),
-                bodyMedium = applyStoryTextStyle(typography.bodyMedium, spec, lineMultiplier, applyWeightAndSpacing = true),
-                bodySmall = applyStoryTextStyle(typography.bodySmall, spec, lineMultiplier, applyWeightAndSpacing = true),
-                titleLarge = applyStoryTextStyle(typography.titleLarge, spec, lineMultiplier = null, applyWeightAndSpacing = false),
-                titleMedium = applyStoryTextStyle(typography.titleMedium, spec, lineMultiplier = null, applyWeightAndSpacing = false),
-                titleSmall = applyStoryTextStyle(typography.titleSmall, spec, lineMultiplier = null, applyWeightAndSpacing = false)
-            ),
-            content = content
-        )
+        MaterialTheme(typography = storyTypography) {
+            CompositionLocalProvider(LocalTextStyle provides storyTypography.bodyLarge, content = content)
+        }
     }
 }
 
 internal val EchoLiteraryFont = FontFamily(Font(R.font.echo_literary_regular))
+internal val EchoXiaoWeiSerifFont = FontFamily(Font(R.font.echo_xiaowei_regular))
+internal val EchoXiHeiFont = FontFamily(Font(R.font.echo_xihei_regular))
+internal val EchoTypewriterFont = FontFamily(Font(R.font.echo_typewriter_regular))
+internal val EchoCalligraphyFont = FontFamily(Font(R.font.echo_calligraphy_regular))
 
 /** 分栏展示同一 Conversation 的资料，普通对话与故事都可使用。 */
 @Composable

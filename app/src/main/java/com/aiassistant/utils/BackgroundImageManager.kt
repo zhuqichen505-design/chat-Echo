@@ -34,20 +34,22 @@ object BackgroundImageManager {
     )
 
     // A preset is the selected color, not a bitmap whose hue silently changes with dark mode.
-    // Dark options have their own visible swatches and remain available in either mode.
+    // Light presets carry clear, comfortable pastel hues (never mistaken for plain white) while
+    // keeping dark-text contrast > 11:1; dark presets carry unmistakable rich dark tones (never
+    // collapsing into flat black) while keeping white-text contrast > 8:1.
     val PRESET_SOLID_COLORS = listOf(
-        SolidColorPreset("pale_green", "浅艾绿", 0xFFF1F8F4.toInt(), 0xFFF1F8F4.toInt(), "#F1F8F4"),
-        SolidColorPreset("pale_blue", "浅湖蓝", 0xFFF0F5FA.toInt(), 0xFFF0F5FA.toInt(), "#F0F5FA"),
-        SolidColorPreset("pale_purple", "浅薰紫", 0xFFF6F3F9.toInt(), 0xFFF6F3F9.toInt(), "#F6F3F9"),
-        SolidColorPreset("pale_pink", "浅樱粉", 0xFFFAF2F4.toInt(), 0xFFFAF2F4.toInt(), "#FAF2F4"),
-        SolidColorPreset("pale_yellow", "浅暖杏", 0xFFFAF8F0.toInt(), 0xFFFAF8F0.toInt(), "#FAF8F0"),
-        SolidColorPreset("pale_cyan", "浅山岚", 0xFFF0F7F7.toInt(), 0xFFF0F7F7.toInt(), "#F0F7F7"),
-        SolidColorPreset("night_blue", "深海蓝", 0xFF24374D.toInt(), 0xFF24374D.toInt(), "#24374D"),
-        SolidColorPreset("forest", "夜森林", 0xFF263E35.toInt(), 0xFF263E35.toInt(), "#263E35"),
-        SolidColorPreset("plum", "暮烟紫", 0xFF40334A.toInt(), 0xFF40334A.toInt(), "#40334A"),
-        SolidColorPreset("cocoa", "暖可可", 0xFF44372F.toInt(), 0xFF44372F.toInt(), "#44372F"),
-        SolidColorPreset("graphite", "石墨灰", 0xFF343B42.toInt(), 0xFF343B42.toInt(), "#343B42"),
-        SolidColorPreset("deep_teal", "深青绿", 0xFF214148.toInt(), 0xFF214148.toInt(), "#214148"),
+        SolidColorPreset("pale_green", "浅艾绿", 0xFFC8E6D2.toInt(), 0xFFC8E6D2.toInt(), "#C8E6D2"),
+        SolidColorPreset("pale_blue", "浅湖蓝", 0xFFC9DFF6.toInt(), 0xFFC9DFF6.toInt(), "#C9DFF6"),
+        SolidColorPreset("pale_purple", "浅薰紫", 0xFFDDD2F2.toInt(), 0xFFDDD2F2.toInt(), "#DDD2F2"),
+        SolidColorPreset("pale_pink", "浅樱粉", 0xFFF6D4DE.toInt(), 0xFFF6D4DE.toInt(), "#F6D4DE"),
+        SolidColorPreset("pale_yellow", "浅暖杏", 0xFFF4E4BE.toInt(), 0xFFF4E4BE.toInt(), "#F4E4BE"),
+        SolidColorPreset("pale_cyan", "浅山岚", 0xFFC4E6E8.toInt(), 0xFFC4E6E8.toInt(), "#C4E6E8"),
+        SolidColorPreset("night_blue", "深海蓝", 0xFF1E4976.toInt(), 0xFF1E4976.toInt(), "#1E4976"),
+        SolidColorPreset("forest", "夜森林", 0xFF205845.toInt(), 0xFF205845.toInt(), "#205845"),
+        SolidColorPreset("plum", "暮烟紫", 0xFF583B78.toInt(), 0xFF583B78.toInt(), "#583B78"),
+        SolidColorPreset("cocoa", "暖可可", 0xFF634232.toInt(), 0xFF634232.toInt(), "#634232"),
+        SolidColorPreset("graphite", "石墨灰", 0xFF45505B.toInt(), 0xFF45505B.toInt(), "#45505B"),
+        SolidColorPreset("deep_teal", "深青绿", 0xFF185763.toInt(), 0xFF185763.toInt(), "#185763"),
         SolidColorPreset("pure_white", "纯白", 0xFFFFFFFF.toInt(), 0xFFFFFFFF.toInt(), "#FFFFFF"),
         SolidColorPreset("pure_black", "纯黑", 0xFF000000.toInt(), 0xFF000000.toInt(), "#000000")
     )

@@ -301,6 +301,32 @@ object TimelineMemoryHelper {
         return ordered.filterIndexed { index, _ -> index in selected }
     }
 
+    /**
+     * 缓存友好型确定性时间线选择：仅按时间线自身顺序与预算选出固定进入 Zone 1 静态前缀的节点，
+     * 不因每轮用户输入变化而重排或替换前缀；超预算的更早节点作为 second 返回，供 Zone 3 尾注按需召回。
+     */
+    fun selectDeterministicTimelineNodesForContext(
+        nodes: List<TimelineNode>,
+        tokenBudget: Int
+    ): Pair<List<TimelineNode>, List<TimelineNode>> {
+        val ordered = nodes.sortedWith(compareBy<TimelineNode> { it.orderIndex }.thenBy { it.createdAt })
+        if (ordered.isEmpty()) return emptyList<TimelineNode>() to emptyList()
+        var remaining = (tokenBudget - 64).coerceAtLeast(0)
+        val selectedIndices = mutableSetOf<Int>()
+        // 从最近时间线节点倒序填充，保留近期完整演进链；结果再按时间正序输出
+        for (index in ordered.indices.reversed()) {
+            val node = ordered[index]
+            val cost = com.aiassistant.data.repository.helpers.TokenEstimationHelper.estimateTokenCount("[${node.timeTag}] ${node.event}") + 12
+            if (cost <= remaining) {
+                selectedIndices += index
+                remaining -= cost
+            }
+        }
+        val stablePrefix = ordered.filterIndexed { index, _ -> index in selectedIndices }
+        val overflow = ordered.filterIndexed { index, _ -> index !in selectedIndices }
+        return stablePrefix to overflow
+    }
+
     // 匹配如 [第3天·傍晚]、[第3天]、[DAY 2]、[10月5日·上午]、[周三·晚上] 等时间标签
     private val TIME_TAG_PATTERN = Pattern.compile("""^[\s\[【](?:第\s*(\d+)\s*天(?:[·\s\-]([^\]】]+))?|DAY\s*(\d+)|([^\]】]+))[\]】]\s*(.*)$""", Pattern.CASE_INSENSITIVE)
     private val DAY_NUMBER_PATTERN = Pattern.compile("""(?:第\s*(\d+)\s*天|DAY\s*(\d+))""", Pattern.CASE_INSENSITIVE)

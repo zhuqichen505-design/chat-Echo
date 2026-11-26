@@ -1,5 +1,6 @@
 package com.aiassistant.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -67,14 +69,38 @@ data class SideAnchorItem(
     /** 输入列表序号（从 1 开始）；其它场景为空表示不展示编号 */
     val number: Int? = null,
     /** 搜索用的完整文本；为空时退回 [title] */
-    val searchText: String? = null
+    val searchText: String? = null,
+    /** 可选角色/类型标识（如对话内搜索命中的“提问”/“回复”） */
+    val roleLabel: String? = null
 )
 
-/** 右侧列表内搜索：按完整文本过滤，忽略大小写与首尾空白。 */
+/** 右侧列表内搜索：按完整文本过滤，支持空格分隔多词 AND 匹配，忽略大小写与首尾空白。 */
 internal fun filterAnchorItems(items: List<SideAnchorItem>, query: String): List<SideAnchorItem> {
-    val normalized = query.trim()
-    if (normalized.isEmpty()) return items
-    return items.filter { (it.searchText ?: it.title).contains(normalized, ignoreCase = true) }
+    val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (terms.isEmpty()) return items
+    return items.filter { item ->
+        val haystack = item.searchText ?: item.title
+        terms.all { term -> haystack.contains(term, ignoreCase = true) }
+    }
+}
+
+/** 搜索态预览摘要：优先围绕首个命中词截取单行上下文，帮助定位回复或长提问中的命中位置。 */
+internal fun buildAnchorSearchPreview(item: SideAnchorItem, query: String, maxChars: Int = 44): String {
+    val firstTerm = query.trim().split(Regex("\\s+")).firstOrNull { it.isNotEmpty() }
+        ?: return item.title
+    val source = (item.searchText ?: item.title)
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    if (source.isEmpty()) return item.title
+    val hitIndex = source.indexOf(firstTerm, ignoreCase = true)
+    if (hitIndex < 0) return item.title
+    if (source.length <= maxChars) return source
+    val leadingContext = ((maxChars - firstTerm.length) / 3).coerceAtLeast(8)
+    val start = (hitIndex - leadingContext).coerceAtLeast(0)
+    val end = (start + maxChars).coerceAtMost(source.length)
+    val prefix = if (start > 0) "…" else ""
+    val suffix = if (end < source.length) "…" else ""
+    return prefix + source.substring(start, end).trim() + suffix
 }
 
 @Composable
@@ -83,16 +109,21 @@ fun SideAnchorNavigator(
     listState: LazyListState,
     visible: Boolean = true,
     hazeState: HazeState? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    searchItems: List<SideAnchorItem> = items,
+    listLabel: String = "提问",
+    searchPlaceholder: String = "搜索提问或回复内容"
 ) {
-    if (items.size < 2) return
+    if (items.size < 2 && searchItems.size < 2) return
+    val railItems = if (items.size >= 2) items else searchItems
 
     val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
-    val currentIndex by remember(items, listState) {
+    BackHandler(enabled = expanded) { expanded = false }
+    val currentIndex by remember(railItems, listState) {
         derivedStateOf {
             val first = listState.firstVisibleItemIndex
-            items.lastOrNull { it.itemIndex <= first }?.itemIndex ?: items.first().itemIndex
+            railItems.lastOrNull { it.itemIndex <= first }?.itemIndex ?: railItems.first().itemIndex
         }
     }
 
@@ -103,7 +134,9 @@ fun SideAnchorNavigator(
         modifier = modifier
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
             contentAlignment = Alignment.CenterEnd
         ) {
             if (expanded) {
@@ -121,7 +154,7 @@ fun SideAnchorNavigator(
                 modifier = Modifier.align(Alignment.CenterEnd)
             ) {
                 CollapsedAnchorRail(
-                    items = items,
+                    items = railItems,
                     currentIndex = currentIndex,
                     onClick = { expanded = true }
                 )
@@ -135,8 +168,11 @@ fun SideAnchorNavigator(
             ) {
                 ExpandedAnchorPanel(
                     items = items,
+                    searchItems = searchItems,
                     currentIndex = currentIndex,
                     hazeState = hazeState,
+                    listLabel = listLabel,
+                    searchPlaceholder = searchPlaceholder,
                     onDismiss = { expanded = false },
                     onSelected = { item ->
                         expanded = false
@@ -217,10 +253,14 @@ private fun CollapsedAnchorRail(
 }
 
 @Composable
-private fun ExpandedAnchorPanel(
+internal fun ExpandedAnchorPanel(
     items: List<SideAnchorItem>,
+    searchItems: List<SideAnchorItem> = items,
     currentIndex: Int,
     hazeState: HazeState?,
+    listLabel: String = "提问",
+    searchPlaceholder: String = "搜索提问或回复内容",
+    initialQuery: String = "",
     onDismiss: () -> Unit,
     onSelected: (SideAnchorItem) -> Unit
 ) {
@@ -230,9 +270,18 @@ private fun ExpandedAnchorPanel(
     val activeIndex = remember(items, currentIndex) {
         items.indexOfLast { it.itemIndex <= currentIndex }.coerceAtLeast(0)
     }
-    var query by remember { mutableStateOf("") }
-    val visibleItems = remember(items, query) { filterAnchorItems(items, query) }
+    var query by remember(initialQuery) { mutableStateOf(initialQuery) }
+    val isSearching = query.isNotBlank()
+    val visibleItems = remember(items, searchItems, query) {
+        if (query.isBlank()) items else filterAnchorItems(searchItems, query)
+    }
     val showNumbers = remember(items) { items.any { it.number != null } }
+    val canScrollPanel by remember(panelListState) {
+        derivedStateOf {
+            val info = panelListState.layoutInfo
+            info.totalItemsCount > 1 && info.totalItemsCount > info.visibleItemsInfo.size.coerceAtLeast(1)
+        }
+    }
 
     LaunchedEffect(activeIndex, query) {
         if (query.isBlank() && activeIndex >= 0 && items.isNotEmpty()) {
@@ -286,11 +335,12 @@ private fun ExpandedAnchorPanel(
             AnchorSearchField(
                 query = query,
                 onQueryChange = { query = it },
+                placeholder = searchPlaceholder,
                 modifier = Modifier.padding(horizontal = 10.dp)
             )
             val resultHint = when {
-                query.isBlank() -> "提问 · 共 ${items.size} 条"
-                visibleItems.isEmpty() -> "没有匹配的提问"
+                !isSearching -> "$listLabel · 共 ${items.size} 条"
+                visibleItems.isEmpty() -> "没有匹配的内容"
                 else -> "找到 ${visibleItems.size} 条匹配"
             }
             Text(
@@ -299,18 +349,31 @@ private fun ExpandedAnchorPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp)
             )
-            Box(modifier = Modifier.fillMaxWidth()) {
+            // 使用 weight(1f, fill = false) 紧贴列表实际高度，滚动条置于 matchParentSize 叠层中，
+            // 避免 fillMaxHeight() 把列表容器强行拉满至 480dp 上限并在列表下方产生空白。
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+            ) {
                 LazyColumn(
                     state = panelListState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 360.dp)
-                        .padding(end = 14.dp),
+                        .padding(end = if (canScrollPanel) 14.dp else 0.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    items(items = visibleItems, key = { it.itemIndex }) { item ->
+                    items(
+                        items = visibleItems,
+                        key = { "${it.roleLabel.orEmpty()}_${it.itemIndex}_${it.number ?: 0}" }
+                    ) { item ->
                         val selected = item.itemIndex == currentIndex
                         val itemShape = RoundedCornerShape(14.dp)
+                        val displayText = if (isSearching) {
+                            buildAnchorSearchPreview(item, query)
+                        } else {
+                            item.title
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -326,7 +389,13 @@ private fun ExpandedAnchorPanel(
                                 .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (showNumbers) {
+                            if (isSearching && !item.roleLabel.isNullOrBlank()) {
+                                AnchorRoleBadge(
+                                    label = item.roleLabel,
+                                    isReply = item.roleLabel == "回复",
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                            } else if (showNumbers) {
                                 AnchorNumberBadge(
                                     number = item.number,
                                     selected = selected,
@@ -334,16 +403,16 @@ private fun ExpandedAnchorPanel(
                                 )
                             }
                             Text(
-                                text = item.title,
+                                text = displayText,
                                 modifier = Modifier.weight(1f),
-                                maxLines = 1,
+                                maxLines = if (isSearching) 2 else 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (selected) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
                                 }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -372,29 +441,30 @@ private fun ExpandedAnchorPanel(
                             )
                         }
                     }
-                    item(key = "anchor_dismiss") {
-                        val dismissShape = RoundedCornerShape(999.dp)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .echoShapeClick(dismissShape, onClick = onDismiss)
-                                .padding(vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "收起",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                            )
-                        }
-                    }
                 }
-                AnchorPanelScrollbar(
-                    listState = panelListState,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight()
-                        .padding(end = 2.dp)
+                Box(modifier = Modifier.matchParentSize()) {
+                    AnchorPanelScrollbar(
+                        listState = panelListState,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(end = 2.dp)
+                    )
+                }
+            }
+            val dismissShape = RoundedCornerShape(999.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .echoShapeClick(dismissShape, onClick = onDismiss)
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "收起",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
                 )
             }
         }
@@ -500,9 +570,42 @@ private fun AnchorNumberBadge(
 }
 
 @Composable
+private fun AnchorRoleBadge(
+    label: String,
+    isReply: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = if (isReply) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+    }
+    val fgColor = if (isReply) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
+    Box(
+        modifier = modifier
+            .height(20.dp)
+            .background(color = bgColor, shape = RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = fgColor
+        )
+    }
+}
+
+@Composable
 private fun AnchorSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
+    placeholder: String = "搜索提问或回复内容",
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -527,9 +630,11 @@ private fun AnchorSearchField(
         Box(modifier = Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "搜索提问内容",
+                    text = placeholder,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             BasicTextField(

@@ -1,5 +1,62 @@
 # 维护记录
 
+## 2026-11-26 · 发布 Echo 2.9.5（提示词前缀缓存改造、4 项隔离/配置修复及 10 项交互与视觉优化）
+
+版本由 2.9.4/239 递增至 2.9.5/240（仅更新 `app/build.gradle.kts`）。将工作区已完成验收的 10 项交互与视觉优化连同本轮提示词前缀缓存改造及 4 项关联修复合并冻结验收、构建并发布。Room v37 / 20 个实体、消息与备份格式不变。
+
+改动：
+1. **提示词前缀缓存改造（Anthropic / OpenAI / OpenRouter / 兼容网关）**：
+   - 新增 `PromptCacheHelper` 与协议字段（`AnthropicCacheControl`、`AnthropicRequest.system: Any?`、`AnthropicContent.cache_control`、`ChatCompletionRequest.prompt_cache_key / cache_control / session_id`、`PreparedDirectionContext.dynamicTurnContext`）。
+   - **Anthropic 三断点滑动缓存**：静态 `system`（BP1）+ 历史锚点（BP2，优先最后一个历史 `assistant`）+ 当前稳定用户输入（BP3，置于动态尾注之前以保证下一轮精确命中）；回复方向规划期启用 BP4 覆盖 `<turn_context>` 使紧随其后的正式回复复用缓存；默认 5 分钟 TTL，支持扩展 1 小时 TTL（附带 `anthropic-beta: extended-cache-ttl-2025-04-11`）。
+   - **OpenAI / OpenRouter 安全路由**：统一发送安全 HTTP 头 `X-Session-ID: echo-conv-<id>`；按 Host / Vendor 白名单发送 `prompt_cache_key`（官方 OpenAI 或 OpenRouter + GPT）、`session_id`（OpenRouter）及 `cache_control`（OpenRouter + Claude），避免第三方严格代理报 HTTP 400。
+   - **三区前缀稳定性与阶梯滞后截断**：`<session_memory>` 改为按 `createdAt, id` 稳定排序（取消每轮按用户输入关键词重排）；`<session_timeline>` 经 `TimelineMemoryHelper.selectDeterministicTimelineNodesForContext` 采用确定性时序窗口入静态前缀 Zone 1，超预算早期节点在 Zone 3 召回；关键词世界书（`isConstant == false`）、跨会话长期记忆与单轮 `replyDirection` / 规划指令统一后置至当前用户消息末尾 Zone 3；`ContextCompressionPlanner` 预算溢出时按 80% 滞后目标一次性腾出追加跑道；新增会话级 `PromptCacheSnapshot` 命中/未命中归因诊断。
+   - `PersonalizationManager` / `SettingsRetryControls` 新增「提示词前缀缓存优化」开关（默认开启）与 Claude 5 分钟 / 1 小时 TTL 切换。
+2. **4 项关联隔离与配置缺陷修复**：
+   - `RoleplayViewModel` 新建角色扮演/故事会话补写 `tags = "roleplay"` / `"story"`，修复通用助手底设与个性化偏好泄露。
+   - `RoleplayRepository.assembleRoleplayContext` 新增 `includeSessionMemories` 并在 `ChatViewModel` 传 `false`，消除角色扮演会话记忆重复注入。
+   - `AiRepository.enrichUserMessageWithWebSearch` 透传 `isRoleplay` 至 `EchoToolHub.enrichUserPrompt`，阻止设备工具在角色扮演会话误触发。
+   - `SettingsApiConfigDialog` 编辑既有配置保存时保留采样/思考/联网/停止词/Seed 等未在本页修改的参数。
+3. **10 项交互与视觉优化（合并同日已验收改动）**：
+   - 对话页右侧搜索索引提问与回复（含 `thinkingContent`）、多词 AND 匹配与上下文预览；修复右侧提问列表下方空白；API 编辑页「从 Key 读取模型」移至「默认模型」上方并支持折叠；API 配置页新增独立悬浮下拉选择器 `EchoAnchoredDropdownPopup`、「添加API配置」移至顶部、移除卡片设默认星星图标；首页新增 `BackHandler` 先退出多选/搜索态；创作正文字体默认改为「默认字体（跟随系统）」，新增 4 款开源中文字体（`echo_xiaowei_regular.ttf`、`echo_typewriter_regular.ttf`、`echo_calligraphy_regular.ttf` 为 SIL OFL 1.1，`echo_xihei_regular.ttf` 为 IPA 开源字体）连同既有思源宋体覆盖全部 7 款非系统选项并新增实时缩微排版预览卡 `StoryReadingPreviewCard`；重调 14 款内置纯色背景提高彩色辨识度与可读对比度。
+
+验证：冻结验收 `20261126-225459-447` 脚本 / Gradle 退出 0，582.7 秒；97 套件 / 1,161 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。Release 构建 `assembleRelease --no-daemon` 退出 0，472.517 秒（7 分 52 秒）；排他复制为本机发布目录 `Echo-v2.9.5.apk`（249 → 250 文件、248 → 249 APK，历史包全部保留）。
+
+APK 元数据与审计：`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；`com.aiassistant`、2.9.5/240、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（较 2.9.4 新增 4 个内置开源字体文件，0 删除，6 项变化，解压 CRC 全通过）；`resources.arsc` SHA-256 `bc0069723665f44398ac53c85ef7d23ecbe71f5e9198e2d48a101dd040b303a6`（因新增 4 项字体资源更新），186 张位图与 2.9.4 一致；DEX 7,530,324 字节，字符串 32,912 条（唯一 32,906 条，较 2.9.4 +210 / -84），新增 37 条可读中文均为本版缓存开关/提示、预览与版本号，隐私扫描新增命中 0。未连接真机，真实上游网关缓存命中率、5 款中文字体渲染观感、纯色背景及交互手势待人工验收。
+
+## 2026-11-26 · 对话全内容搜索、提问列表底部空白修复、API 配置页/编辑页重构、首页搜索返回、创作字体内置与预览增强及纯色背景调校（未发版）
+
+用户明确提出 10 项需求。源码版本仍为 2.9.4/239，Room v37 / 20 个实体、请求协议、消息及备份格式不变；未递增版本、未构建 APK、未提交或发布。
+
+改动：
+1. **对话页搜索覆盖提问与回复全部内容**：
+   - `ChatContextComponents` 新增 `buildChatSearchAnchorItems(displayMessages)`，同时索引 `user`（标记「提问」）与 `assistant`（标记「回复」，正文及 `thinkingContent` 均参与匹配）的完整内容并保留列表精确下标；`ChatScreen` 将其接入 `SideAnchorNavigator.searchItems`。
+   - `SideAnchorNavigator` 升级 `filterAnchorItems` 支持空格分隔多词 AND 忽略大小写匹配，新增 `buildAnchorSearchPreview` 围绕首个命中词生成上下文摘要；空查询仍展示「提问」导航列表，输入关键词后切换检索提问与回复并展示「提问 / 回复」角色徽章与 2 行命中预览，点击直跳对应消息。
+2. **修复对话页右侧提问列表下方大片空白**：
+   - 根因：v2.8.38 在 `ExpandedAnchorPanel` 的 `Box` 内为 `AnchorPanelScrollbar` 添加了 `.fillMaxHeight()`，在外层 `heightIn(max = 480.dp)` 约束下会把 `Box` 撑满剩余高度，而 `LazyColumn` 被 `heightIn(max = 360.dp)` 截断，且「收起」项位于列表内，导致列表下方出现明显空白区域。
+   - 修复：`ExpandedAnchorPanel` 改为 `Box(Modifier.fillMaxWidth().weight(1f, fill = false))` 包裹无固定 360dp 截断的 `LazyColumn`，`AnchorPanelScrollbar` 移入 `Box(Modifier.matchParentSize())` 不再参与父容器高度撑开；「收起」固定为紧贴列表底部的紧凑页脚；同时补齐 `BackHandler` 与 `imePadding()`。
+3. **编辑 API 配置页「从 Key 读取模型」移至「默认模型」上方**：
+   - `SettingsApiConfigDialog` 在 `ApiConfigSection.MODELS` 分区内将「从 Key 读取模型」触发栏、结果列表与空态提示置于「默认模型 / 已配置模型」之前，并增加结果折叠开关以兼顾长模型列表浏览，同步保持 `apiConfigSectionIndices` 定位一致。
+4. **API 配置页「新对话默认 API」改为独立悬浮下拉列表**：
+   - `EchoHaze` 新增 `EchoAnchoredDropdownPopup`（复用 `EchoMenuPositionProvider` 屏幕避让、不透明防斑块面板与主题边框/圆角/动效）；`SettingsScreen`（`ApiConfigTab`）用其替代原页内 `AnimatedVisibility` 展开，展开时独立浮于页面之上，不再将下方配置列表向下推挤。
+5. **API 配置页「添加API配置」移至页面最上方**：
+   - `SettingsScreen`（`ApiConfigTab`）将「添加API配置」按钮移为列表首个条目（`api_add_top`），位于「新对话默认 API」与「API配置管理」之上。
+6. **删除 API 配置卡片上的默认星星图标按钮**：
+   - `SettingsScreen`（`ApiConfigCard`）移除 `Icons.Default.StarBorder` 设默认按钮及冗余 `onSetDefault` 参数（顶部「新对话默认 API」图标同步换为 `Icons.Default.Tune`），默认切换统一由顶部独立下拉列表完成，卡片保留「默认」徽章与「编辑 / 删除」操作。
+7. **首页搜索对话后按返回先退出搜索页面**：
+   - `HomeScreen` 新增纯函数 `resolveHomeBackAction(isSelectionMode, searchQuery)` 与 `BackHandler`：处于多选时先退出多选，处于搜索态（`searchQuery.isNotBlank()`）时先清空 `searchQuery` 并清除输入框焦点，仅在常规首页态放行系统返回退出应用。
+8. **创作正文字体默认采用系统字体，并内置 5 款开源中文字体解决中文回退**：
+   - `PersonalizationManager` 将 `EchoStoryFont.SYSTEM`（「默认字体」）调整为 `values` 首项、新建配置默认值与未知值回退项。
+   - 根因：Android 通用字体族（`Serif` / `Cursive` / `Monospace` / `SansSerif`）在国产 ROM 上普遍缺乏差异化中文覆盖并静默退回系统默认黑体；且 `PRINT_BOOK` 原使用 `FontWeight.Medium`（W500）低于 Android 合成加粗阈值（W600）。
+   - 修复：在 `app/src/main/res/font/` 新增 4 款 SIL OFL 1.1 开源中文字体（`echo_xiaowei_regular.ttf` 站酷小薇体、`echo_xihei_regular.ttf` 霞鹜新晰黑、`echo_typewriter_regular.ttf` 霞鹜文楷等宽、`echo_calligraphy_regular.ttf` 龙藏手写体），连同既有 `echo_literary_regular.ttf`（思源宋体）覆盖除「默认字体」外的全部 7 款选项；`StoryReadingComponents` 为 `PRINT_BOOK` / `CLEAR` 使用 `FontWeight.SemiBold`、全量启用 `FontSynthesis.All`、覆盖 `headline*` / `title*` / `body*` / `labelLarge` 并通过 `LocalTextStyle` 提供 `bodyLarge`。
+9. **强化创作正文与排版实时预览效果**：
+   - `SettingsAppearanceTab` 新增 `StoryReadingPreviewCard`，在外观设置页渲染真实缩微阅读区（当前排版/字体/行距倍率徽章、`split` 分栏故事资料条、随 6 种排版真实切换的用户消息样式及两段完整叙事正文，严格应用 `StoryReadingMetrics` 的行高、首行缩进、两端对齐、段距、消息间距与水平留白）。
+10. **重调内置 14 款纯色背景色值**：
+   - `BackgroundImageManager.PRESET_SOLID_COLORS` 将 6 款浅色背景由近乎纯白（通道 ≥ 240、饱和度 < 5%）调整为清晰柔和的粉彩色（`#C8E6D2`、`#C9DFF6`、`#DDD2F2`、`#F6D4DE`、`#F4E4BE`、`#C4E6E8`，饱和度 13%–21%、相对深字对比度 > 11:1）；将 6 款深色彩色由发黑近黑调整为清晰可辨的低明度色彩（`#1E4976`、`#205845`、`#583B78`、`#634232`、`#45505B`、`#185763`，相对亮度 `0.063–0.079`、相对白字对比度 > 8:1）；保留 `pure_white` 与 `pure_black`。
+
+涉及文件：`SideAnchorNavigator.kt`、`ChatContextComponents.kt`、`ChatScreen.kt`、`SettingsApiConfigDialog.kt`、`EchoHaze.kt`、`SettingsScreen.kt`、`HomeScreen.kt`、`PersonalizationManager.kt`、`StoryReadingComponents.kt`、`SettingsAppearanceTab.kt`、`BackgroundImageManager.kt`，新增 4 个开源字体资源（`app/src/main/res/font/echo_{xiaowei,xihei,typewriter,calligraphy}_regular.ttf`），同步更新 `UI_THEME_DESIGN_SPEC.md`，测试更新 `ChatNavigationAndFavoritesTest.kt`、`RetryPreferencesTest.kt`、`V1922FeaturesTest.kt`、`UiPolishRegressionTest.kt`（套件 96 不变，总测试 1,147 → 1,151）。
+
+验证：首轮定向测试（118 项）发现 3 处细节并完成修正（首页搜索返回判定统一为 `searchQuery.isNotBlank()`、`夜森林` 微调至 `#205845`、右侧列表布局测试改为直接断言列表底边与「收起」顶边间隔 ≤ 16dp）后复跑全部通过；源码冻结后执行全量冻结验收 `20261126-210047-387`（`pwsh -File scripts/verify.ps1`），脚本 / Gradle 退出 0，耗时 617.835 秒；96 套件 / 1,151 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning（零新增警告）；输入哈希一致；`git diff --check` 退出 0。未连接真机，5 款中文字体真机渲染质感、纯色背景在 OLED 屏幕上的实际观感、API 浮层下拉交互、提问列表高度收紧与首页返回手势待人工验收。
+
 ## 2026-11-26 · 发布 Echo 2.9.4（创作阅读页与字体扩展、UI/主题规范建档、API 配置界面及拖拽动画优化）
 
 版本由 2.9.3/238 递增至 2.9.4/239（仅更新 `app/build.gradle.kts`）。将本轮完成的阅读页/字体扩展、`UI_THEME_DESIGN_SPEC.md` 建档与 API 配置界面/拖拽排序优化合并验收并构建发布。Room v37 / 20 个实体、请求协议、消息及备份格式不变。

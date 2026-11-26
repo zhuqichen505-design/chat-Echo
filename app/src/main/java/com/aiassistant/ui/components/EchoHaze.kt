@@ -640,6 +640,91 @@ fun EchoGlassDropdownMenu(
 }
 
 /**
+ * 锚定式悬浮独立下拉列表（与触发卡片同宽，浮于页面之上而不挤压下方内容）。
+ * 复用 [EchoMenuPositionProvider] 的屏幕避让规则与不透明面板材质，消除半透明斑块与黑影。
+ */
+@Composable
+fun EchoAnchoredDropdownPopup(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    anchorWidth: Dp,
+    modifier: Modifier = Modifier,
+    maxHeight: Dp = 360.dp,
+    offset: androidx.compose.ui.unit.DpOffset = androidx.compose.ui.unit.DpOffset(0.dp, 6.dp),
+    properties: androidx.compose.ui.window.PopupProperties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val glass = echoGlassPalette()
+    val colors = MaterialTheme.colorScheme
+    val menuShape = EchoGlassPagePanelShape
+    val containerColor = if (LocalEchoThemeStyle.current.flatSurfaces) colors.surface
+        else colors.surfaceTint.copy(alpha = 0.05f).compositeOver(colors.surface)
+
+    val expandedState = remember { MutableTransitionState(false) }
+    expandedState.targetState = expanded
+
+    if (expandedState.currentState || expandedState.targetState || !expandedState.isIdle) {
+        val density = LocalDensity.current
+        val positionProvider = remember(offset, density) { EchoMenuPositionProvider(offset, density) }
+        Popup(
+            popupPositionProvider = positionProvider,
+            onDismissRequest = onDismissRequest,
+            properties = properties
+        ) {
+            val reducedMotion = com.aiassistant.ui.theme.rememberReducedMotion()
+            AnimatedVisibility(
+                visibleState = expandedState,
+                enter = if (reducedMotion) {
+                    EnterTransition.None
+                } else {
+                    fadeIn(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast)) +
+                        scaleIn(
+                            initialScale = 0.94f,
+                            animationSpec = com.aiassistant.ui.theme.EchoMotion.tweenSpec(
+                                com.aiassistant.ui.theme.EchoMotion.Duration.standard,
+                                com.aiassistant.ui.theme.EchoMotion.Easing.emphasizedDecelerate
+                            ),
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                        )
+                },
+                exit = fadeOut(com.aiassistant.ui.theme.EchoMotion.tweenSpec(com.aiassistant.ui.theme.EchoMotion.Duration.fast))
+            ) {
+                val widthModifier = if (anchorWidth > 0.dp) {
+                    Modifier.width(anchorWidth)
+                } else {
+                    Modifier.widthIn(min = 240.dp, max = 360.dp)
+                }
+                Surface(
+                    modifier = modifier
+                        .then(widthModifier)
+                        .heightIn(max = maxHeight)
+                        .echoThemeHardShadow(shape = menuShape)
+                        .echoThemeFrameOrnament(cornerRadius = LocalEchoThemeStyle.current.panelCornerRadius, compact = true),
+                    shape = menuShape,
+                    color = containerColor,
+                    contentColor = colors.onSurface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    border = BorderStroke(
+                        if (LocalEchoThemeStyle.current.strongOutline) 1.6.dp else 1.dp,
+                        glass.outline
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        content = content
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * 下拉菜单定位策略（移植 Material3 DropdownMenuPositionProvider 的锚点避让规则，保证自绘容器定位不退化）：
  * 1. 水平依次尝试「与锚点左缘对齐 → 与锚点右缘对齐 → 贴窗口左/右边缘」（贴哪一边由锚点位于窗口左半/右半决定）；
  * 2. 垂直依次尝试「贴锚点下方 → 翻到锚点上方 → 贴窗口底部 → 贴窗口顶部」，上下各保留 [MenuVerticalMargin] 边距；

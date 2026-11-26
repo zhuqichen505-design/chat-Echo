@@ -53,23 +53,23 @@ object EchoStoryReadingStyle {
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: IMMERSIVE
 }
 
-/** 创作正文可独立切换的字体风格；可通过独立开关应用于普通对话。 */
+/** 创作正文可独立切换的字体风格；默认为手机系统字体，可通过独立开关应用于普通对话。 */
 object EchoStoryFont {
+    const val SYSTEM = "system"
     const val LITERARY = "literary"
     const val CLEAR = "clear"
     const val TYPEWRITER = "typewriter"
-    const val SYSTEM = "system"
     const val SYSTEM_SERIF = "system_serif"
     const val PRINT_BOOK = "print_book"
     const val ELEGANT_LIGHT = "elegant_light"
     const val CALLIGRAPHY = "calligraphy"
 
     val values = listOf(
-        LITERARY, CLEAR, TYPEWRITER,
-        SYSTEM, SYSTEM_SERIF, PRINT_BOOK, ELEGANT_LIGHT, CALLIGRAPHY
+        SYSTEM, LITERARY, SYSTEM_SERIF, PRINT_BOOK,
+        CLEAR, ELEGANT_LIGHT, TYPEWRITER, CALLIGRAPHY
     )
 
-    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: LITERARY
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: SYSTEM
 }
 
 /** 流式回复指示动画预设；动画实现由聊天渲染层消费。 */
@@ -81,6 +81,16 @@ object EchoStreamingAnimationStyle {
     val values = listOf(THIN_CURSOR, SOUND_WAVE, INK_RING)
 
     fun sanitize(value: String?): String = value?.takeIf { it in values } ?: THIN_CURSOR
+}
+
+/** 提示词缓存 TTL 预设（Anthropic 支持默认 5 分钟与扩展 1 小时）。 */
+object EchoPromptCacheTtl {
+    const val FIVE_MINUTES = "5m"
+    const val ONE_HOUR = "1h"
+
+    val values = listOf(FIVE_MINUTES, ONE_HOUR)
+
+    fun sanitize(value: String?): String = value?.takeIf { it in values } ?: FIVE_MINUTES
 }
 
 /** 关闭模型头像后的身份标识，与正文末尾的流式动画独立。 */
@@ -124,7 +134,7 @@ data class PersonalizationSettings(
     val appTheme: String = "system",
     val appearancePreset: String = EchoAppearancePreset.EXISTING,
     val storyReadingStyle: String = EchoStoryReadingStyle.IMMERSIVE,
-    val storyFont: String = EchoStoryFont.LITERARY,
+    val storyFont: String = EchoStoryFont.SYSTEM,
     val applyReadingStyleToChats: Boolean = false,
     val applyReadingFontToChats: Boolean = false,
     val streamingAnimationStyle: String = EchoStreamingAnimationStyle.THIN_CURSOR,
@@ -215,6 +225,25 @@ class PersonalizationManager(private val context: Context) {
         return prefs.edit().putInt(KEY_CONNECTION_TIMEOUT_SECONDS, sanitized).commit()
     }
 
+    /** 是否开启提示词前缀缓存优化（Anthropic 三断点标记 + OpenAI/OpenRouter 会话路由键 + 前缀稳定性保护）。 */
+    fun isPromptCachingEnabled(): Boolean = prefs.getBoolean(KEY_PROMPT_CACHING_ENABLED, true)
+
+    fun setPromptCachingEnabled(enabled: Boolean): Boolean {
+        val previous = isPromptCachingEnabled()
+        if (prefs.edit().putBoolean(KEY_PROMPT_CACHING_ENABLED, enabled).commit()) return true
+        prefs.edit().putBoolean(KEY_PROMPT_CACHING_ENABLED, previous).commit()
+        return false
+    }
+
+    /** Claude 提示词缓存 TTL（5m 默认 / 1h 扩展）。 */
+    fun getPromptCacheTtl(): String =
+        EchoPromptCacheTtl.sanitize(prefs.getString(KEY_PROMPT_CACHE_TTL, EchoPromptCacheTtl.FIVE_MINUTES))
+
+    fun setPromptCacheTtl(ttl: String): Boolean {
+        val sanitized = EchoPromptCacheTtl.sanitize(ttl)
+        return prefs.edit().putString(KEY_PROMPT_CACHE_TTL, sanitized).commit()
+    }
+
     fun getSettings(): PersonalizationSettings {
         val legacyGlobalPrompt = legacyPrefs.getString("global_system_prompt", "").orEmpty()
         val globalPrompt = prefs.getString(KEY_GLOBAL_PROMPT, null) ?: legacyGlobalPrompt
@@ -238,7 +267,7 @@ class PersonalizationManager(private val context: Context) {
             appTheme = prefs.getString(KEY_APP_THEME, "system").orEmpty().ifBlank { "system" },
             appearancePreset = EchoAppearancePreset.sanitize(prefs.getString(KEY_APPEARANCE_PRESET, EchoAppearancePreset.EXISTING)),
             storyReadingStyle = EchoStoryReadingStyle.sanitize(prefs.getString(KEY_STORY_READING_STYLE, EchoStoryReadingStyle.IMMERSIVE)),
-            storyFont = EchoStoryFont.sanitize(prefs.getString(KEY_STORY_FONT, EchoStoryFont.LITERARY)),
+            storyFont = EchoStoryFont.sanitize(prefs.getString(KEY_STORY_FONT, EchoStoryFont.SYSTEM)),
             applyReadingStyleToChats = prefs.getBoolean(KEY_APPLY_READING_STYLE_TO_CHATS, false),
             applyReadingFontToChats = prefs.getBoolean(KEY_APPLY_READING_FONT_TO_CHATS, false),
             streamingAnimationStyle = EchoStreamingAnimationStyle.sanitize(prefs.getString(KEY_STREAMING_ANIMATION_STYLE, EchoStreamingAnimationStyle.THIN_CURSOR)),
@@ -412,6 +441,8 @@ class PersonalizationManager(private val context: Context) {
         private const val KEY_AUTO_COMPRESSION_THRESHOLD_L4 = "auto_compression_threshold_l4"
         private const val KEY_API_CONFIG_ORDER = "api_config_order"
         private const val KEY_CONNECTION_TIMEOUT_SECONDS = "connection_timeout_seconds"
+        private const val KEY_PROMPT_CACHING_ENABLED = "prompt_caching_enabled"
+        private const val KEY_PROMPT_CACHE_TTL = "prompt_cache_ttl"
         private const val KEY_IGNORE_CONTEXT_FALLBACK_PREFIX = "ignore_context_fallback_conv_"
 
         const val DEFAULT_CONNECTION_TIMEOUT_SECONDS = 120

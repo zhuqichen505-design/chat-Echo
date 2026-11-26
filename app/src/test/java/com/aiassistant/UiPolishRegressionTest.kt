@@ -1491,6 +1491,8 @@ class UiPolishRegressionTest {
     }
 
     @Test fun solidBackgroundSwatchesKeepTheirChosenColorInDarkMode() {
+        fun contrast(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float =
+            (maxOf(a.luminance(), b.luminance()) + 0.05f) / (minOf(a.luminance(), b.luminance()) + 0.05f)
         val presets = com.aiassistant.utils.BackgroundImageManager.PRESET_SOLID_COLORS
         assertEquals(14, presets.map { it.id }.distinct().size)
         presets.forEach { assertEquals(it.lightColorInt, it.darkColorInt) }
@@ -1500,6 +1502,28 @@ class UiPolishRegressionTest {
         assertEquals(0xFFFFFFFF.toInt(), presets.single { it.id == "pure_white" }.lightColorInt)
         assertEquals(0xFF000000.toInt(), presets.single { it.id == "pure_black" }.darkColorInt)
         assertTrue(darkSwatches.filter { it.id != "pure_black" }.all { (it.lightColorInt and 0xFFFFFF) != 0 })
+
+        val lightColored = presets.filter { it.id != "pure_white" && androidx.compose.ui.graphics.Color(it.lightColorInt).luminance() >= 0.5f }
+        assertEquals(6, lightColored.size)
+        lightColored.forEach { preset ->
+            val r = (preset.lightColorInt shr 16) and 0xFF
+            val g = (preset.lightColorInt shr 8) and 0xFF
+            val b = preset.lightColorInt and 0xFF
+            val spread = maxOf(r, g, b) - minOf(r, g, b)
+            assertTrue("${preset.id} 浅色应具备明显色差（>= 28），避免近似纯白，实际=$spread", spread >= 28)
+            val ratio = contrast(androidx.compose.ui.graphics.Color(0xFF1A1A1A), androidx.compose.ui.graphics.Color(preset.lightColorInt))
+            assertTrue("${preset.id} 浅色与深字对比度应 >= 10:1，实际=$ratio", ratio >= 10f)
+        }
+
+        val darkColored = darkSwatches.filter { it.id != "pure_black" }
+        assertEquals(6, darkColored.size)
+        darkColored.forEach { preset ->
+            val color = androidx.compose.ui.graphics.Color(preset.darkColorInt)
+            val lum = color.luminance()
+            assertTrue("${preset.id} 深色相对亮度应在 0.05..0.10 避免发黑如纯黑，实际=$lum", lum in 0.05f..0.10f)
+            val ratio = contrast(androidx.compose.ui.graphics.Color.White, color)
+            assertTrue("${preset.id} 深色与白字对比度应 >= 7:1，实际=$ratio", ratio >= 7f)
+        }
     }
 
 
@@ -2142,16 +2166,40 @@ class UiPolishRegressionTest {
             com.aiassistant.ui.screens.chat.readingFontSpec(it)
         }
         assertEquals(8, specs.size)
-        assertEquals(androidx.compose.ui.text.font.FontFamily.Default,
-            specs.getValue(com.aiassistant.utils.EchoStoryFont.SYSTEM).family)
-        assertEquals(androidx.compose.ui.text.font.FontFamily.Serif,
-            specs.getValue(com.aiassistant.utils.EchoStoryFont.SYSTEM_SERIF).family)
-        assertEquals(androidx.compose.ui.text.font.FontWeight.Medium,
+        val systemSpec = specs.getValue(com.aiassistant.utils.EchoStoryFont.SYSTEM)
+        assertEquals(androidx.compose.ui.text.font.FontFamily.Default, systemSpec.family)
+        assertFalse("默认字体应直接使用手机系统字体", systemSpec.usesBundledTypeface)
+
+        val genericFamilies = setOf(
+            androidx.compose.ui.text.font.FontFamily.Default,
+            androidx.compose.ui.text.font.FontFamily.SansSerif,
+            androidx.compose.ui.text.font.FontFamily.Serif,
+            androidx.compose.ui.text.font.FontFamily.Monospace,
+            androidx.compose.ui.text.font.FontFamily.Cursive
+        )
+        val bundledKeys = com.aiassistant.utils.EchoStoryFont.values.filter { it != com.aiassistant.utils.EchoStoryFont.SYSTEM }
+        assertEquals(7, bundledKeys.size)
+        bundledKeys.forEach { key ->
+            val spec = specs.getValue(key)
+            assertTrue("$key 应绑定内置字体资源以保证中文生效", spec.usesBundledTypeface)
+            assertFalse("$key 不得退回通用系统字体族", spec.family in genericFamilies)
+        }
+        assertEquals(androidx.compose.ui.text.font.FontWeight.SemiBold,
             specs.getValue(com.aiassistant.utils.EchoStoryFont.PRINT_BOOK).weight)
-        assertEquals(androidx.compose.ui.text.font.FontWeight.Light,
+        assertEquals(androidx.compose.ui.text.font.FontWeight.SemiBold,
+            specs.getValue(com.aiassistant.utils.EchoStoryFont.CLEAR).weight)
+        assertEquals(androidx.compose.ui.text.font.FontWeight.Normal,
             specs.getValue(com.aiassistant.utils.EchoStoryFont.ELEGANT_LIGHT).weight)
-        assertEquals(androidx.compose.ui.text.font.FontFamily.Cursive,
-            specs.getValue(com.aiassistant.utils.EchoStoryFont.CALLIGRAPHY).family)
+        val distinctBundledFamilies = listOf(
+            com.aiassistant.utils.EchoStoryFont.LITERARY,
+            com.aiassistant.utils.EchoStoryFont.SYSTEM_SERIF,
+            com.aiassistant.utils.EchoStoryFont.CLEAR,
+            com.aiassistant.utils.EchoStoryFont.TYPEWRITER,
+            com.aiassistant.utils.EchoStoryFont.CALLIGRAPHY
+        ).map { specs.getValue(it).family }.distinct()
+        assertEquals("五类内置字体必须对应五套独立字形资源", 5, distinctBundledFamilies.size)
+        assertEquals("全部 8 款字体配置必须两两可区分", 8,
+            specs.values.map { Triple(it.family, it.weight, it.letterSpacingBonusSp) }.distinct().size)
     }
 
     @Test fun defaultApiSelectionActionPromptsOnlyWhenDisabled() {
@@ -2211,6 +2259,218 @@ class UiPolishRegressionTest {
         val emptied = com.aiassistant.ui.screens.settings.removeApiKeyItem(listOf(k1), 0)
         assertEquals(1, emptied.size)
         assertEquals("", emptied.first().namedKey.key)
+    }
+
+    @Test fun expandedAnchorPanelWrapsTightlyWithoutBlankSpaceBelowShortOrFilteredLists() {
+        data class PanelMetrics(
+            val panelHeight: Float,
+            val listBottom: Float,
+            val dismissTop: Float,
+            val panelBottom: Float
+        )
+        fun measurePanel(
+            items: List<com.aiassistant.ui.components.SideAnchorItem>,
+            searchItems: List<com.aiassistant.ui.components.SideAnchorItem> = items,
+            initialQuery: String = ""
+        ): PanelMetrics {
+            val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+            val activity = controller.get()
+            val composeView = ComposeView(activity)
+            val scaleKey = android.provider.Settings.Global.ANIMATOR_DURATION_SCALE
+            val previousScale = android.provider.Settings.Global.getFloat(activity.contentResolver, scaleKey, 1f)
+            android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, 0f)
+            var panelBounds: Rect? = null
+            try {
+                composeView.setContent {
+                    CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                        androidx.compose.material3.MaterialTheme {
+                            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                                Box(Modifier.onGloballyPositioned { panelBounds = it.boundsInRoot() }) {
+                                    com.aiassistant.ui.components.ExpandedAnchorPanel(
+                                        items = items,
+                                        searchItems = searchItems,
+                                        currentIndex = 0,
+                                        hazeState = null,
+                                        initialQuery = initialQuery,
+                                        onDismiss = {},
+                                        onSelected = {}
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                activity.setContentView(composeView, android.widget.FrameLayout.LayoutParams(360, 800))
+                val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                mainLooper.idleFor(java.time.Duration.ofMillis(32))
+                val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(360, android.view.View.MeasureSpec.EXACTLY)
+                val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(800, android.view.View.MeasureSpec.EXACTLY)
+                repeat(2) {
+                    composeView.measure(widthSpec, heightSpec)
+                    composeView.layout(0, 0, 360, 800)
+                    mainLooper.idleFor(java.time.Duration.ofMillis(16))
+                }
+                var listBounds: Rect? = null
+                var dismissBounds: Rect? = null
+                fun walk(node: androidx.compose.ui.semantics.SemanticsNode) {
+                    if (listBounds == null && node.config.contains(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange)) {
+                        listBounds = node.boundsInRoot
+                    }
+                    val texts = node.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.Text) { null }
+                    if (texts?.any { it.text == "收起" } == true) {
+                        dismissBounds = node.boundsInRoot
+                    }
+                    node.children.forEach(::walk)
+                }
+                fun collectRoots(view: android.view.View) {
+                    if (view is androidx.compose.ui.node.RootForTest) walk(view.semanticsOwner.rootSemanticsNode)
+                    if (view is android.view.ViewGroup) {
+                        for (i in 0 until view.childCount) collectRoots(view.getChildAt(i))
+                    }
+                }
+                collectRoots(composeView)
+                val panel = requireNotNull(panelBounds)
+                val list = requireNotNull(listBounds)
+                val dismiss = requireNotNull(dismissBounds)
+                return PanelMetrics(panel.height, list.bottom, dismiss.top, panel.bottom)
+            } finally {
+                runCatching { composeView.disposeComposition() }
+                runCatching { controller.pause().stop().destroy() }
+                android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+                runCatching {
+                    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    mainLooper.idleFor(java.time.Duration.ofMillis(64))
+                    mainLooper.idle()
+                }
+            }
+        }
+
+        val oneItem = listOf(
+            com.aiassistant.ui.components.SideAnchorItem("第一问", 0, number = 1, searchText = "第一问内容", roleLabel = "提问")
+        )
+        val twoItems = oneItem + com.aiassistant.ui.components.SideAnchorItem("第二问", 2, number = 2, searchText = "第二问内容", roleLabel = "提问")
+        val longItems = (1..20).map { i ->
+            com.aiassistant.ui.components.SideAnchorItem("第 $i 问", (i - 1) * 2, number = i, searchText = "普通提问 $i", roleLabel = "提问")
+        }
+        val longSearchItems = longItems + com.aiassistant.ui.components.SideAnchorItem(
+            title = "关于星河档案馆的详细回复",
+            itemIndex = 5,
+            number = null,
+            searchText = "这是回复中的星河档案馆段落",
+            roleLabel = "回复"
+        )
+
+        val one = measurePanel(oneItem)
+        val two = measurePanel(twoItems)
+        val filtered = measurePanel(longItems, longSearchItems, initialQuery = "星河档案馆")
+        val long = measurePanel(longItems, longSearchItems)
+
+        assertTrue("2 条列表应比 1 条列表自然增高单行高度，避免被撑满空白：h1=${one.panelHeight}, h2=${two.panelHeight}",
+            two.panelHeight > one.panelHeight && (two.panelHeight - one.panelHeight) in 20f..80f)
+        assertTrue("2 条短列表应远低于 480dp 上限，实际=${two.panelHeight}", two.panelHeight < long.panelHeight - 150f)
+        assertTrue("搜索仅命中 1 条回复时面板应自动收紧无空白，实际=${filtered.panelHeight}",
+            filtered.panelHeight < long.panelHeight - 150f)
+        assertTrue("20 条长列表应在 480dp 上限内铺满可滚区域，实际=${long.panelHeight}",
+            long.panelHeight in 420f..481f)
+
+        listOf("short" to two, "filtered" to filtered, "long" to long).forEach { (label, m) ->
+            val gapBetweenListAndDismiss = m.dismissTop - m.listBottom
+            assertTrue("$label 场景列表与收起按钮之间不得存在大片空白，实际间隔=$gapBetweenListAndDismiss",
+                gapBetweenListAndDismiss in 0f..16f)
+        }
+    }
+
+    @Test fun homeBackActionExitsSelectionAndSearchBeforeLeavingApp() {
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.ClearSelection,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = true, searchQuery = "")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.ClearSelection,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = true, searchQuery = "量子")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.ExitSearch,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = false, searchQuery = "量子")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.ExitSearch,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = false, searchQuery = "  a  ")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.AllowSystemBack,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = false, searchQuery = "")
+        )
+        assertEquals(
+            com.aiassistant.ui.screens.home.HomeBackAction.AllowSystemBack,
+            com.aiassistant.ui.screens.home.resolveHomeBackAction(isSelectionMode = false, searchQuery = "   ")
+        )
+    }
+
+    @Test fun apiConfigCardOmitsDefaultStarButtonWhileRetainingEditAndDelete() {
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        val activity = controller.get()
+        val composeView = ComposeView(activity)
+        val scaleKey = android.provider.Settings.Global.ANIMATOR_DURATION_SCALE
+        val previousScale = android.provider.Settings.Global.getFloat(activity.contentResolver, scaleKey, 1f)
+        android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, 0f)
+        try {
+            val nonDefaultConfig = com.aiassistant.domain.model.ApiConfig(
+                id = 1L, name = "Synthetic NonDefault", provider = "Synthetic",
+                baseUrl = "https://api.example.test/v1", apiKey = "sk-test",
+                modelName = "synthetic-model", isEnabled = true, isDefault = false
+            )
+            composeView.setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                    androidx.compose.material3.MaterialTheme {
+                        com.aiassistant.ui.screens.settings.ApiConfigCard(
+                            hazeState = dev.chrisbanes.haze.HazeState(),
+                            config = nonDefaultConfig,
+                            onEdit = {},
+                            onDelete = {},
+                            onToggleEnabled = {}
+                        )
+                    }
+                }
+            }
+            activity.setContentView(composeView, android.widget.FrameLayout.LayoutParams(400, 300))
+            val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+            mainLooper.idleFor(java.time.Duration.ofMillis(32))
+            val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY)
+            val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(300, android.view.View.MeasureSpec.EXACTLY)
+            repeat(2) {
+                composeView.measure(widthSpec, heightSpec)
+                composeView.layout(0, 0, 400, 300)
+                mainLooper.idleFor(java.time.Duration.ofMillis(16))
+            }
+
+            val descriptions = mutableListOf<String>()
+            fun walk(node: androidx.compose.ui.semantics.SemanticsNode) {
+                node.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription) { null }
+                    ?.let { descriptions += it }
+                node.children.forEach(::walk)
+            }
+            fun collectRoots(view: android.view.View) {
+                if (view is androidx.compose.ui.node.RootForTest) walk(view.semanticsOwner.rootSemanticsNode)
+                if (view is android.view.ViewGroup) {
+                    for (i in 0 until view.childCount) collectRoots(view.getChildAt(i))
+                }
+            }
+            collectRoots(composeView)
+
+            assertFalse("API 卡片不再展示设默认星星按钮", descriptions.any { it.contains("默认") })
+            assertTrue("API 卡片应保留编辑按钮", descriptions.contains("编辑"))
+            assertTrue("API 卡片应保留删除按钮", descriptions.contains("删除"))
+        } finally {
+            runCatching { composeView.disposeComposition() }
+            runCatching { controller.pause().stop().destroy() }
+            android.provider.Settings.Global.putFloat(activity.contentResolver, scaleKey, previousScale)
+            runCatching {
+                val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                mainLooper.idleFor(java.time.Duration.ofMillis(64))
+                mainLooper.idle()
+            }
+        }
     }
 }
 

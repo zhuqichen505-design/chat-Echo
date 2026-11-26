@@ -2,8 +2,10 @@ package com.aiassistant
 
 import com.aiassistant.domain.model.Message
 import com.aiassistant.ui.components.SideAnchorItem
+import com.aiassistant.ui.components.buildAnchorSearchPreview
 import com.aiassistant.ui.components.filterAnchorItems
 import com.aiassistant.ui.screens.chat.buildChatAnchorItems
+import com.aiassistant.ui.screens.chat.buildChatSearchAnchorItems
 import com.aiassistant.ui.screens.chat.buildDisplayMessages
 import com.aiassistant.ui.screens.chat.groupDisplayAnchor
 import com.aiassistant.ui.screens.chat.resolveChatListAnchor
@@ -64,7 +66,59 @@ class ChatNavigationAndFavoritesTest {
         assertEquals(listOf(1), filterAnchorItems(items, "sql").map { it.number })
         assertEquals(listOf(2), filterAnchorItems(items, "一下").map { it.number })
         assertEquals(listOf(3), filterAnchorItems(items, "总结").map { it.number })
+        assertEquals("空格分隔多词需全部命中", listOf(1), filterAnchorItems(items, "sql 性能").map { it.number })
+        assertTrue("多词中任一词未命中时返回空", filterAnchorItems(items, "sql 索引").isEmpty())
         assertTrue("没有任何命中时返回空列表", filterAnchorItems(items, "不存在的内容").isEmpty())
+    }
+
+    @Test
+    fun buildChatSearchAnchorItems_indexesQuestionsRepliesAndThinkingWithDirectIndices() {
+        val items = buildDisplayMessages(
+            listOf(
+                message(id = 1L, role = "user", content = "第一问：请解释量子纠缠", createdAt = 100L),
+                Message(
+                    id = 2L,
+                    conversationId = 1L,
+                    role = "assistant",
+                    content = "量子纠缠是一种非局域关联现象，贝尔不等式实验验证了它。",
+                    thinkingContent = "先从爱因斯坦 EPR 佯谬说起",
+                    createdAt = 200L
+                ),
+                message(id = 3L, role = "user", content = "第二问：那和量子通信有什么关系？", createdAt = 300L),
+                message(id = 4L, role = "assistant", content = "量子密钥分发可以利用纠缠态检测窃听。", createdAt = 400L)
+            ),
+            emptyMap()
+        )
+
+        val promptOnly = buildChatAnchorItems(items)
+        val searchAll = buildChatSearchAnchorItems(items)
+
+        assertEquals(2, promptOnly.size)
+        assertEquals(listOf("提问", "提问"), promptOnly.map { it.roleLabel })
+
+        assertEquals("对话搜索必须覆盖提问与回复全部条目", 4, searchAll.size)
+        assertEquals(listOf(0, 1, 2, 3), searchAll.map { it.itemIndex })
+        assertEquals(listOf("提问", "回复", "提问", "回复"), searchAll.map { it.roleLabel })
+
+        val replyHits = filterAnchorItems(searchAll, "贝尔不等式")
+        assertEquals(listOf(1), replyHits.map { it.itemIndex })
+        assertEquals("回复", replyHits.single().roleLabel)
+
+        val thinkingHits = filterAnchorItems(searchAll, "EPR")
+        assertEquals(listOf(1), thinkingHits.map { it.itemIndex })
+
+        val bothHits = filterAnchorItems(searchAll, "量子")
+        assertEquals(listOf(0, 1, 2, 3), bothHits.map { it.itemIndex })
+
+        val longReply = SideAnchorItem(
+            title = "长回复标题",
+            itemIndex = 3,
+            searchText = "前面有很多铺垫内容用来测试上下文截取效果，真正需要命中的核心关键词是星河档案馆，后面也有较长补充说明文字。",
+            roleLabel = "回复"
+        )
+        val snippet = buildAnchorSearchPreview(longReply, "星河档案馆", maxChars = 24)
+        assertTrue("搜索预览必须包含命中词", snippet.contains("星河档案馆"))
+        assertTrue("超长正文预览应围绕命中词截断", snippet.length <= 28)
     }
 
     // ==================== 收藏 ====================

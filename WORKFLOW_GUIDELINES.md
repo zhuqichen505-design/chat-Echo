@@ -26,6 +26,33 @@
 
 ## 本次记录
 
+## 2026-11-26 · 发布 Echo 2.9.5（提示词前缀缓存改造、4 项隔离/配置修复及 10 项交互与视觉优化）
+
+- 基线 `main/76dd7e7`（源码由 2.9.4/239 递增至 2.9.5/240，仅更新 `app/build.gradle.kts`；Room v37 / 20 个实体不变）；确认本次更新仅源自当前仓库 `app/chat-Echo` 已审核工作区修改（含既有 10 项交互与视觉优化及本轮提示词前缀缓存改造与 4 项修复）。
+- 冻结验收 `20261126-225459-447`：脚本 / Gradle 退出 0，582.7 秒；97 套件 / 1,161 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。
+- Release 构建 `assembleRelease --no-daemon` 退出 0，472.517 秒（7 分 52 秒）；排他复制为本机发布目录 `Echo-v2.9.5.apk`（249 → 250 文件、248 → 249 APK，全部历史包保留）。
+- APK 审计：`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；v2 签名通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；454 条目（+4 个内置开源字体文件，0 删除，6 项变更，CRC 全通过），186 张位图与 2.9.4 一致，DEX 7,530,324 字节、唯一字符串 32,906 条（+210 / -84），隐私扫描新增命中 0；4 款新增字体经 OpenType `name` 表核验为 3 款 SIL OFL 1.1 + 1 款 IPA 开源字体；已同步脱敏文档内本机 Gradle 缓存路径。
+- 未连接真机；真实上游网关缓存命中率、5 款中文字体渲染、纯色背景观感及交互手势待人工验收。
+
+## 2026-11-26 · 提示词前缀缓存改造与 4 项关联隔离/配置修复（未发版）
+
+- 基线 `main/76dd7e7`（源码版本 2.9.4/239，Room v37 / 20 个实体，保留工作区既有的 10 项交互与视觉优化未提交改动）；未递增版本、未构建 APK、未提交或推送。
+- 改动：
+  1. 新增 `PromptCacheHelper` 与协议字段（`AnthropicCacheControl`、`AnthropicRequest.system: Any?`、`AnthropicContent.cache_control`、`ChatCompletionRequest.prompt_cache_key / cache_control / session_id`、`PreparedDirectionContext.dynamicTurnContext`）：Anthropic Messages API 落地三断点滑动缓存（静态 `system` BP1 + 历史锚点 BP2 + 当前稳定用户消息 BP3，方向规划期启用 BP4 覆盖 `<turn_context>`），默认 5 分钟 TTL 并支持扩展 1 小时 TTL（附带 `anthropic-beta: extended-cache-ttl-2025-04-11`）；OpenAI/OpenRouter 按 Host/Vendor 安全白名单附带 `prompt_cache_key`、`session_id`、OpenRouter Claude `cache_control` 及 `X-Session-ID` 粘性路由头。
+  2. 重构三区前缀稳定性架构（`AiRepository`、`TimelineMemoryHelper`、`ContextCompressionPlanner`）：取消 `<session_memory>` 每轮按用户输入关键词重排，改为按 `createdAt, id` 稳定排序；`<session_timeline>` 改为确定性时序窗口入静态前缀 Zone 1、超预算早期节点按需在 Zone 3 召回；关键词动态世界书（`isConstant == false`）、跨会话长期记忆与单轮 `replyDirection` / 规划指令统一后置至当前用户消息末尾 Zone 3，确保常规多轮与“方向规划→正式回复”两步调用共享字节级一致前缀；普通发送发生预算溢出时按 80% 阶梯滞后目标腾出追加跑道，同时新增内存级 `PromptCacheSnapshot` 命中/未命中归因诊断。
+  3. `PersonalizationManager` / `SettingsRetryControls` 新增提示词前缀缓存总开关（默认开启）与 Claude 5 分钟 / 1 小时 TTL 切换项。
+  4. 同步修复 4 项关联缺陷：`RoleplayViewModel` 新建角色扮演/故事会话写入 `tags = "roleplay" / "story"` 恢复隔离判定；`RoleplayRepository.assembleRoleplayContext` 新增 `includeSessionMemories` 开关并在 `ChatViewModel` 主链路传 `false` 消除会话记忆重复注入；`AiRepository.enrichUserMessageWithWebSearch` 透传 `isRoleplay` 防止设备工具误触发污染剧情与缓存；`SettingsApiConfigDialog` 编辑既有配置时完整保留采样/思考/联网/停止词等未编辑参数。
+  5. 新增 `PromptCacheOptimizationTest`（10 项测试），同步适配 `ChatRetryRepositoryTest`、`MemoryExtractionRepositoryTest`、`InputInjectionRepositoryTest` 的新三区与块数组协议文本解析（未删减或放宽断言）。
+- 冻结验收 `20261126-224501-323`：脚本 / Gradle 退出 0，307.659 秒；97 套件 / 1,161 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 未连接真机；真实上游网关（Anthropic 官方/中转、OpenAI、OpenRouter、DeepSeek）的实时 `cached_tokens` / `cache_read_input_tokens` 命中率、设置页缓存开关与 TTL 切换交互待真机人工验收。
+
+## 2026-11-26 · 10 项交互与视觉优化（未发版）
+
+- 基线 `main/76dd7e7`（源码版本 2.9.4/239，Room v37 / 20 个实体，本地领先远端 1 个既有发布记录提交）；未递增版本、未构建 APK、未提交或推送。
+- 改动：① 对话页右侧搜索索引提问与回复（含 `thinkingContent`），支持多词匹配、上下文预览与角色徽章直跳；② 修复 `ExpandedAnchorPanel` 滚动条 `fillMaxHeight()` 与 `360dp` 截断导致的列表下方空白，改为 `weight(1f, fill = false)` + `matchParentSize()` 滚动条叠层与紧贴底部页脚；③ API 编辑页「从 Key 读取模型」移至「默认模型」上方并支持折叠；④ 新增 `EchoAnchoredDropdownPopup` 将 API 配置页「新对话默认 API」改为不挤压下方内容的独立悬浮下拉列表；⑤ 「添加API配置」移至 API 配置页顶部；⑥ 移除 `ApiConfigCard` 设默认星星图标；⑦ 首页新增 `BackHandler`（多选/搜索态返回优先退出而非直接退出应用）；⑧ 创作正文字体默认改为 `EchoStoryFont.SYSTEM`（默认字体），引入 4 款 SIL OFL 1.1 中文字体资源连同既有思源宋体覆盖全部 7 款非系统字体并开启 `FontSynthesis.All`；⑨ 新增 `StoryReadingPreviewCard` 实时缩微阅读预览；⑩ 调校 14 款内置纯色背景使 6 款浅色与 6 款深色彩色均清晰可辨且保持高可读对比度；同步更新 `UI_THEME_DESIGN_SPEC.md` 与 `UPDATE_LOG.md`，新增 4 项回归测试（总计 1,151 项）。
+- 冻结验收 `20261126-210047-387`：脚本 / Gradle 退出 0，617.835 秒；96 套件 / 1,151 项测试全部 EXECUTED，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning；输入哈希一致；`git diff --check` 退出 0。
+- 未连接真机；5 款中文字体渲染质感、纯色背景真机观感、浮层下拉交互、提问列表无空白与首页返回手势待人工验收。
+
 ## 2026-11-26 · 发布 Echo 2.9.4（创作阅读页与字体扩展、UI/主题规范建档、API 配置界面及拖拽动画优化）
 
 - 基线 `main/e60e516`（源码由 2.9.3/238 递增至 2.9.4/239，仅更新 `app/build.gradle.kts`；Room v37 / 20 个实体不变）；确认本次更新仅源自当前仓库已审核工作区修改。

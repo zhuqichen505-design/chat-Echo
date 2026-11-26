@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -60,6 +61,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import com.aiassistant.AiAssistantApp
 import com.aiassistant.BuildConfig
@@ -622,17 +624,17 @@ fun AppearanceTab(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("创作正文字体", style = MaterialTheme.typography.titleSmall)
-                Text("可单独选择是否应用于普通对话；设置与操作按钮保持界面字体。", style = MaterialTheme.typography.bodySmall,
+                Text("默认跟随手机系统字体，其余 7 款均内置完整中文字库；设置与操作按钮保持界面字体。", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val storyFontOptions = listOf(
+                    Triple(EchoStoryFont.SYSTEM, "默认字体", "跟随手机系统默认字体，与整机保持一致"),
                     Triple(EchoStoryFont.LITERARY, "沉浸衬线", "内置思源宋体，适合长篇小说与文学叙事"),
-                    Triple(EchoStoryFont.CLEAR, "清晰无衬线", "现代无衬线字体，久读清爽不累眼"),
-                    Triple(EchoStoryFont.TYPEWRITER, "稿纸等宽", "打字机等宽字形，适合剧本草稿与技术叙事"),
-                    Triple(EchoStoryFont.SYSTEM, "跟随系统", "使用设备系统默认字体，与整机一致"),
-                    Triple(EchoStoryFont.SYSTEM_SERIF, "经典宋体", "调用系统衬线字体，古典报刊书卷韵味"),
-                    Triple(EchoStoryFont.PRINT_BOOK, "精印书宋", "适中字重与宽松字距，呈现出版级精装排版"),
-                    Triple(EchoStoryFont.ELEGANT_LIGHT, "轻盈细黑", "轻量级无衬线与舒展字距，通透轻盈"),
-                    Triple(EchoStoryFont.CALLIGRAPHY, "随笔手写", "手札随笔风格（中文依系统字体回退适配）")
+                    Triple(EchoStoryFont.SYSTEM_SERIF, "经典宋体", "内置站酷小薇体，典雅舒展的古典书卷衬线"),
+                    Triple(EchoStoryFont.PRINT_BOOK, "精印书宋", "加厚书宋字重与宽松字距，呈现出版级精装排版"),
+                    Triple(EchoStoryFont.CLEAR, "清晰无衬线", "内置霞鹜新晰黑（清晰字重），轮廓利落久读不累眼"),
+                    Triple(EchoStoryFont.ELEGANT_LIGHT, "轻盈细黑", "内置霞鹜新晰黑（轻盈舒展），纤细通透"),
+                    Triple(EchoStoryFont.TYPEWRITER, "稿纸等宽", "内置霞鹜文楷等宽，中文楷韵与英文等宽兼备"),
+                    Triple(EchoStoryFont.CALLIGRAPHY, "随笔手写", "内置龙藏手写体，自然灵动的中文笔迹风味")
                 )
                 FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -653,44 +655,16 @@ fun AppearanceTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SettingsInnerShape,
-                    color = glass.control,
-                    border = BorderStroke(1.dp, glass.outline)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            "创作正文与排版预览",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        com.aiassistant.ui.screens.chat.StoryReadingTypography(
-                            style = settings.storyReadingStyle,
-                            font = settings.storyFont
-                        ) {
-                            val previewMetrics = com.aiassistant.ui.screens.chat.storyReadingMetricsFor(settings.storyReadingStyle)
-                            val previewStyle = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = chatFontSize.sp,
-                                lineHeight = chatFontSize.sp * previewMetrics.lineMultiplier,
-                                textAlign = if (previewMetrics.justifyParagraphs) androidx.compose.ui.text.style.TextAlign.Justify else androidx.compose.ui.text.style.TextAlign.Start,
-                                textIndent = if (previewMetrics.paragraphIndentEm > 0f) {
-                                    androidx.compose.ui.text.style.TextIndent(firstLine = androidx.compose.ui.unit.TextUnit(previewMetrics.paragraphIndentEm, androidx.compose.ui.unit.TextUnitType.Em))
-                                } else {
-                                    androidx.compose.ui.text.style.TextIndent.None
-                                }
-                            )
-                            Text(
-                                text = "夜雨落在石板街上，远处的钟楼敲响了三下。Echo quietly turned the page, watching the ink settle into warm paper.",
-                                style = previewStyle,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
+                val activeReadingLabel = readingStyleOptions.firstOrNull { it.first == settings.storyReadingStyle }?.second ?: "沉浸叙事"
+                val activeFontLabel = storyFontOptions.firstOrNull { it.first == settings.storyFont }?.second ?: "默认字体"
+                StoryReadingPreviewCard(
+                    readingStyle = settings.storyReadingStyle,
+                    readingStyleLabel = activeReadingLabel,
+                    storyFont = settings.storyFont,
+                    storyFontLabel = activeFontLabel,
+                    chatFontSize = chatFontSize,
+                    glass = glass
+                )
                 HomeLayoutSwitch("正文字体也用于普通对话", "同时用于消息正文与展开的思考内容。", settings.applyReadingFontToChats) { enabled ->
                     saveVisualPreference("普通对话字体已更新") { it.copy(applyReadingFontToChats = enabled) }
                 }
@@ -905,12 +879,20 @@ fun AppearanceTab(
                         val previewFontSpec = if (settings.applyReadingFontToChats) {
                             com.aiassistant.ui.screens.chat.readingFontSpec(settings.storyFont)
                         } else null
+                        val baseMedium = MaterialTheme.typography.bodyMedium
+                        val previewLetterSpacing = if (previewFontSpec != null && previewFontSpec.letterSpacingBonusSp != 0f) {
+                            ((if (baseMedium.letterSpacing.isSpecified) baseMedium.letterSpacing.value else 0f) + previewFontSpec.letterSpacingBonusSp).sp
+                        } else {
+                            baseMedium.letterSpacing
+                        }
                         Text(
                             "你好！我是 Echo 智能助手，这是一段用于预览对话与排版字体大小的示例文本。",
-                            style = MaterialTheme.typography.bodyMedium.copy(
+                            style = baseMedium.copy(
                                 fontSize = chatFontSize.sp,
                                 fontFamily = previewFontSpec?.family ?: MaterialTheme.typography.bodyLarge.fontFamily,
-                                fontWeight = previewFontSpec?.weight ?: MaterialTheme.typography.bodyMedium.fontWeight
+                                fontWeight = previewFontSpec?.weight ?: baseMedium.fontWeight,
+                                fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All,
+                                letterSpacing = previewLetterSpacing
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -1234,6 +1216,236 @@ fun AppearanceTab(
                 pendingCropUri = null
             }
         )
+    }
+}
+
+@Composable
+private fun StoryReadingPreviewCard(
+    readingStyle: String,
+    readingStyleLabel: String,
+    storyFont: String,
+    storyFontLabel: String,
+    chatFontSize: Int,
+    glass: com.aiassistant.ui.components.EchoGlassPalette
+) {
+    val metrics = com.aiassistant.ui.screens.chat.storyReadingMetricsFor(readingStyle)
+    val isSplit = EchoStoryReadingStyle.sanitize(readingStyle) == EchoStoryReadingStyle.SPLIT
+    val isCompact = EchoStoryReadingStyle.sanitize(readingStyle) == EchoStoryReadingStyle.COMPACT
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = SettingsInnerShape,
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.82f),
+        border = BorderStroke(1.dp, glass.outline)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "创作正文与排版预览",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                ) {
+                    Text(
+                        text = "$readingStyleLabel · $storyFontLabel · ${String.format(Locale.US, "%.2fx", metrics.lineMultiplier)} 行距",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            if (isSplit) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.AutoStories,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                "故事资料栏（宽屏并排 · 窄屏顶部可折叠）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "人物：林澄 · 时间线：雨夜三更 · 设定：旧钟楼藏有密钥",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            com.aiassistant.ui.screens.chat.StoryReadingTypography(
+                style = readingStyle,
+                font = storyFont
+            ) {
+                val baseBody = MaterialTheme.typography.bodyLarge
+                val userStyle = baseBody.copy(
+                    fontSize = (chatFontSize - 1).coerceAtLeast(13).sp,
+                    lineHeight = (chatFontSize - 1).coerceAtLeast(13).sp * metrics.lineMultiplier
+                )
+                val bodyParagraphStyle = baseBody.copy(
+                    fontSize = chatFontSize.sp,
+                    lineHeight = chatFontSize.sp * metrics.lineMultiplier,
+                    textAlign = if (metrics.justifyParagraphs) androidx.compose.ui.text.style.TextAlign.Justify
+                        else androidx.compose.ui.text.style.TextAlign.Start,
+                    textIndent = if (metrics.paragraphIndentEm > 0f) {
+                        androidx.compose.ui.text.style.TextIndent(
+                            firstLine = androidx.compose.ui.unit.TextUnit(
+                                metrics.paragraphIndentEm,
+                                androidx.compose.ui.unit.TextUnitType.Em
+                            )
+                        )
+                    } else {
+                        androidx.compose.ui.text.style.TextIndent.None
+                    }
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(metrics.messageSpacingDp.dp)
+                ) {
+                    val userPromptSample = "我推开旧书店沉重的木门，掸去肩头雨水：「钟楼刚才敲了三下，你在等谁？」"
+                    when (metrics.userStyle) {
+                        com.aiassistant.ui.screens.chat.StoryUserMessageStyle.QuoteLine -> {
+                            val lineColor = MaterialTheme.colorScheme.primary
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 6.dp)
+                                    .drawBehind {
+                                        val stroke = 1.5.dp.toPx()
+                                        drawLine(lineColor, Offset(stroke / 2f, 0f), Offset(stroke / 2f, size.height), stroke)
+                                    }
+                                    .padding(start = 10.dp, top = 2.dp, bottom = 2.dp)
+                            ) {
+                                Text(userPromptSample, style = userStyle, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        com.aiassistant.ui.screens.chat.StoryUserMessageStyle.BookIndent -> {
+                            val primaryLine = MaterialTheme.colorScheme.primary
+                            val secondaryLine = MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.85f))
+                                    .drawBehind {
+                                        drawLine(primaryLine, Offset(1.dp.toPx(), 0f), Offset(1.dp.toPx(), size.height), 1.5.dp.toPx())
+                                        drawLine(secondaryLine, Offset(4.dp.toPx(), 4.dp.toPx()), Offset(4.dp.toPx(), size.height - 4.dp.toPx()), 0.6.dp.toPx())
+                                    }
+                                    .padding(start = 12.dp, end = 10.dp, top = 6.dp, bottom = 6.dp)
+                            ) {
+                                Text(userPromptSample, style = userStyle, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        com.aiassistant.ui.screens.chat.StoryUserMessageStyle.ScriptCue -> {
+                            val cueColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .drawBehind {
+                                        val stroke = 0.8.dp.toPx()
+                                        drawLine(cueColor, Offset(0f, 0f), Offset(size.width, 0f), stroke)
+                                        drawLine(cueColor, Offset(0f, size.height), Offset(size.width, size.height), stroke)
+                                    }
+                                    .padding(vertical = 6.dp, horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                    Text(
+                                        "行动 / 对白",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(userPromptSample, style = userStyle, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        com.aiassistant.ui.screens.chat.StoryUserMessageStyle.Bubble -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(0.86f),
+                                    shape = RoundedCornerShape(14.dp, 4.dp, 14.dp, 14.dp),
+                                    color = glass.userBubble,
+                                    border = BorderStroke(0.8.dp, glass.outlineSelected.copy(alpha = 0.35f))
+                                ) {
+                                    Text(
+                                        text = userPromptSample,
+                                        style = userStyle,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(
+                                            horizontal = if (isCompact) 10.dp else 12.dp,
+                                            vertical = if (isCompact) 6.dp else 8.dp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = metrics.horizontalExtraPaddingDp.dp),
+                        verticalArrangement = Arrangement.spacedBy((metrics.paragraphVerticalPaddingDp * 2f).dp)
+                    ) {
+                        Text(
+                            text = "夜雨落在青石板街上，远处的旧钟楼沉沉敲响了第三下。柜台后的煤油灯微微摇曳，将泛黄书页上的墨迹映得格外分明。",
+                            style = bodyParagraphStyle,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "她合上笔记抬起眼，轻声道：“你来得正好，这封信在雨停之前必须送出。” Echo quietly turned the page, watching the ink settle into warm paper.",
+                            style = bodyParagraphStyle,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

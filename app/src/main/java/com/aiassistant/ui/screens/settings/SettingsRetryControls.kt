@@ -16,6 +16,7 @@ import com.aiassistant.domain.model.RetryRule
 import com.aiassistant.ui.components.EchoSwitch
 import com.aiassistant.ui.components.EchoSwitchSize
 import com.aiassistant.ui.components.EchoSettingRow
+import com.aiassistant.utils.EchoPromptCacheTtl
 import com.aiassistant.utils.PersonalizationManager
 
 @Composable
@@ -81,6 +82,47 @@ internal fun SettingsRetryControls(manager: PersonalizationManager) {
     } else if (timeoutSaveFailed) {
         Text("连接超时设置保存失败，请重试。", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error)
+    }
+    var promptCachingEnabled by remember { mutableStateOf(manager.isPromptCachingEnabled()) }
+    var promptCachingSaveFailed by remember { mutableStateOf(false) }
+    var promptCacheTtl by remember { mutableStateOf(manager.getPromptCacheTtl()) }
+    EchoSettingRow(
+        title = "提示词前缀缓存优化",
+        subtitle = "开启后为 Anthropic 发送三断点缓存标记、为 OpenAI/OpenRouter 附带会话路由键，并保持系统前缀稳定以提升命中率；遇不兼容中转可关闭。",
+        contentPaddingHorizontal = 0.dp
+    ) {
+        EchoSwitch(checked = promptCachingEnabled, onCheckedChange = { enabled ->
+            val saved = runCatching { manager.setPromptCachingEnabled(enabled) }.getOrDefault(false)
+            if (saved) promptCachingEnabled = enabled
+            promptCachingSaveFailed = !saved
+        })
+    }
+    if (promptCachingSaveFailed) {
+        Text("提示词缓存设置保存失败，请重试。", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+    }
+    if (promptCachingEnabled) {
+        EchoSettingRow(
+            title = "Claude 缓存保留时长",
+            subtitle = "默认 5 分钟适合常规连续对话；1 小时适合间歇长篇创作（仅对支持扩展 TTL 的 Claude 接口生效）。",
+            contentPaddingHorizontal = 0.dp
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    EchoPromptCacheTtl.FIVE_MINUTES to "5 分钟",
+                    EchoPromptCacheTtl.ONE_HOUR to "1 小时"
+                ).forEach { (value, label) ->
+                    FilterChip(
+                        selected = promptCacheTtl == value,
+                        onClick = {
+                            val saved = runCatching { manager.setPromptCacheTtl(value) }.getOrDefault(false)
+                            if (saved) promptCacheTtl = value
+                        },
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+        }
     }
     EchoSettingRow(title = "模型失败后自动重试", subtitle = "总开关：关闭后不自动重连、不自动切换备用 Key；首次失败立即显示原因", contentPaddingHorizontal = 0.dp) {
         EchoSwitch(checked = retryEnabled, onCheckedChange = {

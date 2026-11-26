@@ -878,6 +878,8 @@ class RetryPreferencesTest {
 
         assertEquals(6, EchoStoryReadingStyle.values.size)
         assertEquals(8, com.aiassistant.utils.EchoStoryFont.values.size)
+        assertEquals(com.aiassistant.utils.EchoStoryFont.SYSTEM, manager.getSettings().storyFont)
+        assertEquals(com.aiassistant.utils.EchoStoryFont.SYSTEM, com.aiassistant.utils.EchoStoryFont.values.first())
 
         for (style in EchoStoryReadingStyle.values) {
             for (font in com.aiassistant.utils.EchoStoryFont.values) {
@@ -897,7 +899,7 @@ class RetryPreferencesTest {
         )))
         val fallback = PersonalizationManager(context).getSettings()
         assertEquals(EchoStoryReadingStyle.IMMERSIVE, fallback.storyReadingStyle)
-        assertEquals(com.aiassistant.utils.EchoStoryFont.LITERARY, fallback.storyFont)
+        assertEquals(com.aiassistant.utils.EchoStoryFont.SYSTEM, fallback.storyFont)
     }
 
     @Test fun retryCountsClampWithoutChangingOtherCategories() {

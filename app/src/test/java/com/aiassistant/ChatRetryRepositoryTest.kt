@@ -39,6 +39,17 @@ class ChatRetryRepositoryTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
 
+    private fun extractWireText(element: com.google.gson.JsonElement?): String {
+        if (element == null || element.isJsonNull) return ""
+        if (element.isJsonPrimitive) return element.asString
+        if (element.isJsonArray) {
+            return element.asJsonArray.mapNotNull { block ->
+                block.takeIf { it.isJsonObject }?.asJsonObject?.get("text")?.takeUnless { it.isJsonNull }?.asString
+            }.joinToString("\n\n")
+        }
+        return element.toString()
+    }
+
     @Test fun disablingStreamingRequestsCompleteJsonAndPersistsBodyThinkingAndUsageInBothProtocols() = runBlocking {
         for (protocol in listOf("openai", "anthropic")) {
             val remoteText = "合成非流式完整正文 $protocol"
@@ -1372,8 +1383,8 @@ class ChatRetryRepositoryTest {
                             assertEquals(listOf("合成购物回复10。", "合成购物回复11。"), variants.map { it.content })
                             val regenerationWire = endpoint.payloads.map { com.google.gson.JsonParser.parseString(it).asJsonObject }
                                 .last { it["stream"]?.asBoolean == true }
-                            val regenerationSystem = if (protocol == "anthropic") regenerationWire["system"].asString
-                                else regenerationWire.getAsJsonArray("messages").first().asJsonObject["content"].asString
+                            val regenerationSystem = if (protocol == "anthropic") extractWireText(regenerationWire["system"])
+                                else extractWireText(regenerationWire.getAsJsonArray("messages").first().asJsonObject["content"])
                             assertTrue(regenerationSystem.contains(compressed.rollingSummary!!))
                             assertFalse("重生成请求不能夹带旧版本回复", regenerationWire.toString().contains("合成购物回复10。"))
                             assertFalse("压缩后正式请求不能重新携带首轮原文", regenerationWire.toString().contains("合成购物第1轮"))
@@ -1849,8 +1860,8 @@ class ChatRetryRepositoryTest {
                             }
                             assertEquals(1, endpoint.payloads.size)
                             val body = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
-                            val system = if (protocol == "openai") body.getAsJsonArray("messages").first { it.asJsonObject["role"].asString == "system" }.asJsonObject["content"].asString
-                                else body["system"].asString
+                            val system = if (protocol == "openai") extractWireText(body.getAsJsonArray("messages").first { it.asJsonObject["role"].asString == "system" }.asJsonObject["content"])
+                                else extractWireText(body["system"])
                             for (expected in listOf("SYNTHETIC_NEW_ROLE", "SYNTHETIC_NEW_WORLDVIEW", "SYNTHETIC_NEW_PLOT", "SYNTHETIC_NEW_PROMPT", "SYNTHETIC_SELECTED_LORE")) {
                                 assertTrue("Missing $expected in $protocol request", system.contains(expected))
                             }
@@ -1975,9 +1986,9 @@ class ChatRetryRepositoryTest {
                     f.repository.sendChatMessageWithConfig(config, id, "继续", options = ChatRequestOptions(enableSessionMemory = false),
                         onToken = {}, onComplete = { text, _, _ -> assertEquals("OK", text) }, onError = { fail(it) })
                     val body = com.google.gson.JsonParser.parseString(endpoint.payloads.single()).asJsonObject
-                    val system = if (protocol == "openai") body.getAsJsonArray("messages")
-                        .firstOrNull { it.asJsonObject["role"].asString == "system" }?.asJsonObject?.get("content")?.asString.orEmpty()
-                        else body["system"]?.takeUnless { it.isJsonNull }?.asString.orEmpty()
+                    val system = if (protocol == "openai") extractWireText(body.getAsJsonArray("messages")
+                        .firstOrNull { it.asJsonObject["role"].asString == "system" }?.asJsonObject?.get("content"))
+                        else extractWireText(body["system"])
                     assertEquals(hasNode, system.contains("合成角色抵达测试城门"))
                     assertEquals(hasTime, system.contains("第 3 天·上午"))
                     assertEquals(hasNode || hasTime, system.contains("<session_timeline>"))
@@ -2141,9 +2152,9 @@ class ChatRetryRepositoryTest {
                 val chats = requests.filter { it["stream"]?.asBoolean == true }
                 assertTrue("回退必须真实生成摘要", requests.any { it["stream"]?.asBoolean != true })
                 assertTrue("重试报文应替换早期原文", chats.last().getAsJsonArray("messages").size() < chats.first().getAsJsonArray("messages").size())
-                val system = if (protocol == "openai") chats.last().getAsJsonArray("messages").first {
-                    it.asJsonObject["role"].asString == "system" }.asJsonObject["content"].asString
-                else chats.last()["system"].asString
+                val system = if (protocol == "openai") extractWireText(chats.last().getAsJsonArray("messages").first {
+                    it.asJsonObject["role"].asString == "system" }.asJsonObject["content"])
+                else extractWireText(chats.last()["system"])
                 assertTrue("重试报文应注入已保存摘要", system.contains("合成角色遵守既有约定"))
                 assertEquals(original, f.db.messageDao().getMessagesList(id).take(original.size))
             } }

@@ -125,7 +125,15 @@ object ContextCompressionPlanner {
         if (tier == CompressionTier.LT) {
             return Plan(retainedAt(cut), emptyList(), 0L, retainedCost(cut), false)
         }
-        while (cut < turns.lastIndex && retainedCost(cut) > historyBudget) cut++
+        if (retainedCost(cut) > historyBudget) {
+            // 仅在普通发送且触发预算溢出时按滞后目标（80%）批量前移，留出纯追加跑道保护 KV Cache。
+            val targetBudget = if (!forceCompression) {
+                PromptCacheHelper.overflowHysteresisTarget(historyBudget)
+            } else {
+                historyBudget
+            }
+            while (cut < turns.lastIndex && retainedCost(cut) > targetBudget) cut++
+        }
         // Raw retention and summary coverage are independent. Restoring a larger raw
         // window may overlap a checked summary, whose factual range must not regress.
         val retiredMessageCount = turns.take(cut).sumOf { it.size }

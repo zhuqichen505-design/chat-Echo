@@ -1,5 +1,20 @@
 # Echo 当前源码与已发布版本验收走查
 
+## 2026-11-26 · 2.9.5 提示词前缀缓存改造、4 项隔离/配置修复及 10 项交互与视觉优化
+
+版本 2.9.5/240；Room v37 / 20 个实体不变。本次发布汇总三大块内容：
+- **提示词前缀缓存改造**：新增 `PromptCacheHelper` 与协议字段（`AnthropicCacheControl`、`AnthropicRequest.system: Any?`、`AnthropicContent.cache_control`、`ChatCompletionRequest.prompt_cache_key / cache_control / session_id`、`PreparedDirectionContext.dynamicTurnContext`）；Anthropic 落地三断点（方向规划四断点）滑动缓存并支持 5m/1h TTL，OpenAI/OpenRouter 按 Host/Vendor 安全白名单附带会话粘性路由键与 `X-Session-ID`；重构三区前缀稳定性（Zone 1 静态前缀确定性排序，Zone 3 动态关键词世界书/跨会话记忆/单轮 `replyDirection` 后置至当前轮尾注）与预算溢出 80% 阶梯滞后截断；新增内存级 `PromptCacheSnapshot` 诊断及设置页总开关/TTL 控件。
+- **4 项关联隔离与配置修复**：`RoleplayViewModel` 补写 `roleplay`/`story` 标签、`RoleplayRepository`/`ChatViewModel` 消除会话记忆双重注入、`AiRepository` 透传 `isRoleplay` 至 `EchoToolHub`、`SettingsApiConfigDialog` 保存既有配置保留未编辑高级参数。
+- **10 项交互与视觉优化**：对话页全内容搜索（含思考）与右侧列表空白修复、API 配置悬浮默认选择器/顶部添加/去星星/读取模型前置折叠、首页返回先退搜索/多选、内置 4 款开源中文字体（默认跟随系统）与缩微阅读实时预览卡、14 款内置纯色背景重调。
+
+冻结验收 `20261126-225459-447`：脚本 / Gradle 退出 0，582.7 秒；97 套件 / 1,161 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 119 Warning；输入哈希一致；`git diff --check` 退出 0。
+
+Release 构建 `assembleRelease --no-daemon` 退出 0，472.517 秒（7 分 52 秒）。`Echo-v2.9.5.apk` 45,655,059 字节，SHA-256 `a5aacfeeaedd6ab064b8baf7eae0ed6431496545efa4cd8f11e3ffba27609dc2`；`com.aiassistant`、2.9.5/240、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner 验证通过（v2），证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f`，与上一版一致，Android Debug **非正式生产签名**。
+
+APK 审计：454 条目（较 2.9.4 新增 4 个内置开源字体 `res/{Dy,Qk,dX,ex}.ttf`，0 删除，6 项变更，解压 CRC 全通过）；`resources.arsc` SHA-256 `bc0069723665f44398ac53c85ef7d23ecbe71f5e9198e2d48a101dd040b303a6`，186 张位图与 2.9.4 全部一致；DEX 7,530,324 字节，字符串 32,912 条（唯一 32,906 条，较 2.9.4 +210 / -84），新增 37 条可读中文均为本版缓存/搜索/预览文案与版本号，隐私扫描新增命中 0。排他复制到本机发布目录（249 → 250 文件，248 → 249 APK），全部历史包保留。
+
+设备边界：未连接真机；真实上游网关（Anthropic/OpenAI/OpenRouter/DeepSeek）的缓存命中率与 TTL 切换表现、5 款开源中文字体真机渲染、14 款纯色背景观感及浮层/搜索/返回手势待人工实机复验。
+
 ## 2026-11-26 · 2.9.4 创作阅读页与字体扩展、UI/主题规范建档及 API 配置界面/拖拽优化
 
 版本 2.9.4/239；Room v37 / 20 个实体不变。本次发布包含三项功能与体验更新：

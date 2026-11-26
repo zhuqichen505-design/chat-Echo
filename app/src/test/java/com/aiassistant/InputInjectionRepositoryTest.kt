@@ -1076,10 +1076,15 @@ class InputInjectionRepositoryTest {
                     ChatRequestOptions(enableWorldBook = true, activeWorldBookIds = book.toString(),
                         retrievalQuery = "去 SyntheticHarbor 核对合成通行证"))
                 val payload = endpoint.payloads.single()
-                val system = if (protocol == "anthropic") payload.get("system").asString
-                    else payload.messageTexts("system").joinToString("\n")
-                assertTrue("原始输入应触发世界书，而非只用触发语检索", system.contains(lore))
-                assertEquals("合成触发语", payload.messageTexts("user").last())
+                val system = if (protocol == "anthropic") {
+                    val sys = payload.get("system")
+                    if (sys.isJsonPrimitive) sys.asString else sys.asJsonArray.joinToString("\n") { it.asJsonObject.get("text")?.asString.orEmpty() }
+                } else payload.messageTexts("system").joinToString("\n")
+                val lastUser = payload.messageTexts("user").last()
+                assertTrue("原始输入应触发世界书，而非只用触发语检索", lastUser.contains(lore))
+                assertFalse("关键词触发世界书不得污染静态 system 前缀", system.contains(lore))
+                assertTrue("当前发送正文必须以触发语开头", lastUser.startsWith("合成触发语"))
+                assertFalse("发送正文不得泄露显示用原文", lastUser.contains("合成显示提示"))
                 assertTrue(endpoint.failures.toString(), endpoint.failures.isEmpty())
             } }
         }

@@ -6,6 +6,7 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.activity.compose.BackHandler
 import com.aiassistant.ui.theme.echoPaperTexture
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -255,6 +257,18 @@ fun HomeScreen(
 
     val presentationScrolledAway by remember(conversationListState) {
         derivedStateOf { conversationListState.firstVisibleItemIndex > 0 }
+    }
+    val focusManager = LocalFocusManager.current
+    val homeBackAction = resolveHomeBackAction(isSelectionMode = isSelectionMode, searchQuery = searchQuery)
+    BackHandler(enabled = homeBackAction != HomeBackAction.AllowSystemBack) {
+        when (homeBackAction) {
+            HomeBackAction.ClearSelection -> selectedConversationIds = emptySet()
+            HomeBackAction.ExitSearch -> {
+                searchQuery = ""
+                focusManager.clearFocus()
+            }
+            HomeBackAction.AllowSystemBack -> Unit
+        }
     }
 
     Scaffold(
@@ -630,6 +644,8 @@ fun HomeScreen(
                 listState = conversationListState,
                 visible = showScrollControls,
                 hazeState = hazeState,
+                listLabel = "对话",
+                searchPlaceholder = "搜索对话标题",
                 modifier = Modifier
                     .matchParentSize()
                     .padding(end = 4.dp)
@@ -698,6 +714,21 @@ fun HomeScreen(
             }
         )
     }
+}
+
+internal enum class HomeBackAction {
+    ClearSelection,
+    ExitSearch,
+    AllowSystemBack
+}
+
+internal fun resolveHomeBackAction(
+    isSelectionMode: Boolean,
+    searchQuery: String
+): HomeBackAction = when {
+    isSelectionMode -> HomeBackAction.ClearSelection
+    searchQuery.isNotBlank() -> HomeBackAction.ExitSearch
+    else -> HomeBackAction.AllowSystemBack
 }
 
 internal fun buildHomeAnchorItems(

@@ -356,7 +356,8 @@ class RoleplayRepository(
         maxHistoryMessages: Int = 50,
         queryText: String? = null,
         includeWorldBook: Boolean = true,
-        includeTimelineContext: Boolean = true
+        includeTimelineContext: Boolean = true,
+        includeSessionMemories: Boolean = true
     ): String {
         val session = roleplaySessionDao.getSessionById(sessionId)
             ?: return userMessage ?: ""
@@ -411,11 +412,15 @@ class RoleplayRepository(
             }
         }
 
-        // 5. 长期事实不参与时间推断；正式时间线由聊天仓库统一注入。
+        // 5. 长期事实不参与时间推断；正式时间线与会话记忆在聊天请求链中由 AiRepository 统一注入，避免重复。
         val pinnedFacts = roleplayMemoryDao.getPinnedFacts(sessionId).map { it.content }
-        val sessionMemories = memoryDao?.getCandidateMemories(session.conversationId)
-            ?.filter { it.isEnabled && it.scope == "conversation" }
-            ?.map { it.content } ?: emptyList()
+        val sessionMemories = if (includeSessionMemories) {
+            memoryDao?.getCandidateMemories(session.conversationId)
+                ?.filter { it.isEnabled && it.scope == "conversation" }
+                ?.map { it.content } ?: emptyList()
+        } else {
+            emptyList()
+        }
 
         val allRoleplayMemories = (pinnedFacts + sessionMemories).map { it.trim() }.filter { it.isNotBlank() }.distinct()
         fun isLegacyTimeAnchor(content: String): Boolean = content.startsWith("【当前故事时间】：") || content.startsWith("当前故事时间：")

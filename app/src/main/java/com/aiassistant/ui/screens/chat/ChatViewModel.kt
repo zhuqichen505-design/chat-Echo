@@ -1436,7 +1436,8 @@ class ChatViewModel(private val conversationId: Long) : ViewModel() {
                         globalRoleplayPrompt = globalRpPrompt,
                         queryText = content,
                         includeWorldBook = false, // 世界书统一由实际请求链按本轮开关、范围和预算注入一次
-                        includeTimelineContext = false // 时间线及当前参照由实际请求链统一注入
+                        includeTimelineContext = false, // 时间线及当前参照由实际请求链统一注入
+                        includeSessionMemories = false // 会话专属记忆统一由 AiRepository 按缓存稳定区注入，杜绝重复
                     )
                 } else {
                     currentSystemPrompt

@@ -24,21 +24,29 @@ class V1922FeaturesTest {
         val expectedNames = listOf("浅艾绿", "浅湖蓝", "浅薰紫", "浅樱粉", "浅暖杏", "浅山岚")
         assertEquals(expectedNames, presets.map { it.name })
 
-        // 验证每款颜色的极高可读性（浅色模式下通道亮度均极高，确保 WCAG AAA 对比度）
+        // 浅色背景需具备清晰可辨的粉彩色相（不再惨白如纯白），同时保持高明度与深字高对比度
         presets.forEach { preset ->
             val red = (preset.lightColorInt shr 16) and 0xFF
             val green = (preset.lightColorInt shr 8) and 0xFF
             val blue = preset.lightColorInt and 0xFF
 
-            // 低饱和度要求：RGB 差异极小，且整体通道值均在 240 (0xF0) 以上
-            assertTrue("Red channel of ${preset.name} should be >= 240", red >= 240)
-            assertTrue("Green channel of ${preset.name} should be >= 240", green >= 240)
-            assertTrue("Blue channel of ${preset.name} should be >= 240", blue >= 240)
-
             val maxChannel = maxOf(red, green, blue)
             val minChannel = minOf(red, green, blue)
             val saturation = (maxChannel - minChannel).toFloat() / maxChannel.toFloat()
-            assertTrue("${preset.name} 饱和度应低于 5%，实际为 ${(saturation * 100)}%", saturation <= 0.05f)
+            assertTrue("${preset.name} 应明显区别于纯白（饱和度 >= 10%），实际为 ${(saturation * 100)}%", saturation >= 0.10f)
+            assertTrue("${preset.name} 仍应保持柔和粉彩上限（饱和度 <= 35%），实际为 ${(saturation * 100)}%", saturation <= 0.35f)
+            assertTrue("${preset.name} 最亮通道应保持浅色观感 (>= 220)，实际为 $maxChannel", maxChannel >= 220)
+        }
+
+        // 深色彩色背景需明显区别于纯黑，呈现可辨色相且不刺眼
+        val darkColored = allPresets.filter { it.id in setOf("night_blue", "forest", "plum", "cocoa", "graphite", "deep_teal") }
+        assertEquals(6, darkColored.size)
+        darkColored.forEach { preset ->
+            val red = (preset.darkColorInt shr 16) and 0xFF
+            val green = (preset.darkColorInt shr 8) and 0xFF
+            val blue = preset.darkColorInt and 0xFF
+            val maxChannel = maxOf(red, green, blue)
+            assertTrue("${preset.name} 最亮通道应 >= 85 以明显区别于纯黑，实际为 $maxChannel", maxChannel >= 85)
         }
     }
 

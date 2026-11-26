@@ -158,18 +158,46 @@ internal fun buildChatAnchorItems(displayMessages: List<DisplayMessageItem>): Li
             title = anchorTitle(message.content),
             itemIndex = index,
             number = inputNumber,
-            searchText = message.content
+            searchText = message.content,
+            roleLabel = "提问"
         )
     }
 }
 
-internal fun anchorTitle(value: String): String {
+/** 对话页内搜索索引：包含全部提问与回复内容（含思考过程），命中后可直接定位到对应消息。 */
+internal fun buildChatSearchAnchorItems(displayMessages: List<DisplayMessageItem>): List<SideAnchorItem> {
+    var turnNumber = 0
+    return displayMessages.mapIndexedNotNull { index, item ->
+        val message = item.message
+        val isUser = message.role == "user"
+        val isAssistant = message.role == "assistant"
+        if (!isUser && !isAssistant) return@mapIndexedNotNull null
+        if (isUser) turnNumber += 1
+        val searchable = listOfNotNull(
+            message.content.takeIf { it.isNotBlank() },
+            message.thinkingContent?.takeIf { it.isNotBlank() }
+        ).joinToString("\n")
+        if (searchable.isBlank()) return@mapIndexedNotNull null
+        SideAnchorItem(
+            title = anchorTitle(
+                value = message.content.ifBlank { message.thinkingContent.orEmpty() },
+                fallback = if (isUser) "我的提问" else "AI 回复"
+            ),
+            itemIndex = index,
+            number = turnNumber.takeIf { it > 0 },
+            searchText = searchable,
+            roleLabel = if (isUser) "提问" else "回复"
+        )
+    }
+}
+
+internal fun anchorTitle(value: String, fallback: String = "我的提问"): String {
     return value
         .lineSequence()
         .firstOrNull { it.isNotBlank() }
         ?.trim()
         ?.take(28)
-        ?: "我的提问"
+        ?: fallback
 }
 
 @Composable

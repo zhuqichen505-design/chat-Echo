@@ -11,7 +11,8 @@ data class PreparedDirectionContext(
     // Include sources already compressed out of recentMessages, so deletion also
     // invalidates the prepared system prompt, summary and retrieved memories.
     val sourceConversationId: Long? = null,
-    val sourceMessages: List<Message>? = null
+    val sourceMessages: List<Message>? = null,
+    val dynamicTurnContext: String? = null
 )
 
 data class ReplyDirection(val title: String, val description: String)

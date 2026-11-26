@@ -46,6 +46,17 @@ import java.util.concurrent.atomic.AtomicInteger
 class MemoryExtractionRepositoryTest {
     @org.junit.Before fun allowSyntheticHttpEndpoints() { HttpTestAccess.start() }
     @org.junit.After fun restoreClosedHttpPolicy() { HttpTestAccess.stop() }
+
+    private fun extractWireContentText(element: com.google.gson.JsonElement?): String {
+        if (element == null || element.isJsonNull) return ""
+        if (element.isJsonPrimitive) return element.asString
+        if (element.isJsonArray) {
+            return element.asJsonArray.mapNotNull { block ->
+                block.takeIf { it.isJsonObject }?.asJsonObject?.get("text")?.takeUnless { it.isJsonNull }?.asString
+            }.joinToString("\n\n")
+        }
+        return element.toString()
+    }
     private class Endpoint(val respond: (Socket, JsonObject) -> Unit) : AutoCloseable {
         private val server = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
         private val executor = Executors.newCachedThreadPool()
@@ -715,8 +726,9 @@ class MemoryExtractionRepositoryTest {
                 val prepared = f.repository.prepareReplyDirectionContext(config, id, "继续", options)
                 assertTrue("压缩应保留旧置顶消息", prepared.recentMessages.any { it.content.contains("远古石堡") })
                 assertFalse("回归前提：近期触发词已被压缩移出原文", prepared.recentMessages.any { it.content.contains("青色港湾") })
-                assertTrue("方向准备应扫描真实最近四条消息", prepared.systemPrompt.orEmpty().contains(recentLore))
-                assertFalse("旧置顶消息不能冒充近期消息", prepared.systemPrompt.orEmpty().contains(oldLore))
+                assertTrue("方向准备应扫描真实最近四条消息并将关键词世界书放入动态尾注区", prepared.dynamicTurnContext.orEmpty().contains(recentLore))
+                assertFalse("关键词触发世界书不得污染静态 system 前缀", prepared.systemPrompt.orEmpty().contains(recentLore))
+                assertFalse("旧置顶消息不能冒充近期消息", prepared.systemPrompt.orEmpty().contains(oldLore) || prepared.dynamicTurnContext.orEmpty().contains(oldLore))
 
                 val tokens = StringBuilder()
                 f.repository.sendChatMessageWithConfig(config, id, "继续", options = options,
@@ -728,8 +740,10 @@ class MemoryExtractionRepositoryTest {
                 val system = if (protocol == "anthropic") payload.get("system").toString() else
                     payload.getAsJsonArray("messages").filter { it.asJsonObject.get("role").asString == "system" }
                         .joinToString("\n") { it.asJsonObject.get("content").toString() }
-                assertTrue("$protocol 请求应包含压缩前近期消息触发的设定", system.contains(recentLore))
-                assertFalse("$protocol 请求不得由旧置顶消息触发设定", system.contains(oldLore))
+                val lastUser = payload.getAsJsonArray("messages").last().asJsonObject.get("content").toString()
+                assertTrue("$protocol 请求应包含压缩前近期消息触发的设定", lastUser.contains(recentLore))
+                assertFalse("$protocol 静态 system 前缀不得被动态关键词世界书污染", system.contains(recentLore))
+                assertFalse("$protocol 请求不得由旧置顶消息触发设定", payload.toString().contains(oldLore))
             } }
         }
     }
@@ -1700,14 +1714,14 @@ class MemoryExtractionRepositoryTest {
                     for (sourceId in ids.take(sourceCount)) assertTrue("源消息未进入任何摘要请求：$sourceId", sourcePrompts.contains("原文ID $sourceId]"))
                     chat(f, config, id)
                     val request = endpoint.payloads.last()
-                    val system = if (protocol == "anthropic") request.get("system").asString else
-                        request.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                    val system = if (protocol == "anthropic") extractWireContentText(request.get("system")) else
+                        extractWireContentText(request.getAsJsonArray("messages").first().asJsonObject.get("content"))
                     assertTrue(system.contains("铜钥匙"))
                     val body = request.getAsJsonArray("messages").filter { it.asJsonObject.get("role").asString != "system" }
                     assertEquals(compressed.recentMessageCount + 1, body.size)
                     assertFalse("已被摘要覆盖的开头不能继续发送", request.toString().contains("合成长历史唯一片段[1]"))
                     assertTrue(request.toString().contains("合成长历史唯一片段[4000]"))
-                    val actualTokens = body.sumOf { AiRepository.estimateTokenCount(it.asJsonObject.get("content").toString()) + 24 } + AiRepository.estimateTokenCount(system)
+                    val actualTokens = body.sumOf { AiRepository.estimateTokenCount(extractWireContentText(it.asJsonObject.get("content"))) + 24 } + AiRepository.estimateTokenCount(system)
                     assertTrue("实际HTTP正文仍超过输入预算：$protocol/$tier/$actualTokens", actualTokens <= compressed.promptBudgetTokens)
                     assertEquals(originals.map { it.content }, f.db.messageDao().getMessagesList(id).take(4000).map { it.content })
                     assertEquals("实际发送只新增正式回复，不删除任何原文", 4001, f.db.messageDao().getMessagesList(id).size)
@@ -1937,8 +1951,8 @@ class MemoryExtractionRepositoryTest {
                 assertEquals(originalMessages, f.db.messageDao().getMessagesList(id))
                 chat(f, config, id)
                 val wire = endpoint.payloads.last()
-                val system = if (protocol == "anthropic") wire.get("system").asString else
-                    wire.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                val system = if (protocol == "anthropic") extractWireContentText(wire.get("system")) else
+                    extractWireContentText(wire.getAsJsonArray("messages").first().asJsonObject.get("content"))
                 assertTrue("成功压缩后的实际对话请求必须注入摘要", system.contains(summary))
                 assertFalse("已压缩早期原文不得继续发送", wire.toString().contains("容量回归合成原文[1]"))
                 assertTrue("最近完整轮次仍须保留", wire.toString().contains("容量回归合成原文[86]"))
@@ -1975,8 +1989,8 @@ class MemoryExtractionRepositoryTest {
                 assertEquals(ids[21], saved.summaryUpdatedMessageId)
                 chat(f, config, id)
                 val request = endpoint.payloads.last()
-                val system = if (protocol == "anthropic") request.get("system").asString else
-                    request.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                val system = if (protocol == "anthropic") extractWireContentText(request.get("system")) else
+                    extractWireContentText(request.getAsJsonArray("messages").first().asJsonObject.get("content"))
                 assertTrue(system.contains(summary))
                 assertFalse(request.toString().contains("合成采购原文[1]"))
                 assertTrue(request.toString().contains("合成采购原文[24]"))
@@ -2827,8 +2841,8 @@ class MemoryExtractionRepositoryTest {
                     f.db.conversationDao().getConversationById(id)!!.rollingSummary)
                 chat(f, config, id)
                 val payload = endpoint.payloads.last()
-                val systemPrompt = if (protocol == "anthropic") payload.get("system").asString else
-                    payload.getAsJsonArray("messages").first().asJsonObject.get("content").asString
+                val systemPrompt = if (protocol == "anthropic") extractWireContentText(payload.get("system")) else
+                    extractWireContentText(payload.getAsJsonArray("messages").first().asJsonObject.get("content"))
                 assertTrue(systemPrompt.contains(summary))
                 assertTrue(systemPrompt.contains(finalTodo))
                 assertEquals("已有摘要的发送不能再付费整理一次", 1,
@@ -3401,7 +3415,7 @@ class MemoryExtractionRepositoryTest {
                 assertEquals("synthetic-direct-truncation-model", request.get("model").asString)
                 val contents = request.getAsJsonArray("messages")
                     .filter { it.asJsonObject.get("role").asString != "system" }
-                    .map { it.asJsonObject.get("content").asString }
+                    .map { extractWireContentText(it.asJsonObject.get("content")) }
                 assertEquals((originals.take(2) + originals.drop(10)).map { it.content } + "reply OK", contents)
                 assertFalse(request.toString().contains(badSummary))
                 assertEquals("每次直接截断发送只能产生正式对话请求", 1, endpoint.payloads.size)

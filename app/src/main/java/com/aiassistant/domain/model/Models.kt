@@ -462,7 +462,10 @@ data class ChatCompletionRequest(
     val thinking_budget: Int? = null,
     val thinking_effort: String? = null,
     val reasoning_effort: String? = null,
-    val thinking: AnthropicThinking? = null
+    val thinking: AnthropicThinking? = null,
+    val prompt_cache_key: String? = null,
+    val cache_control: AnthropicCacheControl? = null,
+    val session_id: String? = null
 )
 
 data class StreamOptions(
@@ -627,18 +630,24 @@ data class ModelInfo(
 )
 
 // Anthropic API 格式
+data class AnthropicCacheControl(
+    val type: String = "ephemeral",
+    val ttl: String? = null
+)
+
 data class AnthropicRequest(
     val model: String,
     val messages: List<AnthropicMessage>,
     val max_tokens: Int,
-    val system: String? = null,
+    val system: Any? = null,
     val temperature: Float? = null,
     val top_p: Float? = null,
     val top_k: Int? = null,
     val stream: Boolean = false,
     val stop_sequences: List<String>? = null,
     val thinking: AnthropicThinking? = null,
-    val output_config: AnthropicOutputConfig? = null
+    val output_config: AnthropicOutputConfig? = null,
+    val cache_control: AnthropicCacheControl? = null
 )
 
 data class AnthropicThinking(
@@ -656,7 +665,8 @@ data class AnthropicMessage(
 data class AnthropicContent(
     val type: String,
     val text: String? = null,
-    val source: AnthropicImageSource? = null
+    val source: AnthropicImageSource? = null,
+    val cache_control: AnthropicCacheControl? = null
 )
 
 data class AnthropicImageSource(

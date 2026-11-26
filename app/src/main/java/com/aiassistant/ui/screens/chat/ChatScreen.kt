@@ -393,6 +393,9 @@ fun ChatScreen(
     val chatNavItems = remember(displayMessages) {
         buildChatAnchorItems(displayMessages)
     }
+    val chatSearchItems = remember(displayMessages) {
+        buildChatSearchAnchorItems(displayMessages)
+    }
 
     DisposableEffect(conversationId) {
         onDispose {
@@ -1808,9 +1811,12 @@ fun ChatScreen(
 
             SideAnchorNavigator(
                 items = chatNavItems,
+                searchItems = chatSearchItems,
                 listState = listState,
                 visible = showScrollControls,
                 hazeState = hazeState,
+                listLabel = "提问",
+                searchPlaceholder = "搜索提问或回复内容",
                 modifier = Modifier
                     .matchParentSize()
                     .padding(end = 4.dp + storyContextInset)
