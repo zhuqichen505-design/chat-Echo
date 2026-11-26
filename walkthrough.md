@@ -13,6 +13,8 @@ Release 构建 `assembleRelease --no-daemon` 退出 0，1989.602 秒。`Echo-v2.
 
 APK 审计：450 条目且条目名集合与 2.9.3 一致，解压校验通过；仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc` 哈希一致（`d78af33ccd39de600f7eaf69ce830f27c2de8e84189af3682c2e4d46a7325a7e`），181 张位图全部一致；DEX 7,491,580 字节，字符串 32,786 条（唯一 32,780 条，较 2.9.3 +150 / -68），新增可读中文 51 条均为本版阅读排版/字体文案、API 配置界面提示与版本号，隐私扫描新增命中 0。排他复制到本机发布目录（248 → 249 文件，247 → 248 APK），全部历史包保留。
 
+发布核验：版本提交 `6a3d061` 与 annotated 标签 `v2.9.4`（对象 `a6e5ffa`）已推送，远端 main 与 peeled 标签一致；Release 为 Latest，唯一附件平台 digest、独立下载 SHA-256 与大小（25,705,611 字节）均与本机一致；远端旧 v2.9.3 Release / 标签已撤，本机 `v2.9.3` 标签（`da3cde1`）与全部历史 APK 保留。
+
 设备边界：未连接真机；新增创作阅读页排版与 8 种字体实际渲染、API 配置列表展开/停用确认弹窗、编辑页四分区快跳与 Key 拖拽排序手感，待人工实机复验。
 
 ## 2026-11-25 · 2.9.3 全量 15 套主题细节工艺升级与全局 UI 形态一致性

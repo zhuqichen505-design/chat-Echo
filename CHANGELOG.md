@@ -1,6 +1,6 @@
 # 当前版本说明
 
-## Echo 2.9.4/239（已构建，待发布）
+## Echo 2.9.4/239（已发布）
 
 - 创作阅读页排版与正文字体扩展：`EchoStoryReadingStyle` 由 3 项扩展为 6 项（保留 `IMMERSIVE` 沉浸叙事 / `PLAIN` 纯净直排 / `SPLIT` 双栏对照，新增 `BOOK` 书页典籍 / `COMPACT` 紧凑速览 / `SCRIPT` 剧本分镜）；`EchoStoryFont` 由 3 项扩展为 8 项（保留 `LITERARY` / `CLEAR` / `TYPEWRITER`，新增 `SYSTEM` 跟随系统 / `SYSTEM_SERIF` 经典宋体 / `PRINT_BOOK` 精印书宋 / `ELEGANT_LIGHT` 轻盈细黑 / `CALLIGRAPHY` 随笔手写）；外观设置同步新增阅读排版与正文字体实时预览卡，聊天对话页正文与用户消息自适应不同排版缩进、段距及无框引线风格。
 - 新建 UI 与主题设计流程及规范文档 `UI_THEME_DESIGN_SPEC.md`：依据仓库源码整理设计令牌（`EchoTokens` / `EchoMotion`）、13 组 WCAG AA ≥ 4.5:1 双模式对比度红线、11 维主题架构与 15 套主题矩阵、共享组件与拖拽规范、5 阶段变更 SOP 及随需求自动同步更新机制，并在工作区 `AGENTS.md` §5、`WORKFLOW_GUIDELINES.md` 与 `PROJECT.md` 登记索引。
@@ -11,7 +11,7 @@
   - 修复 `SmoothReorderState` 拖拽期间非选中卡片联动抬升与松手让位项双倍跳动回弹缺陷，修正不等高条目偏移公式、并行播放落座与抬升回落动画并补偿手柄缩放位移，排队消息补充稳定 `key(msg.id)`。
 - 保持 Room v37（20 个实体）、请求协议、消息与备份格式不变。
 
-冻结验收 `20261126-164421-224`：脚本 / Gradle 退出 0，1981.789 秒；96 套件 / 1,147 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，1989.602 秒；`Echo-v2.9.4.apk` 25,705,611 字节，SHA-256 `1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`；v2 签名通过，证书与上版一致（Android Debug 非正式生产签名）；450 条目、条目名集合、`resources.arsc` 与 181 张位图均与 2.9.3 一致，DEX 字符串 32,780 条唯一串（+150 / -68），隐私扫描新增命中 0。
+冻结验收 `20261126-164421-224`：脚本 / Gradle 退出 0，1981.789 秒；96 套件 / 1,147 项测试全部执行，失败 / 错误 / 跳过均 0；Lint 0 Error / 116 Warning，输入哈希一致，`git diff --check` 退出 0。Release 构建退出 0，1989.602 秒；`Echo-v2.9.4.apk` 25,705,611 字节，SHA-256 `1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`；v2 签名通过，证书与上版一致（Android Debug 非正式生产签名）；450 条目、条目名集合、`resources.arsc` 与 181 张位图均与 2.9.3 一致，DEX 字符串 32,780 条唯一串（+150 / -68），隐私扫描新增命中 0。版本提交 `6a3d061` 与标签 `v2.9.4`（对象 `a6e5ffa`）已推送并核验，Release 为 Latest，唯一附件平台 digest 与独立下载 SHA-256 一致；远端旧 v2.9.3 Release / 标签已撤，本机历史标签与全部历史 APK 保留。
 
 ## Echo 2.9.3/238（已发布）
 

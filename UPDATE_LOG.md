@@ -21,6 +21,8 @@
 
 APK 元数据与审计：`Echo-v2.9.4.apk` 25,705,611 字节，SHA-256 `1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`；`com.aiassistant`、2.9.4/239、arm64-v8a、minSdk 26 / targetSdk 34 / compileSdk 34；apksigner v2 验证通过，证书 SHA-256 `939638f6d3e9af7f8a980e62af52d275fee73381f2130cc4e20a0d349f98e21f` 与上版一致（Android Debug 非正式生产签名）；450 条目且条目名集合与 2.9.3 一致，仅 5 项变化（`AndroidManifest.xml`、`META-INF/version-control-info.textproto`、`assets/dexopt/baseline.prof`、`assets/dexopt/baseline.profm`、`classes.dex`）；`resources.arsc`（`d78af33ccd39de600f7eaf69ce830f27c2de8e84189af3682c2e4d46a7325a7e`）与 181 张位图均与 2.9.3 一致；DEX 7,491,580 字节，字符串 32,786 条（唯一 32,780 条，较 2.9.3 +150 / -68），新增可读中文 51 条均为本版阅读排版/字体文案、API 配置界面交互与版本号，隐私扫描新增命中 0。未连接真机，新增阅读排版/字体视觉、API 配置交互及 Key 拖拽手感待人工验收。
 
+发布核验：版本提交 `6a3d06108a7f1d217a999da132fb4cffaed5f95a` 与 annotated 标签 `v2.9.4`（对象 `a6e5ffa20bf92fbf5ceaf1f5ae1ca0dce786aa02`）已推送，`git ls-remote` 核验远端 main 与 peeled 标签均指向该提交；Echo 2.9.4 Release 为 Latest，唯一附件 `Echo-v2.9.4.apk` 的平台 digest（`sha256:1ffa00342690f95e49b726d5883c75b5e8a0ee1b2a49c98ef81ee760c81657a8`）、独立下载 SHA-256 与大小（25,705,611 字节）均与本机一致。按仅保留最新版策略已删除远端旧 v2.9.3 Release 与远端标签；本机 `v2.9.3` 标签（`da3cde140a46cbccf19bf0ce567731c11624b290`，仅本机、未推送）与全部历史 APK 保留（249 文件 / 248 APK）。
+
 ## 2026-11-25 · 发布 Echo 2.9.3（全量 15 套主题细节工艺升级与全局 UI 形态一致性）
 
 版本由 2.9.2/237 递增至 2.9.3/238（仅更新 `app/build.gradle.kts`）。本次按用户要求将昨日晴空/索引优化、全量 15 套主题非换色结构升级与全局 UI 几何一致性完善合并发布；同时纳入工作区清理的 5 个早期冗余根目录资源/旧脚本删除记录（`APPlogo.png`、`build_apk.bat`、`build_apk.sh`、`logo.jpg`、`logo.png`）。Room v37 / 20 个实体、请求协议、消息及备份格式不变。
